@@ -150,8 +150,10 @@ class LiveProviderTest(unittest.TestCase):
         text, _conf = stt.transcribe("k", audio_bytes=b"RIFF....",
                                      timings_out=timings)
         self.assertEqual(text, "stub spoken hook here")
-        self.assertEqual(timings, [{"w": "stub", "t": 0.1},
-                                   {"w": "hook", "t": 0.5}])
+        self.assertEqual(timings, [{"w": "stub", "t": 0.1, "level": "word",
+                                    "end": 0.4},
+                                   {"w": "hook", "t": 0.5, "level": "word",
+                                    "end": 0.9}])
 
     def test_live_stt_needs_audio(self):
         stt = providers.LiveStt([("deepgram", "deepgram", "flux-general-en",

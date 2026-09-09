@@ -221,7 +221,7 @@ ul.plain li{padding:6px 0;border-bottom:1px solid var(--line)}
 <section class="view" id="v-compare"><h1 class="page-title">Compare</h1><p class="page-sub">Two modes: creatives side-by-side, or campaigns ranked with why-analysis.</p>
 <div class="card"><input id="cmp-a" placeholder="creative A key"> <input id="cmp-b" placeholder="creative B key">
 <button class="action" id="cmp-go">Compare creatives</button>
-<div class="muted" style="font-size:12px">GET /api/compare — badges note whether each side passes the current filters.</div></div>
+<div class="muted" style="font-size:12px">GET /api/compare — both sides are computed over the current top filter bar scope.</div></div>
 <div class="card"><h3>Campaign compare</h3>
 <input id="cmp-campaigns" placeholder="campaigns, comma-separated (blank = all)" style="width:60%">
 <label>Rank by <select id="cmp-rank"><option value="cpa">CPA</option><option value="cpm">CPM</option><option value="ctr">CTR</option><option value="vtr">VTR</option><option value="roas">ROAS</option></select></label>
@@ -235,6 +235,9 @@ ul.plain li{padding:6px 0;border-bottom:1px solid var(--line)}
 <option value="platform">platform</option><option value="campaign">campaign</option></select></label>
 <button class="action" id="gb-go">Refresh</button></div>
 <div id="bench-out"></div>
+<div class="card"><h3>Retention patterns</h3>
+<div class="muted" style="font-size:12px">Where the scoped population normally loses viewers, aggregated across creatives (GET /api/retention/patterns follows the top filter bar).</div>
+<div id="patterns-out" class="muted">—</div></div>
 <div class="card"><h3>Benchmark builder</h3>
 <div class="muted" style="font-size:12px">Saved cohorts persist server-side (/api/cohorts) and start from the active top filter bar.</div>
 <div class="filter-grid">
@@ -283,12 +286,24 @@ ul.plain li{padding:6px 0;border-bottom:1px solid var(--line)}
 const $=id=>document.getElementById(id);
 const esc=v=>String(v??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 function filtered_path(p){
-  if(p==="/api/campaigns"||p.startsWith("/api/benchmarks")||p==="/api/creatives"){
+  // One shared scope for every analytics surface: Overview,
+  // Campaigns, Creatives, Benchmarks, Ask, both Compare modes,
+  // retention patterns and Reports read identical populations.
+  // /api/compare/campaigns reuses ?campaign(s)= for its candidate
+  // list, so the campaign axis is not appended there.
+  const scoped=p==="/api/campaigns"||p.startsWith("/api/benchmarks")||p==="/api/creatives"||p.startsWith("/api/compare")||p.startsWith("/api/retention/patterns");
+  if(scoped){
+    const skip_campaign=p.startsWith("/api/compare/campaigns");
     const f=active_filters();const q=new URLSearchParams();
-    ["platform","vertical","market","funnel","objective","client","project","date"].forEach(k=>{const v=f[k];if(v&&v!=="all")q.append(k,v);});
+    ["platform","vertical","market","funnel","objective","client","project","campaign","date"].forEach(k=>{if(skip_campaign&&k==="campaign")return;const v=f[k];if(v&&v!=="all")q.append(k,v);});
     const s=q.toString();if(s)p+=(p.includes("?")?"&":"?")+s;
   }
   return p;
+}
+function scope_filters(){
+  const f=active_filters();const out={};
+  ["platform","vertical","market","funnel","objective","client","project","campaign","date"].forEach(k=>{const v=f[k];if(v&&v!=="all")out[k]=[v];});
+  return out;
 }
 const api=async(m,p,b)=>{const r=await fetch(filtered_path(p),{method:m,headers:{"Content-Type":"application/json"},body:b?JSON.stringify(b):undefined});const j=await r.json();if(!r.ok)throw new Error(j.error||r.status);return j;};
 document.querySelectorAll("#tabs button").forEach(b=>b.onclick=()=>{document.querySelectorAll("#tabs button").forEach(x=>x.setAttribute("aria-pressed","false"));b.setAttribute("aria-pressed","true");document.querySelectorAll(".view").forEach(v=>v.classList.remove("active"));document.querySelector("#v-"+b.dataset.view).classList.add("active");refresh();});
@@ -354,10 +369,12 @@ $("cmp-camp-go").onclick=async()=>{try{
 }catch(e){$("cmp-camp-out").innerHTML=`<p class="muted">${esc(e.message)}</p>`;}};
 function render_campaign_compare(r){
   const kpis=["spend","impressions","clicks","conversions","cpm","vtr","ctr","cpa","roas"];
+  const winner=(r.why||{}).top||null;
   const head="<tr><th>Campaign</th>"+kpis.map(k=>`<th>${esc(k.toUpperCase())}</th>`).join("")+"</tr>";
-  const body=(r.ranking||[]).map((c,i)=>`<tr${i===0?' class="row-top"':""}><td>${esc(c)}${i===0?" (top)":""}</td>`+kpis.map(k=>`<td>${esc(String((r.kpis[c]||{})[k]??"—"))}</td>`).join("")+"</tr>").join("");
+  const body=(r.ranking||[]).map((c,i)=>`<tr${i===0&&winner?' class="row-top"':""}><td>${esc(c)}${i===0&&winner?" (top)":""}</td>`+kpis.map(k=>`<td>${esc(String((r.kpis[c]||{})[k]??"—"))}</td>`).join("")+"</tr>").join("");
   const why=((r.why||{}).differences||[]).map(d=>`<li>${esc(d)}</li>`).join("");
-  $("cmp-camp-out").innerHTML=`<div class="card"><h4>Ranked by ${esc(r.rank_by||"")}</h4><table><thead>${head}</thead><tbody>${body}</tbody></table><div class="insight-panel"><h4>Why ${esc((r.why||{}).top||"—")} won</h4><ul class="plain">${why||"<li>—</li>"}</ul></div></div>`;
+  const head_txt=winner?`Why ${esc(winner)} won`:"Insufficient data / no winner";
+  $("cmp-camp-out").innerHTML=`<div class="card"><h4>Ranked by ${esc(r.rank_by||"")}</h4><p class="muted" style="font-size:12px">Scope: ${esc(r.scope||"All data")}</p><table><thead>${head}</thead><tbody>${body}</tbody></table><div class="insight-panel"><h4>${head_txt}</h4><ul class="plain">${why||"<li>—</li>"}</ul></div></div>`;
 }
 $("gb-go").onclick=bench;
 $("ask-go").onclick=ask_go;
@@ -516,7 +533,7 @@ function creative_detail(kept){
     ${kpi_row("Spend","$"+esc(String(m.spend??"—")))}${kpi_row("CPM","$"+esc(String(m.cpm??"—")))}${kpi_row("VTR",esc(String(m.vtr??"—")))}${kpi_row("CTR",esc(String(m.ctr??"—")))}${kpi_row("CPA","$"+esc(String(m.cpa??"—")))}${kpi_row("ROAS",esc(String(m.roas??"—")))}
     <div class="muted" style="font-size:13px">campaigns: ${esc((found.campaigns||[]).join(", ")||"—")} · <a href="#" id="detail-bench">vs benchmark</a><span id="detail-bench-out"></span></div></div>
     <div class="card" style="margin:0"><h4 style="margin-top:0">Creative intelligence</h4>
-    ${intel_row("Hook",esc(a.hook_type||"—"))}${intel_row("Hook modality (visual/spoken/text)",esc(a.hook_modality||"unknown"))}${intel_row("Creator vs branded",esc(a.creator_vs_branded||"—"))}${intel_row("Duration",esc(String(a.duration_s??found.duration_s??"—"))+"s")}${intel_row("Audio word timings",Array.isArray(a.transcript_words)?esc(String(a.transcript_words.length))+" timestamped words":"—")}${intel_row("Brand first mentioned (audio)",a.brand_audio_mention_s!=null?esc(String(a.brand_audio_mention_s))+"s":"—")}${intel_row("Brand appearance",esc(String(a.brand_seconds&&a.brand_seconds.length?a.brand_seconds[0].start_s+"s":"—")))}${intel_row("Product appearance",esc(String(a.product_seconds&&a.product_seconds.length?a.product_seconds[0].start_s+"s":"—")))}${intel_row("CTA",esc(a.cta||((a.structure||{}).cta?"set":"—")))}${intel_row("Voiceover",esc(a.voiceover||((a.structure||{}).voiceover?"set":"—")))}${intel_row("Supers",esc(Array.isArray(a.supers)?a.supers.join(", "):(a.supers||"—")))}${intel_row("Editing pace",esc(a.pace_cuts_per_min!=null?String(a.pace_cuts_per_min)+" cuts/min":"—"))}</div>
+    ${intel_row("Hook",esc(a.hook_type||"—"))}${intel_row("Hook modality (visual/spoken/text)",esc(a.hook_modality||"unknown"))}${intel_row("Creator vs branded",esc(a.creator_vs_branded||"—"))}${intel_row("Duration",esc(String(a.duration_s??found.duration_s??"—"))+"s")}${intel_row("Audio timings",audio_timing_txt(a))}${intel_row("Brand first mentioned (audio)",brand_audio_txt(a))}${intel_row("Brand appearance",esc(String(a.brand_seconds&&a.brand_seconds.length?a.brand_seconds[0].start_s+"s":"—")))}${intel_row("Product appearance",esc(String(a.product_seconds&&a.product_seconds.length?a.product_seconds[0].start_s+"s":"—")))}${intel_row("CTA",esc(a.cta||((a.structure||{}).cta?"set":"—")))}${intel_row("Voiceover",esc(a.voiceover||((a.structure||{}).voiceover?"set":"—")))}${intel_row("Supers",esc(Array.isArray(a.supers)?a.supers.join(", "):(a.supers||"—")))}${intel_row("Editing pace",esc(a.pace_cuts_per_min!=null?String(a.pace_cuts_per_min)+" cuts/min":"—"))}</div>
   </div></div>`;
   box.querySelectorAll(".chip").forEach(ch=>ch.onclick=()=>{
     const v=document.querySelector("#creative-video");
@@ -537,8 +554,52 @@ function creative_detail(kept){
 async function load_retention(key){
   const box=$("retention-graph");if(!box)return;
   try{
-    const segs=await api("GET","/api/retention?creative_key="+encodeURIComponent(key));
-    box.innerHTML=retention_svg(segs);
+    const [segs,pats]=await Promise.all([
+      api("GET","/api/retention?creative_key="+encodeURIComponent(key)),
+      api("GET","/api/retention/patterns").catch(()=>null)]);
+    const evs=pats&&Array.isArray(pats.events)?pats.events.filter(e=>e.creative_key===key):[];
+    box.innerHTML=retention_svg(segs)+retention_drops(evs);
+    box.querySelectorAll("[data-seek]").forEach(btn=>btn.onclick=()=>{
+      const v=document.querySelector("#creative-video");
+      if(v&&Number.isFinite(Number(btn.dataset.seek))){try{v.currentTime=Number(btn.dataset.seek);}catch(e){}}
+    });
+  }catch(e){box.innerHTML=`<span class="muted">${esc(e.message)}</span>`;}
+}
+function audio_timing_txt(a){
+  const tw=Array.isArray(a.transcript_words)?a.transcript_words:[];
+  if(!tw.length)return "—";
+  const levels=[...new Set(tw.map(e=>e.level||"word"))];
+  return `${tw.length} timings (${levels.join("/")}-level)`;
+}
+function brand_audio_txt(a){
+  if(a.brand_audio_mention_s==null)return "—";
+  const m=Array.isArray(a.brand_audio_matches)?a.brand_audio_matches[0]:null;
+  const approx=a.brand_audio_approx||(m&&m.approx);
+  if(!approx)return `${a.brand_audio_mention_s}s (word-level)`;
+  const end=m&&m.end!=null?m.end:"?";
+  return `within ${a.brand_audio_mention_s}–${end}s segment (segment-level timing, not an exact word time)`;
+}
+function retention_drops(evs){
+  if(!evs.length)return '<p class="muted" style="font-size:12px">No steep drops (≥5 pts) in this curve.</p>';
+  return '<ul class="plain">'+evs.map(e=>{
+    const el=e.element||{};
+    const bits=[el.slot?("during "+el.slot):null,
+      el.product_demo?"product demo on screen":null,
+      el.brand_visible?"brand visible":null,
+      el.cta_present?"CTA present":null,
+      el.voiceover?"voiceover running":null].filter(Boolean).join(" · ")||"no element annotated";
+    return `<li style="font-size:13px"><button class="chip" data-seek="${esc(String(e.seek_s??0))}">${esc(String(e.start_s))}–${esc(String(e.end_s))}s</button> <span class="retention-drop">−${esc(String(e.drop_pts))} pts</span> (${esc(String(e.from_pct))}% → ${esc(String(e.to_pct))}%) — ${esc(bits)}. Click the time chip to seek the video.</li>`;
+  }).join("")+"</ul>";
+}
+async function load_patterns(){
+  const box=$("patterns-out");if(!box)return;
+  try{
+    const p=await api("GET","/api/retention/patterns");
+    if(!p.patterns||!p.patterns.length){box.innerHTML=`<span class="muted">No steep drops in scope (${esc(p.scope||"All data")}, ${esc(String(p.n_creatives??0))} creatives with curves).</span>`;return;}
+    box.innerHTML=`<p class="muted" style="font-size:12px">Scope: ${esc(p.scope||"All data")} · ${esc(String(p.n_creatives))} creatives, ${esc(String(p.n_events))} drop events.</p><ul class="plain">`+p.patterns.slice(0,8).map(pt=>{
+      const bits=[pt.slot?("during "+pt.slot):"any segment",pt.product_demo?"product demo on screen":null,pt.brand_visible?"brand visible":null,pt.cta_present?"CTA present":null,pt.voiceover?"voiceover running":null].filter(Boolean).join(" · ");
+      return `<li style="font-size:13px"><strong>${esc(String(pt.n_creatives))} creative${pt.n_creatives===1?"":"s"}</strong> lose ~${esc(String(pt.avg_drop_pts))} pts (max ${esc(String(pt.max_drop_pts))}) ${esc(bits)} — e.g. ${esc((pt.examples||[]).join(", "))}</li>`;
+    }).join("")+"</ul>";
   }catch(e){box.innerHTML=`<span class="muted">${esc(e.message)}</span>`;}
 }
 function retention_svg(segs){
@@ -552,15 +613,13 @@ function retention_svg(segs){
   return `<svg viewBox="0 0 560 ${segs.length*24+6}" width="100%" role="img" aria-label="Retention drop per segment"><title>${esc("Retention drop per segment from /api/retention")}</title>${rows}</svg>`;
 }
 function render_compare(r,a,b){
-  const f=active_filters();
+  const scope=(r&&r.scope)||"All data";
   const kpi_row=(d,k,money)=>`<tr><th>${k.toUpperCase()}</th><td>${esc(kpi(d[k],money))}</td></tr>`;
   const card=key=>{
     const d=(r&&r[key])||{};const ann=d.annotation||{};
-    const blob=text_blob([key,ann.hook_type,ann.creator_vs_branded]);
-    const pass=(f.platform==="all"?"—":blob.includes(f.platform))&&(text_match(blob,f)?"passes filters":"filtered out");
     const top=(r&&r.why&&r.why.top)===key&&key?" (top)":"";
     return `<div class="card"><h3>${esc(key||"(empty)")}${esc(top)}</h3>
-    <div class="muted" style="font-size:12px">${esc(String(pass))}</div>
+    <div class="muted" style="font-size:12px">Scope: ${esc(scope)} — KPIs computed over scoped rows only</div>
     <table>${kpi_row(d,"spend",1)}${kpi_row(d,"impressions")}${kpi_row(d,"clicks")}${kpi_row(d,"conversions")}${kpi_row(d,"cpm",1)}${kpi_row(d,"vtr")}${kpi_row(d,"ctr")}${kpi_row(d,"cpc",1)}${kpi_row(d,"cpa",1)}${kpi_row(d,"roas")}
     <tr><th>Hook</th><td>${esc(ann.hook_type||"—")}</td></tr>
     <tr><th>Format</th><td>${esc(ann.creator_vs_branded||"—")}</td></tr>
@@ -568,8 +627,9 @@ function render_compare(r,a,b){
   };
   const why=((r&&r.why&&r.why.differences)||[]).map(d=>`<li>${esc(d)}</li>`).join("");
   const top=(r&&r.why&&r.why.top)||null;
+  const head=top?`Why ${esc(top)} won`:"Insufficient data / no winner";
   $("cmp-out").innerHTML=`<div class="cmp-grid">${card(a)}${card(b)}</div>`
-    +`<div class="insight-panel"><h4>Why ${esc(top||"—")} won</h4><ul class="plain">${why||"<li>—</li>"}</ul></div>`;
+    +`<div class="insight-panel"><h4>${head}</h4><p class="muted" style="font-size:12px">Scope: ${esc(scope)}</p><ul class="plain">${why||"<li>—</li>"}</ul></div>`;
 }
 async function bench(){try{
   const b=await api("GET","/api/benchmarks?group_by="+encodeURIComponent($("gb").value));
@@ -578,6 +638,7 @@ async function bench(){try{
   let entries=Object.entries(b);
   entries=sort_rows(entries,f);
   $("bench-out").innerHTML="<table><tr><th>Group</th><th>Ads</th><th>Spend</th><th>CTR</th><th>CPC</th><th>CPA</th></tr>"+entries.map(([k,g])=>`<tr><td>${esc(k)}</td><td>${esc(String(g.n_ads))}</td><td>$${esc(String(g.spend))}</td><td>${esc(kpi(g.ctr))}</td><td>${esc(kpi(g.cpc,1))}</td><td>${esc(kpi(g.cpa,1))}</td></tr>`).join("")+"</table>";
+  load_patterns();
 }catch(e){$("bench-out").textContent=e.message;}}
 function cohort_filters_from_ui(){
   const f=active_filters();const out={};
@@ -618,9 +679,9 @@ async function ask_go(){
   const q=$("ask-q").value;
   if(!q.trim()){$("ask-out").textContent="Type a question first.";return;}
   try{
-    const r=await api("POST","/api/ask",{question:q});
+    const r=await api("POST","/api/ask",{question:q,filters:scope_filters()});
     const srcs=Array.isArray(r.sources)?r.sources:[];
-    $("ask-out").innerHTML=`<p>${esc(r.answer)}</p><p class="muted">sources: ${srcs.map(s=>esc(s)).join(", ")||"—"}${r.review_id?` · review ${esc(String(r.review_id))} opened — export stays blocked until reviews are marked reviewed`:""}</p>`;
+    $("ask-out").innerHTML=`<p>${esc(r.answer)}</p><p class="muted">sources: ${srcs.map(s=>esc(s)).join(", ")||"—"} · scope: ${esc(r.scope||"All data")}${r.review_id?` · review ${esc(String(r.review_id))} opened — export stays blocked until reviews are marked reviewed`:""}</p>`;
   }catch(e){$("ask-out").innerHTML=`<p class="muted">${esc(e.message)}</p>`;}
 }
 async function report_lists(){
@@ -643,7 +704,8 @@ function report_body(){
     kpis:kpis.length?kpis:["cpa","ctr"],
     benchmark:$("rep-bench").value,
     override:$("rep-override").checked,
-    strict_human:$("rep-strict").checked};
+    strict_human:$("rep-strict").checked,
+    filters:scope_filters()};
 }
 function download_link(filename,mime,text){
   $("rep-links").innerHTML=`<a download="${esc(filename)}" href="${esc(URL.createObjectURL(new Blob([text],{type:mime})))}">Download ${esc(filename)}</a>`;

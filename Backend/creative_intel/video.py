@@ -78,8 +78,19 @@ def extract_audio(src_path, dst_wav):
 def extract_frames(src_path, out_pattern, every_s=EVERY_S, max_frames=MAX_FRAMES):
     if every_s <= 0:
         raise _unavailable("bad frame interval")
+    # format=yuvj420p: phone/desktop clips are usually limited-range
+    # yuv420p, which recent ffmpeg mjpeg encoders reject ("Non
+    # full-range YUV is non-standard"). Full-range 420 keeps the
+    # encoder happy on old and new builds alike. The fps value is an
+    # integer fraction or a plain float rate: "fps=1/3.0" carries a
+    # non-integer denominator, which ffmpeg reads as 0 fps and
+    # silently writes nothing.
+    if float(every_s).is_integer():
+        fps = "fps=1/%d" % int(every_s)
+    else:
+        fps = "fps=%.6f" % (1.0 / float(every_s))
     _run(["ffmpeg", "-y", "-v", "error", "-i", src_path,
-          "-vf", "fps=1/%s" % (every_s,), out_pattern])
+          "-vf", "%s,format=yuvj420p" % fps, out_pattern])
     frames = []
     for i in range(1, max_frames + 1):
         path = out_pattern % i

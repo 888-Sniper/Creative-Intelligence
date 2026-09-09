@@ -541,14 +541,26 @@ class LiveStt:
         return value
 
     @staticmethod
-    def _fill_timings(timings_out, words):
+    def _fill_timings(timings_out, words, level="word"):
+        """Append {w, t, end, level} timing entries.
+
+        level is "word" for true word timestamps (Deepgram) or
+        "segment" for provider segments (Groq verbose_json): a
+        segment's t is the segment start, never a word time, and
+        downstream display must say "within X-Ys" rather than
+        pretending the word occurred at exactly t.
+        """
         if timings_out is None:
             return
         for w in (words or [])[:300]:
             try:
-                timings_out.append({
+                entry = {
                     "w": str(w.get("word", w.get("text", "")))[:60],
-                    "t": round(float(w.get("start", 0)), 2)})
+                    "t": round(float(w.get("start", 0)), 2),
+                    "level": level}
+                if w.get("end") is not None:
+                    entry["end"] = round(float(w.get("end")), 2)
+                timings_out.append(entry)
             except (TypeError, ValueError):
                 continue
 
@@ -607,7 +619,8 @@ class LiveStt:
             raise ProviderUnavailable("groq-whisper unreachable: %s" % e)
         if not isinstance(got.get("text"), str):
             raise ProviderUnavailable("unexpected groq-whisper response shape")
-        LiveStt._fill_timings(timings_out, got.get("segments"))
+        LiveStt._fill_timings(timings_out, got.get("segments"),
+                              level="segment")
         return got["text"], 0.7
 
 

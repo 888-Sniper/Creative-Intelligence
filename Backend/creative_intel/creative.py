@@ -27,11 +27,17 @@ MAX_BRAND_TERMS = 20
 def brand_audio_mentions(transcript_words, brand_terms):
     """First audible mention per brand term over timed words.
 
-    transcript_words: [{w, t}, ...] from STT. brand_terms: user
-    lexicon (client/brand names) — matching without a lexicon would
-    be guessing, so no terms means no mentions. Multi-word terms use
-    a sliding window timed at the first word. Returns
-    {"brand_audio_mention_s": float|None, "matches": [{term, t}]}.
+    transcript_words: [{w, t, level?, end?}, ...] from STT.
+    brand_terms: user lexicon (client/brand names) — matching
+    without a lexicon would be guessing, so no terms means no
+    mentions. Multi-word terms use a sliding window timed at the
+    first word. Entries whose timing is segment-level (Groq)
+    match approximately: the term fell somewhere inside the
+    segment, so matches carry approx=True plus the segment end,
+    and the roll-up sets brand_audio_approx. Word-level
+    (Deepgram) matches stay exact. Returns
+    {"brand_audio_mention_s": float|None, "brand_audio_approx": bool,
+     "matches": [{term, t, end?, approx}]}.
     """
     words = [e for e in (transcript_words or [])
              if isinstance(e, dict) and isinstance(e.get("w"), str)
@@ -44,13 +50,42 @@ def brand_audio_mentions(transcript_words, brand_terms):
     matches = []
     lowered = [e["w"].casefold() for e in words]
     for parts in terms:
+        needle = " ".join(parts)
+        candidates = []
         for i in range(len(lowered) - len(parts) + 1):
             if lowered[i:i + len(parts)] == parts:
-                matches.append({"term": " ".join(parts),
-                                "t": round(float(words[i]["t"]), 2)})
+                window = words[i:i + len(parts)]
+                approx = any(e.get("level") == "segment"
+                             for e in window)
+                match = {"term": needle,
+                         "t": round(float(words[i]["t"]), 2),
+                         "approx": approx}
+                ends = [e.get("end") for e in window
+                        if isinstance(e.get("end"), (int, float))]
+                if approx and ends:
+                    match["end"] = round(float(max(ends)), 2)
+                candidates.append(match)
                 break
+        # Segment entries hold whole sentences, not words: a term
+        # inside one matches approximately (somewhere within the
+        # segment window), never at an exact word time.
+        for e in words:
+            if e.get("level") != "segment":
+                continue
+            if needle in (e["w"] or "").casefold():
+                match = {"term": needle,
+                         "t": round(float(e["t"]), 2),
+                         "approx": True}
+                if isinstance(e.get("end"), (int, float)):
+                    match["end"] = round(float(e["end"]), 2)
+                candidates.append(match)
+                break
+        if candidates:
+            matches.append(min(candidates, key=lambda m: m["t"]))
     first = min((m["t"] for m in matches), default=None)
-    return {"brand_audio_mention_s": first, "matches": matches}
+    return {"brand_audio_mention_s": first,
+            "brand_audio_approx": any(m["approx"] for m in matches),
+            "matches": matches}
 
 STRUCTURE_SLOTS = ("hook", "body", "demo", "supers", "cta",
                    "endframe", "voiceover")
@@ -191,6 +226,7 @@ def run_pipeline(conn, creative_key, providers, media=None, brand_terms=None):
         if found["brand_audio_mention_s"] is not None:
             ann["brand_audio_mention_s"] = found["brand_audio_mention_s"]
             ann["brand_audio_matches"] = found["matches"]
+            ann["brand_audio_approx"] = found["brand_audio_approx"]
     errors = validate(ann)
     if errors:
         raise ValueError("structurer produced invalid v0: " + "; ".join(errors))

@@ -95,7 +95,7 @@ Project identity is row["project"] when present, else row["campaign"].
 """
 
 FILTER_KEYS = ("vertical", "platform", "funnel", "objective", "market",
-               "client", "date")
+               "client", "date", "campaign")
 
 KPI_KEYS = ("cpm", "vtr", "ctr", "cpa", "roas")
 
@@ -218,6 +218,105 @@ def match_filters(row, filters):
     return True
 
 
+# ads-column behind each scope axis ("funnel" reads funnel_stage;
+# "project" is matched Python-side via project_of, which falls back
+# to campaign, so it is deliberately absent here).
+SCOPE_COLUMNS = {"client": "client",
+                 "campaign": "campaign", "platform": "platform",
+                 "vertical": "vertical", "market": "market",
+                 "funnel": "funnel_stage", "objective": "objective",
+                 "date": "date"}
+
+
+class Scope:
+    """One reusable analysis scope for every analytics operation.
+
+    Axes: client, project, campaign, platform, vertical, market,
+    funnel, objective, date. "all"/blank means no constraint;
+    matching is case-insensitive. campaign_kpis, creative rows,
+    benchmark, compare_creatives, compare_campaigns, ask_data,
+    build_report and retention patterns all take the same scope,
+    so a Beauty + Spain + TikTok + Lower Funnel view can never
+    silently analyse a broader dataset.
+    """
+
+    AXES = ("client", "project", "campaign", "platform", "vertical",
+            "market", "funnel", "objective", "date")
+
+    def __init__(self, raw=None):
+        self.axes = {}
+        for key in self.AXES:
+            vals = _as_list((raw or {}).get(key))
+            vals = [v for v in vals if v not in ("", "all")]
+            if vals:
+                self.axes[key] = sorted(set(vals))
+
+    @classmethod
+    def from_query(cls, query, ignore=()):
+        """Build from a parse_qs query dict. "project" stays a
+        project list (include_projects semantics live in
+        normalized()); keys in ignore are skipped (the campaign
+        compare route reuses ?campaign= for its candidate list)."""
+        raw = {}
+        for key in cls.AXES:
+            if key in ignore:
+                continue
+            if key == "project":
+                raw[key] = [v for v in query.get("project", [])
+                            if v not in ("", "all")]
+            else:
+                raw[key] = [v for v in query.get(key, [])
+                            if v not in ("", "all")]
+        return cls(raw)
+
+    @classmethod
+    def from_payload(cls, payload):
+        """Build from a POST body carrying a "filters" object."""
+        return cls((payload or {}).get("filters") or {})
+
+    def normalized(self):
+        """normalize_filters-compatible dict for match_filters."""
+        filt = {k: list(v) for k, v in self.axes.items() if k != "project"}
+        if self.axes.get("project"):
+            filt["include_projects"] = list(self.axes["project"])
+        return normalize_filters(filt)
+
+    def match(self, row):
+        """True when an enriched ads row is inside this scope."""
+        return match_filters(row, self.normalized())
+
+    def sql(self):
+        """Case-insensitive WHERE fragment over ads columns for
+        direct SQL aggregations. Returns (clause, params); clause
+        is "1=1" when the scope is empty. The project axis is
+        skipped here (matched Python-side via project_of); callers
+        doing pure-SQL aggregation must AND a project match with
+        self.match or drop the axis explicitly."""
+        bits, params = [], []
+        for key in self.AXES:
+            vals = self.axes.get(key)
+            if not vals or key not in SCOPE_COLUMNS:
+                continue
+            col = SCOPE_COLUMNS[key]
+            bits.append("(%s)" % " OR ".join(
+                ["lower(%s)=lower(?)" % col] * len(vals)))
+            params.extend(vals)
+        if not bits:
+            return "1=1", []
+        return " AND ".join(bits), params
+
+    def describe(self):
+        """Short human label ("Beauty, Spain, TikTok") or "All data"."""
+        bits = []
+        for key in self.AXES:
+            if self.axes.get(key):
+                bits.append(", ".join(self.axes[key]))
+        return "; ".join(bits) if bits else "All data"
+
+    def is_empty(self):
+        return not self.axes
+
+
 def all_rows(conn):
     """Every ads row, enriched with annotation fields + conv_rate."""
     conn.row_factory = None
@@ -302,17 +401,23 @@ def _campaign_elements(conn, campaign):
             "n_creatives": len({r.get("creative_key") for r in rows})}
 
 
-def compare_campaigns(conn, campaigns=None, rank_by="cpa"):
+def compare_campaigns(conn, campaigns=None, rank_by="cpa", filters=None):
     """Compare campaigns: per-campaign KPIs plus a why-analysis.
 
     rank_by picks the ranking metric (lower-is-better for cpm/cpa,
-    higher-is-better for vtr/ctr/roas). The why-analysis names which
-    elements (hook_type, creator mode, platform mix, scale) differ
-    between the top- and bottom-ranked campaigns.
+    higher-is-better for vtr/ctr/roas). filters is the shared
+    analysis Scope (or a plain filter dict): only scoped rows feed
+    the KPIs. The why-analysis names which elements (hook_type,
+    creator mode, platform mix, scale) differ between the top- and
+    bottom-ranked campaigns. When every candidate's rank_by KPI is
+    uncomputable (None), there is no winner: top/bottom are None
+    and the UI must read "Insufficient data / no winner" instead
+    of crowning an arbitrary campaign.
     """
     if rank_by not in KPI_KEYS:
         raise ValueError("rank_by must be one of %s" % sorted(KPI_KEYS))
-    per = campaign_kpis(conn, campaigns)
+    scope = filters if isinstance(filters, Scope) else Scope(filters)
+    per = campaign_kpis(conn, campaigns, filters=scope.normalized())
     if len(per) < 1:
         raise ValueError("no campaigns match %r" % (campaigns,))
     higher = KPI_DIRECTIONS[rank_by] == "higher"
@@ -325,6 +430,14 @@ def compare_campaigns(conn, campaigns=None, rank_by="cpa"):
         return (0, -value if higher else value)
 
     ranking = sorted(per, key=_rank_key)
+    if all(per[name][rank_by] is None for name in ranking):
+        why = {"metric": rank_by, "top": None, "bottom": None,
+               "differences": ["Insufficient data / no winner: %s is "
+                               "uncomputable for every compared campaign."
+                               % rank_by.upper()],
+               "details": {}}
+        return {"kpis": per, "ranking": ranking, "rank_by": rank_by,
+                "why": why, "scope": scope.describe()}
     top, bottom = ranking[0], ranking[-1]
     why = {"metric": rank_by, "top": top, "bottom": bottom, "differences": [],
            "details": {}}
@@ -353,26 +466,54 @@ def compare_campaigns(conn, campaigns=None, rank_by="cpa"):
         if not why["differences"]:
             why["differences"].append(
                 "same elements on every axis: gap is execution/scale, not mix")
-    return {"kpis": per, "ranking": ranking, "rank_by": rank_by, "why": why}
+    return {"kpis": per, "ranking": ranking, "rank_by": rank_by,
+            "why": why, "scope": scope.describe()}
 
 
-def _creative_rows(conn, campaign):
-    """Per-creative performance + annotation labels for one campaign."""
+def _span_min(ann, key):
+    """Earliest start_s across a span list (brand/product/logo)."""
+    spans = (ann or {}).get(key) or []
+    starts = [s.get("start_s") for s in spans
+              if isinstance(s, dict)
+              and isinstance(s.get("start_s"), (int, float))
+              and not isinstance(s.get("start_s"), bool)]
+    return min(starts) if starts else None
+
+
+def _creative_rows(conn, campaign, scope=None):
+    """Per-creative performance + annotation labels for one campaign.
+
+    scope (Scope or plain filter dict, default everything) restricts
+    the ads rows feeding each creative's KPIs, so a creative used in
+    Campaign A + B shows only Campaign-A metrics when the scope
+    selects Campaign A. Rows also carry the full creative-analysis
+    classification set the XLSX export needs.
+    """
+    scope = scope if isinstance(scope, Scope) else Scope(scope)
+    cols = ["spend", "impressions", "clicks", "conversions",
+            "video_views", "revenue", "platform", "client", "project",
+            "campaign", "vertical", "market", "objective",
+            "funnel_stage", "date"]
     out = []
     for (key,) in conn.execute(
             "SELECT DISTINCT creative_key FROM ads WHERE campaign=?",
             (campaign,)).fetchall():
-        rows = conn.execute(
-            "SELECT spend, impressions, clicks, conversions, video_views,"
-            " revenue, platform FROM ads WHERE creative_key=? AND campaign=?",
-            (key, campaign,)).fetchall()
-        spend = sum(r[0] for r in rows)
-        impr = sum(r[1] for r in rows)
-        clicks = sum(r[2] for r in rows)
-        conv = sum(r[3] for r in rows)
-        views = sum(r[4] or 0 for r in rows)
-        revenue = sum(r[5] or 0 for r in rows)
-        platforms = sorted({r[6] for r in rows if r[6]})
+        rows = [dict(zip(cols, r)) for r in conn.execute(
+            "SELECT %s FROM ads WHERE creative_key=? AND campaign=?" % (
+                ", ".join(cols)), (key, campaign,)).fetchall()]
+        rows = [r for r in rows if scope.match(r)]
+        if not rows and not scope.is_empty():
+            continue
+        spend = sum(r["spend"] for r in rows)
+        impr = sum(r["impressions"] for r in rows)
+        clicks = sum(r["clicks"] for r in rows)
+        conv = sum(r["conversions"] for r in rows)
+        views = sum(r["video_views"] or 0 for r in rows)
+        revenue = sum(r["revenue"] or 0 for r in rows)
+        platforms = sorted({r["platform"] for r in rows if r["platform"]})
+
+        def _distinct(col):
+            return sorted({str(r[col]) for r in rows if r[col]})
         got = conn.execute("SELECT annotation_json FROM annotations"
                            " WHERE creative_key=?", (key,)).fetchone()
         try:
@@ -384,6 +525,18 @@ def _creative_rows(conn, campaign):
                               (key,)).fetchone()
         duration = conn.execute("SELECT duration_s FROM creatives WHERE creative_key=?",
                                 (key,)).fetchone()
+        struct = ann.get("structure") or {}
+        slots = sorted(s for s, seg in struct.items()
+                       if isinstance(seg, dict)
+                       and (seg.get("end_s") or 0) > (seg.get("start_s") or 0))
+        cta = ann.get("cta")
+        if isinstance(cta, dict):
+            cta_text = ("set %ss-%ss" % (cta.get("start_s"),
+                                         cta.get("end_s"))
+                        if (cta.get("end_s") or 0) > (cta.get("start_s") or 0)
+                        else "")
+        else:
+            cta_text = str(cta or "")
         out.append({
             "creative_key": key,
             "platform": ",".join(platforms),
@@ -391,6 +544,8 @@ def _creative_rows(conn, campaign):
             "impressions": impr,
             "clicks": clicks,
             "conversions": conv,
+            "video_views": views,
+            "revenue": round(revenue, 2),
             "cpm": round(spend / impr * 1000, 2) if impr else None,
             "vtr": round(views / impr, 4) if impr else None,
             "ctr": round(clicks / impr, 4) if impr else None,
@@ -398,28 +553,51 @@ def _creative_rows(conn, campaign):
             "cpa": round(spend / conv, 2) if conv else None,
             "roas": round(revenue / spend, 4) if spend else None,
             "hook_type": ann.get("hook_type") or "unannotated",
+            "hook_modality": ann.get("hook_modality") or "unknown",
             "creator_vs_branded": ann.get("creator_vs_branded") or "unannotated",
             "duration_s": ann.get("duration_s") or (duration[0] if duration else 0),
             "status": ann.get("status") or (status[0] if status else "auto"),
             "verified": ann.get("status") == "human_verified",
+            "client": "; ".join(_distinct("client")),
+            "project": "; ".join(_distinct("project")),
+            "vertical": "; ".join(_distinct("vertical")),
+            "market": "; ".join(_distinct("market")),
+            "funnel": "; ".join(_distinct("funnel_stage")),
+            "objective": "; ".join(_distinct("objective")),
+            "date": "; ".join(_distinct("date")),
+            "brand_first_visible_s": _span_min(ann, "brand_seconds"),
+            "product_first_visible_s": _span_min(ann, "product_seconds"),
+            "logo_first_visible_s": _span_min(ann, "logo_seconds"),
+            "brand_audio_mention_s": ann.get("brand_audio_mention_s"),
+            "brand_audio_approx": bool(ann.get("brand_audio_approx")),
+            "cta": cta_text,
+            "supers": "; ".join(str(s) for s in (ann.get("supers") or [])
+                                if s),
+            "voiceover": "voiceover" in slots,
+            "editing_pace_cuts_per_min": ann.get("pace_cuts_per_min"),
+            "structure": ", ".join(slots),
         })
     return out
 
 
-def _report_extras(conn, names, strict_human=False):
+def _report_extras(conn, names, strict_human=False, scope=None):
     """Best/worst creatives, hook learnings, heuristic next steps.
 
     Everything is computed from uploaded rows + annotations in this
-    call. Recommendations are plainly labelled heuristic: they rank
-    by measured CPA/CTR, they do not invent diagnoses. In strict mode
-    best/watch contention is limited to HUMAN-VERIFIED annotations so
-    no unverified hook/format label can enter an official report.
+    call. scope (shared Scope or plain filter dict) restricts every
+    creative row, so a report on Beauty + Spain never blends in
+    France rows. Recommendations are plainly labelled heuristic:
+    they rank by measured CPA/CTR, they do not invent diagnoses.
+    In strict mode best/watch contention is limited to
+    HUMAN-VERIFIED annotations so no unverified hook/format label
+    can enter an official report.
     """
+    scope = scope if isinstance(scope, Scope) else Scope(scope)
     per_campaign = {}
     hook_spend, hook_conv = {}, {}
     strict_nulled = 0
     for name in names:
-        rows = _creative_rows(conn, name)
+        rows = _creative_rows(conn, name, scope=scope)
 
         def _rank(pool):
             converting = [r for r in pool if (r["conversions"] or 0) > 0]
@@ -504,7 +682,7 @@ def _show(value):
 
 
 def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
-                 fmt="one-pager", strict_human=False):
+                 fmt="one-pager", strict_human=False, filters=None):
     """Generate a report over selected campaigns + KPIs + benchmark.
 
     fmt is "one-pager" (markdown), "csv", "deck" (slide JSON),
@@ -512,7 +690,11 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
     spreadsheet bytes, base64). Binary formats ride inside the same
     JSON envelope so the local-first HTTP contract is unchanged.
     benchmark_sel may be None, a group_by string, a metric name, or a
-    precomputed mapping.
+    precomputed mapping. filters is the shared analysis Scope (or a
+    plain filter dict): campaign KPIs, creative rows and the why
+    analysis all read the identical scoped population, and the scope
+    is printed on the report so a filtered export can never be
+    mistaken for a full-dataset one.
     """
     fmt = (fmt or "one-pager").lower()
     if fmt not in ("one-pager", "csv", "deck", "pptx", "xlsx"):
@@ -523,7 +705,9 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
     if not wanted_kpis:
         raise ValueError("pick at least one KPI from %s" % sorted(report_kpis))
     rank_by = wanted_kpis[0] if wanted_kpis[0] in KPI_KEYS else "cpa"
-    comp = compare_campaigns(conn, campaigns, rank_by=rank_by)
+    scope = filters if isinstance(filters, Scope) else Scope(filters)
+    comp = compare_campaigns(conn, campaigns, rank_by=rank_by,
+                             filters=scope)
     if benchmark_sel is None:
         bench = {}
     elif isinstance(benchmark_sel, str):
@@ -535,6 +719,7 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
         raise ValueError("benchmark must be None, a group name, or a mapping")
     names = comp["ranking"]
     lines = ["# Campaign Report", "",
+             "Scope: %s" % scope.describe(),
              "Campaigns: %s" % ", ".join(names),
              "KPIs: %s | Ranked by: %s" % (", ".join(wanted_kpis), comp["rank_by"]), ""]
     for name in names:
@@ -543,8 +728,14 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
         for k in wanted_kpis:
             lines.append("- %s: %s" % (k.upper(), _show(row[k])))
         lines.append("")
-    lines += ["## Why %s leads %s (%s)" % (comp["why"]["top"], comp["why"]["bottom"],
-                                           comp["why"]["metric"])]
+    if comp["why"]["top"] is None:
+        lines += ["## No winner (%s uncomputable for every campaign — "
+                  "insufficient data, no arbitrary pick)"
+                  % comp["why"]["metric"].upper()]
+    else:
+        lines += ["## Why %s leads %s (%s)" % (
+            comp["why"]["top"], comp["why"]["bottom"],
+            comp["why"]["metric"])]
     for d in comp["why"]["differences"]:
         lines.append("- %s" % d)
     lines += ["", "## Benchmark", ""]
@@ -560,7 +751,8 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
     else:
         lines.append("- (no benchmark selected)")
     strict = bool(strict_human)
-    extras = _report_extras(conn, names, strict_human=strict)
+    extras = _report_extras(conn, names, strict_human=strict,
+                            scope=scope)
     unverified_excluded = 0
     if strict:
         # HUMAN-VERIFIED parity: insights resting on unverified
@@ -607,7 +799,8 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
             "" if comp["kpis"][name][k] is None
             else str(comp["kpis"][name][k]) for k in wanted_kpis))
     csv_text = "\n".join(csv_lines) + "\n"
-    deck = {"title": "Campaign Report", "rank_by": comp["rank_by"],
+    deck = {"title": "Campaign Report", "scope": scope.describe(),
+            "rank_by": comp["rank_by"],
             "slides": [{"campaign": n, "kpis": {k: comp["kpis"][n][k] for k in wanted_kpis}}
                        for n in names],
             "why": comp["why"]["differences"], "benchmark": bench,
@@ -646,7 +839,10 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
                         worst["creative_key"], _show(worst["cpa"]),
                         worst["hook_type"], worst["creator_vs_branded"]))
                 slides.append({"title": name, "bullets": bullets})
-            slides.append({"title": "Why %s leads" % comp["why"]["top"],
+            why_title = ("Why %s leads" % comp["why"]["top"]
+                         if comp["why"]["top"] is not None
+                         else "No winner — insufficient data")
+            slides.append({"title": why_title,
                            "bullets": comp["why"]["differences"] or ["—"]})
             bench = deck.get("benchmark") or {}
             bench_bullets = []
@@ -702,21 +898,42 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
                 "rows": [[r, v] for r, v in zip(
                     deck["recommendations"],
                     deck["recommendations_verified"])] or [["—", ""]]}
-        all_creatives = {"name": "All Creatives",
-                         "header": ["campaign", "creative", "platform",
-                                    "spend", "impressions", "clicks",
-                                    "conversions", "cpm", "vtr", "ctr",
-                                    "cpc", "cpa", "roas", "hook", "format",
-                                    "duration_s", "status", "human_verified"],
-                         "rows": [[name, r["creative_key"], r["platform"],
-                                   r["spend"], r["impressions"], r["clicks"],
-                                   r["conversions"], r["cpm"], r["vtr"],
-                                   r["ctr"], r["cpc"], r["cpa"], r["roas"],
-                                   r["hook_type"], r["creator_vs_branded"],
-                                   r["duration_s"], r["status"], r["verified"]]
-                                  for name in names
-                                  for r in extras["per_campaign"][name][
-                                      "creatives"]]}
+        # Every creative, every performance number and every
+        # creative-analysis classification: the workbook must stand
+        # alone without re-querying the app.
+        all_header = ["client", "project", "campaign", "platform",
+                      "vertical", "market", "funnel", "objective",
+                      "date", "creative", "spend", "impressions",
+                      "clicks", "conversions", "video_views", "revenue",
+                      "cpm", "vtr", "ctr", "cpc", "cpa", "roas",
+                      "hook_type", "hook_modality", "creator_vs_branded",
+                      "duration_s", "brand_first_visible_s",
+                      "product_first_visible_s", "logo_first_visible_s",
+                      "brand_audio_mention_s", "brand_audio_approx",
+                      "cta", "supers", "voiceover",
+                      "editing_pace_cuts_per_min", "structure",
+                      "status", "human_verified"]
+        all_creatives = {
+            "name": "All Creatives",
+            "header": all_header,
+            "rows": [[r["client"], r["project"], name, r["platform"],
+                      r["vertical"], r["market"], r["funnel"],
+                      r["objective"], r["date"], r["creative_key"],
+                      r["spend"], r["impressions"], r["clicks"],
+                      r["conversions"], r["video_views"], r["revenue"],
+                      r["cpm"], r["vtr"], r["ctr"], r["cpc"], r["cpa"],
+                      r["roas"], r["hook_type"], r["hook_modality"],
+                      r["creator_vs_branded"], r["duration_s"],
+                      r["brand_first_visible_s"],
+                      r["product_first_visible_s"],
+                      r["logo_first_visible_s"],
+                      r["brand_audio_mention_s"],
+                      r["brand_audio_approx"], r["cta"], r["supers"],
+                      r["voiceover"],
+                      r["editing_pace_cuts_per_min"], r["structure"],
+                      r["status"], r["verified"]]
+                     for name in names
+                     for r in extras["per_campaign"][name]["creatives"]]}
         bench = deck.get("benchmark") or {}
         if isinstance(bench, dict) and bench and isinstance(
                 next(iter(bench.values())), dict):
@@ -728,8 +945,21 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
             bsheet = {"name": "Benchmarks", "header": ["benchmark"],
                       "rows": [[str(bench)[:300] if bench
                                 else "(no benchmark selected)"]]}
+        # Raw canonical imported rows (scoped): the workbook carries
+        # full performance data, not only summaries.
+        raw_cols = [c[0] for c in conn.execute(
+            "SELECT * FROM ads LIMIT 0").description]
+        raw_all = [dict(zip(raw_cols, v)) for v in conn.execute(
+            "SELECT * FROM ads").fetchall()]
+        raw_rows = [[r.get(c) for c in raw_cols if c != "id"]
+                    for r in raw_all if scope.match(r)]
+        raw_header = [c for c in raw_cols if c != "id"] + ["scope"]
+        raw = {"name": "Raw Performance Data",
+               "header": raw_header,
+               "rows": [row + [scope.describe()] for row in raw_rows]
+               or [[None] * len(raw_header)]}
         blob = ooxml.build_xlsx([sheet, why, creatives, all_creatives,
-                                   bsheet, learn, reco])
+                                 raw, bsheet, learn, reco])
         return {"format": "xlsx", "filename": "campaign-report.xlsx",
                 "xlsx_b64": base64.b64encode(blob).decode(),
                 "markdown": markdown, "csv": csv_text, "deck": deck}

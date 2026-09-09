@@ -96,10 +96,15 @@ def _cpa(group):
     return (spend / conv) if conv else 0.0, spend, conv
 
 
-def _fact_pack(conn, limit=8):
+def _fact_pack(conn, limit=8, scope=None):
     """Compact computed facts for the LLM asker. Every number below is
-    derived from uploaded rows/annotations in this call."""
-    rows = _ads(conn)
+    derived from uploaded rows/annotations in this call. scope (the
+    shared analysis Scope or a plain filter dict) restricts the rows
+    first, so Ask answers the filtered dataset it was asked about."""
+    from . import benchmarks
+    scope = (scope if isinstance(scope, benchmarks.Scope)
+             else benchmarks.Scope(scope))
+    rows = [r for r in _ads(conn) if scope.match(r)]
     anns = _annotations(conn)
     spend = sum(r["spend"] for r in rows)
     impr = sum(r["impressions"] for r in rows)
@@ -196,9 +201,10 @@ def _fact_pack(conn, limit=8):
         "bottom_20_pct": ranked[-nq:] if len(ranked) > 1 else [],
     }
     retention = {}
-    curves = conn.execute(
+    scoped_keys = {r["creative_key"] for r in rows if r["creative_key"]}
+    curves = [(k, t0, t1) for k, t0, t1 in conn.execute(
         "SELECT creative_key, MIN(t_sec), MAX(t_sec) FROM retention"
-        " GROUP BY creative_key").fetchall()
+        " GROUP BY creative_key").fetchall() if k in scoped_keys]
     if curves:
         drops = []
         for key, _t0, _t1 in curves:
@@ -257,6 +263,7 @@ def _fact_pack(conn, limit=8):
                           if anns.get(k))},
         "quintiles": quintiles,
         "retention": retention or None,
+        "scope": scope.describe(),
     }
     return pack
 
@@ -278,11 +285,11 @@ _USED_SOURCES = {
 }
 
 
-def _llm_answer(conn, question, llm):
+def _llm_answer(conn, question, llm, scope=None):
     """LLM answer strictly over _fact_pack. Raises ProviderUnavailable
     on any failure so the caller falls back to the rule engine."""
     from . import providers
-    pack = _fact_pack(conn)
+    pack = _fact_pack(conn, scope=scope)
     try:
         data = _extract_json_obj(providers, llm, question, pack)
     except Exception:
@@ -325,23 +332,34 @@ def _extract_json_obj(providers, llm, question, pack):
         raise providers.ProviderUnavailable("ask output is not valid JSON")
 
 
-def answer(conn, question, llm=None):
+def answer(conn, question, llm=None, scope=None):
     """Answer strictly from uploaded rows + annotations + transcripts.
 
     llm (optional LiveLlm-compatible) answers over a computed fact pack;
     any live failure falls back to the deterministic rule engine, and
-    both paths open the review-to-zero row.
+    both paths open the review-to-zero row. scope (the shared analysis
+    Scope or a plain filter dict) restricts every number on both
+    paths, so Ask answers the filtered dataset it was asked about.
     """
     from . import benchmarks, providers
     ensure(conn)
-    rows = _ads(conn)
+    scope = (scope if isinstance(scope, benchmarks.Scope)
+             else benchmarks.Scope(scope))
+    rows = [r for r in _ads(conn) if scope.match(r)]
     if not rows:
+        if _ads(conn):
+            return {"answer": "No uploaded rows match the current scope "
+                    "(%s). Loosen the filters and ask again."
+                    % scope.describe(),
+                    "sources": [], "review_id": None,
+                    "scope": scope.describe()}
         return {"answer": "No uploaded data yet. Upload a Meta or TikTok "
                 "export before asking questions.",
-                "sources": [], "review_id": None}
+                "sources": [], "review_id": None,
+                "scope": scope.describe()}
     if llm is not None:
         try:
-            return _llm_answer(conn, question, llm)
+            return _llm_answer(conn, question, llm, scope=scope)
         except providers.ProviderUnavailable:
             pass  # live failed: rules below never leave the user empty-handed
     q = (question or "").lower()
@@ -475,12 +493,176 @@ def answer(conn, question, llm=None):
             cite("Uploaded CSV")
             if any(k != "(unannotated)" for k in groups):
                 cite("Annotation")
+    pack = None
+
+    def scoped_pack():
+        nonlocal pack
+        if pack is None:
+            pack = _fact_pack(conn, scope=scope)
+        return pack
+
+    def _money(value):
+        return ("$%s" % f"{value:,.2f}") if value is not None else "n/a"
+
+    if "hook" in q:
+        hooks = scoped_pack()["hooks"]
+        if not hooks:
+            parts.append("No hook labels in scope yet — annotate creatives "
+                         "to unlock hook comparisons.")
+            cite("Annotation")
+        else:
+            bits = ["%s: %d creatives at %s spend, CPA %s" % (
+                h["hook"], h["n_creatives"], _money(h["spend"]),
+                _money(h["cpa"])) for h in hooks]
+            parts.append("Hooks in scope — " + "; ".join(bits) + ".")
+            cite("Uploaded CSV")
+            cite("Annotation")
+            cite("Benchmark Derived")
+    if any(w in q for w in ("length", "duration", "long", "short",
+                            "15s", "30s", "seconds")):
+        lengths = scoped_pack()["lengths"]
+        if not lengths:
+            parts.append("No video durations recorded in scope yet.")
+            cite("Uploaded CSV")
+        else:
+            bits = ["%s: %d creatives at %s spend, CPA %s, CTR %s" % (
+                b["bucket"], b["n_creatives"], _money(b["spend"]),
+                _money(b["cpa"]),
+                ("%.2f%%" % (100.0 * b["ctr"]) if b.get("ctr") is not None
+                 else "n/a")) for b in lengths]
+            parts.append("Video length in scope — " + "; ".join(bits) + ".")
+            cite("Uploaded CSV")
+            cite("Benchmark Derived")
+    if "cta" in q or "call to action" in q:
+        cta = scoped_pack()["cta"]
+        bits = []
+        for label, key in (("with CTA", "with_cta"),
+                           ("without CTA", "without_cta")):
+            group = cta.get(key)
+            if group:
+                bits.append("%s: %d creatives at %s spend, CPA %s, CTR %s"
+                            % (label, group["n_creatives"],
+                               _money(group["spend"]), _money(group["cpa"]),
+                               ("%.2f%%" % (100.0 * group["ctr"])
+                                if group.get("ctr") is not None else "n/a")))
+        if not bits:
+            parts.append("No CTA annotations in scope yet.")
+            cite("Annotation")
+        else:
+            parts.append("CTA in scope — " + "; ".join(bits) + ".")
+            cite("Uploaded CSV")
+            cite("Annotation")
+            cite("Benchmark Derived")
+    if any(w in q for w in ("funnel", "upper", "lower", "stage", "tof",
+                            "mof", "bof")):
+        funnel = scoped_pack()["funnel"]
+        if not funnel:
+            parts.append("No funnel data in scope.")
+            cite("Uploaded CSV")
+        else:
+            bits = ["%s: %d creatives at %s spend, CPA %s" % (
+                s["stage"], s["n_creatives"], _money(s["spend"]),
+                _money(s["cpa"])) for s in funnel]
+            parts.append("Funnel in scope — " + "; ".join(bits) + ".")
+            cite("Uploaded CSV")
+            cite("Benchmark Derived")
+    markets = scoped_pack()["markets"] if (
+        "market" in q or "country" in q or "geo" in q or "region" in q) else []
+    if "market" in q or "country" in q or "geo" in q or "region" in q:
+        if not markets:
+            nobits = [m["market"] for m in scoped_pack()["markets"]]
+            parts.append("No market split in scope%s." % (
+                " (only %s)" % ", ".join(nobits) if nobits else ""))
+            cite("Uploaded CSV")
+        else:
+            bits = ["%s: %d creatives at %s spend, CPA %s" % (
+                m["market"], m["n_creatives"], _money(m["spend"]),
+                _money(m["cpa"])) for m in markets]
+            parts.append("Markets in scope — " + "; ".join(bits) + ".")
+            cite("Uploaded CSV")
+            cite("Benchmark Derived")
+    verticals = scoped_pack()["verticals"] if "vertical" in q else []
+    if "vertical" in q:
+        if not verticals:
+            parts.append("No vertical split in scope.")
+            cite("Uploaded CSV")
+        else:
+            bits = ["%s: %d creatives at %s spend, CPA %s" % (
+                v["vertical"], v["n_creatives"], _money(v["spend"]),
+                _money(v["cpa"])) for v in verticals]
+            parts.append("Verticals in scope — " + "; ".join(bits) + ".")
+            cite("Uploaded CSV")
+            cite("Benchmark Derived")
+    if any(w in q for w in ("top vs", "top versus", "bottom", "quintile",
+                            "best vs", "worst", "winners", "losers")):
+        quint = scoped_pack()["quintiles"]
+        top, bottom = quint["top_20_pct"], quint["bottom_20_pct"]
+        if not top:
+            parts.append("Not enough ranked creatives in scope for a "
+                         "top-vs-bottom split.")
+            cite("Uploaded CSV")
+        else:
+            def _side(keys):
+                group = [r for r in rows if r["creative_key"] in keys]
+                spend = sum(x["spend"] for x in group)
+                conv = sum(x["conversions"] for x in group)
+                return "%s at %s spend, CPA %s" % (
+                    ", ".join(keys), _money(spend),
+                    _money(spend / conv if conv else None))
+            line = "Top 20%% in scope: %s." % _side(top)
+            if bottom:
+                line += " Bottom 20%% in scope: %s." % _side(bottom)
+            parts.append(line)
+            cite("Uploaded CSV")
+            cite("Benchmark Derived")
+    if any(w in q for w in ("retention", "drop", "lose viewers", "dropoff",
+                            "drop-off", "watch time")):
+        ret = scoped_pack()["retention"]
+        if not ret:
+            parts.append("No retention curves in scope yet — upload a "
+                         "retention export to analyse drop-off.")
+            cite("Uploaded CSV")
+        else:
+            line = ("%d creatives carry curves in scope (avg total drop "
+                    "%s pts)." % (
+                        ret["creatives_with_curves"],
+                        ret["avg_drop_pts"]
+                        if ret["avg_drop_pts"] is not None else "n/a"))
+            try:
+                from . import retention as retention_mod
+                pats = retention_mod.patterns(conn, scope)["patterns"][:3]
+                for p in pats:
+                    line += (" Normal loss: ~%s pts %s%s." % (
+                        p["avg_drop_pts"],
+                        ("during " + p["slot"]) if p["slot"] else "per video",
+                        " with product demo on screen"
+                        if p["product_demo"] else ""))
+            except ValueError:
+                pass
+            parts.append(line)
+            cite("Uploaded CSV")
+            cite("Benchmark Derived")
+    if any(w in q for w in ("structure", "slots", "section")):
+        struct = scoped_pack()["structure"]
+        hits = struct.get("slots_annotated") or {}
+        if not hits:
+            parts.append("No structure slots annotated in scope yet.")
+            cite("Annotation")
+        else:
+            bits = ["%s on %d creatives" % (slot, n)
+                    for slot, n in sorted(hits.items(),
+                                          key=lambda kv: -kv[1])]
+            parts.append("Structure in scope (%d annotated creatives): %s."
+                         % (struct.get("n_annotated_creatives", 0),
+                            ", ".join(bits)))
+            cite("Annotation")
     if not parts:
         spend = sum(r["spend"] for r in rows)
         parts.append("Insufficient data: I can answer about spend, CTR, CPA, "
-                     "VTR, TikTok formats, or best creatives — all from "
-                     "uploaded rows. The dataset holds %d uploaded rows at "
-                     "$%s total spend."
+                     "VTR, TikTok formats, best creatives, hooks, video "
+                     "length, CTA, funnel, markets, verticals, top-vs-bottom, "
+                     "retention, or structure — all from uploaded rows. The "
+                     "dataset holds %d uploaded rows at $%s total spend."
                      % (len(rows), f"{spend:,.2f}"))
         cite("Uploaded CSV")
 
@@ -492,7 +674,9 @@ def answer(conn, question, llm=None):
         (datetime.datetime.now(datetime.timezone.utc).isoformat(),
          question, text, json.dumps(ordered)))
     conn.commit()
-    return {"answer": text, "sources": ordered, "review_id": cur.lastrowid}
+    return {"answer": "%s (Scope: %s)" % (text, scope.describe()),
+            "sources": ordered, "review_id": cur.lastrowid,
+            "scope": scope.describe()}
 
 
 def list_reviews(conn):

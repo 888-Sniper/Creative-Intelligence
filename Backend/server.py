@@ -219,13 +219,18 @@ def apply_action(conn, action, payload, prov, media_dir=None):
                 conn, _media_dir(media_dir), payload["creative_key"])
         except ValueError:
             bundle = None
+        from creative_intel import video as video_mod
         if bundle and (bundle.get("videos") and
                        not (bundle.get("audio") or bundle.get("images")) and
-                       getattr(prov, "mode", "mock") == "live"):
+                       (getattr(prov, "mode", "mock") == "live" or
+                        video_mod.have_ffmpeg())):
             # Upload MP4 -> Run Pipeline, end to end: decompose the
             # first stored video (ffmpeg, cached) into STT audio +
-            # vision frames. Mock mode skips this; mocks need no media.
-            from creative_intel import video as video_mod
+            # vision frames. Live mode always attempts this and fails
+            # closed without ffmpeg; mock mode attempts it whenever
+            # ffmpeg exists so the full extraction chain is provable
+            # without provider keys, and skips it otherwise (mocks
+            # need no media).
             prepared = video_mod.prepare(
                 bundle["videos"][0],
                 os.path.join(_media_dir(media_dir), "derived"))
@@ -387,8 +392,8 @@ class Handler(BaseHTTPRequestHandler):
                     "SELECT creative_key, platform, name, duration_s, status,"
                     " transcript FROM creatives")]
                 from creative_intel import benchmarks as _bench
-                filt = _filters_from_query(q)
-                norm = _bench.normalize_filters(filt) if filt else None
+                scope = _bench.Scope.from_query(q)
+                norm = scope.normalized()
                 ad_cols = [c[0] for c in conn.execute(
                     "SELECT * FROM ads LIMIT 0").description]
                 kept = []
@@ -396,12 +401,18 @@ class Handler(BaseHTTPRequestHandler):
                     ad_rows = [dict(zip(ad_cols, v)) for v in conn.execute(
                         "SELECT * FROM ads WHERE creative_key=?",
                         (r["creative_key"],)).fetchall()]
-                    # Cohort-correct metrics: only rows passing the active
-                    # filters feed the KPI aggregation (P1: a Spain filter
-                    # must never show France-blended CPA).
+                    # Cohort-correct metrics: only rows passing the
+                    # shared scope feed the KPI aggregation (a Spain
+                    # filter must never show France-blended CPA; a
+                    # Campaign-A filter must never blend Campaign B).
                     matched = [ad for ad in ad_rows
-                               if norm is None or _bench.match_filters(ad, norm)]
-                    if norm is not None and not matched:
+                               if _bench.match_filters(ad, norm)]
+                    if ad_rows and not matched:
+                        # Performance exists but nothing is inside
+                        # the scope: hide the card. A creative with
+                        # media but no performance rows yet stays
+                        # visible (zero metrics) so it can be
+                        # annotated and pipelined.
                         continue
                     agg_rows = matched
                     spend = sum(v["spend"] for v in agg_rows)
@@ -419,8 +430,10 @@ class Handler(BaseHTTPRequestHandler):
                         "cpm": round(spend / impr * 1000, 2) if impr else None,
                         "vtr": round(views / impr, 4) if impr else None,
                         "ctr": round(clicks / impr, 4) if impr else None,
+                        "cpc": round(spend / clicks, 2) if clicks else None,
                         "cpa": round(spend / conv, 2) if conv else None,
                         "roas": round(rev / spend, 4) if spend else None}
+                    r["scope"] = scope.describe()
                     ann = conn.execute(
                         "SELECT annotation_json FROM annotations WHERE creative_key=?",
                         (r["creative_key"],)).fetchone()
@@ -431,19 +444,25 @@ class Handler(BaseHTTPRequestHandler):
                 key = q.get("creative_key", [""])[0]
                 send(self, 200, retention.join_segments(conn, key))
             elif url.path == "/api/compare":
+                from creative_intel import benchmarks as _bench2
                 a, b = q.get("a", [""])[0], q.get("b", [""])[0]
+                scope = _bench2.Scope.from_query(q)
+                ad_cols = [c[0] for c in conn.execute(
+                    "SELECT * FROM ads LIMIT 0").description]
                 out = {}
                 for key in (a, b):
-                    rows = conn.execute(
-                        "SELECT spend, impressions, clicks, conversions,"
-                        " video_views, revenue FROM ads WHERE creative_key=?",
-                        (key,)).fetchall()
-                    spend = sum(r[0] for r in rows)
-                    impr = sum(r[1] for r in rows)
-                    clicks = sum(r[2] for r in rows)
-                    conv = sum(r[3] for r in rows)
-                    views = sum(r[4] or 0 for r in rows)
-                    revenue = sum(r[5] or 0 for r in rows)
+                    rows = [dict(zip(ad_cols, v)) for v in conn.execute(
+                        "SELECT * FROM ads WHERE creative_key=?",
+                        (key,)).fetchall()]
+                    # Same scope as every other surface: a Spain
+                    # comparison never blends France rows.
+                    rows = [r for r in rows if scope.match(r)]
+                    spend = sum(r["spend"] for r in rows)
+                    impr = sum(r["impressions"] for r in rows)
+                    clicks = sum(r["clicks"] for r in rows)
+                    conv = sum(r["conversions"] for r in rows)
+                    views = sum(r["video_views"] or 0 for r in rows)
+                    revenue = sum(r["revenue"] or 0 for r in rows)
                     ann = conn.execute("SELECT annotation_json FROM annotations"
                                        " WHERE creative_key=?", (key,)).fetchone()
                     out[key] = {"spend": round(spend, 2),
@@ -456,9 +475,15 @@ class Handler(BaseHTTPRequestHandler):
                                 "cpc": round(spend / clicks, 2) if clicks else None,
                                 "cpa": round(spend / conv, 2) if conv else None,
                                 "roas": round(revenue / spend, 4) if spend else None,
+                                "scope": scope.describe(),
                                 "annotation": json.loads(ann[0]) if ann else None}
                 out["why"] = _creative_why(a, b, out.get(a, {}), out.get(b, {}))
+                out["scope"] = scope.describe()
                 send(self, 200, out)
+            elif url.path == "/api/retention/patterns":
+                from creative_intel import benchmarks as _bench3
+                send(self, 200, retention.patterns(
+                    conn, _bench3.Scope.from_query(q)))
             elif url.path == "/api/replay":
                 send(self, 200, replay.history(conn))
             elif url.path == "/api/reviews":
@@ -497,8 +522,10 @@ class Handler(BaseHTTPRequestHandler):
             elif url.path == "/api/ask":
                 live = (self.prov.llm if getattr(
                     self.prov, "mode", "mock") == "live" else None)
-                send(self, 200, qa.answer(conn, payload.get("question", ""),
-                                          llm=live))
+                from creative_intel import benchmarks as _bench4
+                send(self, 200, qa.answer(
+                    conn, payload.get("question", ""), llm=live,
+                    scope=_bench4.Scope.from_payload(payload)))
                 return
             elif url.path == "/api/reviews/mark":
                 pending = qa.mark_reviewed(conn, int(payload["review_id"]))
@@ -634,8 +661,12 @@ def expert2_compare_route(conn, query):
     campaigns = _csv_param(query.get("campaigns", [""])[0]
                            if "campaigns" in query else query.get("campaign", [""]))
     rank_by = (query.get("rank_by", ["cpa"])[0] or "cpa").lower()
+    # ?campaign(s)= names the candidates; every other axis scopes them.
+    scope = _bench.Scope.from_query(
+        query, ignore=("campaign", "campaigns", "rank_by", "metric",
+                       "id", "name"))
     return _bench.compare_campaigns(
-        conn, campaigns or None, rank_by=rank_by)
+        conn, campaigns or None, rank_by=rank_by, filters=scope)
 
 
 def expert2_cohort_build_route(conn, query):
@@ -677,7 +708,8 @@ def expert2_report_route(conn, payload):
     benchmark_sel = payload.get("benchmark")
     fmt = payload.get("format", "one-pager")
     result = _bench.build_report(conn, campaigns, kpis, benchmark_sel, fmt,
-                                 strict_human=bool(payload.get("strict_human")))
+                                 strict_human=bool(payload.get("strict_human")),
+                                 filters=payload.get("filters"))
     if override:
         replay.log(conn, "report-override",
                    {"campaigns": campaigns, "format": fmt,
@@ -723,9 +755,15 @@ def expert2_dispatch_post(handler, conn, url, payload):
         return True
     if url.path == "/api/compare/campaigns":
         try:
-            send(handler, 200, expert2_compare_route(
-                conn, {"campaigns": [",".join(payload.get("campaigns", []) or [])],
-                       "rank_by": [payload.get("rank_by", "cpa")]}))
+            # POST callers scope via the filters object; fold it into
+            # the pseudo-query so the comparison runs once, scoped.
+            pseudo = {"campaigns": [",".join(
+                payload.get("campaigns", []) or [])],
+                "rank_by": [payload.get("rank_by", "cpa")]}
+            for key, vals in ((payload.get("filters") or {}).items()):
+                pseudo[key] = (list(vals) if isinstance(vals, list)
+                               else [vals])
+            send(handler, 200, expert2_compare_route(conn, pseudo))
         except ValueError as e:
             send(handler, 409, {"error": str(e)})
         return True

@@ -86,21 +86,16 @@ def _to_number_strict(raw, kind):
     return value
 
 
-def parse_csv_report(csv_text, platform, source="upload"):
-    """Return (rows, quarantined). Quarantined entries carry the 1-based
-    source row number (header is row 1) plus a reason. Nothing is silently
-    coerced: one bad cell quarantines its row, the rest of the file loads."""
+def _rows_from_dicts(fieldnames, dicts, platform, source):
+    """Shared strict pipeline: header aliases, quarantine, key fallback."""
     rows, quarantined = [], []
-    reader = csv.DictReader(io.StringIO(csv_text))
-    if not reader.fieldnames or not any(c.strip() for c in reader.fieldnames):
-        raise ValueError("empty CSV: no header row found")
     col_map = {}
-    for col in reader.fieldnames:
+    for col in fieldnames:
         for field, aliases in _ALIASES.items():
-            if _norm(col) in aliases and field not in col_map:
+            if _norm(str(col)) in aliases and field not in col_map:
                 col_map[field] = col
-    for lineno, raw in enumerate(reader, start=2):
-        if not any((v or "").strip() for v in raw.values()):
+    for lineno, raw in enumerate(dicts, start=2):
+        if not any(str(v or "").strip() for v in raw.values()):
             continue
         row = {"platform": platform, "source": source}
         bad = None
@@ -108,6 +103,8 @@ def parse_csv_report(csv_text, platform, source="upload"):
             if field == "platform":
                 continue
             raw_val = raw.get(col_map.get(field, ""), "") if field in col_map else ""
+            if raw_val is None:
+                raw_val = ""
             if field in _NUMERIC:
                 try:
                     row[field] = _to_number_strict(raw_val, _NUMERIC[field])
@@ -115,7 +112,7 @@ def parse_csv_report(csv_text, platform, source="upload"):
                     bad = "%s %s" % (field, exc)
                     break
             else:
-                row[field] = (raw_val or "").strip()
+                row[field] = str(raw_val or "").strip()
         if bad is not None:
             quarantined.append({"source_row": lineno, "reason": bad})
             continue
@@ -123,6 +120,28 @@ def parse_csv_report(csv_text, platform, source="upload"):
             row["creative_key"] = row["ad_name"] or "uncategorised"
         rows.append(row)
     return rows, quarantined
+
+
+def parse_csv_report(csv_text, platform, source="upload"):
+    """Return (rows, quarantined). Quarantined entries carry the 1-based
+    source row number (header is row 1) plus a reason. Nothing is silently
+    coerced: one bad cell quarantines its row, the rest of the file loads."""
+    reader = csv.DictReader(io.StringIO(csv_text))
+    if not reader.fieldnames or not any(c.strip() for c in reader.fieldnames):
+        raise ValueError("empty CSV: no header row found")
+    return _rows_from_dicts(reader.fieldnames, list(reader), platform, source)
+
+
+def parse_xlsx_report(blob, platform, source="upload"):
+    """Same contract as parse_csv_report for true .xlsx bytes (stdlib)."""
+    from creative_intel import ooxml
+    dicts = ooxml.parse_xlsx(blob)
+    if not dicts:
+        raise ValueError("empty workbook: no data rows found")
+    headers = list(dicts[0].keys())
+    if not any(str(h or "").strip() for h in headers):
+        raise ValueError("empty workbook: no header row found")
+    return _rows_from_dicts(headers, dicts, platform, source)
 
 
 def parse_csv(csv_text, platform, source="upload"):

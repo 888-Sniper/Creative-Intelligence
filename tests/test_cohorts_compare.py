@@ -5,6 +5,7 @@ import os
 import sqlite3
 import sys
 import tempfile
+import threading
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Backend"))
@@ -243,7 +244,8 @@ class ReportTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             benchmarks.build_report(conn, ["Alpha"], [], None)
         with self.assertRaises(ValueError):
-            benchmarks.build_report(conn, ["Alpha"], ["cpa"], None, fmt="pptx")
+            benchmarks.build_report(conn, ["Alpha"], ["cpa"], None,
+                                    fmt="keynote")
         conn.close()
 
     def test_totals_and_cpc_retained_not_dropped(self):
@@ -323,6 +325,65 @@ class ServerRoutesTest(unittest.TestCase):
                 httpd.server_close()
         finally:
             os.unlink(db)
+
+
+class CreativeCompareParityTest(unittest.TestCase):
+    """GET /api/compare matches campaign-compare depth: full KPI set
+    plus a data-grounded why-analysis."""
+
+    def test_full_kpis_and_why(self):
+        import server
+        from http.server import HTTPServer
+        db = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
+        try:
+            conn = sqlite3.connect(db)
+            schema.init_db(conn)
+            ingest.insert_rows(conn, ingest.parse_csv(
+                "Campaign,Ad Name,Creative Name,Amount Spent,Impressions,"
+                "Link Clicks,Conversions,Video Views,Revenue\n"
+                "C,ca,cka,100,10000,200,10,3000,250\n"
+                "C,cb,ckb,300,30000,300,15,3000,300\n", "meta"))
+            for key, hook, mode in (("cka", "question", "creator"),
+                                    ("ckb", "demo_open", "branded")):
+                ann = creative.blank_annotation()
+                ann["hook_type"] = hook
+                ann["creator_vs_branded"] = mode
+                creative.save_annotation(conn, key, ann)
+            conn.close()
+            server.Handler.db_path = db
+            httpd = HTTPServer(("127.0.0.1", 0), server.Handler)
+            port = httpd.server_address[1]
+            thread = threading.Thread(target=httpd.serve_forever,
+                                      daemon=True)
+            thread.start()
+            try:
+                import urllib.request
+                base = "http://127.0.0.1:%d" % port
+                with urllib.request.urlopen(
+                        base + "/api/compare?a=cka&b=ckb") as resp:
+                    got = json.loads(resp.read())
+                for key in ("cka", "ckb"):
+                    for kpi in ("spend", "impressions", "clicks",
+                                "conversions", "cpm", "vtr", "ctr", "cpc",
+                                "cpa", "roas"):
+                        self.assertIn(kpi, got[key])
+                self.assertEqual(got["cka"]["cpa"], 10.0)
+                self.assertEqual(got["ckb"]["cpa"], 20.0)
+                self.assertEqual(got["why"]["top"], "cka")
+                text = " ".join(got["why"]["differences"])
+                self.assertIn("CPA", text)
+                self.assertIn("question", text)
+            finally:
+                httpd.shutdown()
+                httpd.server_close()
+                thread.join(timeout=10)
+        finally:
+            os.unlink(db)
+
+    def test_why_empty_selection(self):
+        import server
+        why = server._creative_why("", "", {}, {})
+        self.assertIsNone(why["top"])
 
 
 if __name__ == "__main__":

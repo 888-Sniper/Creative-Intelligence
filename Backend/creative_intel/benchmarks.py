@@ -350,13 +350,16 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
                  fmt="one-pager"):
     """Generate a report over selected campaigns + KPIs + benchmark.
 
-    fmt is "one-pager" (markdown), "csv", or "deck" (slide JSON).
+    fmt is "one-pager" (markdown), "csv", "deck" (slide JSON),
+    "pptx" (true PowerPoint bytes, base64), or "xlsx" (true
+    spreadsheet bytes, base64). Binary formats ride inside the same
+    JSON envelope so the local-first HTTP contract is unchanged.
     benchmark_sel may be None, a group_by string, a metric name, or a
     precomputed mapping.
     """
     fmt = (fmt or "one-pager").lower()
-    if fmt not in ("one-pager", "csv", "deck"):
-        raise ValueError("fmt must be one-pager, csv, or deck")
+    if fmt not in ("one-pager", "csv", "deck", "pptx", "xlsx"):
+        raise ValueError("fmt must be one-pager, csv, deck, pptx, or xlsx")
     report_kpis = KPI_KEYS + ("spend", "impressions", "clicks",
                              "conversions", "cpc")
     wanted_kpis = [k for k in (kpis or []) if k in report_kpis]
@@ -412,4 +415,34 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
         return {"format": "csv", "csv": csv_text, "markdown": markdown, "deck": deck}
     if fmt == "deck":
         return {"format": "deck", "deck": deck, "markdown": markdown, "csv": csv_text}
+    if fmt in ("pptx", "xlsx"):
+        import base64
+        from creative_intel import ooxml
+        if fmt == "pptx":
+            slides = [{"title": "Campaign Report — %s" % comp["rank_by"].upper(),
+                       "bullets": ["Campaigns: %s" % ", ".join(names),
+                                   "KPIs: %s" % ", ".join(wanted_kpis)]}]
+            for name in names:
+                row = comp["kpis"][name]
+                slides.append({
+                    "title": name,
+                    "bullets": ["%s: %s" % (k.upper(), row[k])
+                                for k in wanted_kpis]})
+            slides.append({"title": "Why %s leads" % comp["why"]["top"],
+                           "bullets": comp["why"]["differences"] or ["—"]})
+            blob = ooxml.build_pptx("Campaign Report", slides)
+            return {"format": "pptx", "filename": "campaign-report.pptx",
+                    "pptx_b64": base64.b64encode(blob).decode(),
+                    "markdown": markdown, "csv": csv_text, "deck": deck}
+        sheet = {"name": "Campaigns",
+                 "header": ["campaign"] + wanted_kpis,
+                 "rows": [[name] + [comp["kpis"][name][k] for k in wanted_kpis]
+                          for name in names]}
+        why = {"name": "Why analysis",
+               "header": ["finding"],
+               "rows": [[d] for d in comp["why"]["differences"]] or [["—"]]}
+        blob = ooxml.build_xlsx([sheet, why])
+        return {"format": "xlsx", "filename": "campaign-report.xlsx",
+                "xlsx_b64": base64.b64encode(blob).decode(),
+                "markdown": markdown, "csv": csv_text, "deck": deck}
     return {"format": "one-pager", "markdown": markdown, "csv": csv_text, "deck": deck}

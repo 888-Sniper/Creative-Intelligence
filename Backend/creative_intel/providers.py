@@ -5,11 +5,14 @@ closed when the Keychain key is missing or provider_mode != live: they
 raise ProviderUnavailable instead of silently returning mocks.
 """
 
+import base64
 import concurrent.futures
 import json
 import os
 import subprocess
 import time
+import urllib.error
+import urllib.request
 
 LIVE_MODEL_IDS = {
     # Active defaults per provider, copied from Nextly docs/PROVIDERS.md.
@@ -210,7 +213,7 @@ def race(active, fallback, call, timeout=FALLBACK_TIMEOUT_S):
 
 
 class MockStt:
-    def transcribe(self, creative_key):
+    def transcribe(self, creative_key, audio_bytes=None, mime=None):
         return ("mock transcript for %s: hook in first three seconds, demo, offer cta"
                 % creative_key, 0.5)
 
@@ -220,7 +223,7 @@ class MockVision:
         n = max(1, int(duration_s / every_s))
         return [{"t_sec": round(i * every_s, 1)} for i in range(n)]
 
-    def annotate(self, frames):
+    def annotate(self, frames, images=None):
         return [{"t_sec": f["t_sec"], "label": "mock-frame",
                  "brand_visible": f["t_sec"] < 3.0, "confidence": 0.5}
                 for f in frames]
@@ -249,25 +252,533 @@ class MockLlm:
         return ann
 
 
-class LiveBundle:
-    """Placeholder live bundle: raises until live clients are wired.
+def _env_key_name(service):
+    short = service
+    if short.startswith("creative-intel-"):
+        short = short[len("creative-intel-"):]
+    return "CREATIVE_INTEL_KEY_" + short.upper().replace("-", "_")
 
-    Wiring notes live in Docs/Providers.md; model ids in LIVE_MODEL_IDS.
+
+def _env_base_name(provider):
+    return "CREATIVE_INTEL_BASE_" + provider.upper().replace("-", "_")
+
+
+def live_secret(service):
+    """Secret value for a Keychain service (never logs it).
+
+    Environment override first (CI / non-macOS), else macOS Keychain
+    via `security -w`. Returns None when unavailable: callers fail
+    closed. The value is never written to logs, errors, or the repo.
+    """
+    env = os.environ.get(_env_key_name(service))
+    if env:
+        return env
+    try:
+        out = subprocess.run(
+            ["security", "find-generic-password", "-s", service, "-w"],
+            capture_output=True, timeout=10, text=True)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    val = (out.stdout or "").strip()
+    return val if out.returncode == 0 and val else None
+
+
+def live_base(provider, default):
+    """Endpoint base: env override (tests/stubs/proxies) else default."""
+    return os.environ.get(_env_base_name(provider)) or default
+
+
+HTTP_TIMEOUT_S = 30.0
+
+
+def _http_json(url, payload=None, headers=None, timeout=HTTP_TIMEOUT_S):
+    """POST (dict payload) or GET (None); returns decoded JSON. No logging."""
+    data = json.dumps(payload).encode() if payload is not None else None
+    req = urllib.request.Request(url, data=data, headers=dict(headers or {}),
+                                 method="POST" if data else "GET")
+    if data:
+        req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8") or "{}")
+    except urllib.error.HTTPError as e:
+        try:
+            detail = e.read().decode("utf-8", "replace")[:500]
+        except Exception:
+            detail = ""
+        raise ProviderUnavailable("HTTP %s from %s: %s"
+                                  % (e.code, _host_of(url), detail))
+    except OSError as e:
+        raise ProviderUnavailable("unreachable %s: %s" % (_host_of(url), e))
+
+
+def _host_of(url):
+    try:
+        return urllib.request.urlparse(url).netloc
+    except Exception:
+        return "provider"
+
+
+def _extract_json(text):
+    """First {...} object in model output; raises ProviderUnavailable."""
+    if not isinstance(text, str):
+        raise ProviderUnavailable("non-text model output")
+    start = text.find("{")
+    end = text.rfind("}")
+    if start < 0 or end <= start:
+        raise ProviderUnavailable("no JSON object in model output")
+    try:
+        return json.loads(text[start:end + 1])
+    except ValueError:
+        raise ProviderUnavailable("model output is not valid JSON")
+
+
+# Provider -> wiring. default_base=None means env-only (private proxy);
+# the provider stays unavailable until CREATIVE_INTEL_BASE_<NAME> is set.
+ENDPOINTS = {
+    "deepgram": {"kind": "stt", "base": "https://api.deepgram.com",
+                 "key": "creative-intel-deepgram"},
+    "groq-whisper": {"kind": "stt", "base": "https://api.groq.com",
+                     "key": "creative-intel-groq-stt"},
+    "gemini": {"kind": "chat", "base": "https://generativelanguage.googleapis.com",
+               "key": "creative-intel-gemini", "native": "gemini"},
+    "nvidia": {"kind": "chat", "base": "https://integrate.api.nvidia.com",
+               "key": "creative-intel-nvidia", "path": "/v1/chat/completions"},
+    "openai": {"kind": "chat", "base": "https://api.openai.com",
+               "key": "creative-intel-openai", "path": "/v1/chat/completions"},
+    "anthropic": {"kind": "chat", "base": "https://api.anthropic.com",
+                  "key": "creative-intel-anthropic", "native": "anthropic"},
+    "zai": {"kind": "chat", "base": "https://open.bigmodel.cn",
+            "key": "creative-intel-zai", "path": "/api/paas/v4/chat/completions"},
+    "deepseek": {"kind": "chat", "base": "https://api.deepseek.com",
+                 "key": "creative-intel-deepseek", "path": "/v1/chat/completions"},
+    "moonshot": {"kind": "chat", "base": "https://api.moonshot.ai",
+                 "key": "creative-intel-moonshot", "path": "/v1/chat/completions"},
+    "xai": {"kind": "chat", "base": "https://api.x.ai",
+            "key": "creative-intel-xai", "path": "/v1/chat/completions"},
+    "teamorouter": {"kind": "chat", "base": None,
+                    "key": "creative-intel-teamorouter",
+                    "path": "/v1/chat/completions"},
+    "openrouter": {"kind": "chat", "base": "https://openrouter.ai",
+                   "key": "creative-intel-openrouter",
+                   "path": "/api/v1/chat/completions"},
+    "litellm": {"kind": "chat", "base": None,
+                "key": "creative-intel-litellm", "path": "/v1/chat/completions"},
+    "ollama": {"kind": "chat", "base": "http://127.0.0.1:11434",
+               "key": None, "path": "/v1/chat/completions"},
+}
+
+VISION_PROMPT = (
+    "You analyse ad-creative frames. Reply with ONE JSON object only: "
+    '{"frames": [{"t_sec": <number>, "label": "<short>", '
+    '"brand_visible": <true|false>, "confidence": <0..1>}]}. '
+    "One entry per supplied image, in order; t_sec values are: %s.")
+
+STRUCTURE_PROMPT = (
+    "You structure ad-creative analysis. Reply with ONE JSON object only "
+    "using exactly these keys: hook_type (one of question, bold_claim, "
+    "demo_open, social_proof, offer, story, pattern_interrupt, other), "
+    "hook_confidence (0..1), brand_seconds/product_seconds/logo_seconds "
+    "(arrays of {start_s, end_s}), structure (object with hook, body, "
+    "demo, supers, cta, endframe, voiceover each {start_s, end_s, "
+    "confidence}), creator_vs_branded (creator|branded|hybrid), "
+    "creator_confidence (0..1), duration_s, pace_cuts_per_min. "
+    "Transcript: %s\nVision labels: %s")
+
+
+class OpenAiChat:
+    """OpenAI-compatible chat client (OpenAI, NVIDIA, DeepSeek, Kimi,
+    Grok, Zhipu, OpenRouter, LiteLLM proxies, Ollama)."""
+
+    def __init__(self, provider, model):
+        cfg = ENDPOINTS[provider]
+        base = live_base(provider, cfg["base"])
+        if not base:
+            raise ProviderUnavailable(
+                "%s needs %s set (private proxy base)" % (
+                    provider, _env_base_name(provider)))
+        self.url = base.rstrip("/") + cfg["path"]
+        self.key = live_secret(cfg["key"]) if cfg["key"] else None
+        if cfg["key"] and not self.key:
+            raise ProviderUnavailable("missing key for %s" % provider)
+        self.model = model
+
+    def chat(self, messages, max_tokens=2048):
+        headers = {}
+        if self.key:
+            headers["Authorization"] = "Bearer " + self.key
+        body = {"model": self.model, "messages": messages,
+                "max_tokens": max_tokens, "temperature": 0.2}
+        got = _http_json(self.url, body, headers)
+        try:
+            return got["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError):
+            raise ProviderUnavailable("unexpected chat response shape")
+
+
+class GeminiChat:
+    def __init__(self, model):
+        base = live_base("gemini", ENDPOINTS["gemini"]["base"])
+        self.key = live_secret(ENDPOINTS["gemini"]["key"])
+        if not self.key:
+            raise ProviderUnavailable("missing key for gemini")
+        self.url = ("%s/v1beta/models/%s:generateContent?key=%s"
+                    % (base.rstrip("/"), model, self.key))
+        self.model = model
+
+    def chat(self, messages, max_tokens=2048):
+        parts = []
+        for m in messages:
+            for item in (m.get("content") if isinstance(m.get("content"), list)
+                         else [{"type": "text", "text": str(m.get("content", ""))}]):
+                if item.get("type") == "text":
+                    parts.append({"text": item.get("text", "")})
+                elif item.get("type") == "image_url":
+                    url = (item.get("image_url") or {}).get("url", "")
+                    if url.startswith("data:"):
+                        header, b64 = url.split(",", 1)
+                        mime = header.split(";")[0][5:] or "image/jpeg"
+                        parts.append({"inline_data": {"mime_type": mime,
+                                                      "data": b64}})
+        body = {"contents": [{"parts": parts}],
+                "generationConfig": {"maxOutputTokens": max_tokens,
+                                     "temperature": 0.2,
+                                     "thinkingConfig": {"thinkingLevel": "LOW"}}}
+        got = _http_json(self.url, body, {})
+        try:
+            return "".join(p.get("text", "") for p in
+                           got["candidates"][0]["content"]["parts"])
+        except (KeyError, IndexError, TypeError):
+            raise ProviderUnavailable("unexpected gemini response shape")
+
+
+class AnthropicChat:
+    def __init__(self, model):
+        base = live_base("anthropic", ENDPOINTS["anthropic"]["base"])
+        self.key = live_secret(ENDPOINTS["anthropic"]["key"])
+        if not self.key:
+            raise ProviderUnavailable("missing key for anthropic")
+        self.url = base.rstrip("/") + "/v1/messages"
+        self.model = model
+
+    def chat(self, messages, max_tokens=2048):
+        conv = []
+        for m in messages:
+            items = (m.get("content") if isinstance(m.get("content"), list)
+                     else [{"type": "text", "text": str(m.get("content", ""))}])
+            blocks = []
+            for item in items:
+                if item.get("type") == "text":
+                    blocks.append({"type": "text", "text": item.get("text", "")})
+                elif item.get("type") == "image_url":
+                    url = (item.get("image_url") or {}).get("url", "")
+                    if url.startswith("data:"):
+                        header, b64 = url.split(",", 1)
+                        mime = header.split(";")[0][5:] or "image/jpeg"
+                        blocks.append({"type": "image",
+                                       "source": {"type": "base64",
+                                                  "media_type": mime,
+                                                  "data": b64}})
+            conv.append({"role": "user" if m.get("role") != "assistant" else "assistant",
+                         "content": blocks})
+        body = {"model": self.model, "max_tokens": max_tokens, "messages": conv,
+                "output_config": ({} if self.model == "claude-haiku-4-5"
+                                  else {"effort": "low"})}
+        headers = {"x-api-key": self.key, "anthropic-version": "2023-06-01"}
+        got = _http_json(self.url, body, headers)
+        try:
+            return "".join(b.get("text", "") for b in got["content"]
+                           if b.get("type") == "text")
+        except (KeyError, TypeError):
+            raise ProviderUnavailable("unexpected anthropic response shape")
+
+
+def make_chat(provider, model):
+    native = ENDPOINTS[provider].get("native")
+    if native == "gemini":
+        return GeminiChat(model)
+    if native == "anthropic":
+        return AnthropicChat(model)
+    return OpenAiChat(provider, model)
+
+
+def _image_part(jpeg_bytes):
+    return {"type": "image_url",
+            "image_url": {"url": "data:image/jpeg;base64,"
+                                + base64.b64encode(jpeg_bytes).decode()}}
+
+
+class LiveStt:
+    """Transcription over configured STT adapters (Active then Fallback)."""
+
+    def __init__(self, adapters):
+        self.adapters = adapters  # [(name, kind, model), ...]
+
+    def transcribe(self, creative_key, audio_bytes=None, mime=None):
+        if not audio_bytes:
+            raise ProviderUnavailable(
+                "no audio for %r: upload media first" % creative_key)
+        mime = mime or "audio/wav"
+
+        def call(item):
+            name, kind, model, _tier = item
+            if kind == "deepgram":
+                return self._deepgram(name, model, audio_bytes, mime)
+            return self._groq(name, model, audio_bytes, mime)
+
+        winner, value = race(
+            [a for a in self.adapters if a[3] == "active"],
+            [a for a in self.adapters if a[3] == "fallback"], call)
+        if not value:
+            raise ProviderUnavailable("all STT adapters unavailable")
+        return value
+
+    @staticmethod
+    def _deepgram(name, model, audio, mime):
+        base = live_base("deepgram", ENDPOINTS["deepgram"]["base"])
+        key = live_secret(ENDPOINTS["deepgram"]["key"])
+        if not key:
+            raise ProviderUnavailable("missing key for deepgram")
+        url = base.rstrip("/") + "/v2/listen?model=" + model + "&smart_format=true"
+        req = urllib.request.Request(url, data=bytes(audio),
+                                     headers={"Authorization": "Token " + key,
+                                              "Content-Type": mime},
+                                     method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_S) as resp:
+                got = json.loads(resp.read().decode("utf-8") or "{}")
+        except urllib.error.HTTPError as e:
+            raise ProviderUnavailable("deepgram HTTP %s" % e.code)
+        except OSError as e:
+            raise ProviderUnavailable("deepgram unreachable: %s" % e)
+        try:
+            alt = got["results"]["channels"][0]["alternatives"][0]
+            return alt.get("transcript", ""), float(alt.get("confidence", 0.5))
+        except (KeyError, IndexError, TypeError, ValueError):
+            raise ProviderUnavailable("unexpected deepgram response shape")
+
+    @staticmethod
+    def _groq(name, model, audio, mime):
+        base = live_base("groq-whisper", ENDPOINTS["groq-whisper"]["base"])
+        key = live_secret(ENDPOINTS["groq-whisper"]["key"])
+        if not key:
+            raise ProviderUnavailable("missing key for groq-whisper")
+        boundary = "----cilive%d" % abs(hash((name, model)))
+        body = b""
+        for field, value in (("model", model),):
+            body += ("--%s\r\nContent-Disposition: form-data; name=\"%s\"\r\n\r\n%s\r\n"
+                     % (boundary, field, value)).encode()
+        body += ("--%s\r\nContent-Disposition: form-data; name=\"file\"; "
+                 "filename=\"audio\"\r\nContent-Type: %s\r\n\r\n"
+                 % (boundary, mime)).encode() + bytes(audio) + b"\r\n"
+        body += ("--%s--\r\n" % boundary).encode()
+        req = urllib.request.Request(
+            base.rstrip("/") + "/openai/v1/audio/transcriptions", data=body,
+            headers={"Authorization": "Bearer " + key,
+                     "Content-Type": "multipart/form-data; boundary=" + boundary},
+            method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_S) as resp:
+                got = json.loads(resp.read().decode("utf-8") or "{}")
+        except urllib.error.HTTPError as e:
+            raise ProviderUnavailable("groq-whisper HTTP %s" % e.code)
+        except OSError as e:
+            raise ProviderUnavailable("groq-whisper unreachable: %s" % e)
+        if not isinstance(got.get("text"), str):
+            raise ProviderUnavailable("unexpected groq-whisper response shape")
+        return got["text"], 0.7
+
+
+class LiveVision:
+    """Frame annotation over configured vision chat models."""
+
+    MAX_IMAGES = 6
+
+    def __init__(self, roster):
+        self.roster = roster  # [(provider, model, tier), ...]
+
+    def sample_frames(self, creative_key, every_s=3.0, duration_s=30.0):
+        n = max(1, int(duration_s / every_s))
+        return [{"t_sec": round(i * every_s, 1)} for i in range(n)]
+
+    def annotate(self, frames, images=None):
+        if not images:
+            raise ProviderUnavailable(
+                "no frame images: upload creative media first")
+        use = images[:self.MAX_IMAGES]
+        t_secs = [f.get("t_sec", 0) for f in frames[:len(use)]]
+
+        def call(item):
+            provider, model, _tier = item
+            client = make_chat(provider, model)
+            content = [{"type": "text",
+                        "text": VISION_PROMPT % ", ".join(str(t) for t in t_secs)}]
+            content += [_image_part(b) for b in use]
+            text = client.chat([{"role": "user", "content": content}],
+                               max_tokens=cue_cap_tokens(model))
+            data = _extract_json(text)
+            out = []
+            for i, entry in enumerate(data.get("frames", [])):
+                if not isinstance(entry, dict):
+                    continue
+                try:
+                    out.append({
+                        "t_sec": float(entry.get("t_sec", t_secs[i] if i < len(t_secs) else 0)),
+                        "label": str(entry.get("label", "frame"))[:80],
+                        "brand_visible": bool(entry.get("brand_visible", False)),
+                        "confidence": min(1.0, max(0.0, float(
+                            entry.get("confidence", 0.5))))})
+                except (TypeError, ValueError, IndexError):
+                    continue
+            if not out:
+                raise ProviderUnavailable("vision returned no usable frames")
+            return out
+
+        winner, value = race(
+            [r for r in self.roster if r[2] == "active"],
+            [r for r in self.roster if r[2] == "fallback"], call)
+        if not value:
+            raise ProviderUnavailable("all vision models unavailable")
+        return value
+
+
+class LiveLlm:
+    """Annotation structuring over configured generation models."""
+
+    def __init__(self, roster):
+        self.roster = roster  # [(provider, model, tier), ...]
+
+    def structure(self, transcript, labels):
+        from .creative import blank_annotation, validate
+        prompt = STRUCTURE_PROMPT % (
+            (transcript or "")[:4000], json.dumps(labels or [])[:4000])
+
+        def call(item):
+            provider, model, _tier = item
+            client = make_chat(provider, model)
+            params = thinking_params(provider, model)
+            _ = params  # vendor reasoning controls ride documented defaults
+            text = client.chat([{"role": "user", "content": prompt}],
+                               max_tokens=cue_cap_tokens(model))
+            data = _extract_json(text)
+            ann = blank_annotation()
+            for key in ("hook_type", "hook_confidence", "brand_seconds",
+                        "product_seconds", "logo_seconds", "structure",
+                        "creator_vs_branded", "creator_confidence",
+                        "duration_s", "pace_cuts_per_min"):
+                if key in data:
+                    ann[key] = data[key]
+            errors = validate(ann)
+            if errors:
+                raise ProviderUnavailable("structurer output invalid: "
+                                          + "; ".join(errors[:3]))
+            return ann
+
+        winner, value = race(
+            [r for r in self.roster if r[2] == "active"],
+            [r for r in self.roster if r[2] == "fallback"], call)
+        if not value:
+            raise ProviderUnavailable("all structuring models unavailable")
+        return value
+
+
+def _configured(provider):
+    cfg = ENDPOINTS[provider]
+    if cfg["key"] is None:
+        return True  # keyless local (ollama)
+    if not (live_base(provider, cfg["base"]) if cfg["base"] else
+            os.environ.get(_env_base_name(provider))):
+        return False
+    return bool(live_secret(cfg["key"]))
+
+
+class LiveBundle:
+    """Live provider bundle: real HTTP clients, fail-closed, never mocks.
+
+    Raises ProviderUnavailable unless provider_mode=live AND at least one
+    adapter per capability is configured. Media bytes (audio/frames) must
+    be supplied by the caller; without them stages raise instead of
+    inventing content.
     """
 
+    STT_ROSTER = [
+        ("deepgram", "flux-general-en", "active"),
+        ("groq-whisper", "whisper-large-v3-turbo", "active"),
+        ("deepgram", "nova-3", "fallback"),
+        ("groq-whisper", "whisper-large-v3", "fallback"),
+    ]
+    VISION_ROSTER = [
+        ("gemini", "gemini-3.5-flash-lite", "active"),
+        ("nvidia", "meta/muse-glimmer-30b", "active"),
+        ("openai", "gpt-5.6-luna", "active"),
+        ("anthropic", "claude-haiku-4-5", "active"),
+        ("zai", "glm-5v-turbo", "active"),
+        ("gemini", "gemini-3.7-flash", "fallback"),
+        ("openai", "gpt-5.6-sol", "fallback"),
+        ("anthropic", "claude-opus-5", "fallback"),
+        ("zai", "glm-5.2", "fallback"),
+    ]
+    LLM_ROSTER = [
+        ("deepseek", "deepseek-v4-flash", "active"),
+        ("moonshot", "kimi-k2.7-code-highspeed", "active"),
+        ("xai", "grok-4.6", "active"),
+        ("gemini", "gemini-3.5-flash-lite", "active"),
+        ("openai", "gpt-5.6-luna", "active"),
+        ("anthropic", "claude-haiku-4-5", "active"),
+        ("teamorouter", "deepseek-v4-flash-free", "fallback"),
+        ("openrouter", "google/gemini-2.5-flash-lite", "fallback"),
+        ("litellm", "(proxy models)", "fallback"),
+        ("ollama", "(host models)", "fallback"),
+    ]
+
     def __init__(self):
-        missing = [k for k, v in key_status().items() if v != "configured"]
         if mode() != "live":
             raise ProviderUnavailable("provider_mode != live (mock is active)")
+        stt = [(p, m, t) for p, m, t in self.STT_ROSTER if _configured(p)]
+        vision = [(p, m, t) for p, m, t in self.VISION_ROSTER
+                  if _configured(p)]
+        llm = [(p, m, t) for p, m, t in self.LLM_ROSTER if _configured(p)]
+        missing = [k for k, v in
+                   (("stt", stt), ("vision", vision), ("llm", llm)) if not v]
         if missing:
-            raise ProviderUnavailable("missing Keychain keys: %s" % missing)
-        raise ProviderUnavailable("live clients not wired yet; add per-provider"
-                                  " HTTP clients per Docs/Providers.md")
+            raise ProviderUnavailable(
+                "no live adapter for: %s (add Keychain keys, keep mock mode "
+                "until then)" % ", ".join(missing))
+        self.stt = LiveStt([(p, "deepgram" if p == "deepgram" else "groq", m, t)
+                            for p, m, t in stt])
+        self.vision = LiveVision(vision)
+        self.llm = LiveLlm(llm)
+
+
+class _Unavailable:
+    """Fails every stage call with the stored ProviderUnavailable."""
+
+    def __init__(self, err):
+        self._err = err
+
+    def __getattr__(self, name):
+        def _raise(*args, **kwargs):
+            raise self._err
+        return _raise
 
 
 class Providers:
     def __init__(self):
         self.mode = mode()
-        self.stt = MockStt()
-        self.vision = MockVision()
-        self.llm = MockLlm()
+        self._live_error = None
+        if self.mode == "live":
+            try:
+                bundle = LiveBundle()
+            except ProviderUnavailable as e:
+                bundle = None
+                self._live_error = e
+            if bundle is not None:
+                self.stt, self.vision, self.llm = (
+                    bundle.stt, bundle.vision, bundle.llm)
+            else:
+                # Live requested but unconfigured: stages raise, never mock.
+                self.stt = self.vision = self.llm = _Unavailable(self._live_error)
+        else:
+            self.stt = MockStt()
+            self.vision = MockVision()
+            self.llm = MockLlm()

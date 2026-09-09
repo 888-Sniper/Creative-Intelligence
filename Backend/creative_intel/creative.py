@@ -110,15 +110,22 @@ def mark_verified(conn, creative_key):
     return ann
 
 
-def run_pipeline(conn, creative_key, providers):
-    """Run all five stages with the given provider bundle; returns stage report."""
+def run_pipeline(conn, creative_key, providers, media=None):
+    """Run all five stages with the given provider bundle; returns stage report.
+
+    media is optional: {"audio": (bytes, mime), "images": [jpeg bytes]}.
+    Mocks ignore it; live adapters fail closed without it.
+    """
     creative = conn.execute("SELECT * FROM creatives WHERE creative_key=?",
                             (creative_key,)).fetchone()
     if not creative:
         raise ValueError("unknown creative %r" % creative_key)
     stages = [{"stage": "ingest", "confidence": 1.0}]
+    media = media or {}
 
-    transcript, conf = providers.stt.transcribe(creative_key)
+    audio_blob, audio_mime = media.get("audio") or (None, None)
+    transcript, conf = providers.stt.transcribe(
+        creative_key, audio_bytes=audio_blob, mime=audio_mime)
     stages.append({"stage": "transcribe", "confidence": conf})
     conn.execute("UPDATE creatives SET transcript=? WHERE creative_key=?",
                  (transcript, creative_key))
@@ -127,7 +134,7 @@ def run_pipeline(conn, creative_key, providers):
     stages.append({"stage": "frame-sample", "frames": len(frames),
                    "confidence": 1.0 if frames else 0.0})
 
-    labels = providers.vision.annotate(frames)
+    labels = providers.vision.annotate(frames, images=media.get("images"))
     stages.append({"stage": "vision-annotate", "labels": len(labels),
                    "confidence": sum(l.get("confidence", 0) for l in labels)
                    / len(labels) if labels else 0.0})

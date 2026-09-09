@@ -10,8 +10,9 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from creative_intel import (benchmarks, creative, export_gate, ingest,
-                            providers, qa, replay, retention, schema)
+from creative_intel import (benchmarks, connectors, creative, export_gate,
+                            ingest, media, providers, qa, replay, retention,
+                            schema)
 
 WEB_INDEX = os.path.normpath(os.path.join(os.path.dirname(
     os.path.abspath(__file__)), "..", "Web", "Index.html"))
@@ -67,6 +68,51 @@ def _filters_from_query(query):
     return out
 
 
+MAX_JSON_BYTES = 120 * 1024 * 1024
+
+
+def _media_dir(explicit=None):
+    if explicit:
+        os.makedirs(explicit, exist_ok=True)
+        return explicit
+    env = os.environ.get("CREATIVE_INTEL_MEDIA_DIR")
+    if env:
+        os.makedirs(env, exist_ok=True)
+        return env
+    return media.media_dir(BASE)
+
+
+def _creative_why(a, b, da, db):
+    """Data-grounded pairwise notes: measured deltas plus observed
+    annotation contrast. Never causal claims, never invented data."""
+    if not a or not b:
+        return {"top": None, "differences": ["Pick two creatives to compare."]}
+    diffs = []
+    for metric, higher_wins in (("cpa", False), ("ctr", True), ("vtr", True),
+                                ("cpc", False), ("cpm", False), ("roas", True)):
+        va, vb = da.get(metric, 0) or 0, db.get(metric, 0) or 0
+        if va == vb:
+            continue
+        winner = a if (va > vb) == higher_wins else b
+        diffs.append("%s leads %s on %s (%s vs %s)"
+                     % (winner, b if winner == a else a,
+                        metric.upper(), va, vb))
+    aa, ab = da.get("annotation") or {}, db.get("annotation") or {}
+    for field, label in (("hook_type", "hook"), ("creator_vs_branded", "format")):
+        fa, fb = aa.get(field), ab.get(field)
+        if fa and fb and fa != fb:
+            diffs.append("%s uses %s %s while %s uses %s"
+                         % (a, label, fa, b, fb))
+    top = None
+    if (da.get("conversions") or 0) > 0 and (db.get("conversions") or 0) > 0:
+        top = a if da.get("cpa", 0) <= db.get("cpa", 0) else b
+    elif (da.get("impressions") or 0) > 0 or (db.get("impressions") or 0) > 0:
+        top = a if (da.get("ctr", 0) or 0) >= (db.get("ctr", 0) or 0) else b
+    if top is None:
+        diffs.append("Neither creative has delivery data yet.")
+    return {"top": top, "differences": diffs or ["No measurable difference."]}
+
+
 def read_json(handler):
     try:
         length = int(handler.headers.get("Content-Length", 0))
@@ -74,16 +120,30 @@ def read_json(handler):
         length = 0
     if not length:
         return {}
+    if length > MAX_JSON_BYTES:
+        raise ValueError("request body exceeds %d MB" % (
+            MAX_JSON_BYTES // (1024 * 1024)))
     return json.loads(handler.rfile.read(length) or b"{}")
 
 
-def apply_action(conn, action, payload, prov):
+def apply_action(conn, action, payload, prov, media_dir=None):
     if action == "ingest":
-        if not isinstance(payload.get("csv"), str) or not payload.get("platform"):
-            raise ValueError("ingest needs csv text and platform")
-        rows, quarantined = ingest.parse_csv_report(
-            payload["csv"], payload["platform"],
-            payload.get("source", "upload"))
+        if not payload.get("platform"):
+            raise ValueError("ingest needs a platform")
+        if isinstance(payload.get("xlsx_b64"), str) and payload["xlsx_b64"]:
+            import base64
+            try:
+                blob = base64.b64decode(payload["xlsx_b64"], validate=True)
+            except Exception:
+                raise ValueError("xlsx_b64 is not valid base64")
+            rows, quarantined = ingest.parse_xlsx_report(
+                blob, payload["platform"], payload.get("source", "upload"))
+        elif isinstance(payload.get("csv"), str):
+            rows, quarantined = ingest.parse_csv_report(
+                payload["csv"], payload["platform"],
+                payload.get("source", "upload"))
+        else:
+            raise ValueError("ingest needs csv text or xlsx_b64 plus platform")
         inserted = ingest.insert_rows(conn, rows)
         return {"inserted": inserted,
                 "quarantined": quarantined,
@@ -96,7 +156,44 @@ def apply_action(conn, action, payload, prov):
         return {"ok": True,
                 "annotation": creative.mark_verified(conn, payload["creative_key"])}
     if action == "pipeline":
-        return creative.run_pipeline(conn, payload["creative_key"], prov)
+        try:
+            bundle = media.find_for_creative(
+                conn, _media_dir(media_dir), payload["creative_key"])
+        except ValueError:
+            bundle = None
+        return creative.run_pipeline(conn, payload["creative_key"], prov,
+                                     media=bundle)
+    if action == "media-upload":
+        return media.save_media(
+            conn, _media_dir(media_dir), payload["creative_key"],
+            payload.get("filename", ""), payload.get("content_b64", ""),
+            payload.get("mime"))
+    if action == "connect-sheets":
+        if not payload.get("platform"):
+            raise ValueError("sheets import needs a platform")
+        csv_text = connectors.fetch_sheet_csv(payload.get("url", ""))
+        rows, quarantined = ingest.parse_csv_report(
+            csv_text, payload["platform"], "sheets")
+        inserted = ingest.insert_rows(conn, rows)
+        return {"inserted": inserted, "quarantined": quarantined,
+                "quarantined_count": len(quarantined)}
+    if action == "connect-meta":
+        csv_text = connectors.meta_insights_csv(
+            payload.get("ad_account_id", ""), payload.get("since", ""),
+            payload.get("until", ""))
+        rows, quarantined = ingest.parse_csv_report(csv_text, "meta", "meta-api")
+        inserted = ingest.insert_rows(conn, rows)
+        return {"inserted": inserted, "quarantined": quarantined,
+                "quarantined_count": len(quarantined)}
+    if action == "connect-tiktok":
+        csv_text = connectors.tiktok_report_csv(
+            payload.get("advertiser_id", ""), payload.get("start_date", ""),
+            payload.get("end_date", ""))
+        rows, quarantined = ingest.parse_csv_report(
+            csv_text, "tiktok", "tiktok-api")
+        inserted = ingest.insert_rows(conn, rows)
+        return {"inserted": inserted, "quarantined": quarantined,
+                "quarantined_count": len(quarantined)}
     if action == "retention":
         conn.executemany(
             "INSERT OR REPLACE INTO retention (creative_key, t_sec, retention_pct)"
@@ -145,6 +242,23 @@ class Handler(BaseHTTPRequestHandler):
         q = urllib.parse.parse_qs(url.query)
         if url.path.startswith("/assets/"):
             self._serve_asset(url.path[len("/assets/"):])
+            return
+        if url.path.startswith("/media/"):
+            conn = self._conn()
+            try:
+                blob, mime, filename = media.load_bytes(
+                    conn, _media_dir(), url.path[len("/media/"):])
+            except ValueError as e:
+                conn.close()
+                send(self, 404, {"error": str(e)})
+                return
+            conn.close()
+            self.send_response(200)
+            self.send_header("Content-Type", mime)
+            self.send_header("Content-Length", str(len(blob)))
+            self.send_header("Cache-Control", "public, max-age=86400")
+            self.end_headers()
+            self.wfile.write(blob)
             return
         if url.path in ("/", "/index.html"):
             with open(WEB_INDEX, "rb") as f:
@@ -209,18 +323,30 @@ class Handler(BaseHTTPRequestHandler):
                 a, b = q.get("a", [""])[0], q.get("b", [""])[0]
                 out = {}
                 for key in (a, b):
-                    rows = conn.execute("SELECT spend, impressions, clicks, conversions"
-                                        " FROM ads WHERE creative_key=?", (key,)).fetchall()
+                    rows = conn.execute(
+                        "SELECT spend, impressions, clicks, conversions,"
+                        " video_views, revenue FROM ads WHERE creative_key=?",
+                        (key,)).fetchall()
                     spend = sum(r[0] for r in rows)
                     impr = sum(r[1] for r in rows)
                     clicks = sum(r[2] for r in rows)
                     conv = sum(r[3] for r in rows)
+                    views = sum(r[4] or 0 for r in rows)
+                    revenue = sum(r[5] or 0 for r in rows)
                     ann = conn.execute("SELECT annotation_json FROM annotations"
                                        " WHERE creative_key=?", (key,)).fetchone()
-                    out[key] = {"spend": spend,
+                    out[key] = {"spend": round(spend, 2),
+                                "impressions": impr,
+                                "clicks": clicks,
+                                "conversions": conv,
+                                "cpm": round(spend / impr * 1000, 2) if impr else 0.0,
+                                "vtr": round(views / impr, 4) if impr else 0.0,
                                 "ctr": round(clicks / impr, 4) if impr else 0.0,
+                                "cpc": round(spend / clicks, 2) if clicks else 0.0,
                                 "cpa": round(spend / conv, 2) if conv else 0.0,
+                                "roas": round(revenue / spend, 4) if spend else 0.0,
                                 "annotation": json.loads(ann[0]) if ann else None}
+                out["why"] = _creative_why(a, b, out.get(a, {}), out.get(b, {}))
                 send(self, 200, out)
             elif url.path == "/api/replay":
                 send(self, 200, replay.history(conn))
@@ -243,6 +369,14 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if url.path == "/api/ingest":
                 action = "ingest"
+            elif url.path == "/api/media/upload":
+                action = "media-upload"
+            elif url.path == "/api/connect/sheets":
+                action = "connect-sheets"
+            elif url.path == "/api/connect/meta":
+                action = "connect-meta"
+            elif url.path == "/api/connect/tiktok":
+                action = "connect-tiktok"
             elif url.path == "/api/pipeline/run":
                 action = "pipeline"
             elif url.path == "/api/retention":
@@ -297,7 +431,9 @@ class Handler(BaseHTTPRequestHandler):
                 send(self, 404, {"error": "not found"})
                 return
             result = apply_action(conn, action, payload, self.prov)
-            replay.log(conn, action, payload)
+            if action != "media-upload":
+                # Media bytes stay out of the replay log (size + portability).
+                replay.log(conn, action, payload)
             send(self, 200, result)
         except (ValueError, export_gate.ExportBlocked) as e:
             send(self, 409, {"error": str(e)})

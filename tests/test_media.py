@@ -1,0 +1,173 @@
+"""Media store tests: upload validation, linking, serving, isolation.
+
+Covers the upload pipeline end to end against a real server instance
+with CREATIVE_INTEL_MEDIA_DIR pointed at a temp dir, so the repo tree
+is never touched.
+"""
+
+import base64
+import json
+import os
+import sqlite3
+import sys
+import tempfile
+import threading
+import unittest
+import urllib.request
+from http.server import HTTPServer
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Backend"))
+
+from creative_intel import creative, media, schema
+
+PNG = (b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
+JPG = (b"\xff\xd8\xff\xe0\x00\x10JFIF\x00" + b"\x00" * 64 + b"\xff\xd9")
+WAV = (b"RIFF" + b"\x00" * 64)
+B64PNG = base64.b64encode(PNG).decode()
+
+
+def make_db():
+    conn = sqlite3.connect(":memory:")
+    schema.init_db(conn)
+    conn.execute(
+        "INSERT INTO creatives (creative_key, platform, name)"
+        " VALUES (?,?,?)", ("m1", "meta", "M One"))
+    conn.commit()
+    return conn
+
+
+class MediaUnitTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.conn = make_db()
+
+    def tearDown(self):
+        self.conn.close()
+
+    def test_upload_roundtrip(self):
+        rec = media.save_media(self.conn, self.tmp, "m1", "spot.png", B64PNG)
+        self.assertEqual(rec["mime"], "image/png")
+        self.assertEqual(rec["url"], "/media/%d" % rec["id"])
+        blob, mime, _name = media.load_bytes(self.conn, self.tmp, rec["id"])
+        self.assertEqual(blob, PNG)
+        self.assertEqual(mime, "image/png")
+
+    def test_dedupe_same_bytes(self):
+        first = media.save_media(self.conn, self.tmp, "m1", "a.png", B64PNG)
+        second = media.save_media(self.conn, self.tmp, "m1", "b.png", B64PNG)
+        self.assertEqual(first["id"], second["id"])
+
+    def test_rejects_bad_type_magic_mismatch_key(self):
+        with self.assertRaises(ValueError):
+            media.save_media(self.conn, self.tmp, "m1", "evil.exe", B64PNG)
+        with self.assertRaises(ValueError):
+            media.save_media(self.conn, self.tmp, "m1", "fake.png",
+                             base64.b64encode(b"not a png").decode())
+        for bad in ("../x", "a/b", "", "x" * 200, None):
+            with self.assertRaises(ValueError):
+                media.save_media(self.conn, self.tmp, bad, "a.png", B64PNG)
+        with self.assertRaises(ValueError):
+            media.save_media(self.conn, self.tmp, "m1", "a.png",
+                             "!!!not-base64!!!")
+
+    def test_mime_mismatch_rejected(self):
+        with self.assertRaises(ValueError):
+            media.save_media(self.conn, self.tmp, "m1", "a.png", B64PNG,
+                             mime="video/mp4")
+
+    def test_source_url_linked_after_annotation(self):
+        ann = creative.blank_annotation()
+        creative.save_annotation(self.conn, "m1", ann)
+        rec = media.save_media(self.conn, self.tmp, "m1", "spot.png", B64PNG)
+        got = self.conn.execute("SELECT annotation_json FROM annotations"
+                                " WHERE creative_key=?", ("m1",)).fetchone()[0]
+        self.assertEqual(json.loads(got)["source_url"], rec["url"])
+
+    def test_no_annotation_no_link_no_crash(self):
+        rec = media.save_media(self.conn, self.tmp, "m1", "spot.png", B64PNG)
+        self.assertTrue(rec["url"].startswith("/media/"))
+
+    def test_find_for_creative_bundle(self):
+        media.save_media(self.conn, self.tmp, "m1", "frame.jpg",
+                         base64.b64encode(JPG).decode())
+        media.save_media(self.conn, self.tmp, "m1", "line.wav",
+                         base64.b64encode(WAV).decode())
+        bundle = media.find_for_creative(self.conn, self.tmp, "m1")
+        self.assertEqual(bundle["images"], [JPG])
+        self.assertEqual(bundle["audio"][1], "audio/wav")
+        self.assertFalse(bundle["has_video"])
+
+    def test_unknown_id_rejected(self):
+        for bad in ("9999", "abc", "../1", "-1"):
+            with self.assertRaises(ValueError):
+                media.load_bytes(self.conn, self.tmp, bad)
+
+
+class MediaLiveTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        import server
+        cls._tmp = tempfile.mkdtemp()
+        os.environ["CREATIVE_INTEL_MEDIA_DIR"] = cls._tmp
+        cls._db = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
+        conn = sqlite3.connect(cls._db)
+        schema.init_db(conn)
+        conn.execute("INSERT INTO creatives (creative_key, platform, name)"
+                     " VALUES (?,?,?)", ("web1", "tiktok", "Web One"))
+        conn.commit()
+        conn.close()
+        server.Handler.db_path = cls._db
+        cls._srv = HTTPServer(("127.0.0.1", 0), server.Handler)
+        cls.port = cls._srv.server_address[1]
+        cls._thread = threading.Thread(target=cls._srv.serve_forever,
+                                       daemon=True)
+        cls._thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._srv.shutdown()
+        cls._thread.join(timeout=10)
+        os.unlink(cls._db)
+        del os.environ["CREATIVE_INTEL_MEDIA_DIR"]
+
+    def _post(self, path, payload):
+        req = urllib.request.Request(
+            "http://127.0.0.1:%d%s" % (self.port, path),
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return resp.status, json.loads(resp.read())
+
+    def test_upload_then_serve_roundtrip(self):
+        status, rec = self._post("/api/media/upload", {
+            "creative_key": "web1", "filename": "clip.png",
+            "content_b64": B64PNG})
+        self.assertEqual(status, 200)
+        with urllib.request.urlopen(
+                "http://127.0.0.1:%d%s" % (self.port, rec["url"]),
+                timeout=10) as resp:
+            self.assertEqual(resp.status, 200)
+            self.assertIn("image/png", resp.headers.get("Content-Type"))
+            self.assertEqual(resp.read(), PNG)
+
+    def test_upload_rejects_exe_live(self):
+        import urllib.error
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            self._post("/api/media/upload", {
+                "creative_key": "web1", "filename": "evil.exe",
+                "content_b64": B64PNG})
+        self.assertEqual(ctx.exception.code, 409)
+
+    def test_media_traversal_404(self):
+        import urllib.error
+        for bad in ("/media/../Index.html", "/media/abc", "/media/99999"):
+            try:
+                urllib.request.urlopen(
+                    "http://127.0.0.1:%d%s" % (self.port, bad), timeout=10)
+                self.fail("served %s" % bad)
+            except urllib.error.HTTPError as exc:
+                self.assertEqual(exc.code, 404)
+
+
+if __name__ == "__main__":
+    unittest.main()

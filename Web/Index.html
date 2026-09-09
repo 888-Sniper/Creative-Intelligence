@@ -182,6 +182,9 @@ ul.plain li{padding:6px 0;border-bottom:1px solid var(--line)}
 <div style="margin-top:12px"><h4>Google Sheets link</h4>
 <div class="ask-row"><input type="text" id="sheets-url" placeholder="Paste a published Google Sheets link…" aria-label="Google Sheets link"><button class="action" id="sheets-go">Import sheet</button></div>
 <div class="muted" style="font-size:12px">Published CSV links only — private files need OAuth (parked).</div></div>
+<div style="margin-top:12px"><h4>Google Drive file (CSV or .xlsx)</h4>
+<div class="ask-row"><input type="text" id="drive-url" placeholder="Paste a public Google Drive share link…" aria-label="Google Drive link"><button class="action" id="drive-go">Import Drive file</button></div>
+<div class="muted" style="font-size:12px">Public share links only — private files need OAuth (parked).</div></div>
 <div style="margin-top:12px"><h4>Platform APIs</h4>
 <div class="filter-grid">
 <label>Meta ad account<input type="text" id="meta-acct" placeholder="act id, no prefix"></label>
@@ -343,6 +346,7 @@ $("rep-pptx").onclick=report_pptx;
 $("rep-xlsx").onclick=report_xlsx;
 $("rep-deck").onclick=report_deck;
 $("sheets-go").onclick=sheets_go;
+$("drive-go").onclick=drive_go;
 $("meta-go").onclick=meta_go;
 $("tt-go").onclick=tt_go;
 $("media-go").onclick=media_go;
@@ -360,6 +364,7 @@ async function prov_status(){try{
 function read_file_b64(file){return new Promise((res,rej)=>{const fr=new FileReader();fr.onload=()=>res(String(fr.result).split(",",2)[1]||"");fr.onerror=()=>rej(new Error("could not read file"));fr.readAsDataURL(file);});}
 async function xlsx_go(){const f=$("xlsx-file").files[0];if(!f){$("up-status").textContent="Choose an .xlsx file first.";return;}try{const b64=await read_file_b64(f);const r=await api("POST","/api/ingest",{platform:$("platform").value,xlsx_b64:b64,source:"upload"});$("up-status").textContent="Inserted "+r.inserted+" rows ("+r.quarantined_count+" quarantined).";refresh();}catch(e){$("up-status").textContent=e.message;}}
 async function sheets_go(){const u=$("sheets-url").value.trim();if(!u){$("up-status").textContent="Paste a Sheets link first.";return;}try{const r=await api("POST","/api/connect/sheets",{url:u,platform:$("platform").value});$("up-status").textContent="Inserted "+r.inserted+" rows from Sheets ("+r.quarantined_count+" quarantined).";refresh();}catch(e){$("up-status").textContent=e.message;}}
+async function drive_go(){const u=$("drive-url").value.trim();if(!u){$("up-status").textContent="Paste a Drive link first.";return;}try{const r=await api("POST","/api/connect/drive",{url:u,platform:$("platform").value});$("up-status").textContent="Inserted "+r.inserted+" rows from Drive ("+r.quarantined_count+" quarantined).";refresh();}catch(e){$("up-status").textContent=e.message;}}
 async function meta_go(){try{const r=await api("POST","/api/connect/meta",{ad_account_id:$("meta-acct").value.trim(),since:$("meta-since").value.trim(),until:$("meta-until").value.trim()});$("conn-status").textContent="Meta: inserted "+r.inserted+" rows ("+r.quarantined_count+" quarantined).";refresh();}catch(e){$("conn-status").textContent=e.message;}}
 async function tt_go(){try{const r=await api("POST","/api/connect/tiktok",{advertiser_id:$("tt-adv").value.trim(),start_date:$("tt-start").value.trim(),end_date:$("tt-end").value.trim()});$("conn-status").textContent="TikTok: inserted "+r.inserted+" rows ("+r.quarantined_count+" quarantined).";refresh();}catch(e){$("conn-status").textContent=e.message;}}
 async function media_go(){if(!selected){$("media-status").textContent="Select a creative below first.";return;}const f=$("media-file").files[0];if(!f){$("media-status").textContent="Choose a media file first.";return;}try{const b64=await read_file_b64(f);const r=await api("POST","/api/media/upload",{creative_key:selected,filename:f.name,content_b64:b64,mime:f.type||undefined});$("media-status").textContent="Stored "+r.filename+" ("+r.bytes+" bytes) → "+r.url+".";refresh();}catch(e){$("media-status").textContent=e.message;}}
@@ -606,7 +611,8 @@ function report_body(){
   const kpis=checked_vals(".rep-kpi");
   return{campaigns:camps.length?camps:null,
     kpis:kpis.length?kpis:["cpa","ctr"],
-    benchmark:$("rep-bench").value};
+    benchmark:$("rep-bench").value,
+    override:$("rep-override").checked};
 }
 function download_link(filename,mime,text){
   $("rep-links").innerHTML=`<a download="${esc(filename)}" href="${esc(URL.createObjectURL(new Blob([text],{type:mime})))}">Download ${esc(filename)}</a>`;
@@ -648,9 +654,15 @@ async function report_deck(){
   try{
     const r=await api("POST","/api/report",{...report_body(),format:"deck"});
     const d=r.deck||{};
-    const slides=(d.slides||[]).map(s=>`<section class="slide"><h2>${esc(s.campaign)}</h2><p>${esc(Object.entries(s.kpis||{}).map(([k,v])=>k+": "+v).join(" · "))}</p></section>`).join("");
+    const slides=(d.slides||[]).map(s=>{
+      const cw=(d.creatives||{})[s.campaign]||{};
+      const best=cw.best?`<p>Best: ${esc(cw.best.creative_key)} (CPA $${esc(String(cw.best.cpa??"—"))})</p>`:"";
+      const worst=cw.worst?`<p>Watch: ${esc(cw.worst.creative_key)} (CPA $${esc(String(cw.worst.cpa??"—"))})</p>`:"";
+      return `<section class="slide"><h2>${esc(s.campaign)}</h2><p>${esc(Object.entries(s.kpis||{}).map(([k,v])=>k+": "+v).join(" · "))}</p>${best}${worst}</section>`;}).join("");
     const why=((d.why||[]).map(w=>`<li>${esc(w)}</li>`).join(""));
-    const deck_html=`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>${esc(d.title||"Client deck")}</title><style>body{font-family:system-ui,sans-serif;color:#1a1a1a;margin:0}.slide{padding:48px;page-break-after:always;border-bottom:2px solid #e2e2e0}</style></head><body><h1 style="padding:48px 48px 0">${esc(d.title||"Client deck")}</h1>${slides}<section class="slide"><h2>Why it won</h2><ul>${why}</ul></section></body></html>`;
+    const learn=((d.learnings||[]).map(w=>`<li>${esc(w)}</li>`).join(""));
+    const reco=((d.recommendations||[]).map(w=>`<li>${esc(w)}</li>`).join(""));
+    const deck_html=`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>${esc(d.title||"Client deck")}</title><style>body{font-family:system-ui,sans-serif;color:#1a1a1a;margin:0}.slide{padding:48px;page-break-after:always;border-bottom:2px solid #e2e2e0}</style></head><body><h1 style="padding:48px 48px 0">${esc(d.title||"Client deck")}</h1>${slides}<section class="slide"><h2>Why it won</h2><ul>${why}</ul></section><section class="slide"><h2>Creative learnings</h2><ul>${learn}</ul></section><section class="slide"><h2>Recommendations / next steps</h2><ul>${reco}</ul></section></body></html>`;
     $("rep-out").textContent="Deck built: "+(d.slides||[]).length+" campaign slides + why-analysis.";
     download_link("deck.html","text/html",deck_html);
   }catch(e){$("rep-out").textContent="BLOCKED: "+e.message;$("rep-links").innerHTML="";}

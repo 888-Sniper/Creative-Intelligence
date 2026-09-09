@@ -138,7 +138,8 @@ class ShellLiveTest(unittest.TestCase):
         self.assertIn("pick_source(a)", HTML)
 
     def test_new_flow_controls_present(self):
-        for cid in ("xlsx-file", "sheets-url", "sheets-go", "meta-acct",
+        for cid in ("xlsx-file", "sheets-url", "sheets-go", "drive-url",
+                    "drive-go", "meta-acct",
                     "meta-since", "meta-until", "tt-adv", "tt-start",
                     "tt-end", "meta-go", "tt-go", "conn-status",
                     "media-file", "media-go", "media-status", "prov-status",
@@ -150,6 +151,7 @@ class ShellLiveTest(unittest.TestCase):
         self.assertIn("Generate PowerPoint (.pptx)", HTML)
         self.assertIn("Generate Excel (.xlsx)", HTML)
         self.assertIn("/api/connect/sheets", HTML)
+        self.assertIn("/api/connect/drive", HTML)
         self.assertIn("/api/connect/meta", HTML)
         self.assertIn("/api/connect/tiktok", HTML)
         self.assertIn("/api/media/upload", HTML)

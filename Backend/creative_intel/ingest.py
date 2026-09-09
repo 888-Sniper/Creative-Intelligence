@@ -172,11 +172,26 @@ def parse_workbook(path, platform, source="upload"):
     return parse_csv(buf.getvalue(), platform, source)
 
 
-def insert_rows(conn, rows):
+def _normalise(rows):
     defaults = {"client": "", "project": "", "vertical": "", "market": "",
                 "objective": "", "funnel_stage": "", "date": "",
                 "revenue": 0.0}
-    normalised = [dict(defaults, **row) for row in rows]
+    return [dict(defaults, **row) for row in rows]
+
+
+def _store_tail(conn, rows):
+    for row in rows:
+        conn.execute(
+            "INSERT OR IGNORE INTO creatives (creative_key, platform, name)"
+            " VALUES (?, ?, ?)",
+            (row["creative_key"], row["platform"], row["ad_name"]))
+    from creative_intel import retention as retention_mod
+    retention_mod.synthesize_from_quartiles(conn)
+    conn.commit()
+
+
+def insert_rows(conn, rows):
+    normalised = _normalise(rows)
     conn.executemany(
         "INSERT INTO ads (platform, source, campaign, adset, ad_name, creative_key,"
         " spend, impressions, clicks, conversions, video_views,"
@@ -188,11 +203,60 @@ def insert_rows(conn, rows):
         " :views_25, :views_50, :views_75, :views_100,"
         " :client, :project, :vertical, :market, :objective, :funnel_stage,"
         " :date, :revenue)", normalised)
-    rows = normalised
-    for row in rows:
-        conn.execute(
-            "INSERT OR IGNORE INTO creatives (creative_key, platform, name)"
-            " VALUES (?, ?, ?)",
-            (row["creative_key"], row["platform"], row["ad_name"]))
-    conn.commit()
-    return len(rows)
+    _store_tail(conn, normalised)
+    return len(normalised)
+
+
+# Columns refreshed when a re-import hits an existing fact. The sync
+# key itself (source, platform, campaign, adset, ad_name, date) is the
+# row identity and is never overwritten.
+UPSERT_VALUE_COLUMNS = (
+    "creative_key", "spend", "impressions", "clicks", "conversions",
+    "video_views", "views_25", "views_50", "views_75", "views_100",
+    "client", "project", "vertical", "market", "objective",
+    "funnel_stage", "revenue")
+
+
+def upsert_rows(conn, rows):
+    """Dedup-aware store for every product import surface.
+
+    Rows matching an existing fact on the sync key update that row's
+    metrics (last write wins); genuinely new facts insert. Returns
+    {"inserted": n, "updated": m}. insert_rows() stays the raw append
+    primitive (refuses exact duplicates via the sync-key index).
+    """
+    from creative_intel import schema as schema_mod
+    key_cols = schema_mod.SYNC_KEY_COLUMNS
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ads_sync_key ON ads (%s)"
+        % ", ".join(key_cols))
+    where = " AND ".join("%s=?" % col for col in key_cols)
+    update_sql = ("UPDATE ads SET %s WHERE %s" % (
+        ", ".join("%s=?" % col for col in UPSERT_VALUE_COLUMNS), where))
+    insert_sql = (
+        "INSERT INTO ads (platform, source, campaign, adset, ad_name, creative_key,"
+        " spend, impressions, clicks, conversions, video_views,"
+        " views_25, views_50, views_75, views_100,"
+        " client, project, vertical, market, objective, funnel_stage,"
+        " date, revenue)"
+        " VALUES (:platform, :source, :campaign, :adset, :ad_name, :creative_key,"
+        " :spend, :impressions, :clicks, :conversions, :video_views,"
+        " :views_25, :views_50, :views_75, :views_100,"
+        " :client, :project, :vertical, :market, :objective, :funnel_stage,"
+        " :date, :revenue)")
+    inserted = updated = 0
+    normalised = _normalise(rows)
+    for row in normalised:
+        key_vals = tuple(row[col] for col in key_cols)
+        hit = conn.execute(
+            "SELECT id FROM ads WHERE %s" % where, key_vals).fetchone()
+        if hit is None:
+            conn.execute(insert_sql, row)
+            inserted += 1
+        else:
+            conn.execute(
+                update_sql,
+                tuple(row[col] for col in UPSERT_VALUE_COLUMNS) + key_vals)
+            updated += 1
+    _store_tail(conn, normalised)
+    return {"inserted": inserted, "updated": updated}

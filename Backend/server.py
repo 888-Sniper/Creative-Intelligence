@@ -10,9 +10,9 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from creative_intel import (benchmarks, connectors, creative, export_gate,
+from creative_intel import (benchmarks, creative, export_gate,
                             ingest, media, providers, qa, replay, retention,
-                            schema)
+                            schema, sync)
 
 WEB_INDEX = os.path.normpath(os.path.join(os.path.dirname(
     os.path.abspath(__file__)), "..", "Web", "Index.html"))
@@ -337,8 +337,11 @@ def apply_action(conn, action, payload, prov, media_dir=None):
                 payload.get("source", "upload"))
         else:
             raise ValueError("ingest needs csv text or xlsx_b64 plus platform")
-        inserted = ingest.insert_rows(conn, rows)
-        return {"inserted": inserted,
+        # Uploads dedup like every other import surface: re-uploading
+        # the same file updates matching facts instead of doubling
+        # totals. (Plain insert_rows() stays the append primitive.)
+        counts = ingest.upsert_rows(conn, rows)
+        return {"inserted": counts["inserted"], "updated": counts["updated"],
                 "quarantined": quarantined,
                 "quarantined_count": len(quarantined)}
     if action == "annotate":
@@ -387,50 +390,47 @@ def apply_action(conn, action, payload, prov, media_dir=None):
     if action == "connect-sheets":
         if not payload.get("platform"):
             raise ValueError("sheets import needs a platform")
-        csv_text = connectors.fetch_sheet_csv(payload.get("url", ""))
-        rows, quarantined = ingest.parse_csv_report(
-            csv_text, payload["platform"], "sheets")
-        inserted = ingest.insert_rows(conn, rows)
-        return {"inserted": inserted, "quarantined": quarantined,
-                "quarantined_count": len(quarantined)}
+        params = {"url": payload.get("url", ""),
+                  "platform": payload["platform"]}
+        out = sync.import_once(
+            conn, "sheets", lambda: sync.fetch_job("sheets", params))
+        sync.save_job(conn, "sheets", params)
+        return out
     if action == "connect-drive":
         if not payload.get("platform"):
             raise ValueError("drive import needs a platform")
-        url = connectors.drive_file_url(payload.get("url", ""))
-        blob = connectors.fetch_bytes(url)
-        if blob.startswith(b"PK"):
-            rows, quarantined = ingest.parse_xlsx_report(
-                blob, payload["platform"], "drive")
-        else:
-            try:
-                text = blob.decode("utf-8-sig")
-            except ValueError:
-                raise ValueError("Drive file is neither CSV text nor .xlsx")
-            if text.lstrip().lower().startswith(("<!doctype html", "<html")):
-                raise ValueError("Google returned a login/confirm page: "
-                                 "private Drive files need OAuth (parked)")
-            rows, quarantined = ingest.parse_csv_report(
-                text, payload["platform"], "drive")
-        inserted = ingest.insert_rows(conn, rows)
-        return {"inserted": inserted, "quarantined": quarantined,
-                "quarantined_count": len(quarantined)}
+        params = {"url": payload.get("url", ""),
+                  "platform": payload["platform"]}
+        out = sync.import_once(
+            conn, "drive", lambda: sync.fetch_job("drive", params))
+        sync.save_job(conn, "drive", params)
+        return out
     if action == "connect-meta":
-        csv_text = connectors.meta_insights_csv(
-            payload.get("ad_account_id", ""), payload.get("since", ""),
-            payload.get("until", ""))
-        rows, quarantined = ingest.parse_csv_report(csv_text, "meta", "meta-api")
-        inserted = ingest.insert_rows(conn, rows)
-        return {"inserted": inserted, "quarantined": quarantined,
-                "quarantined_count": len(quarantined)}
+        params = {"ad_account_id": payload.get("ad_account_id", ""),
+                  "since": payload.get("since", ""),
+                  "until": payload.get("until", "")}
+        out = sync.import_once(
+            conn, "meta", lambda: sync.fetch_job("meta", params))
+        sync.save_job(conn, "meta", params)
+        return out
     if action == "connect-tiktok":
-        csv_text = connectors.tiktok_report_csv(
-            payload.get("advertiser_id", ""), payload.get("start_date", ""),
-            payload.get("end_date", ""))
-        rows, quarantined = ingest.parse_csv_report(
-            csv_text, "tiktok", "tiktok-api")
-        inserted = ingest.insert_rows(conn, rows)
-        return {"inserted": inserted, "quarantined": quarantined,
-                "quarantined_count": len(quarantined)}
+        params = {"advertiser_id": payload.get("advertiser_id", ""),
+                  "start_date": payload.get("start_date", ""),
+                  "end_date": payload.get("end_date", "")}
+        out = sync.import_once(
+            conn, "tiktok", lambda: sync.fetch_job("tiktok", params))
+        sync.save_job(conn, "tiktok", params)
+        return out
+    if action == "sync-now":
+        source = payload.get("source", "")
+        stored = sync.jobs(conn)
+        if source not in stored:
+            raise ValueError(
+                "no saved sync job for %r: run a manual import first"
+                % (source,))
+        return sync.import_once(
+            conn, source,
+            lambda: sync.fetch_job(source, stored[source]))
     if action == "retention":
         conn.executemany(
             "INSERT OR REPLACE INTO retention (creative_key, t_sec, retention_pct)"
@@ -672,6 +672,8 @@ class Handler(BaseHTTPRequestHandler):
                 send(self, 200, retention.curve(conn, key))
             elif url.path == "/api/replay":
                 send(self, 200, replay.history(conn))
+            elif url.path == "/api/sync/status":
+                send(self, 200, sync.status(conn))
             elif url.path == "/api/views":
                 send(self, 200, list_views(conn))
             elif url.path == "/api/reviews":
@@ -703,6 +705,8 @@ class Handler(BaseHTTPRequestHandler):
                 action = "connect-meta"
             elif url.path == "/api/connect/tiktok":
                 action = "connect-tiktok"
+            elif url.path == "/api/sync/run":
+                action = "sync-now"
             elif url.path == "/api/pipeline/run":
                 action = "pipeline"
             elif url.path == "/api/retention":
@@ -815,12 +819,23 @@ def main():
     ap.add_argument("--db", default=os.path.join(BASE, "Data", "local.db"))
     ap.add_argument("--port", type=int, default=4321)
     ap.add_argument("--load-fixture", action="store_true")
+    ap.add_argument("--sync-every", type=int, default=0,
+                    help="re-run saved connector sync jobs every N seconds"
+                    " (0 disables the scheduler)")
     args = ap.parse_args()
     os.makedirs(os.path.dirname(args.db), exist_ok=True)
     if args.load_fixture:
         print("fixture rows: %d" % load_fixtures(args.db))
         return
     Handler.db_path = args.db
+    if args.sync_every > 0:
+        import threading
+        stop = threading.Event()
+        thread = threading.Thread(
+            target=sync.daemon,
+            args=(args.db, args.sync_every, stop), daemon=True)
+        thread.start()
+        print("sync scheduler: every %d seconds" % args.sync_every)
     srv = HTTPServer(("127.0.0.1", args.port), Handler)
     print("Creative Intelligence on http://127.0.0.1:%d" % args.port)
     srv.serve_forever()

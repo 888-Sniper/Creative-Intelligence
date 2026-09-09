@@ -197,7 +197,13 @@ ul.plain li{padding:6px 0;border-bottom:1px solid var(--line)}
 <div style="margin-top:8px"><button class="action" id="meta-go">Import Meta</button>
 <button class="action" id="tt-go">Import TikTok</button>
 <span id="conn-status" class="muted"></span></div>
-<div class="muted" style="font-size:12px">Tokens stay in macOS Keychain or env — never in the repo. Without a token the import refuses instead of inventing rows.</div></div>
+<div class="muted" style="font-size:12px">Tokens stay in macOS Keychain or env — never in the repo. Without a token the import refuses instead of inventing rows.</div>
+<div style="margin-top:12px"><h4>Scheduled sync</h4>
+<div class="muted" style="font-size:12px">Successful imports are remembered as sync jobs: re-imports update matching rows instead of duplicating them, and the server re-runs them on a timer when started with --sync-every SECONDS.</div>
+<div style="margin-top:8px"><button class="action" id="sync-meta">Sync Meta now</button>
+<button class="action" id="sync-tiktok">Sync TikTok now</button>
+<span id="sync-status" class="muted"></span></div>
+<div id="sync-out" class="muted" style="font-size:12px;white-space:pre-line"></div></div></div>
 <div class="muted" style="font-size:12px;margin-top:8px" id="prov-status"></div>
 </div>
 <div class="card"><h3>KPIs</h3><div id="kpis">—</div></div>
@@ -428,10 +434,24 @@ $("sheets-go").onclick=sheets_go;
 $("drive-go").onclick=drive_go;
 $("meta-go").onclick=meta_go;
 $("tt-go").onclick=tt_go;
+$("sync-meta").onclick=()=>sync_now("meta");
+$("sync-tiktok").onclick=()=>sync_now("tiktok");
 $("media-go").onclick=media_go;
 $("xlsx-file").addEventListener("change",xlsx_go);
 function mark_active_filters(){const f=active_filters();["client","project","campaign","platform","vertical","market","funnel","objective","kpi","date"].forEach(k=>{const el=$("flt-"+k);if(!el)return;const v=f[k];el.classList.toggle("active",!!v&&v!=="all");});}
-async function refresh(){mark_active_filters();filter_summary();kpis();campaigns();library();bench();report_lists();prov_status();}
+async function refresh(){mark_active_filters();filter_summary();kpis();campaigns();library();bench();report_lists();prov_status();sync_status();}
+async function sync_status(){try{
+  const s=await api("GET","/api/sync/status");
+  const names={meta:"Meta",tiktok:"TikTok",sheets:"Sheets",drive:"Drive"};
+  const rows=Object.keys(names).map(k=>{const v=(s.sources||{})[k];
+    if(!v)return names[k]+": never synced";
+    const when=v.last_finished_at||v.last_run_at||"?";
+    if(v.last_status==="ok")return names[k]+": ok @ "+when+" ("+v.last_inserted+" new, "+v.last_updated+" updated)";
+    return names[k]+": "+v.last_status+" @ "+when+(v.last_error?": "+v.last_error:"");});
+  const jobs=(s.jobs||[]).map(j=>names[j]||j);
+  $("sync-out").textContent=rows.join("\n")+(jobs.length?"\nScheduled jobs: "+jobs.join(", ")+".":"\nNo scheduled jobs yet — run an import above first.");
+}catch(e){$("sync-status").textContent="Sync status unavailable.";}}
+async function sync_now(source){try{const r=await api("POST","/api/sync/run",{source:source});$("sync-status").textContent="Synced "+source+": "+r.inserted+" new, "+r.updated+" updated ("+r.quarantined_count+" quarantined).";refresh();}catch(e){$("sync-status").textContent=e.message;}}
 async function prov_status(){try{
   const h=await api("GET","/api/health");
   const keys=h.keys||{};
@@ -444,8 +464,8 @@ function read_file_b64(file){return new Promise((res,rej)=>{const fr=new FileRea
 async function xlsx_go(){const f=$("xlsx-file").files[0];if(!f){$("up-status").textContent="Choose an .xlsx file first.";return;}try{const b64=await read_file_b64(f);const r=await api("POST","/api/ingest",{platform:$("platform").value,xlsx_b64:b64,source:"upload"});$("up-status").textContent="Inserted "+r.inserted+" rows ("+r.quarantined_count+" quarantined).";refresh();}catch(e){$("up-status").textContent=e.message;}}
 async function sheets_go(){const u=$("sheets-url").value.trim();if(!u){$("up-status").textContent="Paste a Sheets link first.";return;}try{const r=await api("POST","/api/connect/sheets",{url:u,platform:$("platform").value});$("up-status").textContent="Inserted "+r.inserted+" rows from Sheets ("+r.quarantined_count+" quarantined).";refresh();}catch(e){$("up-status").textContent=e.message;}}
 async function drive_go(){const u=$("drive-url").value.trim();if(!u){$("up-status").textContent="Paste a Drive link first.";return;}try{const r=await api("POST","/api/connect/drive",{url:u,platform:$("platform").value});$("up-status").textContent="Inserted "+r.inserted+" rows from Drive ("+r.quarantined_count+" quarantined).";refresh();}catch(e){$("up-status").textContent=e.message;}}
-async function meta_go(){try{const r=await api("POST","/api/connect/meta",{ad_account_id:$("meta-acct").value.trim(),since:$("meta-since").value.trim(),until:$("meta-until").value.trim()});$("conn-status").textContent="Meta: inserted "+r.inserted+" rows ("+r.quarantined_count+" quarantined).";refresh();}catch(e){$("conn-status").textContent=e.message;}}
-async function tt_go(){try{const r=await api("POST","/api/connect/tiktok",{advertiser_id:$("tt-adv").value.trim(),start_date:$("tt-start").value.trim(),end_date:$("tt-end").value.trim()});$("conn-status").textContent="TikTok: inserted "+r.inserted+" rows ("+r.quarantined_count+" quarantined).";refresh();}catch(e){$("conn-status").textContent=e.message;}}
+async function meta_go(){try{const r=await api("POST","/api/connect/meta",{ad_account_id:$("meta-acct").value.trim(),since:$("meta-since").value.trim(),until:$("meta-until").value.trim()});$("conn-status").textContent="Meta: "+r.inserted+" new, "+r.updated+" updated ("+r.quarantined_count+" quarantined).";refresh();}catch(e){$("conn-status").textContent=e.message;}}
+async function tt_go(){try{const r=await api("POST","/api/connect/tiktok",{advertiser_id:$("tt-adv").value.trim(),start_date:$("tt-start").value.trim(),end_date:$("tt-end").value.trim()});$("conn-status").textContent="TikTok: "+r.inserted+" new, "+r.updated+" updated ("+r.quarantined_count+" quarantined).";refresh();}catch(e){$("conn-status").textContent=e.message;}}
 async function media_go(){if(!selected){$("media-status").textContent="Select a creative below first.";return;}const f=$("media-file").files[0];if(!f){$("media-status").textContent="Choose a media file first.";return;}try{const b64=await read_file_b64(f);const r=await api("POST","/api/media/upload",{creative_key:selected,filename:f.name,content_b64:b64,mime:f.type||undefined});$("media-status").textContent="Stored "+r.filename+" ("+r.bytes+" bytes) → "+r.url+".";refresh();}catch(e){$("media-status").textContent=e.message;}}
 async function kpis(){try{
   const c=await api("GET","/api/campaigns");const groups=Object.values(c);

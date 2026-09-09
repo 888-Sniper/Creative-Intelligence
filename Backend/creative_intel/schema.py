@@ -89,7 +89,35 @@ CREATE TABLE IF NOT EXISTS saved_views (
     created_at TEXT NOT NULL DEFAULT '',
     updated_at TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS sync_runs (
+    id INTEGER PRIMARY KEY,
+    source TEXT NOT NULL DEFAULT '',
+    started_at TEXT NOT NULL DEFAULT '',
+    finished_at TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT '',
+    inserted INTEGER NOT NULL DEFAULT 0,
+    updated INTEGER NOT NULL DEFAULT 0,
+    quarantined INTEGER NOT NULL DEFAULT 0,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    error TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS sync_jobs (
+    source TEXT PRIMARY KEY,
+    params_json TEXT NOT NULL DEFAULT '{}',
+    updated_at TEXT NOT NULL DEFAULT ''
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ads_sync_key ON ads
+    (source, platform, campaign, adset, ad_name, date);
 """
+
+# Natural dedup key for re-imports: the same fact from the same origin
+# (same source feed, platform, campaign/adset/ad row and reporting date)
+# is one row. Every product import surface (uploads, connectors,
+# scheduler) stores via ingest.upsert_rows(), so re-imports update
+# metrics instead of duplicating rows; insert_rows() stays the raw
+# append primitive and refuses exact-duplicate facts.
+SYNC_KEY_COLUMNS = ("source", "platform", "campaign", "adset",
+                    "ad_name", "date")
 
 
 def migrate(conn):
@@ -97,6 +125,10 @@ def migrate(conn):
 
     Idempotent: existing columns are left untouched, so opening an
     old database with the new code is a safe no-rewrite upgrade.
+    Also brings old databases onto the sync contract: exact duplicate
+    facts under the sync key collapse (last write wins, mirroring
+    ingest.upsert_rows) before the uniqueness index is created, and
+    the sync_runs/sync_jobs tables are added when missing.
     Returns the list of columns added.
     """
     existing = {row[1] for row in conn.execute("PRAGMA table_info(ads)")}
@@ -105,8 +137,29 @@ def migrate(conn):
         if name not in existing:
             conn.execute("ALTER TABLE ads ADD COLUMN %s %s" % (name, ddl))
             added.append(name)
-    if added:
-        conn.commit()
+    key_cols = ", ".join(SYNC_KEY_COLUMNS)
+    conn.execute(
+        "DELETE FROM ads WHERE rowid NOT IN"
+        " (SELECT MAX(rowid) FROM ads GROUP BY %s)" % key_cols)
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ads_sync_key ON ads (%s)"
+        % key_cols)
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS sync_runs ("
+        "id INTEGER PRIMARY KEY, source TEXT NOT NULL DEFAULT '',"
+        " started_at TEXT NOT NULL DEFAULT '',"
+        " finished_at TEXT NOT NULL DEFAULT '',"
+        " status TEXT NOT NULL DEFAULT '',"
+        " inserted INTEGER NOT NULL DEFAULT 0,"
+        " updated INTEGER NOT NULL DEFAULT 0,"
+        " quarantined INTEGER NOT NULL DEFAULT 0,"
+        " attempts INTEGER NOT NULL DEFAULT 0,"
+        " error TEXT NOT NULL DEFAULT '')")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS sync_jobs ("
+        "source TEXT PRIMARY KEY, params_json TEXT NOT NULL DEFAULT '{}',"
+        " updated_at TEXT NOT NULL DEFAULT '')")
+    conn.commit()
     return added
 
 

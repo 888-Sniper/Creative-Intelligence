@@ -211,6 +211,87 @@ class LaunchPathTest(unittest.TestCase):
             os.unlink(db)
 
 
+class LaunchContractTest(unittest.TestCase):
+    """UI contract endpoints, exercised over the real launch path."""
+
+    def _launched(self):
+        import server
+        import socket
+        import subprocess
+        import time
+        import urllib.error
+        import urllib.request
+        sock = socket.socket()
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+        sock.close()
+        db = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
+        proc = subprocess.Popen(
+            [sys.executable, server.__file__, "--db", db,
+             "--port", str(port)],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        base = "http://127.0.0.1:%d" % port
+
+        def call(method, path, body=None):
+            data = json.dumps(body).encode() if body is not None else None
+            req = urllib.request.Request(
+                base + path, data=data,
+                headers={"Content-Type": "application/json"})
+            deadline = time.time() + 20
+            while True:
+                try:
+                    with urllib.request.urlopen(req, timeout=2) as resp:
+                        return resp.status, json.loads(resp.read().decode())
+                except urllib.error.HTTPError as exc:
+                    return exc.code, json.loads(exc.read().decode() or "{}")
+                except OSError:
+                    if time.time() > deadline:
+                        raise AssertionError("server never came up: " + path)
+                    time.sleep(0.2)
+        return proc, db, call
+
+    def test_ui_contract_endpoints(self):
+        proc, db, call = self._launched()
+        try:
+            status, _ = call(
+                "POST", "/api/ingest",
+                {"platform": "meta", "csv": META_CSV})
+            self.assertEqual(status, 200)
+            status, rows = call("GET", "/api/creatives")
+            self.assertEqual(status, 200)
+            self.assertTrue(rows)
+            for row in rows:
+                self.assertIn("metrics", row)
+                self.assertIn("campaigns", row)
+                self.assertIn("cpa", row["metrics"])
+            status, comp = call(
+                "GET", "/api/compare/campaigns?campaigns=C1&rank_by=cpa")
+            self.assertEqual(status, 200)
+            self.assertIn("why", comp)
+            self.assertIn("differences", comp["why"])
+            status, saved = call(
+                "POST", "/api/cohorts",
+                {"name": "t", "filters": {"platform": ["meta"]}})
+            self.assertEqual(status, 200)
+            status, built = call(
+                "GET", "/api/cohorts/build?id=%s&metric=cpa" % saved["id"])
+            self.assertEqual(status, 200)
+            self.assertIn("stats", built)
+            status, rep = call(
+                "POST", "/api/report",
+                {"campaigns": ["C1"], "kpis": ["cpa", "ctr"],
+                 "benchmark": "campaign", "format": "one-pager"})
+            self.assertEqual(status, 200)
+            self.assertIn("markdown", rep)
+        finally:
+            proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except Exception:
+                proc.kill()
+            os.unlink(db)
+
+
 class ReplayTest(unittest.TestCase):
     def test_log_round_trip(self):
         import server

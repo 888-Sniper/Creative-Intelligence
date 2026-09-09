@@ -95,7 +95,7 @@ ul.plain{list-style:none;padding:0;margin:0}
 <label><input type="checkbox" id="override"> override (logged)</label>
 <pre id="export-out" class="muted"></pre></div>
 </section>
-<section class="view" id="v-campaign"><h2>Campaign</h2><div id="campaigns"></div></section>
+<section class="view" id="v-campaign"><h2>Campaign</h2><div id="campaign-detail"></div><div id="campaigns"></div></section>
 <section class="view" id="v-creative"><h2>Creative Library</h2>
 <div class="card"><button class="action" id="run-pipe">Run pipeline on selected</button>
 <button class="action" id="verify">Mark HUMAN-VERIFIED</button>
@@ -104,9 +104,15 @@ ul.plain{list-style:none;padding:0;margin:0}
 <div id="library"></div></section>
 <section class="view" id="v-compare"><h2>Compare (side-by-side)</h2>
 <div class="card"><input id="cmp-a" placeholder="creative A key"> <input id="cmp-b" placeholder="creative B key">
-<button class="action" id="cmp-go">Compare</button>
+<button class="action" id="cmp-go">Compare creatives</button>
 <div class="muted" style="font-size:12px">GET /api/compare — badges note whether each side passes the current filters.</div></div>
-<div id="cmp-out"></div></section>
+<div class="card"><h3>Campaign compare</h3>
+<input id="cmp-campaigns" placeholder="campaigns, comma-separated (blank = all)" style="width:60%">
+<label>Rank by <select id="cmp-rank"><option value="cpa">CPA</option><option value="cpm">CPM</option><option value="ctr">CTR</option><option value="vtr">VTR</option><option value="roas">ROAS</option></select></label>
+<button class="action" id="cmp-camp-go">Compare campaigns</button>
+<div class="muted" style="font-size:12px">GET /api/compare/campaigns — full KPI set plus why-analysis.</div></div>
+<div id="cmp-out"></div>
+<div id="cmp-camp-out"></div></section>
 <section class="view" id="v-benchmark"><h2>Benchmark</h2>
 <div class="card"><label>Group by <select id="gb">
 <option value="hook_type">hook_type</option><option value="creator_vs_branded">creator_vs_branded</option>
@@ -114,13 +120,13 @@ ul.plain{list-style:none;padding:0;margin:0}
 <button class="action" id="gb-go">Refresh</button></div>
 <div id="bench-out"></div>
 <div class="card"><h3>Benchmark builder</h3>
+<div class="muted" style="font-size:12px">Saved cohorts persist server-side (/api/cohorts) and start from the active top filter bar.</div>
 <div class="filter-grid">
-<label>Filter text<input type="text" id="bb-filter" placeholder="substring over group"></label>
-<label>Group by<select id="bb-group">
-<option value="hook_type">hook_type</option><option value="creator_vs_branded">creator_vs_branded</option>
-<option value="platform">platform</option><option value="campaign">campaign</option></select></label>
-<label>Include (comma-separated)<input type="text" id="bb-include" placeholder="optional"></label>
-<label>Exclude (comma-separated)<input type="text" id="bb-exclude" placeholder="optional"></label>
+<label>Name<input type="text" id="bb-name" placeholder="e.g. Beauty TikTok lower"></label>
+<label>Metric<select id="bb-metric">
+<option value="cpa">CPA</option><option value="cpm">CPM</option><option value="ctr">CTR</option><option value="vtr">VTR</option><option value="roas">ROAS</option></select></label>
+<label>Include projects (comma-separated)<input type="text" id="bb-include" placeholder="optional"></label>
+<label>Exclude projects (comma-separated)<input type="text" id="bb-exclude" placeholder="optional"></label>
 </div>
 <div style="margin-top:8px"><button class="action" id="bb-create">Create</button></div>
 <div id="bb-saved" style="margin-top:8px"></div>
@@ -163,7 +169,6 @@ const api=async(m,p,b)=>{const r=await fetch(filtered_path(p),{method:m,headers:
 document.querySelectorAll("#tabs button").forEach(b=>b.onclick=()=>{document.querySelectorAll("#tabs button").forEach(x=>x.setAttribute("aria-pressed","false"));b.setAttribute("aria-pressed","true");document.querySelectorAll(".view").forEach(v=>v.classList.remove("active"));document.querySelector("#v-"+b.dataset.view).classList.add("active");refresh();});
 $("theme").onclick=()=>{const h=document.documentElement;h.dataset.theme=h.dataset.theme==="dark"?"":"dark";};
 let selected=null;
-const saved_builders=[];
 function active_filters(){return{
   client:$("flt-client").value.trim().toLowerCase(),
   project:$("flt-project").value.trim().toLowerCase(),
@@ -195,6 +200,19 @@ $("export").onclick=async()=>{const keys=[...document.querySelectorAll(".exp-che
 $("run-pipe").onclick=async()=>{if(!selected)return;await api("POST","/api/pipeline/run",{creative_key:selected});refresh();};
 $("verify").onclick=async()=>{if(!selected)return;await api("POST","/api/creatives/"+encodeURIComponent(selected)+"/verify");refresh();};
 $("cmp-go").onclick=async()=>{try{const a=$("cmp-a").value.trim(),b=$("cmp-b").value.trim();const r=await api("GET","/api/compare?a="+encodeURIComponent(a)+"&b="+encodeURIComponent(b));render_compare(r,a,b);}catch(e){$("cmp-out").innerHTML=`<p class="muted">${esc(e.message)}</p>`;}};
+$("cmp-camp-go").onclick=async()=>{try{
+  const list=$("cmp-campaigns").value.trim();const rank=$("cmp-rank").value;
+  let url="/api/compare/campaigns?rank_by="+encodeURIComponent(rank);
+  if(list)url+="&campaigns="+encodeURIComponent(list);
+  const r=await api("GET",url);render_campaign_compare(r);
+}catch(e){$("cmp-camp-out").innerHTML=`<p class="muted">${esc(e.message)}</p>`;}};
+function render_campaign_compare(r){
+  const kpis=["spend","impressions","clicks","conversions","cpm","vtr","ctr","cpa","roas"];
+  const head="<tr><th>Campaign</th>"+kpis.map(k=>`<th>${esc(k.toUpperCase())}</th>`).join("")+"</tr>";
+  const body=(r.ranking||[]).map((c,i)=>`<tr><td>${esc(c)}${i===0?" (top)":""}</td>`+kpis.map(k=>`<td>${esc(String((r.kpis[c]||{})[k]??"—"))}</td>`).join("")+"</tr>").join("");
+  const why=((r.why||{}).differences||[]).map(d=>`<li>${esc(d)}</li>`).join("");
+  $("cmp-camp-out").innerHTML=`<div class="card"><h4>Ranked by ${esc(r.rank_by||"")}</h4><table>${head}${body}</table><h4>Why ${esc((r.why||{}).top||"—")} leads ${esc((r.why||{}).bottom||"—")}</h4><ul>${why||"<li>—</li>"}</ul></div>`;
+}
 $("gb-go").onclick=bench;
 $("ask-go").onclick=ask_go;
 $("bb-create").onclick=builder_create;
@@ -207,8 +225,29 @@ async function campaigns(){try{
   const c=await api("GET","/api/campaigns");const f=active_filters();
   let entries=Object.entries(c).filter(([k])=>text_blob([k]).includes(f.campaign)&&text_match(text_blob([k]),{...f,campaign:""}));
   entries=sort_rows(entries,f);
-  $("campaigns").innerHTML="<table><tr><th>Campaign</th><th>Ads</th><th>Spend</th><th>CTR</th><th>CPC</th><th>CPA</th></tr>"+entries.map(([k,g])=>`<tr><td>${esc(k)}</td><td>${esc(String(g.n_ads))}</td><td>$${esc(String(g.spend))}</td><td>${esc(String(g.ctr))}</td><td>$${esc(String(g.cpc))}</td><td>$${esc(String(g.cpa))}</td></tr>`).join("")+"</table>";
+  $("campaigns").innerHTML="<table><tr><th>Campaign</th><th>Ads</th><th>Spend</th><th>CTR</th><th>CPC</th><th>CPA</th></tr>"+entries.map(([k,g])=>`<tr><td><a href="#" data-camp="${esc(k)}">${esc(k)}</a></td><td>${esc(String(g.n_ads))}</td><td>$${esc(String(g.spend))}</td><td>${esc(String(g.ctr))}</td><td>$${esc(String(g.cpc))}</td><td>$${esc(String(g.cpa))}</td></tr>`).join("")+"</table>";
+  $("campaigns").querySelectorAll("[data-camp]").forEach(a=>a.onclick=ev=>{ev.preventDefault();campaign_detail(a.dataset.camp);});
 }catch(e){$("campaigns").textContent=e.message;}}
+async function campaign_detail(name){
+  const box=$("campaign-detail");
+  try{
+    const [rows,bench]=await Promise.all([
+      api("GET","/api/creatives"),
+      api("GET","/api/benchmarks?group_by=campaign")]);
+    const in_camp=rows.filter(r=>(r.campaigns||[]).includes(name));
+    if(!in_camp.length){box.innerHTML=`<p class="muted">No creatives for ${esc(name)}.</p>`;return;}
+    const by_cpa=in_camp.slice().sort((a,b)=>(a.metrics.cpa||0)-(b.metrics.cpa||0));
+    const best=by_cpa[0],worst=by_cpa[by_cpa.length-1];
+    const med=bench[name]?bench[name].cpa:null;
+    const delta=(med!=null)?` vs campaign-benchmark CPA $${esc(String(med))}`:"";
+    const hooks={};in_camp.forEach(r=>{const h=(r.annotation||{}).hook_type;if(h)hooks[h]=(hooks[h]||0)+1;});
+    const top_hook=Object.entries(hooks).sort((a,b)=>b[1]-a[1])[0];
+    box.innerHTML=`<div class="card"><h3>${esc(name)}${esc(delta)}</h3>
+    <p>Best: <strong>${esc(best.name||best.creative_key)}</strong> (CPA $${esc(String(best.metrics.cpa))}, CTR ${esc(String(best.metrics.ctr))}, ROAS ${esc(String(best.metrics.roas))})<br>
+    Watch: <strong>${esc(worst.name||worst.creative_key)}</strong> (CPA $${esc(String(worst.metrics.cpa))})<br>
+    <span class="muted">Learning: ${top_hook?esc(top_hook[0]+" leads "+in_camp.length+" creatives here"):"no hook labels yet"} · ${esc(String(in_camp.length))} creatives</span></p></div>`;
+  }catch(e){box.innerHTML=`<p class="muted">${esc(e.message)}</p>`;}
+}
 async function library(){
   const rows=await api("GET","/api/creatives");const f=active_filters();
   const kept=rows.filter(r=>{const a=r.annotation||{};if(f.platform!=="all"&&String(r.platform||"").toLowerCase()!==f.platform)return false;return text_match(text_blob([r.creative_key,r.name,r.transcript,a.hook_type,a.creator_vs_branded,r.status]),f);});
@@ -248,6 +287,7 @@ function creative_detail(kept){
   const found=(kept||[]).find(x=>x.creative_key===selected);
   if(!found){box.innerHTML=`<p class="muted">${esc("Selected creative is hidden by the current filters.")}</p>`;return;}
   const a=found.annotation||{};
+  const m=found.metrics||{};
   const src=pick_source(a);
   const hook_t=(a.structure||{}).hook?Number((a.structure||{}).hook.start_s):NaN;
   const cta_t=(a.structure||{}).cta?Number((a.structure||{}).cta.start_s):NaN;
@@ -256,6 +296,7 @@ function creative_detail(kept){
   const media=src?`<video id="creative-video" controls preload="metadata" style="max-width:100%"><source src="${esc(src)}"></video><div class="muted" style="font-size:12px">Playing annotated source URL.</div>`:`<div>${storyboard_svg(a)}</div><div class="muted" style="font-size:12px">No annotated source URL — SVG storyboard from annotation structure.</div>`;
   box.innerHTML=`<h4 style="margin:0 0 6px">${esc(found.name||found.creative_key)}</h4>
   <div class="muted" style="font-size:13px">key=${esc(found.creative_key)} · platform=${esc(found.platform||"—")} · status=${esc(a.status||found.status||"auto")} · hook=${esc(a.hook_type||"—")}</div>
+  <div style="font-size:13px;margin-top:4px">spend $${esc(String(m.spend??"—"))} · CPM $${esc(String(m.cpm??"—"))} · VTR ${esc(String(m.vtr??"—"))} · CTR ${esc(String(m.ctr??"—"))} · CPA $${esc(String(m.cpa??"—"))} · ROAS ${esc(String(m.roas??"—"))}<br><span class="muted">campaigns: ${esc((found.campaigns||[]).join(", ")||"—")} · <a href="#" id="detail-bench">vs benchmark</a></span><span id="detail-bench-out" class="muted"></span></div>
   <div style="margin:8px 0">${media}</div>
   <div>${chip_btn("Hook",hook_t)}${chip_btn("Brand",brand_t)}${chip_btn("Product",product_t)}${chip_btn("CTA",cta_t)||""}</div>
   <div id="retention-graph" class="muted" style="margin-top:8px">Loading retention…</div>`;
@@ -263,6 +304,16 @@ function creative_detail(kept){
     const v=document.querySelector("#creative-video");
     if(v&&Number.isFinite(Number(ch.dataset.seek))){try{v.currentTime=Number(ch.dataset.seek);}catch(e){}}
   });
+  const bench_link=box.querySelector("#detail-bench");
+  if(bench_link)bench_link.onclick=async ev=>{
+    ev.preventDefault();
+    const out=box.querySelector("#detail-bench-out");
+    try{
+      const bench=await api("GET","/api/benchmarks?group_by=campaign");
+      const rows=(found.campaigns||[]).map(c=>`${c}: CPA $${bench[c]?bench[c].cpa:"—"} vs mine $${m.cpa??"—"}`);
+      out.textContent=rows.length?(" — "+rows.join("; ")):" — no campaign benchmark";
+    }catch(e){out.textContent=" — "+e.message;}
+  };
   load_retention(selected);
 }
 async function load_retention(key){
@@ -306,31 +357,40 @@ async function bench(){try{
   entries=sort_rows(entries,f);
   $("bench-out").innerHTML="<table><tr><th>Group</th><th>Ads</th><th>Spend</th><th>CTR</th><th>CPC</th><th>CPA</th></tr>"+entries.map(([k,g])=>`<tr><td>${esc(k)}</td><td>${esc(String(g.n_ads))}</td><td>$${esc(String(g.spend))}</td><td>${esc(String(g.ctr))}</td><td>$${esc(String(g.cpc))}</td><td>$${esc(String(g.cpa))}</td></tr>`).join("")+"</table>";
 }catch(e){$("bench-out").textContent=e.message;}}
+function cohort_filters_from_ui(){
+  const f=active_filters();const out={};
+  ["platform","vertical","market","funnel","objective","client"].forEach(k=>{if(f[k]&&f[k]!=="all")out[k]=[f[k]];});
+  const inc=$("bb-include").value.split(",").map(s=>s.trim()).filter(Boolean);
+  const exc=$("bb-exclude").value.split(",").map(s=>s.trim()).filter(Boolean);
+  if(inc.length)out.include_projects=inc;
+  if(exc.length)out.exclude_projects=exc;
+  return out;
+}
 async function builder_create(){
   try{
-    const group_by=$("bb-group").value;
-    const data=await api("GET","/api/benchmarks?group_by="+encodeURIComponent(group_by));
-    const filt=$("bb-filter").value.trim().toLowerCase();
-    const inc=$("bb-include").value.split(",").map(s=>s.trim()).filter(Boolean);
-    const exc=$("bb-exclude").value.split(",").map(s=>s.trim()).filter(Boolean);
-    const rows=Object.entries(data).filter(([k])=>{
-      if(filt&&!k.toLowerCase().includes(filt))return false;
-      if(inc.length&&!inc.includes(k))return false;
-      if(exc.includes(k))return false;
-      return true;
-    });
-    const name="Benchmark "+(saved_builders.length+1)+" ("+group_by+")";
-    saved_builders.push({name:name,group_by:group_by,rows:rows});
-    render_builders();
+    const name=$("bb-name").value.trim()||("Cohort "+new Date().toISOString().slice(0,10));
+    const saved=await api("POST","/api/cohorts",{name:name,filters:cohort_filters_from_ui()});
+    $("bb-name").value="";
+    await render_builders(saved.id);
   }catch(e){$("bb-out").innerHTML=`<p class="muted">${esc(e.message)}</p>`;}
 }
-function render_builders(){
-  $("bb-saved").innerHTML=saved_builders.length?("<ul class='plain'>"+saved_builders.map((b,i)=>`<li>${esc(b.name)} — ${esc(String(b.rows.length))} groups <button class="chip" data-bb="${esc(String(i))}">Show</button></li>`).join("")+"</ul>"):'<span class="muted">No saved benchmarks yet.</span>';
-  $("bb-saved").querySelectorAll("[data-bb]").forEach(btn=>btn.onclick=()=>{
-    const b=saved_builders[Number(btn.dataset.bb)];
-    $("bb-out").innerHTML="<h4>"+esc(b.name)+"</h4><table><tr><th>Group</th><th>Ads</th><th>Spend</th><th>CTR</th><th>CPC</th><th>CPA</th></tr>"+b.rows.map(([k,g])=>`<tr><td>${esc(k)}</td><td>${esc(String(g.n_ads))}</td><td>$${esc(String(g.spend))}</td><td>${esc(String(g.ctr))}</td><td>$${esc(String(g.cpc))}</td><td>$${esc(String(g.cpa))}</td></tr>`).join("")+"</table>";
-  });
-  if(saved_builders.length){$("bb-saved").querySelector("[data-bb]").click();}
+async function render_builders(show_id){
+  try{
+    const list=await api("GET","/api/cohorts");
+    $("bb-saved").innerHTML=list.length?("<ul class='plain'>"+list.map(b=>`<li>${esc(b.name)} — ${esc(JSON.stringify(b.filters||{}))} <button class="chip" data-bb="${esc(String(b.id))}">Build</button></li>`).join("")+"</ul>"):'<span class="muted">No saved cohorts yet.</span>';
+    $("bb-saved").querySelectorAll("[data-bb]").forEach(btn=>btn.onclick=()=>build_cohort(Number(btn.dataset.bb)));
+    const target=show_id!=null?show_id:(list.length?list[list.length-1].id:null);
+    if(target!=null)build_cohort(target);
+    else $("bb-out").innerHTML="";
+  }catch(e){$("bb-out").innerHTML=`<p class="muted">${esc(e.message)}</p>`;}
+}
+async function build_cohort(id){
+  try{
+    const metric=$("bb-metric").value;
+    const r=await api("GET","/api/cohorts/build?"+new URLSearchParams({id:String(id),metric:metric}).toString());
+    const s=r.stats||{};
+    $("bb-out").innerHTML=`<h4>Cohort: ${esc(r.name||("#"+id))} (${esc(metric)}) — ${esc(r.status||"")}</h4><p class="muted">n=${esc(String(s.n??r.n_ads??"—"))} · projects=${esc(String((r.project_list||[]).length))} · mean=${esc(String(s.mean_weighted??"—"))} · median=${esc(String(s.median??"—"))} · p25=${esc(String(s.p25??"—"))} · p75=${esc(String(s.p75??"—"))}</p>`;
+  }catch(e){$("bb-out").innerHTML=`<p class="muted">${esc(e.message)}</p>`;}
 }
 async function ask_go(){
   const q=$("ask-q").value;
@@ -354,42 +414,40 @@ async function report_lists(){
   }catch(e){$("rep-creatives").textContent=e.message;}
 }
 function checked_vals(sel){return[...document.querySelectorAll(sel+":checked")].map(c=>c.value);}
+function report_body(){
+  const camps=checked_vals(".rep-campaign");
+  const kpis=checked_vals(".rep-kpi");
+  return{campaigns:camps.length?camps:null,
+    kpis:kpis.length?kpis:["cpa","ctr"],
+    benchmark:$("rep-bench").value};
+}
+function download_link(filename,mime,text){
+  $("rep-links").innerHTML=`<a download="${esc(filename)}" href="${esc(URL.createObjectURL(new Blob([text],{type:mime})))}">Download ${esc(filename)}</a>`;
+}
 async function report_onepager(){
-  const keys=checked_vals(".rep-creative");
   try{
-    const r=await api("POST","/api/export",{creative_keys:keys,override:$("rep-override").checked});
+    const r=await api("POST","/api/report",{...report_body(),format:"one-pager"});
     $("rep-out").textContent=r.markdown;
-    const blob=new Blob([r.markdown],{type:"text/markdown"});
-    $("rep-links").innerHTML=`<a download="one-pager.md" href="${esc(URL.createObjectURL(blob))}">Download one-pager.md</a>`;
+    download_link("one-pager.md","text/markdown",r.markdown);
   }catch(e){$("rep-out").textContent="BLOCKED: "+e.message;$("rep-links").innerHTML="";}
 }
 async function report_csv(){
   try{
-    const camps=await api("GET","/api/campaigns");
-    const want=checked_vals(".rep-campaign");const kpis=checked_vals(".rep-kpi");
-    const cols=["campaign"].concat(kpis.length?kpis:["spend","cpa"]);
-    const lines=[cols.join(",")];
-    Object.entries(camps).filter(([k])=>!want.length||want.includes(k)).forEach(([k,g])=>{
-      lines.push(cols.map(c=>c==="campaign"?('"'+String(k).replace(/"/g,'""')+'"'):String(g[c]??"")).join(","));
-    });
-    const csv_text=lines.join("\n")+"\n";
-    $("rep-out").textContent=csv_text;
-    $("rep-links").innerHTML=`<a download="report.csv" href="${esc(URL.createObjectURL(new Blob([csv_text],{type:"text/csv"})))}">Download report.csv</a>`;
-  }catch(e){$("rep-out").textContent="BLOCKED: "+e.message;}
+    const r=await api("POST","/api/report",{...report_body(),format:"csv"});
+    $("rep-out").textContent=r.csv;
+    download_link("report.csv","text/csv",r.csv);
+  }catch(e){$("rep-out").textContent="BLOCKED: "+e.message;$("rep-links").innerHTML="";}
 }
 async function report_deck(){
   try{
-    const camps=await api("GET","/api/campaigns");
-    const bench_data=await api("GET","/api/benchmarks?group_by="+encodeURIComponent($("rep-bench").value));
-    const want=checked_vals(".rep-campaign");const kpis=checked_vals(".rep-kpi");
-    const camp_rows=Object.entries(camps).filter(([k])=>!want.length||want.includes(k));
-    const esc_html=s=>esc(s);
-    const slides=camp_rows.map(([k,g])=>`<section class="slide"><h2>${esc_html(k)}</h2><p>${kpis.map(kpi=>esc_html(kpi)+": "+esc_html(String(g[kpi]??"—"))).join(" · ")||esc_html("spend: "+g.spend)}</p></section>`).join("");
-    const bench_rows=Object.entries(bench_data).map(([k,g])=>`<li>${esc_html(k)}: CPA $${esc_html(String(g.cpa))}, CTR ${esc_html(String(g.ctr))}</li>`).join("");
-    const deck_html=`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>${esc_html("Client deck")}</title><style>body{font-family:system-ui,sans-serif;color:#1a1a1a;margin:0}.slide{padding:48px;page-break-after:always;border-bottom:2px solid #e2e2e0}</style></head><body><h1 style="padding:48px 48px 0">${esc_html("Creative performance")}</h1>${slides}<section class="slide"><h2>${esc_html("Benchmarks ("+$("rep-bench").value+")")}</h2><ul>${bench_rows}</ul></section></body></html>`;
-    $("rep-out").textContent="Deck built: "+camp_rows.length+" campaign slides + 1 benchmark slide.";
-    $("rep-links").innerHTML=`<a download="deck.html" href="${esc(URL.createObjectURL(new Blob([deck_html],{type:"text/html"})))}">Download deck.html</a>`;
-  }catch(e){$("rep-out").textContent="BLOCKED: "+e.message;}
+    const r=await api("POST","/api/report",{...report_body(),format:"deck"});
+    const d=r.deck||{};
+    const slides=(d.slides||[]).map(s=>`<section class="slide"><h2>${esc(s.campaign)}</h2><p>${esc(Object.entries(s.kpis||{}).map(([k,v])=>k+": "+v).join(" · "))}</p></section>`).join("");
+    const why=((d.why||[]).map(w=>`<li>${esc(w)}</li>`).join(""));
+    const deck_html=`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>${esc(d.title||"Client deck")}</title><style>body{font-family:system-ui,sans-serif;color:#1a1a1a;margin:0}.slide{padding:48px;page-break-after:always;border-bottom:2px solid #e2e2e0}</style></head><body><h1 style="padding:48px 48px 0">${esc(d.title||"Client deck")}</h1>${slides}<section class="slide"><h2>Why it won</h2><ul>${why}</ul></section></body></html>`;
+    $("rep-out").textContent="Deck built: "+(d.slides||[]).length+" campaign slides + why-analysis.";
+    download_link("deck.html","text/html",deck_html);
+  }catch(e){$("rep-out").textContent="BLOCKED: "+e.message;$("rep-links").innerHTML="";}
 }
 refresh();
 </script>

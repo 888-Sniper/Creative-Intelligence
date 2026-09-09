@@ -154,6 +154,25 @@ class Handler(BaseHTTPRequestHandler):
                         "SELECT annotation_json FROM annotations WHERE creative_key=?",
                         (r["creative_key"],)).fetchone()
                     r["annotation"] = json.loads(ann[0]) if ann else None
+                    agg = conn.execute(
+                        "SELECT COALESCE(SUM(spend),0), COALESCE(SUM(impressions),0),"
+                        " COALESCE(SUM(clicks),0), COALESCE(SUM(conversions),0),"
+                        " COALESCE(SUM(video_views),0), COALESCE(SUM(revenue),0)"
+                        " FROM ads WHERE creative_key=?",
+                        (r["creative_key"],)).fetchone()
+                    spend, impr, clicks, conv, views, rev = agg
+                    r["campaigns"] = [c[0] for c in conn.execute(
+                        "SELECT DISTINCT campaign FROM ads WHERE creative_key=?",
+                        (r["creative_key"],)).fetchall()]
+                    r["metrics"] = {
+                        "spend": spend, "impressions": impr, "clicks": clicks,
+                        "conversions": conv, "video_views": views,
+                        "revenue": rev,
+                        "cpm": round(spend / impr * 1000, 2) if impr else 0.0,
+                        "vtr": round(views / impr, 4) if impr else 0.0,
+                        "ctr": round(clicks / impr, 4) if impr else 0.0,
+                        "cpa": round(spend / conv, 2) if conv else 0.0,
+                        "roas": round(rev / spend, 4) if spend else 0.0}
                 send(self, 200, rows)
             elif url.path == "/api/retention":
                 key = q.get("creative_key", [""])[0]
@@ -342,6 +361,12 @@ def expert2_compare_route(conn, query):
 def expert2_cohort_build_route(conn, query):
     from creative_intel import cohorts as _cohorts
     metric = (query.get("metric", ["cpa"])[0] or "cpa").lower()
+    if query.get("id", [""])[0]:
+        try:
+            cohort_id = int(query["id"][0])
+        except (TypeError, ValueError):
+            raise ValueError("cohort id must be an integer")
+        return _cohorts.build_cohort(conn, cohort_id=cohort_id, metric=metric)
     if query.get("name", [""])[0]:
         return _cohorts.build_cohort(conn, name=query["name"][0], metric=metric)
     filt = {}

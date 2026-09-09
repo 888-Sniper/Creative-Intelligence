@@ -213,7 +213,8 @@ def race(active, fallback, call, timeout=FALLBACK_TIMEOUT_S):
 
 
 class MockStt:
-    def transcribe(self, creative_key, audio_bytes=None, mime=None):
+    def transcribe(self, creative_key, audio_bytes=None, mime=None,
+                   timings_out=None):
         return ("mock transcript for %s: hook in first three seconds, demo, offer cta"
                 % creative_key, 0.5)
 
@@ -233,6 +234,7 @@ class MockLlm:
     def structure(self, transcript, labels):
         from .creative import blank_annotation
         ann = blank_annotation()
+        ann["hook_modality"] = "unknown"
         text = (transcript or "").lower()
         if "?" in text or text.startswith(("what", "why", "how", "ever")):
             ann["hook_type"] = "question"
@@ -378,6 +380,9 @@ STRUCTURE_PROMPT = (
     "You structure ad-creative analysis. Reply with ONE JSON object only "
     "using exactly these keys: hook_type (one of question, bold_claim, "
     "demo_open, social_proof, offer, story, pattern_interrupt, other), "
+    "hook_modality (visual if the hook lands on-screen, spoken if it is "
+    "said in the transcript, text if it is overlaid copy, unknown if "
+    "unclear), "
     "hook_confidence (0..1), brand_seconds/product_seconds/logo_seconds "
     "(arrays of {start_s, end_s}), structure (object with hook, body, "
     "demo, supers, cta, endframe, voiceover each {start_s, end_s, "
@@ -514,7 +519,8 @@ class LiveStt:
     def __init__(self, adapters):
         self.adapters = adapters  # [(name, kind, model), ...]
 
-    def transcribe(self, creative_key, audio_bytes=None, mime=None):
+    def transcribe(self, creative_key, audio_bytes=None, mime=None,
+                   timings_out=None):
         if not audio_bytes:
             raise ProviderUnavailable(
                 "no audio for %r: upload media first" % creative_key)
@@ -523,8 +529,9 @@ class LiveStt:
         def call(item):
             name, kind, model, _tier = item
             if kind == "deepgram":
-                return self._deepgram(name, model, audio_bytes, mime)
-            return self._groq(name, model, audio_bytes, mime)
+                return self._deepgram(name, model, audio_bytes, mime,
+                                      timings_out)
+            return self._groq(name, model, audio_bytes, mime, timings_out)
 
         winner, value = race(
             [a for a in self.adapters if a[3] == "active"],
@@ -534,7 +541,19 @@ class LiveStt:
         return value
 
     @staticmethod
-    def _deepgram(name, model, audio, mime):
+    def _fill_timings(timings_out, words):
+        if timings_out is None:
+            return
+        for w in (words or [])[:300]:
+            try:
+                timings_out.append({
+                    "w": str(w.get("word", w.get("text", "")))[:60],
+                    "t": round(float(w.get("start", 0)), 2)})
+            except (TypeError, ValueError):
+                continue
+
+    @staticmethod
+    def _deepgram(name, model, audio, mime, timings_out=None):
         base = live_base("deepgram", ENDPOINTS["deepgram"]["base"])
         key = live_secret(ENDPOINTS["deepgram"]["key"])
         if not key:
@@ -553,19 +572,21 @@ class LiveStt:
             raise ProviderUnavailable("deepgram unreachable: %s" % e)
         try:
             alt = got["results"]["channels"][0]["alternatives"][0]
+            LiveStt._fill_timings(timings_out, alt.get("words"))
             return alt.get("transcript", ""), float(alt.get("confidence", 0.5))
         except (KeyError, IndexError, TypeError, ValueError):
             raise ProviderUnavailable("unexpected deepgram response shape")
 
     @staticmethod
-    def _groq(name, model, audio, mime):
+    def _groq(name, model, audio, mime, timings_out=None):
         base = live_base("groq-whisper", ENDPOINTS["groq-whisper"]["base"])
         key = live_secret(ENDPOINTS["groq-whisper"]["key"])
         if not key:
             raise ProviderUnavailable("missing key for groq-whisper")
         boundary = "----cilive%d" % abs(hash((name, model)))
         body = b""
-        for field, value in (("model", model),):
+        for field, value in (("model", model),
+                             ("response_format", "verbose_json")):
             body += ("--%s\r\nContent-Disposition: form-data; name=\"%s\"\r\n\r\n%s\r\n"
                      % (boundary, field, value)).encode()
         body += ("--%s\r\nContent-Disposition: form-data; name=\"file\"; "
@@ -586,6 +607,7 @@ class LiveStt:
             raise ProviderUnavailable("groq-whisper unreachable: %s" % e)
         if not isinstance(got.get("text"), str):
             raise ProviderUnavailable("unexpected groq-whisper response shape")
+        LiveStt._fill_timings(timings_out, got.get("segments"))
         return got["text"], 0.7
 
 
@@ -690,10 +712,11 @@ class LiveLlm:
                                max_tokens=cue_cap_tokens(model))
             data = _extract_json(text)
             ann = blank_annotation()
-            for key in ("hook_type", "hook_confidence", "brand_seconds",
-                        "product_seconds", "logo_seconds", "structure",
-                        "creator_vs_branded", "creator_confidence",
-                        "duration_s", "pace_cuts_per_min"):
+            for key in ("hook_type", "hook_modality", "hook_confidence",
+                        "brand_seconds", "product_seconds", "logo_seconds",
+                        "structure", "creator_vs_branded",
+                        "creator_confidence", "duration_s",
+                        "pace_cuts_per_min"):
                 if key in data:
                     ann[key] = data[key]
             errors = validate(ann)

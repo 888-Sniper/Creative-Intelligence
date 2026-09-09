@@ -418,6 +418,51 @@ class CreativeCompareParityTest(unittest.TestCase):
             self.assertIn(needle, text)
 
 
+class CreativesFilterTest(unittest.TestCase):
+    """GET /api/creatives honours canonical axes server-side, so the
+    Creative Library can never be wrongly emptied by client text blobs."""
+
+    def _serve(self, db):
+        import server
+        from http.server import HTTPServer
+        server.Handler.db_path = db
+        httpd = HTTPServer(("127.0.0.1", 0), server.Handler)
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        return httpd, thread, "http://127.0.0.1:%d" % httpd.server_address[1]
+
+    def test_vertical_filter_reaches_creatives(self):
+        import urllib.request
+        db = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
+        try:
+            conn = sqlite3.connect(db)
+            schema.init_db(conn)
+            ingest.insert_rows(conn, ingest.parse_csv(DIM_CSV, "meta"))
+            conn.close()
+            httpd, thread, base = self._serve(db)
+            try:
+                with urllib.request.urlopen(base + "/api/creatives") as resp:
+                    all_keys = sorted(r["creative_key"]
+                                      for r in json.loads(resp.read()))
+                self.assertEqual(all_keys, ["hook-a", "hook-b"])
+                with urllib.request.urlopen(
+                        base + "/api/creatives?vertical=Beauty") as resp:
+                    got = sorted(r["creative_key"]
+                                 for r in json.loads(resp.read()))
+                self.assertEqual(got, ["hook-a"])
+                with urllib.request.urlopen(
+                        base + "/api/creatives?vertical=Food") as resp:
+                    got = sorted(r["creative_key"]
+                                 for r in json.loads(resp.read()))
+                self.assertEqual(got, ["hook-b"])
+            finally:
+                httpd.shutdown()
+                httpd.server_close()
+                thread.join(timeout=10)
+        finally:
+            os.unlink(db)
+
+
 class ReportGateTest(unittest.TestCase):
     def test_report_blocked_while_reviews_pending(self):
         import server
@@ -465,6 +510,25 @@ class ReportExtrasTest(unittest.TestCase):
         finally:
             conn.close()
 
+    def test_strict_human_drops_unverified_insights(self):
+        conn = seeded_db()
+        try:
+            loose = benchmarks.build_report(conn, ["Alpha", "Beta"],
+                                            ["cpa", "ctr"], "campaign")
+            self.assertFalse(loose["deck"]["strict_human"])
+            # Seeded annotations are never verified: flags say so.
+            self.assertIn(False, loose["deck"]["learnings_verified"])
+            self.assertIn(False, loose["deck"]["recommendations_verified"])
+            strict = benchmarks.build_report(conn, ["Alpha", "Beta"],
+                                             ["cpa", "ctr"], "campaign",
+                                             strict_human=True)
+            self.assertTrue(strict["deck"]["strict_human"])
+            self.assertGreater(strict["deck"]["unverified_excluded"], 0)
+            self.assertIn("No HUMAN-VERIFIED learnings yet.",
+                          strict["deck"]["learnings"])
+        finally:
+            conn.close()
+
     def test_office_files_carry_all_sections(self):
         import base64
         import zipfile
@@ -493,10 +557,10 @@ class ReportExtrasTest(unittest.TestCase):
             try:
                 sheets = sorted(n for n in zf.namelist()
                                 if n.startswith("xl/worksheets/"))
-                self.assertGreaterEqual(len(sheets), 5)
+                self.assertGreaterEqual(len(sheets), 6)
                 wb = zf.read("xl/workbook.xml").decode()
-                for needle in ("Creatives", "Benchmarks", "Learnings",
-                               "Next steps"):
+                for needle in ("Creatives", "All Creatives", "Benchmarks",
+                               "Learnings", "Next steps"):
                     self.assertIn(needle, wb)
             finally:
                 zf.close()

@@ -355,27 +355,45 @@ def _creative_rows(conn, campaign):
             "SELECT DISTINCT creative_key FROM ads WHERE campaign=?",
             (campaign,)).fetchall():
         rows = conn.execute(
-            "SELECT spend, impressions, clicks, conversions FROM ads"
-            " WHERE creative_key=? AND campaign=?", (key, campaign,)).fetchall()
+            "SELECT spend, impressions, clicks, conversions, video_views,"
+            " revenue, platform FROM ads WHERE creative_key=? AND campaign=?",
+            (key, campaign,)).fetchall()
         spend = sum(r[0] for r in rows)
         impr = sum(r[1] for r in rows)
         clicks = sum(r[2] for r in rows)
         conv = sum(r[3] for r in rows)
+        views = sum(r[4] or 0 for r in rows)
+        revenue = sum(r[5] or 0 for r in rows)
+        platforms = sorted({r[6] for r in rows if r[6]})
         got = conn.execute("SELECT annotation_json FROM annotations"
                            " WHERE creative_key=?", (key,)).fetchone()
         try:
             ann = json.loads(got[0]) if got else {}
         except ValueError:
             ann = {}
+        ann = ann or {}
+        status = conn.execute("SELECT status FROM creatives WHERE creative_key=?",
+                              (key,)).fetchone()
+        duration = conn.execute("SELECT duration_s FROM creatives WHERE creative_key=?",
+                                (key,)).fetchone()
         out.append({
             "creative_key": key,
+            "platform": ",".join(platforms),
             "spend": round(spend, 2),
-            "ctr": round(clicks / impr, 4) if impr else 0.0,
-            "cpa": round(spend / conv, 2) if conv else None,
+            "impressions": impr,
+            "clicks": clicks,
             "conversions": conv,
-            "hook_type": (ann or {}).get("hook_type") or "unannotated",
-            "creator_vs_branded": (ann or {}).get("creator_vs_branded") or
-            "unannotated",
+            "cpm": round(spend / impr * 1000, 2) if impr else 0.0,
+            "vtr": round(views / impr, 4) if impr else 0.0,
+            "ctr": round(clicks / impr, 4) if impr else 0.0,
+            "cpc": round(spend / clicks, 2) if clicks else 0.0,
+            "cpa": round(spend / conv, 2) if conv else None,
+            "roas": round(revenue / spend, 4) if spend else 0.0,
+            "hook_type": ann.get("hook_type") or "unannotated",
+            "creator_vs_branded": ann.get("creator_vs_branded") or "unannotated",
+            "duration_s": ann.get("duration_s") or (duration[0] if duration else 0),
+            "status": ann.get("status") or (status[0] if status else "auto"),
+            "verified": ann.get("status") == "human_verified",
         })
     return out
 
@@ -408,42 +426,51 @@ def _report_extras(conn, names):
     if hook_spend:
         top_hook = max(hook_spend, key=lambda h: hook_spend[h])
         conv = hook_conv.get(top_hook, 0)
-        learnings.append(
+        hooked = [r for name in names for r in per_campaign[name]["creatives"]
+                  if r["hook_type"] == top_hook]
+        learnings.append((
             "%s hooks carry the most spend ($%s%s)." % (
                 top_hook, f"{hook_spend[top_hook]:,.2f}",
-                ", %s conversions" % conv if conv else ", no conversions yet"))
+                ", %s conversions" % conv if conv else ", no conversions yet"),
+            all(r["verified"] for r in hooked) if hooked else True))
     unannotated = sum(1 for name in names for r in per_campaign[name]["creatives"]
                       if r["hook_type"] == "unannotated")
     if unannotated:
-        learnings.append(
+        learnings.append((
             "%d of %d creatives lack hook labels — annotate them to "
             "unlock hook learnings." % (
-                unannotated, sum(len(per_campaign[n]["creatives"]) for n in names)))
+                unannotated, sum(len(per_campaign[n]["creatives"]) for n in names)),
+            True))
     recommendations = []
     cpa_ranked = [(n, per_campaign[n]["best"]) for n in names
                   if per_campaign[n]["best"] and
                   per_campaign[n]["best"]["cpa"] is not None]
     if cpa_ranked:
         top = min(cpa_ranked, key=lambda kv: kv[1]["cpa"])
-        recommendations.append(
+        recommendations.append((
             "Scale candidate (heuristic): %s — lowest best-creative CPA "
-            "at $%s (%s)." % (top[0], top[1]["cpa"], top[1]["creative_key"]))
+            "at $%s (%s)." % (top[0], top[1]["cpa"], top[1]["creative_key"]),
+            bool(top[1]["verified"])))
         bottom = max(cpa_ranked, key=lambda kv: kv[1]["cpa"])
         if bottom[0] != top[0]:
-            recommendations.append(
+            recommendations.append((
                 "Watch (heuristic): %s — highest best-creative CPA at $%s. "
                 "Compare its hook/format against %s before adding spend."
-                % (bottom[0], bottom[1]["cpa"], top[0]))
+                % (bottom[0], bottom[1]["cpa"], top[0]),
+                bool(bottom[1]["verified"] and top[1]["verified"])))
     if not recommendations:
-        recommendations.append(
+        recommendations.append((
             "No converting creatives yet — collect conversions before "
-            "scaling anything.")
-    return {"per_campaign": per_campaign, "learnings": learnings,
-            "recommendations": recommendations}
+            "scaling anything.", True))
+    return {"per_campaign": per_campaign,
+            "learnings": [t for t, _v in learnings],
+            "learnings_verified": [v for _t, v in learnings],
+            "recommendations": [t for t, _v in recommendations],
+            "recommendations_verified": [v for _t, v in recommendations]}
 
 
 def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
-                 fmt="one-pager"):
+                 fmt="one-pager", strict_human=False):
     """Generate a report over selected campaigns + KPIs + benchmark.
 
     fmt is "one-pager" (markdown), "csv", "deck" (slide JSON),
@@ -498,6 +525,27 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
     else:
         lines.append("- (no benchmark selected)")
     extras = _report_extras(conn, names)
+    strict = bool(strict_human)
+    unverified_excluded = 0
+    if strict:
+        # HUMAN-VERIFIED parity: insights resting on unverified
+        # annotations are dropped (counted), never silently kept.
+        kept_learn = [(t, v) for t, v in zip(
+            extras["learnings"], extras["learnings_verified"]) if v]
+        kept_reco = [(t, v) for t, v in zip(
+            extras["recommendations"],
+            extras["recommendations_verified"]) if v]
+        unverified_excluded = (
+            (len(extras["learnings"]) - len(kept_learn)) +
+            (len(extras["recommendations"]) - len(kept_reco)))
+        extras = dict(
+            extras,
+            learnings=[t for t, _v in kept_learn] or [
+                "No HUMAN-VERIFIED learnings yet."],
+            learnings_verified=[True] * (len(kept_learn) or 1),
+            recommendations=[t for t, _v in kept_reco] or [
+                "No HUMAN-VERIFIED recommendations yet."],
+            recommendations_verified=[True] * (len(kept_reco) or 1))
     lines += ["", "## Best / watch creatives", ""]
     for name in names:
         best = extras["per_campaign"][name]["best"]
@@ -528,7 +576,11 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
                               "worst": extras["per_campaign"][n]["worst"]}
                           for n in names},
             "learnings": extras["learnings"],
-            "recommendations": extras["recommendations"]}
+            "learnings_verified": extras["learnings_verified"],
+            "recommendations": extras["recommendations"],
+            "recommendations_verified": extras["recommendations_verified"],
+            "strict_human": strict,
+            "unverified_excluded": unverified_excluded}
     if fmt == "csv":
         return {"format": "csv", "csv": csv_text, "markdown": markdown, "deck": deck}
     if fmt == "deck":
@@ -602,11 +654,29 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
                                   ("watch", deck["creatives"][name]["worst"]))
                               if slot]}
         learn = {"name": "Learnings",
-                 "header": ["finding"],
-                 "rows": [[l] for l in deck["learnings"]] or [["—"]]}
+                 "header": ["finding", "human_verified"],
+                 "rows": [[l, v] for l, v in zip(
+                     deck["learnings"], deck["learnings_verified"])] or [["—", ""]]}
         reco = {"name": "Next steps",
-                "header": ["recommendation (heuristic)"],
-                "rows": [[r] for r in deck["recommendations"]] or [["—"]]}
+                "header": ["recommendation (heuristic)", "human_verified"],
+                "rows": [[r, v] for r, v in zip(
+                    deck["recommendations"],
+                    deck["recommendations_verified"])] or [["—", ""]]}
+        all_creatives = {"name": "All Creatives",
+                         "header": ["campaign", "creative", "platform",
+                                    "spend", "impressions", "clicks",
+                                    "conversions", "cpm", "vtr", "ctr",
+                                    "cpc", "cpa", "roas", "hook", "format",
+                                    "duration_s", "status", "human_verified"],
+                         "rows": [[name, r["creative_key"], r["platform"],
+                                   r["spend"], r["impressions"], r["clicks"],
+                                   r["conversions"], r["cpm"], r["vtr"],
+                                   r["ctr"], r["cpc"], r["cpa"], r["roas"],
+                                   r["hook_type"], r["creator_vs_branded"],
+                                   r["duration_s"], r["status"], r["verified"]]
+                                  for name in names
+                                  for r in extras["per_campaign"][name][
+                                      "creatives"]]}
         bench = deck.get("benchmark") or {}
         if isinstance(bench, dict) and bench and isinstance(
                 next(iter(bench.values())), dict):
@@ -618,7 +688,8 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
             bsheet = {"name": "Benchmarks", "header": ["benchmark"],
                       "rows": [[str(bench)[:300] if bench
                                 else "(no benchmark selected)"]]}
-        blob = ooxml.build_xlsx([sheet, why, creatives, bsheet, learn, reco])
+        blob = ooxml.build_xlsx([sheet, why, creatives, all_creatives,
+                                   bsheet, learn, reco])
         return {"format": "xlsx", "filename": "campaign-report.xlsx",
                 "xlsx_b64": base64.b64encode(blob).decode(),
                 "markdown": markdown, "csv": csv_text, "deck": deck}

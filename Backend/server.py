@@ -382,6 +382,20 @@ class Handler(BaseHTTPRequestHandler):
                 rows = [dict(zip(cols, r)) for r in conn.execute(
                     "SELECT creative_key, platform, name, duration_s, status,"
                     " transcript FROM creatives")]
+                filt = _filters_from_query(q)
+                if filt:
+                    from creative_intel import benchmarks as _bench
+                    norm = _bench.normalize_filters(filt)
+                    ad_cols = [c[0] for c in conn.execute(
+                        "SELECT * FROM ads LIMIT 0").description]
+                    kept = []
+                    for r in rows:
+                        ad_rows = [dict(zip(ad_cols, v)) for v in conn.execute(
+                            "SELECT * FROM ads WHERE creative_key=?",
+                            (r["creative_key"],)).fetchall()]
+                        if any(_bench.match_filters(ad, norm) for ad in ad_rows):
+                            kept.append(r)
+                    rows = kept
                 for r in rows:
                     ann = conn.execute(
                         "SELECT annotation_json FROM annotations WHERE creative_key=?",
@@ -656,7 +670,8 @@ def expert2_report_route(conn, payload):
     kpis = payload.get("kpis") or ["cpa", "ctr"]
     benchmark_sel = payload.get("benchmark")
     fmt = payload.get("format", "one-pager")
-    result = _bench.build_report(conn, campaigns, kpis, benchmark_sel, fmt)
+    result = _bench.build_report(conn, campaigns, kpis, benchmark_sel, fmt,
+                                 strict_human=bool(payload.get("strict_human")))
     if override:
         replay.log(conn, "report-override",
                    {"campaigns": campaigns, "format": fmt,

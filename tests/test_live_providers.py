@@ -63,7 +63,9 @@ class StubHandler(BaseHTTPRequestHandler):
         if self.path.startswith("/v2/listen"):
             assert self.headers.get("Authorization", "").startswith("Token "), \
                 "deepgram auth scheme"
-            alt = {"transcript": "stub spoken hook here", "confidence": 0.9}
+            alt = {"transcript": "stub spoken hook here", "confidence": 0.9,
+                   "words": [{"word": "stub", "start": 0.1, "end": 0.4},
+                             {"word": "hook", "start": 0.5, "end": 0.9}]}
             self._send(200, {"results": {"channels": [{"alternatives": [alt]}]}})
         elif self.path.endswith("/chat/completions"):
             frame = {"t_sec": 0.0, "label": "stub-open",
@@ -140,6 +142,16 @@ class LiveProviderTest(unittest.TestCase):
         self.assertEqual(text, "stub spoken hook here")
         self.assertEqual(conf, 0.9)
         self.assertNotIn("mock", text)
+
+    def test_live_stt_captures_word_timings(self):
+        stt = providers.LiveStt([("deepgram", "deepgram", "flux-general-en",
+                                  "active")])
+        timings = []
+        text, _conf = stt.transcribe("k", audio_bytes=b"RIFF....",
+                                     timings_out=timings)
+        self.assertEqual(text, "stub spoken hook here")
+        self.assertEqual(timings, [{"w": "stub", "t": 0.1},
+                                   {"w": "hook", "t": 0.5}])
 
     def test_live_stt_needs_audio(self):
         stt = providers.LiveStt([("deepgram", "deepgram", "flux-general-en",

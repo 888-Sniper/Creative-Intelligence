@@ -19,6 +19,8 @@ SCHEMA_VERSION = "v0"
 HOOK_TYPES = ("question", "bold_claim", "demo_open", "social_proof",
               "offer", "story", "pattern_interrupt", "other")
 
+HOOK_MODALITIES = ("visual", "spoken", "text", "unknown")
+
 STRUCTURE_SLOTS = ("hook", "body", "demo", "supers", "cta",
                    "endframe", "voiceover")
 
@@ -31,6 +33,7 @@ def blank_annotation():
     return {
         "schema_version": SCHEMA_VERSION,
         "hook_type": "other",
+        "hook_modality": "unknown",
         "hook_confidence": 0.0,
         "brand_seconds": [],
         "product_seconds": [],
@@ -51,6 +54,9 @@ def validate(ann):
         errors.append("schema_version must be %r" % SCHEMA_VERSION)
     if ann.get("hook_type") not in HOOK_TYPES:
         errors.append("hook_type must be one of %s" % (list(HOOK_TYPES),))
+    if ("hook_modality" in ann and
+            ann.get("hook_modality") not in HOOK_MODALITIES):
+        errors.append("hook_modality must be one of %s" % (list(HOOK_MODALITIES),))
     if ann.get("creator_vs_branded") not in CREATOR_MODES:
         errors.append("creator_vs_branded must be one of %s" % (list(CREATOR_MODES),))
     for slot in STRUCTURE_SLOTS:
@@ -124,8 +130,10 @@ def run_pipeline(conn, creative_key, providers, media=None):
     media = media or {}
 
     audio_blob, audio_mime = media.get("audio") or (None, None)
+    timings = []
     transcript, conf = providers.stt.transcribe(
-        creative_key, audio_bytes=audio_blob, mime=audio_mime)
+        creative_key, audio_bytes=audio_blob, mime=audio_mime,
+        timings_out=timings)
     stages.append({"stage": "transcribe", "confidence": conf})
     conn.execute("UPDATE creatives SET transcript=? WHERE creative_key=?",
                  (transcript, creative_key))
@@ -142,6 +150,10 @@ def run_pipeline(conn, creative_key, providers, media=None):
     ann = providers.llm.structure(transcript, labels)
     ann["schema_version"] = SCHEMA_VERSION
     ann["status"] = "auto"
+    if timings:
+        # Word-level audio timings ({w, t}) when the STT adapter
+        # supplies them — basis for audible-mention analysis.
+        ann["transcript_words"] = timings[:300]
     errors = validate(ann)
     if errors:
         raise ValueError("structurer produced invalid v0: " + "; ".join(errors))

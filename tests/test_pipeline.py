@@ -118,6 +118,14 @@ class CreativeTest(unittest.TestCase):
         ann["hook_type"] = "mind_control"
         self.assertTrue(creative.validate(ann))
 
+    def test_hook_modality_validated(self):
+        ann = creative.blank_annotation()
+        self.assertEqual(ann["hook_modality"], "unknown")
+        ann["hook_modality"] = "spoken"
+        self.assertEqual(creative.validate(ann), [])
+        ann["hook_modality"] = "telepathic"
+        self.assertTrue(creative.validate(ann))
+
     def test_pipeline_then_gate(self):
         conn = fresh_db()
         prov = providers.Providers()

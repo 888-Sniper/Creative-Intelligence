@@ -137,6 +137,46 @@ class ShellLiveTest(unittest.TestCase):
         self.assertIn(".creative-card .media video", HTML)
         self.assertIn("pick_source(a)", HTML)
 
+    def test_new_flow_controls_present(self):
+        for cid in ("xlsx-file", "sheets-url", "sheets-go", "meta-acct",
+                    "meta-since", "meta-until", "tt-adv", "tt-start",
+                    "tt-end", "meta-go", "tt-go", "conn-status",
+                    "media-file", "media-go", "media-status", "prov-status",
+                    "rep-pptx", "rep-xlsx"):
+            self.assertIn('id="%s"' % cid, HTML)
+
+    def test_office_labels_honest(self):
+        self.assertIn("presentation (HTML deck)", HTML)
+        self.assertIn("Generate PowerPoint (.pptx)", HTML)
+        self.assertIn("Generate Excel (.xlsx)", HTML)
+        self.assertIn("/api/connect/sheets", HTML)
+        self.assertIn("/api/connect/meta", HTML)
+        self.assertIn("/api/connect/tiktok", HTML)
+        self.assertIn("/api/media/upload", HTML)
+
+    def test_report_office_formats_end_to_end(self):
+        import base64
+        import urllib.request
+        csv_payload = ("Campaign,Spend,Impressions,Clicks,Conversions\n"
+                       "LiveCamp,50,5000,100,5\n").encode()
+        req = urllib.request.Request(
+            "http://127.0.0.1:%d/api/ingest" % self.port, data=json.dumps(
+                {"platform": "meta",
+                 "csv": csv_payload.decode()}).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=5):
+            pass
+        for fmt, key in (("pptx", "pptx_b64"), ("xlsx", "xlsx_b64")):
+            req = urllib.request.Request(
+                "http://127.0.0.1:%d/api/report" % self.port,
+                data=json.dumps({"format": fmt,
+                                 "kpis": ["cpa", "ctr"]}).encode(),
+                headers={"Content-Type": "application/json"}, method="POST")
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                rep = json.loads(resp.read())
+            self.assertEqual(rep["format"], fmt)
+            self.assertTrue(base64.b64decode(rep[key]).startswith(b"PK"))
+
     def test_asset_sandbox(self):
         import urllib.error
         for bad in ("/assets/../Index.html", "/assets/.hidden",

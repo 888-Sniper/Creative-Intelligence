@@ -172,12 +172,30 @@ ul.plain li{padding:6px 0;border-bottom:1px solid var(--line)}
 <h1 class="page-title">Overview</h1>
 <p class="page-sub">How are your campaigns performing? What creatives are winning? What needs attention?</p>
 <div class="card">
-<h3>Upload (Meta / TikTok CSV, Excel-as-CSV, Sheets CSV export)</h3>
+<h3>Upload (Meta / TikTok CSV, Excel .xlsx, Sheets link)</h3>
 <select id="platform"><option value="meta">Meta</option><option value="tiktok">TikTok</option></select>
 <textarea id="csv" placeholder="Paste CSV export text here"></textarea><br><br>
-<button class="action" id="upload">Upload</button>
+<button class="action" id="upload">Upload CSV</button>
+<label class="secondary" style="display:inline-block;cursor:pointer">Upload .xlsx<input type="file" id="xlsx-file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden></label>
 <button class="action" id="fixture">Load Fixture (server --load-fixture)</button>
 <span id="up-status" class="muted"></span>
+<div style="margin-top:12px"><h4>Google Sheets link</h4>
+<div class="ask-row"><input type="text" id="sheets-url" placeholder="Paste a published Google Sheets link…" aria-label="Google Sheets link"><button class="action" id="sheets-go">Import sheet</button></div>
+<div class="muted" style="font-size:12px">Published CSV links only — private files need OAuth (parked).</div></div>
+<div style="margin-top:12px"><h4>Platform APIs</h4>
+<div class="filter-grid">
+<label>Meta ad account<input type="text" id="meta-acct" placeholder="act id, no prefix"></label>
+<label>Since<input type="text" id="meta-since" placeholder="2026-08-01"></label>
+<label>Until<input type="text" id="meta-until" placeholder="2026-08-31"></label>
+<label>TikTok advertiser<input type="text" id="tt-adv" placeholder="advertiser id"></label>
+<label>Start<input type="text" id="tt-start" placeholder="2026-08-01"></label>
+<label>End<input type="text" id="tt-end" placeholder="2026-08-31"></label>
+</div>
+<div style="margin-top:8px"><button class="action" id="meta-go">Import Meta</button>
+<button class="action" id="tt-go">Import TikTok</button>
+<span id="conn-status" class="muted"></span></div>
+<div class="muted" style="font-size:12px">Tokens stay in macOS Keychain or env — never in the repo. Without a token the import refuses instead of inventing rows.</div></div>
+<div class="muted" style="font-size:12px;margin-top:8px" id="prov-status"></div>
 </div>
 <div class="card"><h3>KPIs</h3><div id="kpis">—</div></div>
 <div class="card"><h3>Gated one-pager export</h3>
@@ -190,7 +208,10 @@ ul.plain li{padding:6px 0;border-bottom:1px solid var(--line)}
 <section class="view" id="v-creative"><h1 class="page-title">Creatives</h1><p class="page-sub">Scan the work first, metrics second. Select any creative for the full review workspace.</p>
 <div class="card"><button class="action" id="run-pipe">Run pipeline on selected</button>
 <button class="action" id="verify">Mark HUMAN-VERIFIED</button>
-<span class="muted">Manual annotate: edit hook type / format, then Save.</span></div>
+<span class="muted">Manual annotate: edit hook type / format, then Save.</span>
+<div style="margin-top:10px"><h4>Media for selected creative</h4>
+<div class="ask-row"><input type="file" id="media-file" accept="video/*,image/*,audio/*" aria-label="Creative media file"><button class="action" id="media-go">Upload media</button></div>
+<div class="muted" style="font-size:12px;margin-top:4px">Stored locally, linked as the creative preview and used by live analysis. <span id="media-status"></span></div></div></div>
 <div class="card"><h3>Creative view</h3><div id="creative-detail"><p class="muted">Select a creative below.</p></div></div>
 <div id="library"></div></section>
 <section class="view" id="v-compare"><h1 class="page-title">Compare</h1><p class="page-sub">Two modes: creatives side-by-side, or campaigns ranked with why-analysis.</p>
@@ -223,7 +244,7 @@ ul.plain li{padding:6px 0;border-bottom:1px solid var(--line)}
 <div id="bb-saved" style="margin-top:8px"></div>
 <div id="bb-out" style="margin-top:8px"></div></div>
 </section>
-<section class="view" id="v-report"><h1 class="page-title">Reports</h1><p class="page-sub">Select campaigns, KPIs and a benchmark, then generate. One-pager, CSV and presentation (HTML deck) formats.</p>
+<section class="view" id="v-report"><h1 class="page-title">Reports</h1><p class="page-sub">Select campaigns, KPIs and a benchmark, then generate. One-pager, CSV, true PowerPoint (.pptx), true Excel (.xlsx) and presentation (HTML deck) formats.</p>
 <div class="card"><h3>Campaigns</h3><div id="rep-campaigns" class="muted">—</div></div>
 <div class="card"><h3>Creatives (one-pager source)</h3><div id="rep-creatives" class="muted">—</div></div>
 <div class="card"><h3>KPIs</h3>
@@ -245,6 +266,8 @@ ul.plain li{padding:6px 0;border-bottom:1px solid var(--line)}
 <label><input type="checkbox" id="rep-override"> override (logged)</label><br><br>
 <button class="action" id="rep-onepager">Generate one-pager</button>
 <button class="action" id="rep-csv">Generate CSV</button>
+<button class="action" id="rep-pptx">Generate PowerPoint (.pptx)</button>
+<button class="action" id="rep-xlsx">Generate Excel (.xlsx)</button>
 <button class="action" id="rep-deck">Generate presentation (HTML deck)</button>
 <pre id="rep-out" class="muted"></pre>
 <span id="rep-links" class="report-outputs"></span></div>
@@ -316,9 +339,30 @@ $("ask-go").onclick=ask_go;
 $("bb-create").onclick=builder_create;
 $("rep-onepager").onclick=report_onepager;
 $("rep-csv").onclick=report_csv;
+$("rep-pptx").onclick=report_pptx;
+$("rep-xlsx").onclick=report_xlsx;
 $("rep-deck").onclick=report_deck;
+$("sheets-go").onclick=sheets_go;
+$("meta-go").onclick=meta_go;
+$("tt-go").onclick=tt_go;
+$("media-go").onclick=media_go;
+$("xlsx-file").addEventListener("change",xlsx_go);
 function mark_active_filters(){const f=active_filters();["client","project","campaign","platform","vertical","market","funnel","objective","kpi","date"].forEach(k=>{const el=$("flt-"+k);if(!el)return;const v=f[k];el.classList.toggle("active",!!v&&v!=="all");});}
-async function refresh(){mark_active_filters();filter_summary();kpis();campaigns();library();bench();report_lists();}
+async function refresh(){mark_active_filters();filter_summary();kpis();campaigns();library();bench();report_lists();prov_status();}
+async function prov_status(){try{
+  const h=await api("GET","/api/health");
+  const keys=h.keys||{};
+  const missing=Object.entries(keys).filter(([,v])=>v!=="configured").map(([k])=>k);
+  $("prov-status").textContent=h.provider_mode==="live"
+    ?"Providers: live mode."+(missing.length?" Missing keys: "+missing.join(", ")+".":" All capability groups configured.")
+    :"Providers: mock mode — set provider_mode=live and add Keychain keys for live transcription, vision and structuring.";
+}catch(e){$("prov-status").textContent="Provider status unavailable.";}}
+function read_file_b64(file){return new Promise((res,rej)=>{const fr=new FileReader();fr.onload=()=>res(String(fr.result).split(",",2)[1]||"");fr.onerror=()=>rej(new Error("could not read file"));fr.readAsDataURL(file);});}
+async function xlsx_go(){const f=$("xlsx-file").files[0];if(!f){$("up-status").textContent="Choose an .xlsx file first.";return;}try{const b64=await read_file_b64(f);const r=await api("POST","/api/ingest",{platform:$("platform").value,xlsx_b64:b64,source:"upload"});$("up-status").textContent="Inserted "+r.inserted+" rows ("+r.quarantined_count+" quarantined).";refresh();}catch(e){$("up-status").textContent=e.message;}}
+async function sheets_go(){const u=$("sheets-url").value.trim();if(!u){$("up-status").textContent="Paste a Sheets link first.";return;}try{const r=await api("POST","/api/connect/sheets",{url:u,platform:$("platform").value});$("up-status").textContent="Inserted "+r.inserted+" rows from Sheets ("+r.quarantined_count+" quarantined).";refresh();}catch(e){$("up-status").textContent=e.message;}}
+async function meta_go(){try{const r=await api("POST","/api/connect/meta",{ad_account_id:$("meta-acct").value.trim(),since:$("meta-since").value.trim(),until:$("meta-until").value.trim()});$("conn-status").textContent="Meta: inserted "+r.inserted+" rows ("+r.quarantined_count+" quarantined).";refresh();}catch(e){$("conn-status").textContent=e.message;}}
+async function tt_go(){try{const r=await api("POST","/api/connect/tiktok",{advertiser_id:$("tt-adv").value.trim(),start_date:$("tt-start").value.trim(),end_date:$("tt-end").value.trim()});$("conn-status").textContent="TikTok: inserted "+r.inserted+" rows ("+r.quarantined_count+" quarantined).";refresh();}catch(e){$("conn-status").textContent=e.message;}}
+async function media_go(){if(!selected){$("media-status").textContent="Select a creative below first.";return;}const f=$("media-file").files[0];if(!f){$("media-status").textContent="Choose a media file first.";return;}try{const b64=await read_file_b64(f);const r=await api("POST","/api/media/upload",{creative_key:selected,filename:f.name,content_b64:b64,mime:f.type||undefined});$("media-status").textContent="Stored "+r.filename+" ("+r.bytes+" bytes) → "+r.url+".";refresh();}catch(e){$("media-status").textContent=e.message;}}
 async function kpis(){try{
   const c=await api("GET","/api/campaigns");const groups=Object.values(c);
   if(!groups.length){$("kpis").innerHTML='<div class="empty-state">Upload performance data to begin.</div>';return;}
@@ -388,7 +432,7 @@ async function library(){
 function pick_source(a){
   for(const k of ["source_url","video_url","sourceUrl","videoUrl"]){
     const u=a[k];
-    if(typeof u==="string"&&/^(https?:|blob:)/.test(u.trim()))return u.trim();
+    if(typeof u==="string"&&/^(https?:|blob:|\/media\/)/.test(u.trim()))return u.trim();
   }
   return null;
 }
@@ -474,20 +518,23 @@ function retention_svg(segs){
 }
 function render_compare(r,a,b){
   const f=active_filters();
+  const kpi_row=(d,k,money)=>`<tr><th>${k.toUpperCase()}</th><td>${money?"$":""}${esc(String(d[k]??"—"))}</td></tr>`;
   const card=key=>{
     const d=(r&&r[key])||{};const ann=d.annotation||{};
     const blob=text_blob([key,ann.hook_type,ann.creator_vs_branded]);
     const pass=(f.platform==="all"?"—":blob.includes(f.platform))&&(text_match(blob,f)?"passes filters":"filtered out");
-    return `<div class="card"><h3>${esc(key||"(empty)")}</h3>
+    const top=(r&&r.why&&r.why.top)===key&&key?" (top)":"";
+    return `<div class="card"><h3>${esc(key||"(empty)")}${esc(top)}</h3>
     <div class="muted" style="font-size:12px">${esc(String(pass))}</div>
-    <table><tr><th>Spend</th><td>$${esc(String(d.spend??"—"))}</td></tr>
-    <tr><th>CTR</th><td>${esc(String(d.ctr??"—"))}</td></tr>
-    <tr><th>CPA</th><td>$${esc(String(d.cpa??"—"))}</td></tr>
+    <table>${kpi_row(d,"spend",1)}${kpi_row(d,"impressions")}${kpi_row(d,"clicks")}${kpi_row(d,"conversions")}${kpi_row(d,"cpm",1)}${kpi_row(d,"vtr")}${kpi_row(d,"ctr")}${kpi_row(d,"cpc",1)}${kpi_row(d,"cpa",1)}${kpi_row(d,"roas")}
     <tr><th>Hook</th><td>${esc(ann.hook_type||"—")}</td></tr>
     <tr><th>Format</th><td>${esc(ann.creator_vs_branded||"—")}</td></tr>
     <tr><th>Status</th><td>${esc(ann.status||"—")}</td></tr></table></div>`;
   };
-  $("cmp-out").innerHTML=`<div class="cmp-grid">${card(a)}${card(b)}</div>`;
+  const why=((r&&r.why&&r.why.differences)||[]).map(d=>`<li>${esc(d)}</li>`).join("");
+  const top=(r&&r.why&&r.why.top)||null;
+  $("cmp-out").innerHTML=`<div class="cmp-grid">${card(a)}${card(b)}</div>`
+    +`<div class="insight-panel"><h4>Why ${esc(top||"—")} won</h4><ul class="plain">${why||"<li>—</li>"}</ul></div>`;
 }
 async function bench(){try{
   const b=await api("GET","/api/benchmarks?group_by="+encodeURIComponent($("gb").value));
@@ -576,6 +623,25 @@ async function report_csv(){
     const r=await api("POST","/api/report",{...report_body(),format:"csv"});
     $("rep-out").textContent=r.csv;
     download_link("report.csv","text/csv",r.csv);
+  }catch(e){$("rep-out").textContent="BLOCKED: "+e.message;$("rep-links").innerHTML="";}
+}
+function download_b64(filename,mime,b64){
+  const bin=atob(b64);const arr=new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++)arr[i]=bin.charCodeAt(i);
+  $("rep-links").innerHTML=`<a download="${esc(filename)}" href="${esc(URL.createObjectURL(new Blob([arr],{type:mime})))}">Download ${esc(filename)}</a>`;
+}
+async function report_pptx(){
+  try{
+    const r=await api("POST","/api/report",{...report_body(),format:"pptx"});
+    $("rep-out").textContent="PowerPoint built: "+r.filename+".";
+    download_b64(r.filename,"application/vnd.openxmlformats-officedocument.presentationml.presentation",r.pptx_b64);
+  }catch(e){$("rep-out").textContent="BLOCKED: "+e.message;$("rep-links").innerHTML="";}
+}
+async function report_xlsx(){
+  try{
+    const r=await api("POST","/api/report",{...report_body(),format:"xlsx"});
+    $("rep-out").textContent="Excel workbook built: "+r.filename+".";
+    download_b64(r.filename,"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",r.xlsx_b64);
   }catch(e){$("rep-out").textContent="BLOCKED: "+e.message;$("rep-links").innerHTML="";}
 }
 async function report_deck(){

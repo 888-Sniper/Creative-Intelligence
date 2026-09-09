@@ -1,8 +1,14 @@
 # Providers
 
 Ported from Nextly AI (`docs/PROVIDERS.md`, verified 26 August 2026).
-Re-check model ids before live wiring. No secrets live in this repo;
-every key lives in macOS Keychain under the service name listed.
+Live clients are wired in `Backend/creative_intel/providers.py`
+(stdlib urllib, OpenAI-compatible chat plus native Gemini/Anthropic,
+Deepgram + Groq STT). No secrets live in this repo; every key lives
+in macOS Keychain under the service name listed, with
+`CREATIVE_INTEL_KEY_*` env overrides for CI/non-macOS and
+`CREATIVE_INTEL_BASE_*` endpoint overrides for stubs/proxies.
+Live stages need uploaded media bytes (audio/frames); without them
+they raise instead of inventing content.
 
 ## Pattern (same as Nextly)
 

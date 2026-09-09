@@ -379,12 +379,16 @@ class Handler(BaseHTTPRequestHandler):
                                  "keys": providers.key_status(),
                                  "providers": providers.provider_matrix()})
             elif url.path == "/api/campaigns":
+                # Same shared Scope as every other surface: a
+                # Campaign=CampA filter scopes Overview KPIs too, not
+                # just the library/Ask/reports.
                 send(self, 200, benchmarks.benchmark(
-                    conn, "campaign", _filters_from_query(q)))
+                    conn, "campaign",
+                    benchmarks.Scope.from_query(q).normalized()))
             elif url.path == "/api/benchmarks":
                 send(self, 200, benchmarks.benchmark(
                     conn, q.get("group_by", ["hook_type"])[0],
-                    _filters_from_query(q)))
+                    benchmarks.Scope.from_query(q).normalized()))
             elif url.path == "/api/creatives":
                 cols = ["creative_key", "platform", "name", "duration_s",
                         "status", "transcript"]
@@ -484,6 +488,9 @@ class Handler(BaseHTTPRequestHandler):
                 from creative_intel import benchmarks as _bench3
                 send(self, 200, retention.patterns(
                     conn, _bench3.Scope.from_query(q)))
+            elif url.path == "/api/retention/curve":
+                key = q.get("creative_key", [""])[0]
+                send(self, 200, retention.curve(conn, key))
             elif url.path == "/api/replay":
                 send(self, 200, replay.history(conn))
             elif url.path == "/api/reviews":
@@ -709,7 +716,9 @@ def expert2_report_route(conn, payload):
     fmt = payload.get("format", "one-pager")
     result = _bench.build_report(conn, campaigns, kpis, benchmark_sel, fmt,
                                  strict_human=bool(payload.get("strict_human")),
-                                 filters=payload.get("filters"))
+                                 filters=payload.get("filters"),
+                                 benchmark_scope=payload.get(
+                                     "benchmark_scope", "filters"))
     if override:
         replay.log(conn, "report-override",
                    {"campaigns": campaigns, "format": fmt,

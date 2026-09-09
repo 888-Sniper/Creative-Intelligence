@@ -47,6 +47,8 @@ ACC_CSV = ("Campaign,Ad Name,Creative Name,Amount Spent,Impressions,"
            "Foap,Proj1,Beauty,Spain,Sales,Lower,2026-08-03\n"
            "CampB,B2,null-cpa,80,8000,0,0,1000,0,"
            "Foap,Proj1,Food,France,Awareness,Upper,2026-08-04\n"
+           "CampA,A3,france-offer,30,3000,30,0,500,0,"
+           "Foap,Proj1,Beauty,France,Sales,Lower,2026-08-07\n"
            "CampC,C1,zero-creative,60,0,0,0,0,0,"
            "Foap,Proj2,Food,France,Awareness,Upper,2026-08-05\n"
            "CampD,D1,zero-creative-2,40,0,0,0,0,0,"
@@ -105,6 +107,11 @@ def fresh_acc_db():
         "status": "auto"})
     creative.save_annotation(conn, "spain-only", spain)
     creative.save_annotation(conn, "null-cpa", creative.blank_annotation())
+    offer = creative.blank_annotation()
+    offer.update({"hook_type": "offer", "hook_modality": "text",
+                  "hook_confidence": 0.6, "creator_vs_branded": "hybrid",
+                  "creator_confidence": 0.6, "duration_s": 18.0})
+    creative.save_annotation(conn, "france-offer", offer)
     conn.execute("UPDATE creatives SET status='human_verified'"
                  " WHERE creative_key='shared-creative'")
     conn.executemany(
@@ -269,7 +276,8 @@ class Gate3CampaignIsolationTest(unittest.TestCase):
     def test_scope_campaign_axis(self):
         rows = benchmarks._creative_rows(
             self.conn, "CampA", scope={"campaign": ["CampA"]})
-        self.assertEqual(len(rows), 2)
+        self.assertEqual(sorted(r["creative_key"] for r in rows),
+                         ["france-offer", "shared-creative", "spain-only"])
         rows = benchmarks._creative_rows(
             self.conn, "CampA", scope={"campaign": ["CampB"]})
         self.assertEqual(rows, [])
@@ -624,3 +632,166 @@ class RetentionIntelligenceTest(unittest.TestCase):
         # spain-only has no France rows: excluded from the population.
         self.assertNotIn("spain-only", keys)
         self.assertIn("shared-creative", keys)
+
+
+class RouteScopeIntegrationTest(unittest.TestCase):
+    """The real HTTP routes (not just the helpers) honour Scope.
+
+    Regression cover for the round where /api/campaigns and
+    /api/benchmarks used the old helper without the campaign axis.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        from http.server import HTTPServer
+        import tempfile
+        import threading
+        live = fresh_acc_db()
+        cls._db = tempfile.NamedTemporaryFile(suffix=".db",
+                                              delete=False).name
+        disk = sqlite3.connect(cls._db)
+        schema.init_db(disk)
+        for sql in live.iterdump():
+            if sql.startswith("INSERT"):
+                disk.execute(sql)
+        disk.commit()
+        live.close()
+        disk.close()
+        cls._prev = server.Handler.db_path
+        server.Handler.db_path = cls._db
+        cls._srv = HTTPServer(("127.0.0.1", 0), server.Handler)
+        cls.port = cls._srv.server_address[1]
+        cls._thread = threading.Thread(
+            target=cls._srv.serve_forever, daemon=True)
+        cls._thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._srv.shutdown()
+        cls._thread.join(timeout=10)
+        server.Handler.db_path = cls._prev
+        os.unlink(cls._db)
+
+    def _get(self, path):
+        import urllib.request
+        with urllib.request.urlopen(
+                "http://127.0.0.1:%d%s" % (self.port, path),
+                timeout=10) as resp:
+            return json.loads(resp.read())
+
+    def test_campaigns_route_scopes_by_campaign(self):
+        got = self._get("/api/campaigns?campaign=CampA")
+        self.assertEqual(sorted(got), ["CampA"])
+        self.assertEqual(got["CampA"]["spend"], 180.0)
+
+    def test_campaigns_route_scopes_by_market(self):
+        got = self._get("/api/campaigns?market=Spain")
+        self.assertEqual(sorted(got), ["CampA"])
+
+    def test_benchmarks_route_scopes_by_campaign(self):
+        got = self._get("/api/benchmarks?group_by=platform&campaign=CampA")
+        # All rows are meta, so only the spend proves the scope:
+        # CampA = 180, whole dataset = 560.
+        self.assertEqual(sorted(got), ["meta"])
+        self.assertEqual(got["meta"]["spend"], 180.0)
+
+    def test_benchmarks_route_scopes_by_market(self):
+        got = self._get("/api/benchmarks?group_by=campaign&market=Spain")
+        self.assertEqual(sorted(got), ["CampA"])
+
+    def test_curve_route_serves_points_and_markers(self):
+        got = self._get("/api/retention/curve?creative_key=shared-creative")
+        self.assertEqual(len(got["points"]), 11)
+        self.assertEqual(got["markers"]["product_s"], 6.2)
+        self.assertEqual(got["markers"]["brand_s"], 0.5)
+        self.assertEqual(got["markers"]["cta_s"], 25.0)
+        self.assertEqual(got["markers"]["hook"],
+                         {"start_s": 0.0, "end_s": 3.0})
+
+
+class WhyAnalysisScopeTest(unittest.TestCase):
+    """The campaign why-analysis reads the scoped population."""
+
+    def setUp(self):
+        self.conn = fresh_acc_db()
+
+    def tearDown(self):
+        self.conn.close()
+
+    def test_elements_exclude_out_of_scope_mix(self):
+        scoped = benchmarks._campaign_elements(self.conn, "CampA",
+                                               {"market": ["Spain"]})
+        self.assertNotIn("offer", scoped["hook_types"])
+        self.assertNotIn("hybrid", scoped["creator_modes"])
+        full = benchmarks._campaign_elements(self.conn, "CampA")
+        self.assertIn("offer", full["hook_types"])
+        self.assertIn("hybrid", full["creator_modes"])
+
+    def test_compare_why_no_french_contamination(self):
+        full = benchmarks.compare_campaigns(
+            self.conn, ["CampA", "CampB"], rank_by="cpa",
+            filters={"vertical": ["Beauty"]})
+        self.assertTrue(any("offer" in d
+                            for d in full["why"]["differences"]))
+        scoped = benchmarks.compare_campaigns(
+            self.conn, ["CampA", "CampB"], rank_by="cpa",
+            filters={"market": ["Spain"]})
+        self.assertFalse(any("offer" in d
+                             for d in scoped["why"]["differences"]))
+        self.assertFalse(any("hybrid" in d
+                             for d in scoped["why"]["differences"]))
+
+
+class ReportBenchmarkScopeTest(unittest.TestCase):
+    def setUp(self):
+        self.conn = fresh_acc_db()
+
+    def tearDown(self):
+        self.conn.close()
+
+    def test_benchmark_scoped_by_default(self):
+        rep = benchmarks.build_report(self.conn, ["CampA"], ["cpa"],
+                                      "platform", "deck", filters=SPAIN)
+        bench = rep["deck"]["benchmark"]
+        self.assertEqual(bench["meta"]["spend"], 150.0)
+        self.assertIn("scoped", rep["deck"]["benchmark_scope"])
+        self.assertIn("## Benchmark (scoped", rep["markdown"])
+
+    def test_benchmark_global_opt_out(self):
+        rep = benchmarks.build_report(self.conn, ["CampA"], ["cpa"],
+                                      "platform", "deck", filters=SPAIN,
+                                      benchmark_scope="global")
+        bench = rep["deck"]["benchmark"]
+        self.assertEqual(bench["meta"]["spend"], 560.0)
+        self.assertIn("global", rep["deck"]["benchmark_scope"])
+
+    def test_metric_benchmark_scoped(self):
+        rep = benchmarks.build_report(self.conn, ["CampA"], ["cpa"],
+                                      "cpa", "deck", filters=SPAIN)
+        self.assertEqual(rep["deck"]["benchmark"]["cpa"],
+                         round(150.0 / 18, 2))
+
+
+class RetentionCurveTest(unittest.TestCase):
+    def setUp(self):
+        self.conn = fresh_acc_db()
+
+    def tearDown(self):
+        self.conn.close()
+
+    def test_curve_points_and_markers(self):
+        got = retention.curve(self.conn, "shared-creative")
+        self.assertEqual([(p["t"], p["p"]) for p in got["points"][:3]],
+                         [(0.0, 100.0), (3.0, 98.0), (6.0, 95.0)])
+        self.assertEqual(got["points"][-1], {"t": 30.0, "p": 72.0})
+        markers = got["markers"]
+        self.assertEqual(markers["product_s"], 6.2)
+        self.assertEqual(markers["brand_s"], 0.5)
+        self.assertEqual(markers["cta_s"], 25.0)
+        self.assertEqual(markers["hook"], {"start_s": 0.0, "end_s": 3.0})
+
+    def test_curve_needs_annotation_and_curve(self):
+        with self.assertRaises(ValueError):
+            retention.curve(self.conn, "zero-creative")
+        with self.assertRaises(ValueError):
+            retention.curve(self.conn, "no-such-creative")

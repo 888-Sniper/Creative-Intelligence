@@ -54,6 +54,49 @@ def join_segments(conn, creative_key):
     return out
 
 
+def _span_min(spans):
+    starts = [s.get("start_s") for s in spans or []
+              if isinstance(s, dict)
+              and isinstance(s.get("start_s"), (int, float))
+              and not isinstance(s.get("start_s"), bool)]
+    return min(starts) if starts else None
+
+
+def curve(conn, creative_key):
+    """Full retention curve plus timeline markers for the graph.
+
+    Returns every stored (t, pct) point plus the creative moments
+    worth drawing as vertical markers: hook window, first product /
+    brand / logo visibility, CTA start, and duration. The UI draws
+    retention-%-vs-time from this; drop_events() supplies the
+    clickable drop windows overlaid on top.
+    """
+    ann = _structure(conn, creative_key)
+    pts = _curve(conn, creative_key)
+    structure = ann.get("structure") or {}
+
+    def _slot(name):
+        seg = structure.get(name) or {}
+        try:
+            s0, s1 = float(seg.get("start_s", 0)), float(seg.get("end_s", 0))
+        except (TypeError, ValueError):
+            return None
+        return {"start_s": s0, "end_s": s1} if s1 > s0 else None
+
+    hook = _slot("hook")
+    cta = _slot("cta")
+    return {"creative_key": creative_key,
+            "points": [{"t": t, "p": p} for t, p in pts],
+            "markers": {
+                "hook": hook,
+                "product_s": _span_min(ann.get("product_seconds")),
+                "brand_s": _span_min(ann.get("brand_seconds")),
+                "logo_s": _span_min(ann.get("logo_seconds")),
+                "cta_s": (cta or {}).get("start_s"),
+                "duration_s": ann.get("duration_s")},
+            "hook_modality": (ann.get("hook_modality") or "unknown")}
+
+
 def _span_covers(spans, t):
     for s in spans or []:
         if not isinstance(s, dict):

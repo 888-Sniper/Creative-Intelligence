@@ -270,6 +270,8 @@ ul.plain li{padding:6px 0;border-bottom:1px solid var(--line)}
 <label>Group by <select id="rep-bench">
 <option value="hook_type">hook_type</option><option value="creator_vs_branded">creator_vs_branded</option>
 <option value="platform">platform</option><option value="campaign">campaign</option></select></label>
+<label>Benchmark scope <select id="rep-bench-scope">
+<option value="filters">Current filters</option><option value="global">Global</option></select></label>
 <label><input type="checkbox" id="rep-override"> override (logged)</label>
 <label><input type="checkbox" id="rep-strict"> HUMAN-VERIFIED insights only</label><br><br>
 <button class="action" id="rep-onepager">Generate one-pager</button>
@@ -554,11 +556,12 @@ function creative_detail(kept){
 async function load_retention(key){
   const box=$("retention-graph");if(!box)return;
   try{
-    const [segs,pats]=await Promise.all([
+    const [segs,pats,curve]=await Promise.all([
       api("GET","/api/retention?creative_key="+encodeURIComponent(key)),
-      api("GET","/api/retention/patterns").catch(()=>null)]);
+      api("GET","/api/retention/patterns").catch(()=>null),
+      api("GET","/api/retention/curve?creative_key="+encodeURIComponent(key)).catch(()=>null)]);
     const evs=pats&&Array.isArray(pats.events)?pats.events.filter(e=>e.creative_key===key):[];
-    box.innerHTML=retention_svg(segs)+retention_drops(evs);
+    box.innerHTML=retention_curve(curve,evs)+retention_drops(evs)+retention_svg(segs);
     box.querySelectorAll("[data-seek]").forEach(btn=>btn.onclick=()=>{
       const v=document.querySelector("#creative-video");
       if(v&&Number.isFinite(Number(btn.dataset.seek))){try{v.currentTime=Number(btn.dataset.seek);}catch(e){}}
@@ -578,6 +581,29 @@ function brand_audio_txt(a){
   if(!approx)return `${a.brand_audio_mention_s}s (word-level)`;
   const end=m&&m.end!=null?m.end:"?";
   return `within ${a.brand_audio_mention_s}–${end}s segment (segment-level timing, not an exact word time)`;
+}
+function retention_curve(curve,evs){
+  const pts=curve&&Array.isArray(curve.points)?curve.points:[];
+  if(!pts.length)return '<div class="empty-state">No retention curve stored for this creative yet.</div>';
+  const W=560,H=170,ML=44,MB=24,MT=8,PW=W-ML-8,PH=H-MT-MB;
+  const max_t=Math.max(...pts.map(p=>Number(p.t)||0),1);
+  const X=t=>ML+t/max_t*PW, Y=p=>MT+(100-Math.min(100,Math.max(0,Number(p)||0)))/100*PH;
+  const line=pts.map(p=>`${X(Number(p.t)).toFixed(1)},${Y(Number(p.p)).toFixed(1)}`).join(" ");
+  let grid="";
+  [0,25,50,75,100].forEach(p=>{grid+=`<line x1="${ML}" y1="${Y(p)}" x2="${W-8}" y2="${Y(p)}" stroke="#D8D5CE" stroke-width="1"/><text x="${ML-5}" y="${Y(p)+4}" font-size="10" fill="#5F6B69" text-anchor="end">${p}%</text>`;});
+  const step=[1,2,3,5,6,10,15,30,60].find(s=>max_t/s<=7)||Math.ceil(max_t/7);
+  let ticks="";
+  for(let t=0;t<=max_t+1e-9;t+=step){ticks+=`<text x="${X(t)}" y="${H-8}" font-size="10" fill="#5F6B69" text-anchor="middle">${t}s</text>`;}
+  const mk=(curve&&curve.markers)||{};
+  let marks="";
+  if(mk.hook&&mk.hook.end_s>mk.hook.start_s)marks+=`<rect x="${X(mk.hook.start_s)}" y="${MT}" width="${Math.max(1,X(mk.hook.end_s)-X(mk.hook.start_s))}" height="${PH}" style="fill:var(--foap-primary)" opacity="0.14"><title>Hook window ${mk.hook.start_s}–${mk.hook.end_s}s</title></rect>`;
+  const vline=(t,label,color)=>{if(t==null||!Number.isFinite(Number(t)))return "";return `<line x1="${X(Number(t))}" y1="${MT}" x2="${X(Number(t))}" y2="${MT+PH}" stroke="${color}" stroke-width="1.5" stroke-dasharray="4 3"><title>${esc(label)} at ${t}s</title></line><text x="${X(Number(t))+3}" y="${MT+10}" font-size="10" fill="${color}">${esc(label)}</text>`;};
+  marks+=vline(mk.product_s,"Product","#2E7D32")+vline(mk.brand_s,"Brand","#0A7C72")+vline(mk.cta_s,"CTA","#C0362C");
+  let drops="";
+  (evs||[]).forEach(e=>{drops+=`<rect x="${X(Number(e.start_s)||0)}" y="${MT}" width="${Math.max(3,X(Number(e.end_s)||0)-X(Number(e.start_s)||0))}" height="${PH}" fill="#C0362C" opacity="0.16" style="cursor:pointer" data-seek="${esc(String(e.seek_s??0))}"><title>Drop −${esc(String(e.drop_pts))} pts (${esc(String(e.start_s))}–${esc(String(e.end_s))}s) — click to seek</title></rect>`;});
+  const dots=pts.map(p=>`<circle cx="${X(Number(p.t))}" cy="${Y(Number(p.p))}" r="2.5" style="fill:var(--foap-primary)"><title>${esc(String(p.t))}s — ${esc(String(p.p))}%</title></circle>`).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Retention percentage over time"><title>Retention % vs time from /api/retention/curve; shaded bands are detected drop windows (click to seek)</title>${grid}${ticks}${marks}<polyline points="${line}" fill="none" stroke-width="2" style="stroke:var(--foap-primary)"/>${dots}${drops}</svg>`
+    +'<p class="muted" style="font-size:12px">Curve: retention % over time. Teal band = hook window. Dashed lines = first product / brand / CTA. Red bands = detected drops (click to seek the video).</p>';
 }
 function retention_drops(evs){
   if(!evs.length)return '<p class="muted" style="font-size:12px">No steep drops (≥5 pts) in this curve.</p>';
@@ -703,6 +729,7 @@ function report_body(){
   return{campaigns:camps.length?camps:null,
     kpis:kpis.length?kpis:["cpa","ctr"],
     benchmark:$("rep-bench").value,
+    benchmark_scope:$("rep-bench-scope").value,
     override:$("rep-override").checked,
     strict_human:$("rep-strict").checked,
     filters:scope_filters()};

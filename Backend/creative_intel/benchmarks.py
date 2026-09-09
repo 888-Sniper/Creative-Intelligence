@@ -374,10 +374,16 @@ def campaign_kpis(conn, campaigns=None, filters=None):
     return {k: kpis_for_rows(v) for k, v in sorted(groups.items())}
 
 
-def _campaign_elements(conn, campaign):
-    """Distinct creative elements behind one campaign (for why-analysis)."""
+def _campaign_elements(conn, campaign, scope=None):
+    """Distinct creative elements behind one campaign (for why-analysis).
+
+    scope (shared Scope or plain filter dict) restricts the rows, so
+    a Market=Spain why-analysis never cites the French creative mix.
+    """
     import json
-    rows = [r for r in all_rows(conn) if (r.get("campaign") or "") == campaign]
+    scope = scope if isinstance(scope, Scope) else Scope(scope)
+    rows = [r for r in all_rows(conn)
+            if (r.get("campaign") or "") == campaign and scope.match(r)]
     hook_types, modes, platforms = set(), set(), set()
     for r in rows:
         platforms.add(r.get("platform") or "")
@@ -442,8 +448,8 @@ def compare_campaigns(conn, campaigns=None, rank_by="cpa", filters=None):
     why = {"metric": rank_by, "top": top, "bottom": bottom, "differences": [],
            "details": {}}
     if len(per) >= 2:
-        el_top = _campaign_elements(conn, top)
-        el_bottom = _campaign_elements(conn, bottom)
+        el_top = _campaign_elements(conn, top, scope)
+        el_bottom = _campaign_elements(conn, bottom, scope)
         for label, key in (("hook_type", "hook_types"),
                            ("creator mode", "creator_modes"),
                            ("platform mix", "platforms")):
@@ -682,7 +688,8 @@ def _show(value):
 
 
 def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
-                 fmt="one-pager", strict_human=False, filters=None):
+                 fmt="one-pager", strict_human=False, filters=None,
+                 benchmark_scope="filters"):
     """Generate a report over selected campaigns + KPIs + benchmark.
 
     fmt is "one-pager" (markdown), "csv", "deck" (slide JSON),
@@ -694,7 +701,10 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
     plain filter dict): campaign KPIs, creative rows and the why
     analysis all read the identical scoped population, and the scope
     is printed on the report so a filtered export can never be
-    mistaken for a full-dataset one.
+    mistaken for a full-dataset one. benchmark_scope is "filters"
+    (default: the selected benchmark is computed over the same
+    scope, labelled as such) or "global" (explicit opt-out: the
+    benchmark reads the whole dataset and is labelled global).
     """
     fmt = (fmt or "one-pager").lower()
     if fmt not in ("one-pager", "csv", "deck", "pptx", "xlsx"):
@@ -708,11 +718,17 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
     scope = filters if isinstance(filters, Scope) else Scope(filters)
     comp = compare_campaigns(conn, campaigns, rank_by=rank_by,
                              filters=scope)
+    bench_scoped = (benchmark_scope or "filters").lower() != "global"
+    bench_filt = scope.normalized() if bench_scoped else None
+    bench_label = ("scoped (%s)" % scope.describe() if bench_scoped
+                   else "global (whole dataset)")
     if benchmark_sel is None:
         bench = {}
     elif isinstance(benchmark_sel, str):
-        bench = (benchmark(conn, benchmark_sel) if benchmark_sel in GROUPABLE
-                 else benchmark_filtered(conn, {}, benchmark_sel).get("kpis", {}))
+        bench = (benchmark(conn, benchmark_sel, filters=bench_filt)
+                 if benchmark_sel in GROUPABLE
+                 else benchmark_filtered(
+                     conn, bench_filt or {}, benchmark_sel).get("kpis", {}))
     elif isinstance(benchmark_sel, dict):
         bench = benchmark_sel
     else:
@@ -738,7 +754,7 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
             comp["why"]["metric"])]
     for d in comp["why"]["differences"]:
         lines.append("- %s" % d)
-    lines += ["", "## Benchmark", ""]
+    lines += ["", "## Benchmark (%s)" % bench_label, ""]
     if isinstance(bench, dict) and bench:
         first = next(iter(bench.values()))
         if isinstance(first, dict) and "cpa" in first:
@@ -800,6 +816,7 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
             else str(comp["kpis"][name][k]) for k in wanted_kpis))
     csv_text = "\n".join(csv_lines) + "\n"
     deck = {"title": "Campaign Report", "scope": scope.describe(),
+            "benchmark_scope": bench_label,
             "rank_by": comp["rank_by"],
             "slides": [{"campaign": n, "kpis": {k: comp["kpis"][n][k] for k in wanted_kpis}}
                        for n in names],

@@ -171,6 +171,134 @@ def _creative_why(a, b, da, db):
     return {"top": top, "differences": diffs or ["No measurable difference."]}
 
 
+def _multi_why(keys, datas):
+    """Data-grounded N-way notes (3-6 creatives): per-metric leaders
+    plus observed annotation contrast. Measured deltas only, never
+    causal claims, never invented data."""
+    keys = [k for k in keys if k]
+    if len(keys) < 2:
+        return {"top": None,
+                "differences": ["Pick two or more creatives to compare."]}
+    diffs = []
+    for metric, higher_wins in (("cpa", False), ("cpc", False),
+                                ("cpm", False), ("ctr", True),
+                                ("vtr", True), ("roas", True)):
+        valued = [(k, datas.get(k, {}).get(metric)) for k in keys]
+        valued = [(k, v) for k, v in valued if v is not None]
+        if len({v for _k, v in valued}) < 2:
+            continue
+        best = (max if higher_wins else min)(valued, key=lambda kv: kv[1])
+        diffs.append("%s leads on %s (%s vs %s)" % (
+            best[0], metric.upper(), best[1],
+            ", ".join("%s %s" % (k, v) for k, v in valued if k != best[0])))
+    anns = {k: (datas.get(k, {}).get("annotation") or {}) for k in keys}
+    for field, label in (("hook_type", "Hook"), ("hook_modality", "Modality"),
+                         ("creator_vs_branded", "Format")):
+        vals = sorted({a.get(field) for a in anns.values() if a.get(field)})
+        if len(vals) > 1:
+            diffs.append("%s varies: %s." % (
+                label, "; ".join("%s=%s" % (k, anns[k].get(field) or "—")
+                                 for k in keys)))
+    durs = sorted({a.get("duration_s") for a in anns.values()
+                   if a.get("duration_s")})
+    if len(durs) > 1:
+        diffs.append("Length varies: %s." % "; ".join(
+            "%s=%ss" % (k, anns[k].get("duration_s")) for k in keys
+            if anns[k].get("duration_s")))
+    for key, label in (("brand_seconds", "Brand"), ("product_seconds", "Product")):
+        timed = sorted({k for k in keys if _span_start(anns[k], key) is not None})
+        if timed and len(timed) != len(keys):
+            diffs.append("%s timing is annotated in %s but not in %s." % (
+                label, ", ".join(timed),
+                ", ".join(k for k in keys if k not in timed)))
+    cta = sorted({k for k in keys if anns[k].get("cta")})
+    if cta and len(cta) != len(keys):
+        diffs.append("CTA is annotated in %s but not in %s." % (
+            ", ".join(cta), ", ".join(k for k in keys if k not in cta)))
+    converting = [k for k in keys if (datas.get(k, {}).get("conversions") or 0) > 0]
+    top = None
+    if converting:
+        ranked = [(k, datas[k].get("cpa")) for k in converting
+                  if datas.get(k, {}).get("cpa") is not None]
+        if ranked:
+            top = min(ranked, key=lambda kv: kv[1])[0]
+    else:
+        shown = [(k, datas.get(k, {}).get("ctr")) for k in keys]
+        shown = [(k, v) for k, v in shown if v is not None]
+        if shown:
+            top = max(shown, key=lambda kv: kv[1])[0]
+    if top is None:
+        diffs.append("Neither creative has delivery data yet.")
+    return {"top": top, "differences": diffs or ["No measurable difference."]}
+
+
+VIEW_KPIS = ("all", "spend", "ctr", "cpc", "cpa", "cpm", "vtr",
+             "roas")
+VIEW_KEYS = ("filters", "kpi", "view", "benchmark", "benchmark_scope")
+
+
+def save_view(conn, name, state):
+    """Persist a named analysis view (filters + KPI + tab + benchmark).
+
+    state carries the exact UI snapshot: filters (scope axes),
+    kpi (sort selector), view (active tab), benchmark (report
+    group-by), benchmark_scope (filters|global). Unknown keys or
+    axes are rejected; saving an existing name replaces it so
+    re-saving an updated view never duplicates. Returns the stored
+    record with its id.
+    """
+    from creative_intel import benchmarks as _bench
+    name = str(name or "").strip()
+    if not name or len(name) > 80:
+        raise ValueError("view needs a name of 1-80 characters")
+    if not isinstance(state, dict):
+        raise ValueError("view state must be an object")
+    unknown = sorted(set(state) - set(VIEW_KEYS))
+    if unknown:
+        raise ValueError("unknown view keys: %s" % unknown)
+    clean = {}
+    if "filters" in state:
+        if not isinstance(state["filters"], dict):
+            raise ValueError("view filters must be an object")
+        unknown_axes = sorted(set(state["filters"]) - set(_bench.Scope.AXES))
+        if unknown_axes:
+            raise ValueError("unknown view filter axes: %s" % unknown_axes)
+        _bench.Scope(state["filters"]).normalized()  # validates values
+        clean["filters"] = {k: v for k, v in state["filters"].items()
+                            if v not in ("", "all", [], {})}
+    if "kpi" in state:
+        if state["kpi"] not in VIEW_KPIS:
+            raise ValueError("view kpi must be one of %s" % (VIEW_KPIS,))
+        clean["kpi"] = state["kpi"]
+    if "view" in state:
+        clean["view"] = str(state["view"] or "")[:32]
+    if "benchmark" in state:
+        clean["benchmark"] = str(state["benchmark"] or "")[:32]
+    if "benchmark_scope" in state:
+        if state["benchmark_scope"] not in ("filters", "global"):
+            raise ValueError("view benchmark_scope must be filters|global")
+        clean["benchmark_scope"] = state["benchmark_scope"]
+    import datetime
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    conn.execute(
+        "INSERT INTO saved_views (name, state_json, created_at, updated_at)"
+        " VALUES (?, ?, ?, ?) ON CONFLICT (name) DO UPDATE SET"
+        " state_json=excluded.state_json, updated_at=excluded.updated_at",
+        (name, json.dumps(clean, sort_keys=True), now, now))
+    conn.commit()
+    row = conn.execute("SELECT id, state_json FROM saved_views WHERE name=?",
+                       (name,)).fetchone()
+    return {"id": row[0], "name": name, "state": json.loads(row[1])}
+
+
+def list_views(conn):
+    return [{"id": r[0], "name": r[1], "state": json.loads(r[2]),
+             "updated_at": r[3]}
+            for r in conn.execute(
+                "SELECT id, name, state_json, updated_at FROM saved_views"
+                " ORDER BY name").fetchall()]
+
+
 def read_json(handler):
     try:
         length = int(handler.headers.get("Content-Length", 0))
@@ -303,6 +431,19 @@ def apply_action(conn, action, payload, prov, media_dir=None):
             [(payload["creative_key"], t, p) for t, p in payload["points"]])
         conn.commit()
         return {"ok": True}
+    if action == "save-view":
+        return save_view(conn, payload.get("name", ""),
+                         payload.get("state", {}))
+    if action == "delete-view":
+        try:
+            view_id = int(payload.get("id"))
+        except (TypeError, ValueError):
+            raise ValueError("delete-view needs an integer id")
+        cur = conn.execute("DELETE FROM saved_views WHERE id=?", (view_id,))
+        conn.commit()
+        if not cur.rowcount:
+            raise ValueError("no saved view #%d" % view_id)
+        return {"ok": True, "deleted": view_id}
     raise ValueError("unknown action %r" % action)
 
 
@@ -451,12 +592,25 @@ class Handler(BaseHTTPRequestHandler):
                 send(self, 200, retention.join_segments(conn, key))
             elif url.path == "/api/compare":
                 from creative_intel import benchmarks as _bench2
-                a, b = q.get("a", [""])[0], q.get("b", [""])[0]
+                legacy = [q.get("a", [""])[0], q.get("b", [""])[0]]
+                keys = [k for k in q.get("key", []) if k]
+                if not keys:
+                    keys = legacy
+                seen, ordered = set(), []
+                for k in keys:
+                    if k not in seen:
+                        seen.add(k)
+                        ordered.append(k)
+                keys = ordered[:6]
+                if len(ordered) > 6:
+                    raise ValueError("compare takes at most 6 creatives")
+                if not keys:
+                    keys = ["", ""]
                 scope = _bench2.Scope.from_query(q)
                 ad_cols = [c[0] for c in conn.execute(
                     "SELECT * FROM ads LIMIT 0").description]
                 out = {}
-                for key in (a, b):
+                for key in keys:
                     rows = [dict(zip(ad_cols, v)) for v in conn.execute(
                         "SELECT * FROM ads WHERE creative_key=?",
                         (key,)).fetchall()]
@@ -483,7 +637,14 @@ class Handler(BaseHTTPRequestHandler):
                                 "roas": round(revenue / spend, 4) if spend else None,
                                 "scope": scope.describe(),
                                 "annotation": json.loads(ann[0]) if ann else None}
-                out["why"] = _creative_why(a, b, out.get(a, {}), out.get(b, {}))
+                if len(keys) == 2:
+                    out["why"] = _creative_why(keys[0], keys[1],
+                                               out.get(keys[0], {}),
+                                               out.get(keys[1], {}))
+                else:
+                    out["why"] = _multi_why(
+                        keys, {k: out.get(k, {}) for k in keys})
+                out["keys"] = keys
                 out["scope"] = scope.describe()
                 send(self, 200, out)
             elif url.path == "/api/retention/patterns":
@@ -495,6 +656,8 @@ class Handler(BaseHTTPRequestHandler):
                 send(self, 200, retention.curve(conn, key))
             elif url.path == "/api/replay":
                 send(self, 200, replay.history(conn))
+            elif url.path == "/api/views":
+                send(self, 200, list_views(conn))
             elif url.path == "/api/reviews":
                 send(self, 200, qa.list_reviews(conn))
             else:
@@ -528,6 +691,10 @@ class Handler(BaseHTTPRequestHandler):
                 action = "pipeline"
             elif url.path == "/api/retention":
                 action = "retention"
+            elif url.path == "/api/views":
+                action = "save-view"
+            elif url.path == "/api/views/delete":
+                action = "delete-view"
             elif url.path == "/api/ask":
                 live = (self.prov.llm if getattr(
                     self.prov, "mode", "mock") == "live" else None)

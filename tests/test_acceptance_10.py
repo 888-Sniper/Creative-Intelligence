@@ -634,22 +634,24 @@ class RetentionIntelligenceTest(unittest.TestCase):
         self.assertIn("shared-creative", keys)
 
 
-class RouteScopeIntegrationTest(unittest.TestCase):
-    """The real HTTP routes (not just the helpers) honour Scope.
+_SRV = {}
 
-    Regression cover for the round where /api/campaigns and
-    /api/benchmarks used the old helper without the campaign axis.
+
+def _test_port():
+    """Lazily-started shared HTTP server over a fixture snapshot.
+
+    Module-level and lazy so HTTP tests pass regardless of the
+    alphabetical class order unittest imposes; torn down by
+    tearDownModule. Mutating tests must leave the snapshot clean.
     """
-
-    @classmethod
-    def setUpClass(cls):
+    if "port" not in _SRV:
         from http.server import HTTPServer
         import tempfile
         import threading
         live = fresh_acc_db()
-        cls._db = tempfile.NamedTemporaryFile(suffix=".db",
-                                              delete=False).name
-        disk = sqlite3.connect(cls._db)
+        path = tempfile.NamedTemporaryFile(suffix=".db",
+                                           delete=False).name
+        disk = sqlite3.connect(path)
         schema.init_db(disk)
         for sql in live.iterdump():
             if sql.startswith("INSERT"):
@@ -657,27 +659,52 @@ class RouteScopeIntegrationTest(unittest.TestCase):
         disk.commit()
         live.close()
         disk.close()
-        cls._prev = server.Handler.db_path
-        server.Handler.db_path = cls._db
-        cls._srv = HTTPServer(("127.0.0.1", 0), server.Handler)
-        cls.port = cls._srv.server_address[1]
-        cls._thread = threading.Thread(
-            target=cls._srv.serve_forever, daemon=True)
-        cls._thread.start()
+        _SRV["prev"] = server.Handler.db_path
+        server.Handler.db_path = path
+        srv = HTTPServer(("127.0.0.1", 0), server.Handler)
+        _SRV.update(port=srv.server_address[1], srv=srv, path=path,
+                    thread=threading.Thread(
+                        target=srv.serve_forever, daemon=True))
+        _SRV["thread"].start()
+    return _SRV["port"]
 
-    @classmethod
-    def tearDownClass(cls):
-        cls._srv.shutdown()
-        cls._thread.join(timeout=10)
-        server.Handler.db_path = cls._prev
-        os.unlink(cls._db)
+
+def tearDownModule():
+    if "srv" in _SRV:
+        _SRV["srv"].shutdown()
+        _SRV["thread"].join(timeout=10)
+        server.Handler.db_path = _SRV["prev"]
+        os.unlink(_SRV["path"])
+        _SRV.clear()
+
+
+def _fetch(path, timeout=10):
+    import urllib.request
+    with urllib.request.urlopen(
+            "http://127.0.0.1:%d%s" % (_test_port(), path),
+            timeout=timeout) as resp:
+        return json.loads(resp.read())
+
+
+def _post(path, body, timeout=10):
+    import urllib.request
+    req = urllib.request.Request(
+        "http://127.0.0.1:%d%s" % (_test_port(), path),
+        data=json.dumps(body).encode(),
+        headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read())
+
+
+class RouteScopeIntegrationTest(unittest.TestCase):
+    """The real HTTP routes (not just the helpers) honour Scope.
+
+    Regression cover for the round where /api/campaigns and
+    /api/benchmarks used the old helper without the campaign axis.
+    """
 
     def _get(self, path):
-        import urllib.request
-        with urllib.request.urlopen(
-                "http://127.0.0.1:%d%s" % (self.port, path),
-                timeout=10) as resp:
-            return json.loads(resp.read())
+        return _fetch(path)
 
     def test_campaigns_route_scopes_by_campaign(self):
         got = self._get("/api/campaigns?campaign=CampA")
@@ -931,6 +958,197 @@ class CampaignKpiBestWatchTest(unittest.TestCase):
         self.assertNotIn("a.metrics.cpa,true", body)
         self.assertIn("campaign-benchmark ${k.toUpperCase()}", body)
         self.assertIn("active_filters()", body)
+
+
+class MultiCompareTest(unittest.TestCase):
+    """Creative comparison covers 2-6 creatives, pairwise or N-way."""
+
+    def setUp(self):
+        self.conn = fresh_acc_db()
+
+    def tearDown(self):
+        self.conn.close()
+
+    def _datas(self, keys):
+        out = {}
+        for key in keys:
+            rows = [dict(zip(
+                ["spend", "impressions", "clicks", "conversions",
+                 "video_views", "revenue"],
+                r)) for r in self.conn.execute(
+                "SELECT spend, impressions, clicks, conversions,"
+                " video_views, revenue FROM ads WHERE creative_key=?",
+                (key,)).fetchall()]
+            spend = sum(r["spend"] for r in rows)
+            conv = sum(r["conversions"] for r in rows)
+            clicks = sum(r["clicks"] for r in rows)
+            impr = sum(r["impressions"] for r in rows)
+            out[key] = {
+                "spend": spend, "conversions": conv,
+                "cpa": round(spend / conv, 2) if conv else None,
+                "ctr": round(clicks / impr, 4) if impr else None,
+                "annotation": None}
+        return out
+
+    def test_n_way_names_per_metric_leaders(self):
+        keys = ["shared-creative", "spain-only", "null-cpa"]
+        why = server._multi_why(keys, self._datas(keys))
+        # spain-only has the lowest CPA (6.25) of the converting pair.
+        self.assertEqual(why["top"], "spain-only")
+        self.assertTrue(any("leads on CPA" in d
+                            for d in why["differences"]))
+
+    def test_n_way_needs_two(self):
+        why = server._multi_why(["only-one"], self._datas(["only-one"]))
+        self.assertIsNone(why["top"])
+
+    def test_n_way_no_data_has_no_winner(self):
+        why = server._multi_why(
+            ["zero-creative", "zero-creative-2"],
+            {k: {"spend": 0, "conversions": 0, "cpa": None,
+                 "ctr": None, "annotation": None}
+             for k in ("zero-creative", "zero-creative-2")})
+        self.assertIsNone(why["top"])
+        self.assertTrue(any("delivery data" in d
+                            for d in why["differences"]))
+
+    def test_route_accepts_up_to_six_keys(self):
+        got = _fetch(
+            "/api/compare?key=shared-creative&key=spain-only&key=null-cpa")
+        self.assertEqual(got["keys"],
+                         ["shared-creative", "spain-only", "null-cpa"])
+        self.assertEqual(got["why"]["top"], "spain-only")
+        # Legacy pairwise shape is unchanged.
+        pair = _fetch("/api/compare?a=shared-creative&b=spain-only")
+        self.assertIn("top", pair["why"])
+        self.assertIn("differences", pair["why"])
+
+    def test_route_rejects_seventh_key(self):
+        import urllib.error
+        query = "&".join("key=k%d" % i for i in range(7))
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            _fetch("/api/compare?" + query)
+        self.assertEqual(ctx.exception.code, 409)
+
+
+class SavedViewsTest(unittest.TestCase):
+    def setUp(self):
+        self.conn = fresh_acc_db()
+
+    def tearDown(self):
+        self.conn.close()
+
+    def test_save_list_retrieve(self):
+        state = {"filters": {"market": ["Spain"]}, "kpi": "roas",
+                 "view": "compare", "benchmark": "platform",
+                 "benchmark_scope": "global"}
+        saved = server.save_view(self.conn, "Spain ROAS", state)
+        self.assertEqual(saved["name"], "Spain ROAS")
+        self.assertEqual(saved["state"]["kpi"], "roas")
+        listed = server.list_views(self.conn)
+        self.assertEqual(len(listed), 1)
+        self.assertEqual(listed[0]["state"]["filters"],
+                         {"market": ["Spain"]})
+
+    def test_resave_replaces_without_duplicating(self):
+        first = server.save_view(self.conn, "V", {"kpi": "cpa"})
+        second = server.save_view(self.conn, "V", {"kpi": "ctr"})
+        self.assertEqual(first["id"], second["id"])
+        self.assertEqual(server.list_views(self.conn)[0]["state"]["kpi"],
+                         "ctr")
+
+    def test_validation_rejects_bad_state(self):
+        with self.assertRaises(ValueError):
+            server.save_view(self.conn, "", {"kpi": "cpa"})
+        with self.assertRaises(ValueError):
+            server.save_view(self.conn, "V", {"kpi": "bogus"})
+        with self.assertRaises(ValueError):
+            server.save_view(self.conn, "V", {"nope": 1})
+        with self.assertRaises(ValueError):
+            server.save_view(self.conn, "V",
+                             {"filters": {"bogus_axis": ["x"]}})
+        with self.assertRaises(ValueError):
+            server.save_view(self.conn, "V",
+                             {"benchmark_scope": "whenever"})
+
+    def test_delete_roundtrip(self):
+        saved = server.save_view(self.conn, "Gone", {"kpi": "cpa"})
+        out = server.apply_action(self.conn, "delete-view",
+                                  {"id": saved["id"]},
+                                  providers.Providers())
+        self.assertTrue(out["ok"])
+        self.assertEqual(server.list_views(self.conn), [])
+        with self.assertRaises(ValueError):
+            server.apply_action(self.conn, "delete-view",
+                                {"id": saved["id"]},
+                                providers.Providers())
+
+    def test_http_roundtrip(self):
+        self.assertEqual(_fetch("/api/views"), [])
+        saved = _post("/api/views", {"name": "HTTP view",
+                                     "state": {"kpi": "vtr",
+                                               "view": "benchmark"}})
+        self.assertEqual(saved["state"]["kpi"], "vtr")
+        listed = _fetch("/api/views")
+        self.assertEqual([v["name"] for v in listed], ["HTTP view"])
+        _post("/api/views/delete", {"id": saved["id"]})
+        self.assertEqual(_fetch("/api/views"), [])
+
+
+class ReportKpiAwarenessTest(unittest.TestCase):
+    """Best/Watch/recommendations follow the report's rank KPI."""
+
+    KPI_CSV = ("Campaign,Ad Name,Creative Name,Amount Spent,Impressions,"
+               "Link Clicks,Conversions,Revenue\n"
+               "CampX,A1,cpa-champ,100,10000,200,10,100\n"
+               "CampX,B1,roas-champ,100,10000,100,5,500\n"
+               "CampY,Y1,nobody,50,5000,50,0,0\n")
+
+    def setUp(self):
+        self.conn = sqlite3.connect(":memory:")
+        schema.init_db(self.conn)
+        ingest.insert_rows(self.conn, ingest.parse_csv(self.KPI_CSV, "meta"))
+
+    def tearDown(self):
+        self.conn.close()
+
+    def test_best_follows_rank_metric(self):
+        cpa = benchmarks._report_extras(self.conn, ["CampX"], rank_by="cpa")
+        self.assertEqual(cpa["per_campaign"]["CampX"]["best"]["creative_key"],
+                         "cpa-champ")
+        self.assertEqual(cpa["per_campaign"]["CampX"]["worst"]["creative_key"],
+                         "roas-champ")
+        roas = benchmarks._report_extras(self.conn, ["CampX"], rank_by="roas")
+        self.assertEqual(roas["per_campaign"]["CampX"]["best"]["creative_key"],
+                         "roas-champ")
+        self.assertEqual(roas["per_campaign"]["CampX"]["worst"]["creative_key"],
+                         "cpa-champ")
+
+    def test_recommendations_name_rank_metric(self):
+        rep = benchmarks.build_report(self.conn, ["CampX"], ["roas"],
+                                      None, "one-pager")
+        self.assertIn("highest best-creative ROAS", rep["markdown"])
+        self.assertIn("roas-champ", rep["markdown"])
+        self.assertIn("(ROAS 5.0", rep["markdown"])
+        rep = benchmarks.build_report(self.conn, ["CampX"], ["cpa"],
+                                      None, "one-pager")
+        self.assertIn("lowest best-creative CPA", rep["markdown"])
+        self.assertIn("cpa-champ", rep["markdown"])
+
+    def test_uncomputable_rank_has_no_best(self):
+        extras = benchmarks._report_extras(self.conn, ["CampY"],
+                                           rank_by="cpa")
+        # Zero conversions anywhere: CPA is None for every creative,
+        # so there is no best rather than an arbitrary pick.
+        self.assertIsNone(extras["per_campaign"]["CampY"]["best"])
+        self.assertIsNone(extras["per_campaign"]["CampY"]["worst"])
+        rep = benchmarks.build_report(self.conn, ["CampY"], ["cpa"],
+                                      None, "one-pager")
+        self.assertIn("No CPA values to rank yet", rep["markdown"])
+
+    def test_bad_rank_rejected(self):
+        with self.assertRaises(ValueError):
+            benchmarks._report_extras(self.conn, ["CampX"], rank_by="bogus")
 
 
 class RetentionCurveTest(unittest.TestCase):

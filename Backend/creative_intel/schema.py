@@ -82,6 +82,13 @@ CREATE TABLE IF NOT EXISTS replay_log (
     action TEXT NOT NULL,
     payload_json TEXT NOT NULL DEFAULT '{}'
 );
+CREATE TABLE IF NOT EXISTS saved_views (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    state_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT ''
+);
 """
 
 

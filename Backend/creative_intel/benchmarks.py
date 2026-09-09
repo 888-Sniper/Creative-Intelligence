@@ -586,18 +586,26 @@ def _creative_rows(conn, campaign, scope=None):
     return out
 
 
-def _report_extras(conn, names, strict_human=False, scope=None):
+def _report_extras(conn, names, strict_human=False, scope=None,
+                   rank_by="cpa"):
     """Best/worst creatives, hook learnings, heuristic next steps.
 
     Everything is computed from uploaded rows + annotations in this
     call. scope (shared Scope or plain filter dict) restricts every
     creative row, so a report on Beauty + Spain never blends in
-    France rows. Recommendations are plainly labelled heuristic:
-    they rank by measured CPA/CTR, they do not invent diagnoses.
+    France rows. rank_by (a KPI_KEYS metric) picks the contention
+    metric with its correct higher/lower direction: a ROAS report
+    crowns ROAS leaders, never CPA leaders. Uncomputable-for-all
+    metrics yield no best/watch rather than an arbitrary pick.
+    Recommendations are plainly labelled heuristic: they rank by
+    the measured rank_by metric, they do not invent diagnoses.
     In strict mode best/watch contention is limited to
     HUMAN-VERIFIED annotations so no unverified hook/format label
     can enter an official report.
     """
+    if rank_by not in KPI_KEYS:
+        raise ValueError("rank_by must be one of %s" % sorted(KPI_KEYS))
+    higher = KPI_DIRECTIONS[rank_by] == "higher"
     scope = scope if isinstance(scope, Scope) else Scope(scope)
     per_campaign = {}
     hook_spend, hook_conv = {}, {}
@@ -606,15 +614,17 @@ def _report_extras(conn, names, strict_human=False, scope=None):
         rows = _creative_rows(conn, name, scope=scope)
 
         def _rank(pool):
-            converting = [r for r in pool if (r["conversions"] or 0) > 0]
-            use = converting or pool
-            if converting:
-                key = (lambda r: r["cpa"])
-            else:
-                # Uncomputable CTR ranks last, never as a false zero.
-                key = (lambda r: -(r["ctr"] if r["ctr"] is not None else -1.0))
-            ranked = sorted(use, key=key)
-            return (ranked[0] if ranked else None,
+            def _key(r):
+                # Uncomputable (None) always ranks last, never as a
+                # false zero.
+                value = r[rank_by]
+                if value is None:
+                    return (1, 0.0)
+                return (0, -value if higher else value)
+            ranked = sorted(pool, key=_key)
+            if not ranked or ranked[0][rank_by] is None:
+                return None, None
+            return (ranked[0],
                     ranked[-1] if len(ranked) > 1 else None)
 
         best, worst = _rank(rows)
@@ -654,26 +664,39 @@ def _report_extras(conn, names, strict_human=False, scope=None):
                 unannotated, sum(len(per_campaign[n]["creatives"]) for n in names)),
             True))
     recommendations = []
-    cpa_ranked = [(n, per_campaign[n]["best"]) for n in names
+    money = rank_by in ("cpm", "cpc", "cpa")
+    sym = "$" if money else ""
+
+    def _show_rank(value):
+        return "n/a" if value is None else "%s%s" % (sym, value)
+
+    contenders = [(n, per_campaign[n]["best"]) for n in names
                   if per_campaign[n]["best"] and
-                  per_campaign[n]["best"]["cpa"] is not None]
-    if cpa_ranked:
-        top = min(cpa_ranked, key=lambda kv: kv[1]["cpa"])
+                  per_campaign[n]["best"][rank_by] is not None]
+    if contenders:
+        pick = (max if higher else min)
+        top = pick(contenders, key=lambda kv: kv[1][rank_by])
         recommendations.append((
-            "Scale candidate (heuristic): %s — lowest best-creative CPA "
-            "at $%s (%s)." % (top[0], top[1]["cpa"], top[1]["creative_key"]),
+            "Scale candidate (heuristic): %s — %s best-creative %s "
+            "at %s (%s)." % (
+                top[0],
+                "highest" if higher else "lowest", rank_by.upper(),
+                _show_rank(top[1][rank_by]), top[1]["creative_key"]),
             bool(top[1]["verified"])))
-        bottom = max(cpa_ranked, key=lambda kv: kv[1]["cpa"])
+        bottom = (min if higher else max)(
+            contenders, key=lambda kv: kv[1][rank_by])
         if bottom[0] != top[0]:
             recommendations.append((
-                "Watch (heuristic): %s — highest best-creative CPA at $%s. "
+                "Watch (heuristic): %s — %s best-creative %s at %s. "
                 "Compare its hook/format against %s before adding spend."
-                % (bottom[0], bottom[1]["cpa"], top[0]),
+                % (bottom[0],
+                   "lowest" if higher else "highest", rank_by.upper(),
+                   _show_rank(bottom[1][rank_by]), top[0]),
                 bool(bottom[1]["verified"] and top[1]["verified"])))
     if not recommendations:
         recommendations.append((
-            "No converting creatives yet — collect conversions before "
-            "scaling anything.", True))
+            "No %s values to rank yet — collect delivery data before "
+            "scaling anything." % rank_by.upper(), True))
     return {"per_campaign": per_campaign,
             "learnings": [t for t, _v in learnings],
             "learnings_verified": [v for _t, v in learnings],
@@ -768,7 +791,11 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
         lines.append("- (no benchmark selected)")
     strict = bool(strict_human)
     extras = _report_extras(conn, names, strict_human=strict,
-                            scope=scope)
+                            scope=scope, rank_by=rank_by)
+    rank_sym = "$" if rank_by in ("cpm", "cpc", "cpa") else ""
+
+    def _show_rank(value):
+        return "n/a" if value is None else "%s%s" % (rank_sym, value)
     unverified_excluded = 0
     if strict:
         # HUMAN-VERIFIED parity: insights resting on unverified
@@ -795,14 +822,16 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
         best = extras["per_campaign"][name]["best"]
         worst = extras["per_campaign"][name]["worst"]
         if best:
-            lines.append("- %s best: %s (CPA $%s, CTR %s, %s / %s)" % (
-                name, best["creative_key"], _show(best["cpa"]),
-                _show(best["ctr"]),
+            lines.append("- %s best: %s (%s %s | CPA $%s, CTR %s, %s / %s)" % (
+                name, best["creative_key"], comp["rank_by"].upper(),
+                _show_rank(best[comp["rank_by"]]),
+                _show(best["cpa"]), _show(best["ctr"]),
                 best["hook_type"], best["creator_vs_branded"]))
         if worst:
-            lines.append("- %s watch: %s (CPA $%s, CTR %s, %s / %s)" % (
-                name, worst["creative_key"], _show(worst["cpa"]),
-                _show(worst["ctr"]),
+            lines.append("- %s watch: %s (%s %s | CPA $%s, CTR %s, %s / %s)" % (
+                name, worst["creative_key"], comp["rank_by"].upper(),
+                _show_rank(worst[comp["rank_by"]]),
+                _show(worst["cpa"]), _show(worst["ctr"]),
                 worst["hook_type"], worst["creator_vs_branded"]))
     lines += ["", "## Creative learnings", ""]
     lines += ["- %s" % l for l in extras["learnings"]] or ["- —"]
@@ -848,12 +877,16 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
                 best = deck["creatives"][name]["best"]
                 worst = deck["creatives"][name]["worst"]
                 if best:
-                    bullets.append("Best creative: %s (CPA $%s, %s / %s)" % (
-                        best["creative_key"], _show(best["cpa"]),
+                    bullets.append("Best creative: %s (%s %s | CPA $%s, %s / %s)" % (
+                        best["creative_key"], comp["rank_by"].upper(),
+                        _show_rank(best[comp["rank_by"]]),
+                        _show(best["cpa"]),
                         best["hook_type"], best["creator_vs_branded"]))
                 if worst:
-                    bullets.append("Watch: %s (CPA $%s, %s / %s)" % (
-                        worst["creative_key"], _show(worst["cpa"]),
+                    bullets.append("Watch: %s (%s %s | CPA $%s, %s / %s)" % (
+                        worst["creative_key"], comp["rank_by"].upper(),
+                        _show_rank(worst[comp["rank_by"]]),
+                        _show(worst["cpa"]),
                         worst["hook_type"], worst["creator_vs_branded"]))
                 slides.append({"title": name, "bullets": bullets})
             why_title = ("Why %s leads" % comp["why"]["top"]

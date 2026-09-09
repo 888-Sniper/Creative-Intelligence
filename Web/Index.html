@@ -220,8 +220,9 @@ ul.plain li{padding:6px 0;border-bottom:1px solid var(--line)}
 <div id="library"></div></section>
 <section class="view" id="v-compare"><h1 class="page-title">Compare</h1><p class="page-sub">Two modes: creatives side-by-side, or campaigns ranked with why-analysis.</p>
 <div class="card"><input id="cmp-a" placeholder="creative A key"> <input id="cmp-b" placeholder="creative B key">
+<input id="cmp-extra" placeholder="more keys, comma-separated (up to 4 more)" style="width:60%">
 <button class="action" id="cmp-go">Compare creatives</button>
-<div class="muted" style="font-size:12px">GET /api/compare — both sides are computed over the current top filter bar scope.</div></div>
+<div class="muted" style="font-size:12px">GET /api/compare — 2 to 6 creatives, side by side with per-metric leaders. Every side is computed over the current top filter bar scope.</div></div>
 <div class="card"><h3>Campaign compare</h3>
 <input id="cmp-campaigns" placeholder="campaigns, comma-separated (blank = all)" style="width:60%">
 <label>Rank by <select id="cmp-rank"><option value="cpa">CPA</option><option value="cpm">CPM</option><option value="ctr">CTR</option><option value="vtr">VTR</option><option value="roas">ROAS</option></select></label>
@@ -250,6 +251,11 @@ ul.plain li{padding:6px 0;border-bottom:1px solid var(--line)}
 <div style="margin-top:8px"><button class="action" id="bb-create">Create</button></div>
 <div id="bb-saved" style="margin-top:8px"></div>
 <div id="bb-out" style="margin-top:8px"></div></div>
+<div class="card"><h3>Saved views</h3>
+<div class="muted" style="font-size:12px">Named snapshots of filters + KPI + tab + benchmark (GET/POST /api/views). Applying a view restores the exact analysis setup.</div>
+<div class="ask-row"><input type="text" id="view-name" placeholder="e.g. Beauty Spain TikTok" aria-label="View name"><button class="action" id="view-save">Save current view</button></div>
+<div id="view-list" class="muted" style="margin-top:8px">—</div>
+<div id="view-status" class="muted" style="font-size:12px"></div></div>
 </section>
 <section class="view" id="v-report"><h1 class="page-title">Reports</h1><p class="page-sub">Select campaigns, KPIs and a benchmark, then generate. One-pager, CSV, true PowerPoint (.pptx), true Excel (.xlsx) and presentation (HTML deck) formats.</p>
 <div class="card"><h3>Campaigns</h3><div id="rep-campaigns" class="muted">—</div></div>
@@ -362,7 +368,13 @@ $("fixture").onclick=()=>{$("up-status").textContent="Run: python3 Backend/serve
 $("export").onclick=async()=>{const keys=[...document.querySelectorAll(".exp-check:checked")].map(c=>c.value);try{const r=await api("POST","/api/export",{creative_keys:keys,override:$("override").checked});$("export-out").textContent=r.markdown;}catch(e){$("export-out").textContent="BLOCKED: "+e.message;}};
 $("run-pipe").onclick=async()=>{if(!selected)return;await api("POST","/api/pipeline/run",{creative_key:selected,brand_terms:$("brand-terms").value});refresh();};
 $("verify").onclick=async()=>{if(!selected)return;await api("POST","/api/creatives/"+encodeURIComponent(selected)+"/verify");refresh();};
-$("cmp-go").onclick=async()=>{try{const a=$("cmp-a").value.trim(),b=$("cmp-b").value.trim();const r=await api("GET","/api/compare?a="+encodeURIComponent(a)+"&b="+encodeURIComponent(b));render_compare(r,a,b);}catch(e){$("cmp-out").innerHTML=`<p class="muted">${esc(e.message)}</p>`;}};
+$("cmp-go").onclick=async()=>{try{
+  const keys=[$("cmp-a").value.trim(),$("cmp-b").value.trim(),...$("cmp-extra").value.split(",").map(s=>s.trim()).filter(Boolean)];
+  const seen=[...new Set(keys.filter(Boolean))].slice(0,6);
+  if(seen.length<2){$("cmp-out").innerHTML='<p class="muted">Enter at least two creative keys (up to six).</p>';return;}
+  const r=await api("GET","/api/compare?"+seen.map(k=>"key="+encodeURIComponent(k)).join("&"));
+  render_compare(r,seen);
+}catch(e){$("cmp-out").innerHTML=`<p class="muted">${esc(e.message)}</p>`;}};
 $("cmp-camp-go").onclick=async()=>{try{
   const list=$("cmp-campaigns").value.trim();const rank=$("cmp-rank").value;
   let url="/api/compare/campaigns?rank_by="+encodeURIComponent(rank);
@@ -381,6 +393,29 @@ function render_campaign_compare(r){
 $("gb-go").onclick=bench;
 $("ask-go").onclick=ask_go;
 $("bb-create").onclick=builder_create;
+function view_state(){const pressed=document.querySelector('#tabs button[aria-pressed="true"]');return{filters:scope_filters(),kpi:$("flt-kpi").value,view:pressed?pressed.dataset.view:"main",benchmark:$("rep-bench").value,benchmark_scope:$("rep-bench-scope").value};}
+async function render_views(){try{
+  const list=await api("GET","/api/views");
+  $("view-list").innerHTML=list.length?("<ul class='plain'>"+list.map(v=>`<li>${esc(v.name)} <span class="muted" style="font-size:12px">${esc(JSON.stringify(v.state||{}))}</span> <button class="chip" data-apply="${esc(String(v.id))}">Apply</button> <button class="chip" data-del="${esc(String(v.id))}">Delete</button></li>`).join("")+"</ul>"):'<span class="muted">No saved views yet.</span>';
+  $("view-list").querySelectorAll("[data-apply]").forEach(b=>b.onclick=()=>apply_view((list.find(v=>String(v.id)===b.dataset.apply)||{}).state||{}));
+  $("view-list").querySelectorAll("[data-del]").forEach(b=>b.onclick=async()=>{try{await api("POST","/api/views/delete",{id:Number(b.dataset.del)});render_views();}catch(e){$("view-status").textContent=e.message;}});
+}catch(e){$("view-list").innerHTML=`<span class="muted">${esc(e.message)}</span>`;}}
+function apply_view(st){
+  const f=(st&&st.filters)||{};
+  ["client","project","campaign","platform","vertical","market","funnel","objective","date"].forEach(k=>{
+    const el=$("flt-"+k);if(!el)return;
+    let v=(f[k]||[])[0];
+    if(v==null||v==="")v=(k==="platform")?"all":"";
+    if(k==="platform"&&!["all","meta","tiktok"].includes(v))v="all";
+    el.value=v;
+  });
+  if(st.kpi&&$("flt-kpi").querySelector(`option[value="${st.kpi}"]`))$("flt-kpi").value=st.kpi;
+  if(st.benchmark&&$("rep-bench").querySelector(`option[value="${st.benchmark}"]`))$("rep-bench").value=st.benchmark;
+  if(st.benchmark_scope&&$("rep-bench-scope").querySelector(`option[value="${st.benchmark_scope}"]`))$("rep-bench-scope").value=st.benchmark_scope;
+  if(st.view&&/^[a-z]+$/.test(st.view)){const b=document.querySelector(`#tabs button[data-view="${st.view}"]`);if(b)b.click();}
+  refresh();
+}
+$("view-save").onclick=async()=>{const name=$("view-name").value.trim();if(!name){$("view-status").textContent="Name the view first.";return;}try{const r=await api("POST","/api/views",{name:name,state:view_state()});$("view-name").value="";$("view-status").textContent="Saved "+r.name+".";render_views();}catch(e){$("view-status").textContent=e.message;}};
 $("rep-onepager").onclick=report_onepager;
 $("rep-csv").onclick=report_csv;
 $("rep-pptx").onclick=report_pptx;
@@ -648,7 +683,8 @@ function retention_svg(segs){
   }).join("");
   return `<svg viewBox="0 0 560 ${segs.length*24+6}" width="100%" role="img" aria-label="Retention drop per segment"><title>${esc("Retention drop per segment from /api/retention")}</title>${rows}</svg>`;
 }
-function render_compare(r,a,b){
+function render_compare(r,keys){
+  const arr=Array.isArray(keys)?keys:[];
   const scope=(r&&r.scope)||"All data";
   const kpi_row=(d,k,money)=>`<tr><th>${k.toUpperCase()}</th><td>${esc(kpi(d[k],money))}</td></tr>`;
   const card=key=>{
@@ -663,8 +699,8 @@ function render_compare(r,a,b){
   };
   const why=((r&&r.why&&r.why.differences)||[]).map(d=>`<li>${esc(d)}</li>`).join("");
   const top=(r&&r.why&&r.why.top)||null;
-  const head=top?`Why ${esc(top)} won`:"Insufficient data / no winner";
-  $("cmp-out").innerHTML=`<div class="cmp-grid">${card(a)}${card(b)}</div>`
+  const head=top?(arr.length>2?`${esc(top)} leads the comparison`:`Why ${esc(top)} won`):"Insufficient data / no winner";
+  $("cmp-out").innerHTML=`<div class="cmp-grid">${arr.map(k=>card(k)).join("")}</div>`
     +`<div class="insight-panel"><h4>${head}</h4><p class="muted" style="font-size:12px">Scope: ${esc(scope)}</p><ul class="plain">${why||"<li>—</li>"}</ul></div>`;
 }
 async function bench(){try{
@@ -798,6 +834,7 @@ async function report_deck(){
   }catch(e){$("rep-out").textContent="BLOCKED: "+e.message;$("rep-links").innerHTML="";}
 }
 refresh();
+render_views();
 </script>
 </body>
 </html>

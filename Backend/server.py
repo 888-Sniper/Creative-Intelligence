@@ -234,11 +234,14 @@ def _multi_why(keys, datas):
 
 VIEW_KPIS = ("all", "spend", "ctr", "cpc", "cpa", "cpm", "vtr",
              "roas")
-VIEW_KEYS = ("filters", "kpi", "view", "benchmark", "benchmark_scope")
+VIEW_RANKS = ("cpa", "cpm", "ctr", "vtr", "roas")
+VIEW_KEYS = ("filters", "kpi", "view", "benchmark", "benchmark_scope",
+             "rank_by")
 
 
 def save_view(conn, name, state):
-    """Persist a named analysis view (filters + KPI + tab + benchmark).
+    """Persist a named analysis view (filters + KPI + tab + benchmark
+    + report rank).
 
     state carries the exact UI snapshot: filters (scope axes),
     kpi (sort selector), view (active tab), benchmark (report
@@ -278,6 +281,10 @@ def save_view(conn, name, state):
         if state["benchmark_scope"] not in ("filters", "global"):
             raise ValueError("view benchmark_scope must be filters|global")
         clean["benchmark_scope"] = state["benchmark_scope"]
+    if "rank_by" in state:
+        if state["rank_by"] not in VIEW_RANKS:
+            raise ValueError("view rank_by must be one of %s" % (VIEW_RANKS,))
+        clean["rank_by"] = state["rank_by"]
     import datetime
     now = datetime.datetime.now(datetime.timezone.utc).isoformat()
     conn.execute(

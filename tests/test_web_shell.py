@@ -153,6 +153,26 @@ class ShellLiveTest(unittest.TestCase):
         self.assertIn("sort_creatives", HTML)
         self.assertIn("/api/creatives", HTML)
 
+    def test_report_rank_control_and_deck_honesty(self):
+        self.assertIn('id="rep-rank"', HTML)
+        for value, label in (("cpa", "CPA"), ("cpm", "CPM"),
+                             ("ctr", "CTR"), ("vtr", "VTR"),
+                             ("roas", "ROAS")):
+            self.assertIn('<option value="%s">%s</option>' % (value, label),
+                          HTML)
+        self.assertIn('rank_by:$("rep-rank").value', HTML)
+        # The downloadable HTML deck names the report's rank metric;
+        # Best/Watch must never fall back to hard-coded CPA text.
+        self.assertIn("d.rank_by", HTML)
+        self.assertIn("cw.best[rk]", HTML)
+        self.assertIn("cw.worst[rk]", HTML)
+        self.assertNotIn("(CPA ${esc(kpi(cw.best.cpa,1))})", HTML)
+        self.assertNotIn("(CPA ${esc(kpi(cw.worst.cpa,1))})", HTML)
+
+    def test_saved_views_carry_report_rank(self):
+        self.assertIn('rank_by:$("rep-rank").value', HTML)
+        self.assertIn('$("rep-rank").value=st.rank_by', HTML)
+
     def test_modality_displayed(self):
         self.assertIn("hook_modality", HTML)
         self.assertIn("brand_audio_mention_s", HTML)

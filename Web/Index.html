@@ -252,7 +252,7 @@ ul.plain li{padding:6px 0;border-bottom:1px solid var(--line)}
 <div id="bb-saved" style="margin-top:8px"></div>
 <div id="bb-out" style="margin-top:8px"></div></div>
 <div class="card"><h3>Saved views</h3>
-<div class="muted" style="font-size:12px">Named snapshots of filters + KPI + tab + benchmark (GET/POST /api/views). Applying a view restores the exact analysis setup.</div>
+<div class="muted" style="font-size:12px">Named snapshots of filters + KPI + tab + benchmark + report rank (GET/POST /api/views). Applying a view restores the exact analysis setup.</div>
 <div class="ask-row"><input type="text" id="view-name" placeholder="e.g. Beauty Spain TikTok" aria-label="View name"><button class="action" id="view-save">Save current view</button></div>
 <div id="view-list" class="muted" style="margin-top:8px">—</div>
 <div id="view-status" class="muted" style="font-size:12px"></div></div>
@@ -395,7 +395,7 @@ function render_campaign_compare(r){
 $("gb-go").onclick=bench;
 $("ask-go").onclick=ask_go;
 $("bb-create").onclick=builder_create;
-function view_state(){const pressed=document.querySelector('#tabs button[aria-pressed="true"]');return{filters:scope_filters(),kpi:$("flt-kpi").value,view:pressed?pressed.dataset.view:"main",benchmark:$("rep-bench").value,benchmark_scope:$("rep-bench-scope").value};}
+function view_state(){const pressed=document.querySelector('#tabs button[aria-pressed="true"]');return{filters:scope_filters(),kpi:$("flt-kpi").value,view:pressed?pressed.dataset.view:"main",benchmark:$("rep-bench").value,benchmark_scope:$("rep-bench-scope").value,rank_by:$("rep-rank").value};}
 async function render_views(){try{
   const list=await api("GET","/api/views");
   $("view-list").innerHTML=list.length?("<ul class='plain'>"+list.map(v=>`<li>${esc(v.name)} <span class="muted" style="font-size:12px">${esc(JSON.stringify(v.state||{}))}</span> <button class="chip" data-apply="${esc(String(v.id))}">Apply</button> <button class="chip" data-del="${esc(String(v.id))}">Delete</button></li>`).join("")+"</ul>"):'<span class="muted">No saved views yet.</span>';
@@ -414,6 +414,7 @@ function apply_view(st){
   if(st.kpi&&$("flt-kpi").querySelector(`option[value="${st.kpi}"]`))$("flt-kpi").value=st.kpi;
   if(st.benchmark&&$("rep-bench").querySelector(`option[value="${st.benchmark}"]`))$("rep-bench").value=st.benchmark;
   if(st.benchmark_scope&&$("rep-bench-scope").querySelector(`option[value="${st.benchmark_scope}"]`))$("rep-bench-scope").value=st.benchmark_scope;
+  if(st.rank_by&&$("rep-rank").querySelector(`option[value="${st.rank_by}"]`))$("rep-rank").value=st.rank_by;
   if(st.view&&/^[a-z]+$/.test(st.view)){const b=document.querySelector(`#tabs button[data-view="${st.view}"]`);if(b)b.click();}
   refresh();
 }
@@ -825,8 +826,11 @@ async function report_deck(){
     const d=r.deck||{};
     const slides=(d.slides||[]).map(s=>{
       const cw=(d.creatives||{})[s.campaign]||{};
-      const best=cw.best?`<p>Best: ${esc(cw.best.creative_key)} (CPA ${esc(kpi(cw.best.cpa,1))})</p>`:"";
-      const worst=cw.worst?`<p>Watch: ${esc(cw.worst.creative_key)} (CPA ${esc(kpi(cw.worst.cpa,1))})</p>`:"";
+      const rk=d.rank_by||"cpa";
+      const sym=["spend","cpa","cpc","cpm"].includes(rk)?"$":"";
+      const fmtv=v=>v==null?"n/a":sym+String(v);
+      const best=cw.best?`<p>Best: ${esc(cw.best.creative_key)} (${esc(rk.toUpperCase())} ${esc(fmtv(cw.best[rk]))})</p>`:"";
+      const worst=cw.worst?`<p>Watch: ${esc(cw.worst.creative_key)} (${esc(rk.toUpperCase())} ${esc(fmtv(cw.worst[rk]))})</p>`:"";
       return `<section class="slide"><h2>${esc(s.campaign)}</h2><p>${esc(Object.entries(s.kpis||{}).map(([k,v])=>k+": "+(v==null?"n/a":v)).join(" · "))}</p>${best}${worst}</section>`;}).join("");
     const why=((d.why||[]).map(w=>`<li>${esc(w)}</li>`).join(""));
     const learn=((d.learnings||[]).map(w=>`<li>${esc(w)}</li>`).join(""));

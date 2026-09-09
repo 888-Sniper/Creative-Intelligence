@@ -1041,10 +1041,11 @@ class SavedViewsTest(unittest.TestCase):
     def test_save_list_retrieve(self):
         state = {"filters": {"market": ["Spain"]}, "kpi": "roas",
                  "view": "compare", "benchmark": "platform",
-                 "benchmark_scope": "global"}
+                 "benchmark_scope": "global", "rank_by": "roas"}
         saved = server.save_view(self.conn, "Spain ROAS", state)
         self.assertEqual(saved["name"], "Spain ROAS")
         self.assertEqual(saved["state"]["kpi"], "roas")
+        self.assertEqual(saved["state"]["rank_by"], "roas")
         listed = server.list_views(self.conn)
         self.assertEqual(len(listed), 1)
         self.assertEqual(listed[0]["state"]["filters"],
@@ -1070,6 +1071,8 @@ class SavedViewsTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             server.save_view(self.conn, "V",
                              {"benchmark_scope": "whenever"})
+        with self.assertRaises(ValueError):
+            server.save_view(self.conn, "V", {"rank_by": "spend"})
 
     def test_delete_roundtrip(self):
         saved = server.save_view(self.conn, "Gone", {"kpi": "cpa"})

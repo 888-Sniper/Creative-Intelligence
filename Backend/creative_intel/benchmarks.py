@@ -11,19 +11,33 @@ def _weight(rows, metric):
 
 
 def summarize(rows):
-    """Spend-weighted roll-up of ad rows sharing one group key."""
+    """Spend-weighted roll-up of ad rows sharing one group key.
+
+    Extended keys (clicks, conversions, video_views, cpm, vtr, roas)
+    are additive: every pre-existing key keeps its exact meaning so
+    older consumers and tests are unaffected.
+    """
     spend = sum(r["spend"] for r in rows)
     impr = sum(r["impressions"] for r in rows)
     clicks = sum(r["clicks"] for r in rows)
     conv = sum(r["conversions"] for r in rows)
+    views = sum(r.get("video_views", 0) or 0 for r in rows)
+    revenue = sum(r.get("revenue", 0) or 0 for r in rows)
     return {
         "n_ads": len(rows),
         "spend": round(spend, 2),
         "impressions": impr,
+        "clicks": clicks,
+        "conversions": conv,
+        "video_views": views,
+        "revenue": round(revenue, 2),
         "ctr": round(clicks / impr, 4) if impr else 0.0,
         "cpc": round(spend / clicks, 2) if clicks else 0.0,
+        "cpm": round(spend / impr * 1000, 2) if impr else 0.0,
+        "vtr": round(views / impr, 4) if impr else 0.0,
         "conv_rate_weighted": round(_weight(rows, "conv_rate"), 4),
         "cpa": round(spend / conv, 2) if conv else 0.0,
+        "roas": round(revenue / spend, 4) if spend else 0.0,
     }
 
 

@@ -4,7 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Foap Creative Intelligence</title>
-<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="icon" type="image/png" href="assets/favicon.png">
+<link rel="apple-touch-icon" href="assets/foap-mark.png">
 <style>
 :root{
   --foap-primary:#00C7B2; --foap-primary-hover:#00A895; --foap-primary-pressed:#008F7F;
@@ -113,14 +114,14 @@ ul.plain{list-style:none;padding:0;margin:0}
 ul.plain li{padding:6px 0;border-bottom:1px solid var(--line)}
 .ask-bar{background:var(--card);border:1px solid var(--line);border-radius:var(--foap-radius);padding:16px 20px;margin:16px 0;box-shadow:var(--foap-shadow)}
 .ask-bar h3{margin:0 0 8px;font-size:15px}
-.ask-row{display:flex;gap:8px}
-.ask-row input{flex:1}
+.ask-row{display:flex;gap:8px;flex-wrap:wrap}
+.ask-row input{flex:1;min-width:0}
 .report-outputs{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
 .report-outputs a{display:inline-block;background:var(--foap-surface-2);border:1px solid var(--line);border-radius:999px;padding:7px 14px;font-size:13px;font-weight:600;color:var(--fg);text-decoration:none}
 .report-outputs a:hover{border-color:var(--foap-primary);color:var(--foap-primary)}
 @media (max-width:1100px){.detail-layout{grid-template-columns:1fr}}
 @media (max-width:900px){.filter-grid{grid-template-columns:1fr 1fr}.kpi-grid{grid-template-columns:1fr 1fr}}
-@media (max-width:700px){.cmp-grid{grid-template-columns:1fr}.creative-grid{grid-template-columns:1fr}.app-header-inner{padding:10px 12px}.container{padding:0 12px 32px}.page-title{font-size:22px}table{display:block;overflow-x:auto}}
+@media (max-width:700px){.cmp-grid{grid-template-columns:1fr}.creative-grid{grid-template-columns:1fr}.app-header-inner{padding:10px 12px}.container{padding:0 12px 32px}.page-title{font-size:22px}table{display:block;overflow-x:auto}.ask-row{flex-direction:column}.ask-row .action{width:100%;margin-right:0}}
 </style>
 </head>
 <body>
@@ -322,15 +323,24 @@ async function refresh(){mark_active_filters();filter_summary();kpis();campaigns
 async function kpis(){try{
   const c=await api("GET","/api/campaigns");const groups=Object.values(c);
   if(!groups.length){$("kpis").innerHTML='<div class="empty-state">Upload performance data to begin.</div>';return;}
-  let s=0,n=0;groups.forEach(g=>{s+=g.spend;n+=g.n_ads;});
+  const tot=k=>groups.reduce((t,g)=>t+(Number(g[k])||0),0);
+  const spend=tot("spend"),impr=tot("impressions"),clicks=tot("clicks"),
+        conv=tot("conversions"),views=tot("video_views"),rev=tot("revenue");
+  const cpm=impr?spend/impr*1000:0,vtr=impr?views/impr:0,
+        ctr=impr?clicks/impr:0,cpa=conv?spend/conv:0,roas=spend?rev/spend:0;
   const cpas=groups.map(g=>g.cpa).filter(v=>v>0);
   const best=cpas.length?Math.min(...cpas):null;
   const card=(v,l,d)=>`<div class="kpi-card"><div class="kpi-value">${v}</div><div class="kpi-label">${l}</div>${d?`<div class="kpi-delta">${d}</div>`:""}</div>`;
+  const scope=`across ${groups.length} campaign${groups.length===1?"":"s"}`;
   $("kpis").innerHTML=`<div class="kpi-grid">`
-    +card("$"+s.toFixed(2),"Spend","")
-    +card(String(n),"Creatives","")
-    +card(String(groups.length),"Campaigns","")
-    +card(best!=null?"$"+best.toFixed(2):"—","Best CPA",best!=null?"lowest across selected campaigns":"no conversions yet")
+    +card("$"+spend.toFixed(2),"Spend",scope)
+    +card(impr?impr.toLocaleString("en-US"):"—","Impressions",impr?scope:"no impressions yet")
+    +card(impr?"$"+cpm.toFixed(2):"—","CPM",impr?scope:"no impressions yet")
+    +card(impr?(vtr*100).toFixed(1)+"%":"—","VTR",impr?(views?scope:"no video views yet"):"no impressions yet")
+    +card(impr?(ctr*100).toFixed(2)+"%":"—","CTR",impr?scope:"no impressions yet")
+    +card(conv?"$"+cpa.toFixed(2):"—","CPA",conv?("blended "+scope):"no conversions yet")
+    +card(spend&&rev?roas.toFixed(2)+"x":"—","ROAS",spend&&rev?("blended "+scope):"no revenue yet")
+    +card(best!=null?"$"+best.toFixed(2):"—","Best CPA",best!=null?"lowest single campaign":"no conversions yet")
     +`</div>`;
 }catch(e){$("kpis").innerHTML=`<div class="empty-state">${esc(e.message)}</div>`;}}
 async function campaigns(){try{

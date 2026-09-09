@@ -97,15 +97,30 @@ class ShellLiveTest(unittest.TestCase):
         self.assertIn(b"Foap Creative Intelligence", body)
 
     def test_favicon_asset_serves(self):
-        status, ctype, body = self._get("/assets/favicon.svg")
+        status, ctype, body = self._get("/assets/favicon.png")
         self.assertEqual(status, 200)
-        self.assertIn("svg", ctype)
-        self.assertIn(b"#00C7B2", body)
+        self.assertIn("image/png", ctype)
+        self.assertTrue(body.startswith(b"\x89PNG"))
+
+    def test_logo_and_mark_assets_serve(self):
+        for path, minimum in (("/assets/foap-logo.png", 10000),
+                              ("/assets/foap-mark.png", 5000)):
+            status, ctype, body = self._get(path)
+            self.assertEqual(status, 200, path)
+            self.assertIn("image/png", ctype, path)
+            self.assertTrue(body.startswith(b"\x89PNG"), path)
+            self.assertGreater(len(body), minimum, path)
+
+    def test_overview_kpi_set_present(self):
+        for label in ("Spend", "Impressions", "CPM", "VTR", "CTR",
+                      "CPA", "ROAS", "Best CPA"):
+            self.assertIn(label, HTML)
 
     def test_asset_sandbox(self):
         import urllib.error
         for bad in ("/assets/../Index.html", "/assets/.hidden",
-                    "/assets/x.py", "/assets/nope.png"):
+                    "/assets/x.py", "/assets/nope.png",
+                    "/assets/favicon.svg"):
             try:
                 self._get(bad)
                 self.fail("served %s" % bad)

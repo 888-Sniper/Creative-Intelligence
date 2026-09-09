@@ -151,7 +151,15 @@ ul.plain{list-style:none;padding:0;margin:0}
 <script>
 const $=id=>document.getElementById(id);
 const esc=v=>String(v??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
-const api=async(m,p,b)=>{const r=await fetch(p,{method:m,headers:{"Content-Type":"application/json"},body:b?JSON.stringify(b):undefined});const j=await r.json();if(!r.ok)throw new Error(j.error||r.status);return j;};
+function filtered_path(p){
+  if(p==="/api/campaigns"||p.startsWith("/api/benchmarks")){
+    const f=active_filters();const q=new URLSearchParams();
+    ["platform","vertical","market","funnel","objective","client"].forEach(k=>{const v=f[k];if(v&&v!=="all")q.append(k,v);});
+    const s=q.toString();if(s)p+=(p.includes("?")?"&":"?")+s;
+  }
+  return p;
+}
+const api=async(m,p,b)=>{const r=await fetch(filtered_path(p),{method:m,headers:{"Content-Type":"application/json"},body:b?JSON.stringify(b):undefined});const j=await r.json();if(!r.ok)throw new Error(j.error||r.status);return j;};
 document.querySelectorAll("#tabs button").forEach(b=>b.onclick=()=>{document.querySelectorAll("#tabs button").forEach(x=>x.setAttribute("aria-pressed","false"));b.setAttribute("aria-pressed","true");document.querySelectorAll(".view").forEach(v=>v.classList.remove("active"));document.querySelector("#v-"+b.dataset.view).classList.add("active");refresh();});
 $("theme").onclick=()=>{const h=document.documentElement;h.dataset.theme=h.dataset.theme==="dark"?"":"dark";};
 let selected=null;

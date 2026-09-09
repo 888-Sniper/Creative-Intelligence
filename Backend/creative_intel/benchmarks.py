@@ -174,12 +174,21 @@ def normalize_filters(filters):
     return out
 
 
+FILTER_FIELD = {"funnel": "funnel_stage"}
+
+
 def match_filters(row, filters):
-    """True when a row satisfies every active filter axis."""
+    """True when a row satisfies every active filter axis.
+
+    Matching is case-insensitive; "funnel" reads the funnel_stage column.
+    """
     for key in FILTER_KEYS:
         allowed = (filters or {}).get(key)
-        if allowed and str(row.get(key) or "") not in allowed:
-            return False
+        if allowed:
+            actual = str(row.get(FILTER_FIELD.get(key, key)) or "").lower()
+            wanted = [str(v).lower() for v in allowed]
+            if actual not in wanted:
+                return False
     filt = filters or {}
     if filt.get("include_projects") and project_of(row) not in filt["include_projects"]:
         return False

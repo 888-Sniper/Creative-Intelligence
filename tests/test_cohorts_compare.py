@@ -22,10 +22,55 @@ TIKTOK = ("Campaign,Ad,Video Name,Spend,Impressions,Clicks,Results\n"
           "Gamma,G2,g2,100,10000,150,8\n")
 
 
+DIM_CSV = ("Campaign,Ad Name,Creative Name,Amount Spent,Impressions,"
+           "Link Clicks,Conversions,Vertical,Market,Funnel Stage\n"
+           "C1,A1,hook-a,100,10000,200,10,Beauty,Spain,lower\n"
+           "C2,A2,hook-b,300,30000,300,15,Food,France,top\n")
+
+
 def fresh_db():
     conn = sqlite3.connect(":memory:")
     schema.init_db(conn)
     return conn
+
+
+class FilterParamsTest(unittest.TestCase):
+    def setUp(self):
+        self.conn = fresh_db()
+        ingest.insert_rows(self.conn, ingest.parse_csv(DIM_CSV, "meta"))
+
+    def tearDown(self):
+        self.conn.close()
+
+    def test_vertical_filter_queries_store(self):
+        got = benchmarks.benchmark(self.conn, "campaign",
+                                   {"vertical": ["beauty"]})
+        self.assertEqual(sorted(got), ["C1"])
+
+    def test_funnel_alias_and_case_insensitive(self):
+        got = benchmarks.benchmark(self.conn, "campaign",
+                                   {"funnel": ["LOWER"]})
+        self.assertEqual(sorted(got), ["C1"])
+        got = benchmarks.benchmark(self.conn, "campaign",
+                                   {"funnel": ["top"]})
+        self.assertEqual(sorted(got), ["C2"])
+
+    def test_multi_axis_market(self):
+        got = benchmarks.benchmark(self.conn, "platform",
+                                   {"market": ["spain"],
+                                    "vertical": ["BEAUTY"]})
+        self.assertEqual(sorted(got), ["meta"])
+
+    def test_no_filters_returns_all(self):
+        got = benchmarks.benchmark(self.conn, "campaign", {})
+        self.assertEqual(sorted(got), ["C1", "C2"])
+
+    def test_query_parser_ignores_all_and_unknown(self):
+        import server
+        self.assertEqual(server._filters_from_query(
+            {"vertical": ["Beauty"], "platform": ["all", ""],
+             "hack": ["x"]}), {"vertical": ["Beauty"]})
+        self.assertEqual(server._filters_from_query({}), {})
 
 
 def seeded_db():

@@ -43,6 +43,24 @@ def send(handler, code, obj):
     handler.wfile.write(body)
 
 
+FILTER_AXES = ("platform", "vertical", "funnel", "objective",
+               "market", "client")
+
+
+def _filters_from_query(query):
+    """Canonical dimension filters from URL query params.
+
+    Multi-values per axis allowed (?vertical=Beauty&vertical=Food).
+    "all" and blanks mean no constraint.
+    """
+    out = {}
+    for axis in FILTER_AXES:
+        vals = [v for v in query.get(axis, []) if v not in ("", "all")]
+        if vals:
+            out[axis] = vals
+    return out
+
+
 def read_json(handler):
     try:
         length = int(handler.headers.get("Content-Length", 0))
@@ -115,10 +133,12 @@ class Handler(BaseHTTPRequestHandler):
                                  "keys": providers.key_status(),
                                  "providers": providers.provider_matrix()})
             elif url.path == "/api/campaigns":
-                send(self, 200, benchmarks.benchmark(conn, "campaign"))
+                send(self, 200, benchmarks.benchmark(
+                    conn, "campaign", _filters_from_query(q)))
             elif url.path == "/api/benchmarks":
                 send(self, 200, benchmarks.benchmark(
-                    conn, q.get("group_by", ["hook_type"])[0]))
+                    conn, q.get("group_by", ["hook_type"])[0],
+                    _filters_from_query(q)))
             elif url.path == "/api/creatives":
                 cols = ["creative_key", "platform", "name", "duration_s",
                         "status", "transcript"]

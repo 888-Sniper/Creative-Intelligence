@@ -385,6 +385,124 @@ class CreativeCompareParityTest(unittest.TestCase):
         why = server._creative_why("", "", {}, {})
         self.assertIsNone(why["top"])
 
+    def test_why_contrasts_all_dimensions(self):
+        import server
+        aa = {"hook_type": "question", "creator_vs_branded": "creator",
+              "duration_s": 30.0,
+              "brand_seconds": [{"start_s": 1.0, "end_s": 2.0}],
+              "product_seconds": [{"start_s": 5.0, "end_s": 8.0}],
+              "cta": "shop now",
+              "supers": ["-20% today"],
+              "structure": {
+                  "hook": {"start_s": 0.0, "end_s": 3.0, "confidence": 0.9},
+                  "voiceover": {"start_s": 0.0, "end_s": 30.0,
+                                "confidence": 0.8}}}
+        ab = {"hook_type": "demo_open", "creator_vs_branded": "branded",
+              "duration_s": 15.0,
+              "brand_seconds": [{"start_s": 4.0, "end_s": 6.0}],
+              "product_seconds": [],
+              "structure": {
+                  "hook": {"start_s": 0.0, "end_s": 3.0, "confidence": 0.9}}}
+        da = {"spend": 100.0, "impressions": 10000, "clicks": 200,
+              "conversions": 10, "cpa": 10.0, "ctr": 0.02, "vtr": 0.3,
+              "cpc": 0.5, "cpm": 10.0, "roas": 2.0, "annotation": aa}
+        db = {"spend": 100.0, "impressions": 10000, "clicks": 100,
+              "conversions": 5, "cpa": 20.0, "ctr": 0.01, "vtr": 0.2,
+              "cpc": 1.0, "cpm": 10.0, "roas": 1.0, "annotation": ab}
+        why = server._creative_why("cka", "ckb", da, db)
+        text = " ".join(why["differences"])
+        self.assertEqual(why["top"], "cka")
+        for needle in ("Length:", "Brand appears at", "Product appears in",
+                       "CTA is annotated", "supers are annotated",
+                       "Voiceover is annotated", "Structure:"):
+            self.assertIn(needle, text)
+
+
+class ReportGateTest(unittest.TestCase):
+    def test_report_blocked_while_reviews_pending(self):
+        import server
+        from creative_intel import qa
+        conn = seeded_db()
+        try:
+            qa.answer(conn, "what is spend?")
+            self.assertGreater(qa.pending_count(conn), 0)
+            with self.assertRaises(ValueError) as ctx:
+                server.expert2_report_route(
+                    conn, {"format": "csv", "kpis": ["cpa"]})
+            self.assertIn("review-to-zero", str(ctx.exception))
+            rep = server.expert2_report_route(
+                conn, {"format": "csv", "kpis": ["cpa"], "override": True})
+            self.assertEqual(rep["format"], "csv")
+        finally:
+            conn.close()
+
+    def test_report_open_with_no_pending_reviews(self):
+        import server
+        conn = seeded_db()
+        try:
+            rep = server.expert2_report_route(
+                conn, {"format": "one-pager", "kpis": ["cpa"]})
+            self.assertIn("Alpha", rep["markdown"])
+        finally:
+            conn.close()
+
+
+class ReportExtrasTest(unittest.TestCase):
+    def test_deck_markdown_carry_full_content(self):
+        conn = seeded_db()
+        try:
+            rep = benchmarks.build_report(conn, ["Alpha", "Beta"],
+                                          ["cpa", "ctr"], "campaign")
+            deck = rep["deck"]
+            for key in ("creatives", "learnings", "recommendations"):
+                self.assertIn(key, deck)
+            self.assertEqual(deck["creatives"]["Alpha"]["best"]
+                             ["creative_key"], "a1")
+            self.assertIn("Best / watch creatives", rep["markdown"])
+            self.assertIn("Creative learnings", rep["markdown"])
+            self.assertIn("heuristic", rep["markdown"])
+            self.assertEqual(len(deck["slides"]), 2)  # campaign slides only
+        finally:
+            conn.close()
+
+    def test_office_files_carry_all_sections(self):
+        import base64
+        import zipfile
+        from io import BytesIO
+        conn = seeded_db()
+        try:
+            rep = benchmarks.build_report(conn, ["Alpha", "Beta"],
+                                          ["cpa", "ctr"], "campaign", "pptx")
+            zf = zipfile.ZipFile(BytesIO(base64.b64decode(rep["pptx_b64"])))
+            try:
+                names = zf.namelist()
+                slides = sorted(n for n in names
+                                if n.startswith("ppt/slides/slide"))
+                self.assertGreaterEqual(len(slides), 6)
+                titles = [n for n in names if "/slides/" in n
+                          and n.endswith(".xml")]
+                blob = b" ".join(zf.read(n) for n in titles)
+                for needle in (b"Benchmarks", b"Creative learnings",
+                               b"Recommendations", b"a1"):
+                    self.assertIn(needle, blob)
+            finally:
+                zf.close()
+            rep = benchmarks.build_report(conn, ["Alpha", "Beta"],
+                                          ["cpa", "ctr"], "campaign", "xlsx")
+            zf = zipfile.ZipFile(BytesIO(base64.b64decode(rep["xlsx_b64"])))
+            try:
+                sheets = sorted(n for n in zf.namelist()
+                                if n.startswith("xl/worksheets/"))
+                self.assertGreaterEqual(len(sheets), 5)
+                wb = zf.read("xl/workbook.xml").decode()
+                for needle in ("Creatives", "Benchmarks", "Learnings",
+                               "Next steps"):
+                    self.assertIn(needle, wb)
+            finally:
+                zf.close()
+        finally:
+            conn.close()
+
 
 if __name__ == "__main__":
     unittest.main()

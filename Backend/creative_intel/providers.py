@@ -645,8 +645,36 @@ class LiveVision:
 class LiveLlm:
     """Annotation structuring over configured generation models."""
 
+    ASK_PROMPT = (
+        "You answer questions about ad-campaign data using ONLY the facts "
+        "below. Reply with ONE JSON object: "
+        '{"answer": "<2-6 sentences, every claim traceable to the facts>", '
+        '"used": ["totals"|"campaigns"|"hooks"|"formats"]}. '
+        "If the facts cannot answer, say what data is missing instead of "
+        "guessing. Never give generic marketing advice. Facts: %s. "
+        "Question: %s")
+
     def __init__(self, roster):
         self.roster = roster  # [(provider, model, tier), ...]
+
+    def ask_facts(self, question, facts):
+        """Raw JSON-text answer over a precomputed fact pack; qa.py validates."""
+
+        def call(item):
+            provider, model, _tier = item
+            client = make_chat(provider, model)
+            text = client.chat(
+                [{"role": "user", "content": self.ASK_PROMPT % (
+                    json.dumps(facts)[:6000], (question or "")[:500])}],
+                max_tokens=min(1024, cue_cap_tokens(model)))
+            return text
+
+        _winner, value = race(
+            [r for r in self.roster if r[2] == "active"],
+            [r for r in self.roster if r[2] == "fallback"], call)
+        if not value:
+            raise ProviderUnavailable("all ask models unavailable")
+        return value
 
     def structure(self, transcript, labels):
         from .creative import blank_annotation, validate

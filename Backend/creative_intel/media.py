@@ -182,7 +182,7 @@ def find_for_creative(conn, store, creative_key):
     "images": [jpeg/png/webp bytes]}. Reads files; missing files skipped."""
     check_key(creative_key)
     ensure_schema(conn)
-    audio, images, has_video = None, [], False
+    audio, images, videos, has_video = None, [], [], False
     for row in conn.execute(
             "SELECT id, stored_name, mime FROM media WHERE creative_key=?"
             " ORDER BY id", (creative_key,)).fetchall():
@@ -192,6 +192,10 @@ def find_for_creative(conn, store, creative_key):
         path = os.path.join(store, stored)
         if not os.path.isfile(path):
             continue
+        if mime.startswith("video/"):
+            videos.append(path)
+            has_video = True
+            continue
         with open(path, "rb") as fh:
             blob = fh.read()
         if mime.startswith("audio/"):
@@ -199,7 +203,5 @@ def find_for_creative(conn, store, creative_key):
                 audio = (blob, mime)
         elif mime.startswith("image/"):
             images.append(blob)
-        elif mime.startswith("video/"):
-            # Present but not demuxed: stdlib cannot split A/V tracks.
-            has_video = True
-    return {"audio": audio, "images": images, "has_video": has_video}
+    return {"audio": audio, "images": images, "videos": videos,
+            "has_video": has_video}

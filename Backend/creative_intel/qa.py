@@ -96,15 +96,132 @@ def _cpa(group):
     return (spend / conv) if conv else 0.0, spend, conv
 
 
-def answer(conn, question):
-    """Answer strictly from uploaded rows + annotations + transcripts."""
-    from . import benchmarks
+def _fact_pack(conn, limit=8):
+    """Compact computed facts for the LLM asker. Every number below is
+    derived from uploaded rows/annotations in this call."""
+    rows = _ads(conn)
+    anns = _annotations(conn)
+    spend = sum(r["spend"] for r in rows)
+    impr = sum(r["impressions"] for r in rows)
+    clicks = sum(r["clicks"] for r in rows)
+    conv = sum(r["conversions"] for r in rows)
+    by_campaign, by_hook, by_format = {}, {}, {}
+    for r in rows:
+        by_campaign.setdefault(r["campaign"] or "(uncategorised)", []).append(r)
+        hook = (anns.get(r["creative_key"], {}) or {}).get("hook_type")
+        if hook:
+            by_hook.setdefault(hook, []).append(r)
+        if (r["platform"] or "").lower() == "tiktok":
+            mode = (anns.get(r["creative_key"], {}) or {}).get(
+                "creator_vs_branded") or "(unannotated)"
+            by_format.setdefault(mode, []).append(r)
+
+    def _kpis(group):
+        spend = sum(x["spend"] for x in group)
+        impr = sum(x["impressions"] for x in group)
+        clicks = sum(x["clicks"] for x in group)
+        conv = sum(x["conversions"] for x in group)
+        keys = sorted({x["creative_key"] for x in group})
+        return {"n_creatives": len(keys), "spend": round(spend, 2),
+                "ctr": round(clicks / impr, 4) if impr else 0.0,
+                "cpa": round(spend / conv, 2) if conv else None}
+
+    camps = sorted(by_campaign.items(),
+                   key=lambda kv: sum(x["spend"] for x in kv[1]),
+                   reverse=True)[:limit]
+    return {
+        "totals": {"rows": len(rows), "spend": round(spend, 2),
+                   "ctr": round(clicks / impr, 4) if impr else 0.0,
+                   "cpa": round(spend / conv, 2) if conv else None},
+        "campaigns": [{"campaign": name, **_kpis(group)}
+                      for name, group in camps],
+        "hooks": [{"hook": hook, **_kpis(group)}
+                  for hook, group in sorted(
+                      by_hook.items(),
+                      key=lambda kv: sum(x["spend"] for x in kv[1]),
+                      reverse=True)[:limit]],
+        "formats": [{"format": mode, **_kpis(group)}
+                    for mode, group in sorted(
+                        by_format.items(),
+                        key=lambda kv: sum(x["spend"] for x in kv[1]),
+                        reverse=True)[:limit]],
+    }
+
+
+_USED_SOURCES = {
+    "totals": ("Uploaded CSV", "Benchmark Derived"),
+    "campaigns": ("Uploaded CSV", "Benchmark Derived"),
+    "hooks": ("Annotation", "Uploaded CSV", "Benchmark Derived"),
+    "formats": ("Annotation", "Uploaded CSV", "Benchmark Derived"),
+}
+
+
+def _llm_answer(conn, question, llm):
+    """LLM answer strictly over _fact_pack. Raises ProviderUnavailable
+    on any failure so the caller falls back to the rule engine."""
+    from . import providers
+    pack = _fact_pack(conn)
+    try:
+        data = _extract_json_obj(providers, llm, question, pack)
+    except Exception:
+        raise providers.ProviderUnavailable("ask model output unusable")
+    text = data.get("answer") if isinstance(data, dict) else None
+    used = data.get("used") if isinstance(data, dict) else None
+    if not isinstance(text, str) or not text.strip() or len(text) > 2000:
+        raise providers.ProviderUnavailable("ask model output unusable")
+    cites = []
+    for section in used if isinstance(used, list) else []:
+        for label in _USED_SOURCES.get(section, ()):
+            if label not in cites:
+                cites.append(label)
+    if not cites:
+        cites = ["Uploaded CSV", "Benchmark Derived"]
+    ordered = sorted(set(cites), key=SOURCE_PRIORITY.index)
+    cur = conn.execute(
+        "INSERT INTO qa_reviews (ts, question, answer, sources_json)"
+        " VALUES (?, ?, ?, ?)",
+        (datetime.datetime.now(datetime.timezone.utc).isoformat(),
+         question, text.strip(), json.dumps(ordered)))
+    conn.commit()
+    return {"answer": text.strip() + " [LLM]", "sources": ordered,
+            "review_id": cur.lastrowid}
+
+
+def _extract_json_obj(providers, llm, question, pack):
+    ask = getattr(llm, "ask_facts", None)
+    if not callable(ask):
+        raise providers.ProviderUnavailable("ask model has no ask_facts")
+    raw = ask(question, pack)
+    if not isinstance(raw, str):
+        raise providers.ProviderUnavailable("non-text ask output")
+    start, end = raw.find("{"), raw.rfind("}")
+    if start < 0 or end <= start:
+        raise providers.ProviderUnavailable("no JSON in ask output")
+    try:
+        return json.loads(raw[start:end + 1])
+    except ValueError:
+        raise providers.ProviderUnavailable("ask output is not valid JSON")
+
+
+def answer(conn, question, llm=None):
+    """Answer strictly from uploaded rows + annotations + transcripts.
+
+    llm (optional LiveLlm-compatible) answers over a computed fact pack;
+    any live failure falls back to the deterministic rule engine, and
+    both paths open the review-to-zero row.
+    """
+    from . import benchmarks, providers
     ensure(conn)
     rows = _ads(conn)
     if not rows:
         return {"answer": "No uploaded data yet. Upload a Meta or TikTok "
                 "export before asking questions.",
                 "sources": [], "review_id": None}
+    if llm is not None:
+        try:
+            return _llm_answer(conn, question, llm)
+        except providers.ProviderUnavailable:
+            pass  # live failed: rules below never leave the user empty-handed
     q = (question or "").lower()
     parts, cites = [], []
 

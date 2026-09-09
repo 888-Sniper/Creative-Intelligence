@@ -1,5 +1,7 @@
 """Spend-weighted benchmarks over the canonical ads dataset."""
 
+import json
+
 GROUPABLE = ("platform", "campaign", "hook_type", "creator_vs_branded")
 
 
@@ -346,6 +348,100 @@ def compare_campaigns(conn, campaigns=None, rank_by="cpa"):
     return {"kpis": per, "ranking": ranking, "rank_by": rank_by, "why": why}
 
 
+def _creative_rows(conn, campaign):
+    """Per-creative performance + annotation labels for one campaign."""
+    out = []
+    for (key,) in conn.execute(
+            "SELECT DISTINCT creative_key FROM ads WHERE campaign=?",
+            (campaign,)).fetchall():
+        rows = conn.execute(
+            "SELECT spend, impressions, clicks, conversions FROM ads"
+            " WHERE creative_key=? AND campaign=?", (key, campaign,)).fetchall()
+        spend = sum(r[0] for r in rows)
+        impr = sum(r[1] for r in rows)
+        clicks = sum(r[2] for r in rows)
+        conv = sum(r[3] for r in rows)
+        got = conn.execute("SELECT annotation_json FROM annotations"
+                           " WHERE creative_key=?", (key,)).fetchone()
+        try:
+            ann = json.loads(got[0]) if got else {}
+        except ValueError:
+            ann = {}
+        out.append({
+            "creative_key": key,
+            "spend": round(spend, 2),
+            "ctr": round(clicks / impr, 4) if impr else 0.0,
+            "cpa": round(spend / conv, 2) if conv else None,
+            "conversions": conv,
+            "hook_type": (ann or {}).get("hook_type") or "unannotated",
+            "creator_vs_branded": (ann or {}).get("creator_vs_branded") or
+            "unannotated",
+        })
+    return out
+
+
+def _report_extras(conn, names):
+    """Best/worst creatives, hook learnings, heuristic next steps.
+
+    Everything is computed from uploaded rows + annotations in this
+    call. Recommendations are plainly labelled heuristic: they rank
+    by measured CPA/CTR, they do not invent diagnoses.
+    """
+    per_campaign = {}
+    hook_spend, hook_conv = {}, {}
+    for name in names:
+        rows = _creative_rows(conn, name)
+        converting = [r for r in rows if (r["conversions"] or 0) > 0]
+        pool = converting or rows
+        key = (lambda r: r["cpa"]) if converting else (lambda r: -r["ctr"])
+        ranked = sorted(pool, key=key)
+        per_campaign[name] = {
+            "best": ranked[0] if ranked else None,
+            "worst": ranked[-1] if len(ranked) > 1 else None,
+            "creatives": rows,
+        }
+        for r in rows:
+            hook_spend[r["hook_type"]] = hook_spend.get(r["hook_type"], 0) + r["spend"]
+            hook_conv[r["hook_type"]] = hook_conv.get(r["hook_type"], 0) + (
+                r["conversions"] or 0)
+    learnings = []
+    if hook_spend:
+        top_hook = max(hook_spend, key=lambda h: hook_spend[h])
+        conv = hook_conv.get(top_hook, 0)
+        learnings.append(
+            "%s hooks carry the most spend ($%s%s)." % (
+                top_hook, f"{hook_spend[top_hook]:,.2f}",
+                ", %s conversions" % conv if conv else ", no conversions yet"))
+    unannotated = sum(1 for name in names for r in per_campaign[name]["creatives"]
+                      if r["hook_type"] == "unannotated")
+    if unannotated:
+        learnings.append(
+            "%d of %d creatives lack hook labels — annotate them to "
+            "unlock hook learnings." % (
+                unannotated, sum(len(per_campaign[n]["creatives"]) for n in names)))
+    recommendations = []
+    cpa_ranked = [(n, per_campaign[n]["best"]) for n in names
+                  if per_campaign[n]["best"] and
+                  per_campaign[n]["best"]["cpa"] is not None]
+    if cpa_ranked:
+        top = min(cpa_ranked, key=lambda kv: kv[1]["cpa"])
+        recommendations.append(
+            "Scale candidate (heuristic): %s — lowest best-creative CPA "
+            "at $%s (%s)." % (top[0], top[1]["cpa"], top[1]["creative_key"]))
+        bottom = max(cpa_ranked, key=lambda kv: kv[1]["cpa"])
+        if bottom[0] != top[0]:
+            recommendations.append(
+                "Watch (heuristic): %s — highest best-creative CPA at $%s. "
+                "Compare its hook/format against %s before adding spend."
+                % (bottom[0], bottom[1]["cpa"], top[0]))
+    if not recommendations:
+        recommendations.append(
+            "No converting creatives yet — collect conversions before "
+            "scaling anything.")
+    return {"per_campaign": per_campaign, "learnings": learnings,
+            "recommendations": recommendations}
+
+
 def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
                  fmt="one-pager"):
     """Generate a report over selected campaigns + KPIs + benchmark.
@@ -401,6 +497,23 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
             lines.append("- cohort: %s" % bench)
     else:
         lines.append("- (no benchmark selected)")
+    extras = _report_extras(conn, names)
+    lines += ["", "## Best / watch creatives", ""]
+    for name in names:
+        best = extras["per_campaign"][name]["best"]
+        worst = extras["per_campaign"][name]["worst"]
+        if best:
+            lines.append("- %s best: %s (CPA $%s, CTR %s, %s / %s)" % (
+                name, best["creative_key"], best["cpa"], best["ctr"],
+                best["hook_type"], best["creator_vs_branded"]))
+        if worst:
+            lines.append("- %s watch: %s (CPA $%s, CTR %s, %s / %s)" % (
+                name, worst["creative_key"], worst["cpa"], worst["ctr"],
+                worst["hook_type"], worst["creator_vs_branded"]))
+    lines += ["", "## Creative learnings", ""]
+    lines += ["- %s" % l for l in extras["learnings"]] or ["- —"]
+    lines += ["", "## Recommendations / next steps (heuristic)", ""]
+    lines += ["- %s" % r for r in extras["recommendations"]]
     markdown = "\n".join(lines)
     csv_lines = ["campaign," + ",".join(wanted_kpis)]
     for name in names:
@@ -410,7 +523,12 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
     deck = {"title": "Campaign Report", "rank_by": comp["rank_by"],
             "slides": [{"campaign": n, "kpis": {k: comp["kpis"][n][k] for k in wanted_kpis}}
                        for n in names],
-            "why": comp["why"]["differences"], "benchmark": bench}
+            "why": comp["why"]["differences"], "benchmark": bench,
+            "creatives": {n: {"best": extras["per_campaign"][n]["best"],
+                              "worst": extras["per_campaign"][n]["worst"]}
+                          for n in names},
+            "learnings": extras["learnings"],
+            "recommendations": extras["recommendations"]}
     if fmt == "csv":
         return {"format": "csv", "csv": csv_text, "markdown": markdown, "deck": deck}
     if fmt == "deck":
@@ -424,12 +542,39 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
                                    "KPIs: %s" % ", ".join(wanted_kpis)]}]
             for name in names:
                 row = comp["kpis"][name]
-                slides.append({
-                    "title": name,
-                    "bullets": ["%s: %s" % (k.upper(), row[k])
-                                for k in wanted_kpis]})
+                bullets = ["%s: %s" % (k.upper(), row[k]) for k in wanted_kpis]
+                best = deck["creatives"][name]["best"]
+                worst = deck["creatives"][name]["worst"]
+                if best:
+                    bullets.append("Best creative: %s (CPA $%s, %s / %s)" % (
+                        best["creative_key"], best["cpa"],
+                        best["hook_type"], best["creator_vs_branded"]))
+                if worst:
+                    bullets.append("Watch: %s (CPA $%s, %s / %s)" % (
+                        worst["creative_key"], worst["cpa"],
+                        worst["hook_type"], worst["creator_vs_branded"]))
+                slides.append({"title": name, "bullets": bullets})
             slides.append({"title": "Why %s leads" % comp["why"]["top"],
                            "bullets": comp["why"]["differences"] or ["—"]})
+            bench = deck.get("benchmark") or {}
+            bench_bullets = []
+            if isinstance(bench, dict) and bench:
+                first = next(iter(bench.values()))
+                if isinstance(first, dict) and "cpa" in first:
+                    for group, vals in bench.items():
+                        bench_bullets.append(
+                            "%s: CPA $%s, CTR %s, spend $%s" % (
+                                group, vals.get("cpa"), vals.get("ctr"),
+                                vals.get("spend")))
+                else:
+                    bench_bullets.append("Cohort: %s" % str(bench)[:300])
+            else:
+                bench_bullets.append("(no benchmark selected)")
+            slides.append({"title": "Benchmarks", "bullets": bench_bullets})
+            slides.append({"title": "Creative learnings",
+                           "bullets": deck["learnings"] or ["—"]})
+            slides.append({"title": "Recommendations / next steps",
+                           "bullets": deck["recommendations"] or ["—"]})
             blob = ooxml.build_pptx("Campaign Report", slides)
             return {"format": "pptx", "filename": "campaign-report.pptx",
                     "pptx_b64": base64.b64encode(blob).decode(),
@@ -441,7 +586,39 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
         why = {"name": "Why analysis",
                "header": ["finding"],
                "rows": [[d] for d in comp["why"]["differences"]] or [["—"]]}
-        blob = ooxml.build_xlsx([sheet, why])
+        creatives = {"name": "Creatives",
+                     "header": ["campaign", "role", "creative", "spend",
+                                "ctr", "cpa", "hook", "format"],
+                     "rows": [[name, role,
+                               (slot or {}).get("creative_key"),
+                               (slot or {}).get("spend"),
+                               (slot or {}).get("ctr"),
+                               (slot or {}).get("cpa"),
+                               (slot or {}).get("hook_type"),
+                               (slot or {}).get("creator_vs_branded")]
+                              for name in names
+                              for role, slot in (
+                                  ("best", deck["creatives"][name]["best"]),
+                                  ("watch", deck["creatives"][name]["worst"]))
+                              if slot]}
+        learn = {"name": "Learnings",
+                 "header": ["finding"],
+                 "rows": [[l] for l in deck["learnings"]] or [["—"]]}
+        reco = {"name": "Next steps",
+                "header": ["recommendation (heuristic)"],
+                "rows": [[r] for r in deck["recommendations"]] or [["—"]]}
+        bench = deck.get("benchmark") or {}
+        if isinstance(bench, dict) and bench and isinstance(
+                next(iter(bench.values())), dict):
+            bsheet = {"name": "Benchmarks",
+                      "header": ["group", "cpa", "ctr", "spend"],
+                      "rows": [[g, v.get("cpa"), v.get("ctr"), v.get("spend")]
+                               for g, v in bench.items()]}
+        else:
+            bsheet = {"name": "Benchmarks", "header": ["benchmark"],
+                      "rows": [[str(bench)[:300] if bench
+                                else "(no benchmark selected)"]]}
+        blob = ooxml.build_xlsx([sheet, why, creatives, bsheet, learn, reco])
         return {"format": "xlsx", "filename": "campaign-report.xlsx",
                 "xlsx_b64": base64.b64encode(blob).decode(),
                 "markdown": markdown, "csv": csv_text, "deck": deck}

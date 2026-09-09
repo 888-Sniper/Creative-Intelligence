@@ -41,7 +41,7 @@ def _https_only(url):
     return url
 
 
-def fetch_text(url, timeout=FETCH_TIMEOUT_S):
+def fetch_bytes(url, timeout=FETCH_TIMEOUT_S):
     _https_only(url)
     req = urllib.request.Request(url, headers={"User-Agent": "FoapCI/1.0"})
     try:
@@ -56,12 +56,16 @@ def fetch_text(url, timeout=FETCH_TIMEOUT_S):
                     raise ConnectorUnavailable("remote file exceeds %d MB"
                                                % (MAX_FETCH_BYTES // (1024 * 1024)))
                 chunks.append(part)
-            raw = b"".join(chunks)
+            return b"".join(chunks)
     except ConnectorUnavailable:
         raise
     except Exception as e:
         raise ConnectorUnavailable("fetch failed for %s: %s"
                                    % (_host_of(url), e))
+
+
+def fetch_text(url, timeout=FETCH_TIMEOUT_S):
+    raw = fetch_bytes(url, timeout)
     for encoding in ("utf-8-sig", "utf-8", "latin-1"):
         try:
             return raw.decode(encoding)

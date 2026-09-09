@@ -82,9 +82,27 @@ def _media_dir(explicit=None):
     return media.media_dir(BASE)
 
 
+def _span_start(ann, key):
+    spans = (ann or {}).get(key) or []
+    starts = [s.get("start_s") for s in spans
+              if isinstance(s, dict)
+              and isinstance(s.get("start_s"), (int, float))
+              and not isinstance(s.get("start_s"), bool)]
+    return min(starts) if starts else None
+
+
+def _slot_set(ann, slot):
+    seg = ((ann or {}).get("structure") or {}).get(slot) or {}
+    try:
+        return float(seg.get("end_s", 0)) > float(seg.get("start_s", 0))
+    except (TypeError, ValueError):
+        return False
+
+
 def _creative_why(a, b, da, db):
     """Data-grounded pairwise notes: measured deltas plus observed
-    annotation contrast. Never causal claims, never invented data."""
+    annotation contrast across every creative dimension. Never causal
+    claims, never invented data."""
     if not a or not b:
         return {"top": None, "differences": ["Pick two creatives to compare."]}
     diffs = []
@@ -103,6 +121,46 @@ def _creative_why(a, b, da, db):
         if fa and fb and fa != fb:
             diffs.append("%s uses %s %s while %s uses %s"
                          % (a, label, fa, b, fb))
+    dura, durb = aa.get("duration_s"), ab.get("duration_s")
+    if dura and durb and dura != durb:
+        diffs.append("Length: %s runs %ss vs %s at %ss."
+                     % (a, dura, b, durb))
+    for key, label in (("brand_seconds", "Brand"), ("product_seconds", "Product")):
+        sa, sb = _span_start(aa, key), _span_start(ab, key)
+        if sa is not None and sb is not None and sa != sb:
+            diffs.append("%s appears at %ss in %s vs %ss in %s."
+                         % (label, sa, a, sb, b))
+        elif (sa is None) != (sb is None):
+            shown = a if sa is not None else b
+            diffs.append("%s appears in %s but has no timing in %s."
+                         % (label, shown, b if shown == a else a))
+    cta_a = aa.get("cta") or (_slot_set(aa, "cta") and "set")
+    cta_b = ab.get("cta") or (_slot_set(ab, "cta") and "set")
+    if bool(cta_a) != bool(cta_b):
+        diffs.append("CTA is annotated in %s but not in %s."
+                     % (a if cta_a else b, b if cta_a else a))
+    sup_a, sup_b = aa.get("supers"), ab.get("supers")
+    if bool(sup_a) != bool(sup_b):
+        diffs.append("On-screen supers are annotated in %s but not in %s."
+                     % (a if sup_a else b, b if sup_a else a))
+    vo_a, vo_b = _slot_set(aa, "voiceover"), _slot_set(ab, "voiceover")
+    if vo_a != vo_b:
+        diffs.append("Voiceover is annotated in %s but not in %s."
+                     % (a if vo_a else b, b if vo_a else a))
+    struct_a = sorted(s for s in
+                      ((aa.get("structure") or {}).keys()) if _slot_set(aa, s))
+    struct_b = sorted(s for s in
+                      ((ab.get("structure") or {}).keys()) if _slot_set(ab, s))
+    if struct_a != struct_b:
+        only_a = [s for s in struct_a if s not in struct_b]
+        only_b = [s for s in struct_b if s not in struct_a]
+        bits = []
+        if only_a:
+            bits.append("%s has %s" % (a, ", ".join(only_a)))
+        if only_b:
+            bits.append("%s has %s" % (b, ", ".join(only_b)))
+        if bits:
+            diffs.append("Structure: %s." % "; ".join(bits))
     top = None
     if (da.get("conversions") or 0) > 0 and (db.get("conversions") or 0) > 0:
         top = a if da.get("cpa", 0) <= db.get("cpa", 0) else b
@@ -161,6 +219,18 @@ def apply_action(conn, action, payload, prov, media_dir=None):
                 conn, _media_dir(media_dir), payload["creative_key"])
         except ValueError:
             bundle = None
+        if bundle and (bundle.get("videos") and
+                       not (bundle.get("audio") or bundle.get("images")) and
+                       getattr(prov, "mode", "mock") == "live"):
+            # Upload MP4 -> Run Pipeline, end to end: decompose the
+            # first stored video (ffmpeg, cached) into STT audio +
+            # vision frames. Mock mode skips this; mocks need no media.
+            from creative_intel import video as video_mod
+            prepared = video_mod.prepare(
+                bundle["videos"][0],
+                os.path.join(_media_dir(media_dir), "derived"))
+            bundle = dict(bundle, audio=prepared["audio"],
+                          images=prepared["images"])
         return creative.run_pipeline(conn, payload["creative_key"], prov,
                                      media=bundle)
     if action == "media-upload":
@@ -174,6 +244,27 @@ def apply_action(conn, action, payload, prov, media_dir=None):
         csv_text = connectors.fetch_sheet_csv(payload.get("url", ""))
         rows, quarantined = ingest.parse_csv_report(
             csv_text, payload["platform"], "sheets")
+        inserted = ingest.insert_rows(conn, rows)
+        return {"inserted": inserted, "quarantined": quarantined,
+                "quarantined_count": len(quarantined)}
+    if action == "connect-drive":
+        if not payload.get("platform"):
+            raise ValueError("drive import needs a platform")
+        url = connectors.drive_file_url(payload.get("url", ""))
+        blob = connectors.fetch_bytes(url)
+        if blob.startswith(b"PK"):
+            rows, quarantined = ingest.parse_xlsx_report(
+                blob, payload["platform"], "drive")
+        else:
+            try:
+                text = blob.decode("utf-8-sig")
+            except ValueError:
+                raise ValueError("Drive file is neither CSV text nor .xlsx")
+            if text.lstrip().lower().startswith(("<!doctype html", "<html")):
+                raise ValueError("Google returned a login/confirm page: "
+                                 "private Drive files need OAuth (parked)")
+            rows, quarantined = ingest.parse_csv_report(
+                text, payload["platform"], "drive")
         inserted = ingest.insert_rows(conn, rows)
         return {"inserted": inserted, "quarantined": quarantined,
                 "quarantined_count": len(quarantined)}
@@ -371,6 +462,8 @@ class Handler(BaseHTTPRequestHandler):
                 action = "ingest"
             elif url.path == "/api/media/upload":
                 action = "media-upload"
+            elif url.path == "/api/connect/drive":
+                action = "connect-drive"
             elif url.path == "/api/connect/sheets":
                 action = "connect-sheets"
             elif url.path == "/api/connect/meta":
@@ -382,7 +475,10 @@ class Handler(BaseHTTPRequestHandler):
             elif url.path == "/api/retention":
                 action = "retention"
             elif url.path == "/api/ask":
-                send(self, 200, qa.answer(conn, payload.get("question", "")))
+                live = (self.prov.llm if getattr(
+                    self.prov, "mode", "mock") == "live" else None)
+                send(self, 200, qa.answer(conn, payload.get("question", ""),
+                                          llm=live))
                 return
             elif url.path == "/api/reviews/mark":
                 pending = qa.mark_reviewed(conn, int(payload["review_id"]))
@@ -408,7 +504,7 @@ class Handler(BaseHTTPRequestHandler):
                 schema.init_db(mem)
                 n = 0
                 for entry in hist:
-                    if entry["action"] == "export":
+                    if entry["action"] in ("export", "report-override"):
                         continue
                     apply_action(mem, entry["action"], entry["payload"], self.prov)
                     n += 1
@@ -547,11 +643,25 @@ def expert2_cohort_build_route(conn, query):
 
 def expert2_report_route(conn, payload):
     from creative_intel import benchmarks as _bench
+    # Same review-to-zero gate as /api/export: annotation-derived
+    # insights must not ship in official reports while QA reviews
+    # are pending. override=True is honoured and logged, like export.
+    override = bool(payload.get("override"))
+    if not override:
+        try:
+            export_gate.check_reviews(conn)
+        except export_gate.ExportBlocked as e:
+            raise ValueError(str(e))
     campaigns = payload.get("campaigns") or None
     kpis = payload.get("kpis") or ["cpa", "ctr"]
     benchmark_sel = payload.get("benchmark")
     fmt = payload.get("format", "one-pager")
-    return _bench.build_report(conn, campaigns, kpis, benchmark_sel, fmt)
+    result = _bench.build_report(conn, campaigns, kpis, benchmark_sel, fmt)
+    if override:
+        replay.log(conn, "report-override",
+                   {"campaigns": campaigns, "format": fmt,
+                    "kpis": kpis, "override": True})
+    return result
 
 
 def expert2_dispatch_get(handler, conn, url, query):

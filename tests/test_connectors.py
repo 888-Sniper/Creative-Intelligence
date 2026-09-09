@@ -46,6 +46,14 @@ class StubHandler(BaseHTTPRequestHandler):
         StubHandler.seen["path"] = self.path
         if self.path.startswith("/sheet"):
             self._send(200, SHEET_CSV, "text/csv")
+        elif self.path.startswith("/drive.xlsx"):
+            from creative_intel import ooxml
+            blob = ooxml.build_xlsx([{
+                "name": "Export",
+                "header": ["Campaign", "Spend", "Impressions", "Clicks",
+                           "Conversions", "Ad Name"],
+                "rows": [["DriveCamp", 9, 900, 9, 1, "d1"]]}])
+            self._send(200, blob, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         elif self.path.startswith("/login"):
             self._send(200, "<!DOCTYPE html><html>login</html>", "text/html")
         elif "/insights" in self.path:
@@ -161,6 +169,38 @@ class ConnectorTest(unittest.TestCase):
             self.assertNotIn("super-secret-meta", str(e))
         else:
             self.fail("expected failure without account id")
+
+    def test_drive_csv_and_xlsx(self):
+        import server
+        conn = sqlite3.connect(":memory:")
+        try:
+            schema.init_db(conn)
+            out = server.apply_action(
+                conn, "connect-drive",
+                {"url": self.base + "/sheet.csv", "platform": "meta"}, None)
+            self.assertEqual(out["inserted"], 1)
+            out = server.apply_action(
+                conn, "connect-drive",
+                {"url": self.base + "/drive.xlsx", "platform": "meta"}, None)
+            self.assertEqual(out["inserted"], 1)
+            names = sorted(r[0] for r in conn.execute(
+                "SELECT DISTINCT campaign FROM ads").fetchall())
+            self.assertEqual(names, ["DriveCamp", "StubCamp"])
+        finally:
+            conn.close()
+
+    def test_drive_login_page_refused(self):
+        import server
+        conn = sqlite3.connect(":memory:")
+        try:
+            schema.init_db(conn)
+            with self.assertRaises(ValueError) as ctx:
+                server.apply_action(
+                    conn, "connect-drive",
+                    {"url": self.base + "/login", "platform": "meta"}, None)
+            self.assertIn("OAuth (parked)", str(ctx.exception))
+        finally:
+            conn.close()
 
     def test_server_connect_actions(self):
         import server

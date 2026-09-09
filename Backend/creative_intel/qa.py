@@ -123,15 +123,96 @@ def _fact_pack(conn, limit=8):
         conv = sum(x["conversions"] for x in group)
         keys = sorted({x["creative_key"] for x in group})
         return {"n_creatives": len(keys), "spend": round(spend, 2),
-                "ctr": round(clicks / impr, 4) if impr else 0.0,
+                "ctr": round(clicks / impr, 4) if impr else None,
                 "cpa": round(spend / conv, 2) if conv else None}
 
     camps = sorted(by_campaign.items(),
                    key=lambda kv: sum(x["spend"] for x in kv[1]),
                    reverse=True)[:limit]
-    return {
+    by_funnel, by_vertical, by_market = {}, {}, {}
+    for r in rows:
+        by_funnel.setdefault(
+            r.get("funnel_stage") or "(unset)", []).append(r)
+        if r.get("vertical"):
+            by_vertical.setdefault(r["vertical"], []).append(r)
+        if r.get("market"):
+            by_market.setdefault(r["market"], []).append(r)
+
+    def _vtr(group):
+        impr = sum(x["impressions"] for x in group)
+        views = sum(x["video_views"] for x in group)
+        return round(views / impr, 4) if impr else None
+
+    early, late = [], []
+    with_cta, without_cta = [], []
+    slot_hits = {}
+    durations = {}
+    for key in {r["creative_key"] for r in rows}:
+        got = conn.execute("SELECT duration_s FROM creatives WHERE creative_key=?",
+                           (key,)).fetchone()
+        if got and got[0]:
+            durations[key] = got[0]
+    for r in rows:
+        ann = anns.get(r["creative_key"], {}) or {}
+        start = _product_start(ann)
+        if start is not None:
+            (early if start <= PRODUCT_EARLY_S else late).append(r)
+        struct = ann.get("structure") or {}
+        cta = ann.get("cta") or (struct.get("cta") or {})
+        has_cta = bool(isinstance(cta, str) and cta.strip()) or (
+            isinstance(cta, dict) and
+            (cta.get("end_s") or 0) > (cta.get("start_s") or 0))
+        (with_cta if has_cta else without_cta).append(r)
+        for slot, seg in struct.items():
+            if isinstance(seg, dict) and (seg.get("end_s") or 0) > (
+                    seg.get("start_s") or 0):
+                slot_hits[slot] = slot_hits.get(slot, 0) + 1
+    by_length = {"<=15s": [], "15-30s": [], ">30s": []}
+    for r in rows:
+        dur = durations.get(r["creative_key"])
+        if dur is None:
+            continue
+        bucket = "<=15s" if dur <= 15 else ("15-30s" if dur <= 30 else ">30s")
+        by_length[bucket].append(r)
+    by_key = {}
+    for r in rows:
+        by_key.setdefault(r["creative_key"], []).append(r)
+
+    def _score(group):
+        spend = sum(x["spend"] for x in group)
+        conv = sum(x["conversions"] for x in group)
+        if conv:
+            return (0, spend / conv)
+        impr = sum(x["impressions"] for x in group)
+        clicks = sum(x["clicks"] for x in group)
+        if impr:
+            return (1, -(clicks / impr))
+        return (2, 0.0)
+
+    ranked = sorted(by_key, key=lambda k: _score(by_key[k]))
+    nq = max(1, len(ranked) // 5)
+    quintiles = {
+        "top_20_pct": ranked[:nq],
+        "bottom_20_pct": ranked[-nq:] if len(ranked) > 1 else [],
+    }
+    retention = {}
+    curves = conn.execute(
+        "SELECT creative_key, MIN(t_sec), MAX(t_sec) FROM retention"
+        " GROUP BY creative_key").fetchall()
+    if curves:
+        drops = []
+        for key, _t0, _t1 in curves:
+            pts = conn.execute(
+                "SELECT retention_pct FROM retention WHERE creative_key=?"
+                " ORDER BY t_sec", (key,)).fetchall()
+            if len(pts) >= 2:
+                drops.append(pts[0][0] - pts[-1][0])
+        retention = {"creatives_with_curves": len(curves),
+                     "avg_drop_pts": round(sum(drops) / len(drops), 2)
+                     if drops else None}
+    pack = {
         "totals": {"rows": len(rows), "spend": round(spend, 2),
-                   "ctr": round(clicks / impr, 4) if impr else 0.0,
+                   "ctr": round(clicks / impr, 4) if impr else None,
                    "cpa": round(spend / conv, 2) if conv else None},
         "campaigns": [{"campaign": name, **_kpis(group)}
                       for name, group in camps],
@@ -145,7 +226,39 @@ def _fact_pack(conn, limit=8):
                         by_format.items(),
                         key=lambda kv: sum(x["spend"] for x in kv[1]),
                         reverse=True)[:limit]],
+        "funnel": [{"stage": stage, **_kpis(group)}
+                   for stage, group in sorted(
+                       by_funnel.items(),
+                       key=lambda kv: sum(x["spend"] for x in kv[1]),
+                       reverse=True)[:limit]],
+        "verticals": [{"vertical": name, **_kpis(group)}
+                      for name, group in sorted(
+                          by_vertical.items(),
+                          key=lambda kv: sum(x["spend"] for x in kv[1]),
+                          reverse=True)[:limit]],
+        "markets": [{"market": name, **_kpis(group)}
+                    for name, group in sorted(
+                        by_market.items(),
+                        key=lambda kv: sum(x["spend"] for x in kv[1]),
+                        reverse=True)[:limit]],
+        "product_timing": {
+            "early_s": PRODUCT_EARLY_S,
+            "early": {"n_creatives": len({x["creative_key"] for x in early}),
+                      "vtr": _vtr(early)} if early else None,
+            "late": {"n_creatives": len({x["creative_key"] for x in late}),
+                     "vtr": _vtr(late)} if late else None},
+        "lengths": [{"bucket": bucket, **_kpis(group)} for bucket, group in
+                    by_length.items() if group],
+        "cta": {"with_cta": _kpis(with_cta) if with_cta else None,
+                "without_cta": _kpis(without_cta) if without_cta else None},
+        "structure": {"slots_annotated": slot_hits,
+                      "n_annotated_creatives": sum(
+                          1 for k in {r["creative_key"] for r in rows}
+                          if anns.get(k))},
+        "quintiles": quintiles,
+        "retention": retention or None,
     }
+    return pack
 
 
 _USED_SOURCES = {
@@ -153,6 +266,15 @@ _USED_SOURCES = {
     "campaigns": ("Uploaded CSV", "Benchmark Derived"),
     "hooks": ("Annotation", "Uploaded CSV", "Benchmark Derived"),
     "formats": ("Annotation", "Uploaded CSV", "Benchmark Derived"),
+    "funnel": ("Uploaded CSV", "Benchmark Derived"),
+    "verticals": ("Uploaded CSV", "Benchmark Derived"),
+    "markets": ("Uploaded CSV", "Benchmark Derived"),
+    "product_timing": ("Annotation", "Uploaded CSV", "Benchmark Derived"),
+    "lengths": ("Uploaded CSV", "Benchmark Derived"),
+    "cta": ("Annotation", "Uploaded CSV", "Benchmark Derived"),
+    "structure": ("Annotation",),
+    "quintiles": ("Uploaded CSV", "Benchmark Derived"),
+    "retention": ("Uploaded CSV", "Benchmark Derived"),
 }
 
 
@@ -256,10 +378,16 @@ def answer(conn, question, llm=None):
     if any(w in q for w in ("cpa", "conversion", "result")):
         value, spend, conv = _cpa(rows)
         top_conv = max(rows, key=lambda r: r["conversions"])
-        parts.append("Blended CPA is $%.2f across %s conversions. Top "
-                     "conversions row is %r at %s."
-                     % (value, conv, top_conv["creative_key"],
-                        top_conv["conversions"]))
+        if conv:
+            parts.append("Blended CPA is $%.2f across %s conversions. Top "
+                         "conversions row is %r at %s."
+                         % (value, conv, top_conv["creative_key"],
+                            top_conv["conversions"]))
+        else:
+            parts.append("No conversions yet, so there is no CPA to report "
+                         "($%s spend). Top conversions row is %r at %s."
+                         % (f"{spend:,.2f}", top_conv["creative_key"],
+                            top_conv["conversions"]))
         cite("Benchmark Derived")
         cite("Uploaded CSV")
     if any(w in q for w in ("best", "top", "winner", "creative")):

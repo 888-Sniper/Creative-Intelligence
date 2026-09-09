@@ -671,7 +671,9 @@ class LiveLlm:
         "You answer questions about ad-campaign data using ONLY the facts "
         "below. Reply with ONE JSON object: "
         '{"answer": "<2-6 sentences, every claim traceable to the facts>", '
-        '"used": ["totals"|"campaigns"|"hooks"|"formats"]}. '
+        '"used": ["totals"|"campaigns"|"hooks"|"formats"|"funnel"|'
+        '"verticals"|"markets"|"product_timing"|"lengths"|"cta"|'
+        '"structure"|"quintiles"|"retention"]}. '
         "If the facts cannot answer, say what data is missing instead of "
         "guessing. Never give generic marketing advice. Facts: %s. "
         "Question: %s")

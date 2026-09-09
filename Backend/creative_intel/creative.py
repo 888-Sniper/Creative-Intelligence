@@ -21,6 +21,37 @@ HOOK_TYPES = ("question", "bold_claim", "demo_open", "social_proof",
 
 HOOK_MODALITIES = ("visual", "spoken", "text", "unknown")
 
+MAX_BRAND_TERMS = 20
+
+
+def brand_audio_mentions(transcript_words, brand_terms):
+    """First audible mention per brand term over timed words.
+
+    transcript_words: [{w, t}, ...] from STT. brand_terms: user
+    lexicon (client/brand names) — matching without a lexicon would
+    be guessing, so no terms means no mentions. Multi-word terms use
+    a sliding window timed at the first word. Returns
+    {"brand_audio_mention_s": float|None, "matches": [{term, t}]}.
+    """
+    words = [e for e in (transcript_words or [])
+             if isinstance(e, dict) and isinstance(e.get("w"), str)
+             and isinstance(e.get("t"), (int, float))]
+    terms = []
+    for term in (brand_terms or [])[:MAX_BRAND_TERMS]:
+        parts = str(term or "").casefold().split()
+        if parts:
+            terms.append(parts)
+    matches = []
+    lowered = [e["w"].casefold() for e in words]
+    for parts in terms:
+        for i in range(len(lowered) - len(parts) + 1):
+            if lowered[i:i + len(parts)] == parts:
+                matches.append({"term": " ".join(parts),
+                                "t": round(float(words[i]["t"]), 2)})
+                break
+    first = min((m["t"] for m in matches), default=None)
+    return {"brand_audio_mention_s": first, "matches": matches}
+
 STRUCTURE_SLOTS = ("hook", "body", "demo", "supers", "cta",
                    "endframe", "voiceover")
 
@@ -116,11 +147,13 @@ def mark_verified(conn, creative_key):
     return ann
 
 
-def run_pipeline(conn, creative_key, providers, media=None):
+def run_pipeline(conn, creative_key, providers, media=None, brand_terms=None):
     """Run all five stages with the given provider bundle; returns stage report.
 
     media is optional: {"audio": (bytes, mime), "images": [jpeg bytes]}.
-    Mocks ignore it; live adapters fail closed without it.
+    Mocks ignore it; live adapters fail closed without it. brand_terms
+    is an optional user lexicon for audible brand-mention timing; with
+    none supplied no mention is attributed.
     """
     creative = conn.execute("SELECT * FROM creatives WHERE creative_key=?",
                             (creative_key,)).fetchone()
@@ -154,6 +187,10 @@ def run_pipeline(conn, creative_key, providers, media=None):
         # Word-level audio timings ({w, t}) when the STT adapter
         # supplies them — basis for audible-mention analysis.
         ann["transcript_words"] = timings[:300]
+        found = brand_audio_mentions(ann["transcript_words"], brand_terms)
+        if found["brand_audio_mention_s"] is not None:
+            ann["brand_audio_mention_s"] = found["brand_audio_mention_s"]
+            ann["brand_audio_matches"] = found["matches"]
     errors = validate(ann)
     if errors:
         raise ValueError("structurer produced invalid v0: " + "; ".join(errors))

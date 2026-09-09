@@ -231,8 +231,12 @@ def apply_action(conn, action, payload, prov, media_dir=None):
                 os.path.join(_media_dir(media_dir), "derived"))
             bundle = dict(bundle, audio=prepared["audio"],
                           images=prepared["images"])
+        terms = payload.get("brand_terms") or []
+        if isinstance(terms, str):
+            terms = [t.strip() for t in terms.split(",")]
+        terms = [t for t in terms if isinstance(t, str) and t.strip()][:20]
         return creative.run_pipeline(conn, payload["creative_key"], prov,
-                                     media=bundle)
+                                     media=bundle, brand_terms=terms or None)
     if action == "media-upload":
         return media.save_media(
             conn, _media_dir(media_dir), payload["creative_key"],
@@ -382,45 +386,47 @@ class Handler(BaseHTTPRequestHandler):
                 rows = [dict(zip(cols, r)) for r in conn.execute(
                     "SELECT creative_key, platform, name, duration_s, status,"
                     " transcript FROM creatives")]
+                from creative_intel import benchmarks as _bench
                 filt = _filters_from_query(q)
-                if filt:
-                    from creative_intel import benchmarks as _bench
-                    norm = _bench.normalize_filters(filt)
-                    ad_cols = [c[0] for c in conn.execute(
-                        "SELECT * FROM ads LIMIT 0").description]
-                    kept = []
-                    for r in rows:
-                        ad_rows = [dict(zip(ad_cols, v)) for v in conn.execute(
-                            "SELECT * FROM ads WHERE creative_key=?",
-                            (r["creative_key"],)).fetchall()]
-                        if any(_bench.match_filters(ad, norm) for ad in ad_rows):
-                            kept.append(r)
-                    rows = kept
+                norm = _bench.normalize_filters(filt) if filt else None
+                ad_cols = [c[0] for c in conn.execute(
+                    "SELECT * FROM ads LIMIT 0").description]
+                kept = []
                 for r in rows:
+                    ad_rows = [dict(zip(ad_cols, v)) for v in conn.execute(
+                        "SELECT * FROM ads WHERE creative_key=?",
+                        (r["creative_key"],)).fetchall()]
+                    # Cohort-correct metrics: only rows passing the active
+                    # filters feed the KPI aggregation (P1: a Spain filter
+                    # must never show France-blended CPA).
+                    matched = [ad for ad in ad_rows
+                               if norm is None or _bench.match_filters(ad, norm)]
+                    if norm is not None and not matched:
+                        continue
+                    agg_rows = matched
+                    spend = sum(v["spend"] for v in agg_rows)
+                    impr = sum(v["impressions"] for v in agg_rows)
+                    clicks = sum(v["clicks"] for v in agg_rows)
+                    conv = sum(v["conversions"] for v in agg_rows)
+                    views = sum(v["video_views"] for v in agg_rows)
+                    rev = sum(v["revenue"] for v in agg_rows)
+                    r["campaigns"] = sorted({v["campaign"] for v in agg_rows
+                                             if v["campaign"]})
+                    r["metrics"] = {
+                        "spend": round(spend, 2), "impressions": impr,
+                        "clicks": clicks, "conversions": conv,
+                        "video_views": views, "revenue": round(rev, 2),
+                        "cpm": round(spend / impr * 1000, 2) if impr else None,
+                        "vtr": round(views / impr, 4) if impr else None,
+                        "ctr": round(clicks / impr, 4) if impr else None,
+                        "cpa": round(spend / conv, 2) if conv else None,
+                        "roas": round(rev / spend, 4) if spend else None}
                     ann = conn.execute(
                         "SELECT annotation_json FROM annotations WHERE creative_key=?",
                         (r["creative_key"],)).fetchone()
                     r["annotation"] = json.loads(ann[0]) if ann else None
-                    agg = conn.execute(
-                        "SELECT COALESCE(SUM(spend),0), COALESCE(SUM(impressions),0),"
-                        " COALESCE(SUM(clicks),0), COALESCE(SUM(conversions),0),"
-                        " COALESCE(SUM(video_views),0), COALESCE(SUM(revenue),0)"
-                        " FROM ads WHERE creative_key=?",
-                        (r["creative_key"],)).fetchone()
-                    spend, impr, clicks, conv, views, rev = agg
-                    r["campaigns"] = [c[0] for c in conn.execute(
-                        "SELECT DISTINCT campaign FROM ads WHERE creative_key=?",
-                        (r["creative_key"],)).fetchall()]
-                    r["metrics"] = {
-                        "spend": spend, "impressions": impr, "clicks": clicks,
-                        "conversions": conv, "video_views": views,
-                        "revenue": rev,
-                        "cpm": round(spend / impr * 1000, 2) if impr else 0.0,
-                        "vtr": round(views / impr, 4) if impr else 0.0,
-                        "ctr": round(clicks / impr, 4) if impr else 0.0,
-                        "cpa": round(spend / conv, 2) if conv else 0.0,
-                        "roas": round(rev / spend, 4) if spend else 0.0}
-                send(self, 200, rows)
+                    kept.append(r)
+                send(self, 200, kept)
             elif url.path == "/api/retention":
                 key = q.get("creative_key", [""])[0]
                 send(self, 200, retention.join_segments(conn, key))
@@ -444,12 +450,12 @@ class Handler(BaseHTTPRequestHandler):
                                 "impressions": impr,
                                 "clicks": clicks,
                                 "conversions": conv,
-                                "cpm": round(spend / impr * 1000, 2) if impr else 0.0,
-                                "vtr": round(views / impr, 4) if impr else 0.0,
-                                "ctr": round(clicks / impr, 4) if impr else 0.0,
-                                "cpc": round(spend / clicks, 2) if clicks else 0.0,
-                                "cpa": round(spend / conv, 2) if conv else 0.0,
-                                "roas": round(revenue / spend, 4) if spend else 0.0,
+                                "cpm": round(spend / impr * 1000, 2) if impr else None,
+                                "vtr": round(views / impr, 4) if impr else None,
+                                "ctr": round(clicks / impr, 4) if impr else None,
+                                "cpc": round(spend / clicks, 2) if clicks else None,
+                                "cpa": round(spend / conv, 2) if conv else None,
+                                "roas": round(revenue / spend, 4) if spend else None,
                                 "annotation": json.loads(ann[0]) if ann else None}
                 out["why"] = _creative_why(a, b, out.get(a, {}), out.get(b, {}))
                 send(self, 200, out)

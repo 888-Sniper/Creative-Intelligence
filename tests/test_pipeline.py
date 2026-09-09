@@ -126,6 +126,24 @@ class CreativeTest(unittest.TestCase):
         ann["hook_modality"] = "telepathic"
         self.assertTrue(creative.validate(ann))
 
+    def test_brand_audio_mentions(self):
+        words = [{"w": "try", "t": 0.5}, {"w": "Foap", "t": 1.2},
+                 {"w": "shop", "t": 2.0}, {"w": "now", "t": 2.4}]
+        got = creative.brand_audio_mentions(words, ["foap"])
+        self.assertEqual(got["brand_audio_mention_s"], 1.2)
+        got = creative.brand_audio_mentions(words, ["SHOP NOW"])
+        self.assertEqual(got["brand_audio_mention_s"], 2.0)
+        got = creative.brand_audio_mentions(words, ["unknown-brand"])
+        self.assertIsNone(got["brand_audio_mention_s"])
+        self.assertEqual(got["matches"], [])
+        # No lexicon, no attribution. No timings, no attribution.
+        self.assertIsNone(
+            creative.brand_audio_mentions(words, None)["brand_audio_mention_s"])
+        self.assertIsNone(
+            creative.brand_audio_mentions(None, ["foap"])["brand_audio_mention_s"])
+        self.assertIsNone(
+            creative.brand_audio_mentions([], ["foap"])["brand_audio_mention_s"])
+
     def test_pipeline_then_gate(self):
         conn = fresh_db()
         prov = providers.Providers()

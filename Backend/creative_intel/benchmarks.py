@@ -33,13 +33,13 @@ def summarize(rows):
         "conversions": conv,
         "video_views": views,
         "revenue": round(revenue, 2),
-        "ctr": round(clicks / impr, 4) if impr else 0.0,
-        "cpc": round(spend / clicks, 2) if clicks else 0.0,
-        "cpm": round(spend / impr * 1000, 2) if impr else 0.0,
-        "vtr": round(views / impr, 4) if impr else 0.0,
+        "ctr": round(clicks / impr, 4) if impr else None,
+        "cpc": round(spend / clicks, 2) if clicks else None,
+        "cpm": round(spend / impr * 1000, 2) if impr else None,
+        "vtr": round(views / impr, 4) if impr else None,
         "conv_rate_weighted": round(_weight(rows, "conv_rate"), 4),
-        "cpa": round(spend / conv, 2) if conv else 0.0,
-        "roas": round(revenue / spend, 4) if spend else 0.0,
+        "cpa": round(spend / conv, 2) if conv else None,
+        "roas": round(revenue / spend, 4) if spend else None,
     }
 
 
@@ -127,12 +127,12 @@ def kpis_for_rows(rows):
         "clicks": clicks,
         "conversions": conv,
         "video_views": views,
-        "cpm": round(spend / impr * 1000, 2) if impr else 0.0,
-        "vtr": round(views / impr, 4) if impr else 0.0,
-        "ctr": round(clicks / impr, 4) if impr else 0.0,
-        "cpc": round(spend / clicks, 2) if clicks else 0.0,
-        "cpa": round(spend / conv, 2) if conv else 0.0,
-        "roas": round(revenue / spend, 4) if spend else 0.0,
+        "cpm": round(spend / impr * 1000, 2) if impr else None,
+        "vtr": round(views / impr, 4) if impr else None,
+        "ctr": round(clicks / impr, 4) if impr else None,
+        "cpc": round(spend / clicks, 2) if clicks else None,
+        "cpa": round(spend / conv, 2) if conv else None,
+        "roas": round(revenue / spend, 4) if spend else None,
     }
 
 
@@ -316,7 +316,15 @@ def compare_campaigns(conn, campaigns=None, rank_by="cpa"):
     if len(per) < 1:
         raise ValueError("no campaigns match %r" % (campaigns,))
     higher = KPI_DIRECTIONS[rank_by] == "higher"
-    ranking = sorted(per, key=lambda c: per[c][rank_by], reverse=higher)
+
+    def _rank_key(name):
+        # Uncomputable (None) always ranks last, never as a false zero.
+        value = per[name][rank_by]
+        if value is None:
+            return (1, 0.0)
+        return (0, -value if higher else value)
+
+    ranking = sorted(per, key=_rank_key)
     top, bottom = ranking[0], ranking[-1]
     why = {"metric": rank_by, "top": top, "bottom": bottom, "differences": [],
            "details": {}}
@@ -383,12 +391,12 @@ def _creative_rows(conn, campaign):
             "impressions": impr,
             "clicks": clicks,
             "conversions": conv,
-            "cpm": round(spend / impr * 1000, 2) if impr else 0.0,
-            "vtr": round(views / impr, 4) if impr else 0.0,
-            "ctr": round(clicks / impr, 4) if impr else 0.0,
-            "cpc": round(spend / clicks, 2) if clicks else 0.0,
+            "cpm": round(spend / impr * 1000, 2) if impr else None,
+            "vtr": round(views / impr, 4) if impr else None,
+            "ctr": round(clicks / impr, 4) if impr else None,
+            "cpc": round(spend / clicks, 2) if clicks else None,
             "cpa": round(spend / conv, 2) if conv else None,
-            "roas": round(revenue / spend, 4) if spend else 0.0,
+            "roas": round(revenue / spend, 4) if spend else None,
             "hook_type": ann.get("hook_type") or "unannotated",
             "creator_vs_branded": ann.get("creator_vs_branded") or "unannotated",
             "duration_s": ann.get("duration_s") or (duration[0] if duration else 0),
@@ -398,24 +406,44 @@ def _creative_rows(conn, campaign):
     return out
 
 
-def _report_extras(conn, names):
+def _report_extras(conn, names, strict_human=False):
     """Best/worst creatives, hook learnings, heuristic next steps.
 
     Everything is computed from uploaded rows + annotations in this
     call. Recommendations are plainly labelled heuristic: they rank
-    by measured CPA/CTR, they do not invent diagnoses.
+    by measured CPA/CTR, they do not invent diagnoses. In strict mode
+    best/watch contention is limited to HUMAN-VERIFIED annotations so
+    no unverified hook/format label can enter an official report.
     """
     per_campaign = {}
     hook_spend, hook_conv = {}, {}
+    strict_nulled = 0
     for name in names:
         rows = _creative_rows(conn, name)
-        converting = [r for r in rows if (r["conversions"] or 0) > 0]
-        pool = converting or rows
-        key = (lambda r: r["cpa"]) if converting else (lambda r: -r["ctr"])
-        ranked = sorted(pool, key=key)
+
+        def _rank(pool):
+            converting = [r for r in pool if (r["conversions"] or 0) > 0]
+            use = converting or pool
+            if converting:
+                key = (lambda r: r["cpa"])
+            else:
+                # Uncomputable CTR ranks last, never as a false zero.
+                key = (lambda r: -(r["ctr"] if r["ctr"] is not None else -1.0))
+            ranked = sorted(use, key=key)
+            return (ranked[0] if ranked else None,
+                    ranked[-1] if len(ranked) > 1 else None)
+
+        best, worst = _rank(rows)
+        if strict_human:
+            # Verified-only contention: unverified hook/format labels
+            # must not enter an official strict report.
+            vbest, vworst = _rank([r for r in rows if r["verified"]])
+            strict_nulled += ((best is not None and vbest is None) +
+                              (worst is not None and vworst is None))
+            best, worst = vbest, vworst
         per_campaign[name] = {
-            "best": ranked[0] if ranked else None,
-            "worst": ranked[-1] if len(ranked) > 1 else None,
+            "best": best,
+            "worst": worst,
             "creatives": rows,
         }
         for r in rows:
@@ -466,7 +494,13 @@ def _report_extras(conn, names):
             "learnings": [t for t, _v in learnings],
             "learnings_verified": [v for _t, v in learnings],
             "recommendations": [t for t, _v in recommendations],
-            "recommendations_verified": [v for _t, v in recommendations]}
+            "recommendations_verified": [v for _t, v in recommendations],
+            "strict_nulled": strict_nulled}
+
+
+def _show(value):
+    """Report rendering: uncomputable KPIs read n/a, never None/zero."""
+    return "n/a" if value is None else value
 
 
 def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
@@ -507,7 +541,7 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
         row = comp["kpis"][name]
         lines.append("## %s" % name)
         for k in wanted_kpis:
-            lines.append("- %s: %s" % (k.upper(), row[k]))
+            lines.append("- %s: %s" % (k.upper(), _show(row[k])))
         lines.append("")
     lines += ["## Why %s leads %s (%s)" % (comp["why"]["top"], comp["why"]["bottom"],
                                            comp["why"]["metric"])]
@@ -519,13 +553,14 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
         if isinstance(first, dict) and "cpa" in first:
             for group, vals in bench.items():
                 lines.append("- %s: CPA $%s, CTR %s, spend $%s"
-                             % (group, vals.get("cpa"), vals.get("ctr"), vals.get("spend")))
+                             % (group, _show(vals.get("cpa")),
+                                _show(vals.get("ctr")), vals.get("spend")))
         else:
             lines.append("- cohort: %s" % bench)
     else:
         lines.append("- (no benchmark selected)")
-    extras = _report_extras(conn, names)
     strict = bool(strict_human)
+    extras = _report_extras(conn, names, strict_human=strict)
     unverified_excluded = 0
     if strict:
         # HUMAN-VERIFIED parity: insights resting on unverified
@@ -537,7 +572,8 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
             extras["recommendations_verified"]) if v]
         unverified_excluded = (
             (len(extras["learnings"]) - len(kept_learn)) +
-            (len(extras["recommendations"]) - len(kept_reco)))
+            (len(extras["recommendations"]) - len(kept_reco)) +
+            extras.get("strict_nulled", 0))
         extras = dict(
             extras,
             learnings=[t for t, _v in kept_learn] or [
@@ -552,11 +588,13 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
         worst = extras["per_campaign"][name]["worst"]
         if best:
             lines.append("- %s best: %s (CPA $%s, CTR %s, %s / %s)" % (
-                name, best["creative_key"], best["cpa"], best["ctr"],
+                name, best["creative_key"], _show(best["cpa"]),
+                _show(best["ctr"]),
                 best["hook_type"], best["creator_vs_branded"]))
         if worst:
             lines.append("- %s watch: %s (CPA $%s, CTR %s, %s / %s)" % (
-                name, worst["creative_key"], worst["cpa"], worst["ctr"],
+                name, worst["creative_key"], _show(worst["cpa"]),
+                _show(worst["ctr"]),
                 worst["hook_type"], worst["creator_vs_branded"]))
     lines += ["", "## Creative learnings", ""]
     lines += ["- %s" % l for l in extras["learnings"]] or ["- —"]
@@ -565,8 +603,9 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
     markdown = "\n".join(lines)
     csv_lines = ["campaign," + ",".join(wanted_kpis)]
     for name in names:
-        csv_lines.append(name + "," + ",".join(str(comp["kpis"][name][k])
-                                               for k in wanted_kpis))
+        csv_lines.append(name + "," + ",".join(
+            "" if comp["kpis"][name][k] is None
+            else str(comp["kpis"][name][k]) for k in wanted_kpis))
     csv_text = "\n".join(csv_lines) + "\n"
     deck = {"title": "Campaign Report", "rank_by": comp["rank_by"],
             "slides": [{"campaign": n, "kpis": {k: comp["kpis"][n][k] for k in wanted_kpis}}
@@ -594,16 +633,17 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
                                    "KPIs: %s" % ", ".join(wanted_kpis)]}]
             for name in names:
                 row = comp["kpis"][name]
-                bullets = ["%s: %s" % (k.upper(), row[k]) for k in wanted_kpis]
+                bullets = ["%s: %s" % (k.upper(), _show(row[k]))
+                           for k in wanted_kpis]
                 best = deck["creatives"][name]["best"]
                 worst = deck["creatives"][name]["worst"]
                 if best:
                     bullets.append("Best creative: %s (CPA $%s, %s / %s)" % (
-                        best["creative_key"], best["cpa"],
+                        best["creative_key"], _show(best["cpa"]),
                         best["hook_type"], best["creator_vs_branded"]))
                 if worst:
                     bullets.append("Watch: %s (CPA $%s, %s / %s)" % (
-                        worst["creative_key"], worst["cpa"],
+                        worst["creative_key"], _show(worst["cpa"]),
                         worst["hook_type"], worst["creator_vs_branded"]))
                 slides.append({"title": name, "bullets": bullets})
             slides.append({"title": "Why %s leads" % comp["why"]["top"],
@@ -616,8 +656,8 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
                     for group, vals in bench.items():
                         bench_bullets.append(
                             "%s: CPA $%s, CTR %s, spend $%s" % (
-                                group, vals.get("cpa"), vals.get("ctr"),
-                                vals.get("spend")))
+                                group, _show(vals.get("cpa")),
+                                _show(vals.get("ctr")), vals.get("spend")))
                 else:
                     bench_bullets.append("Cohort: %s" % str(bench)[:300])
             else:

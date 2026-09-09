@@ -526,6 +526,27 @@ class ReportExtrasTest(unittest.TestCase):
             self.assertGreater(strict["deck"]["unverified_excluded"], 0)
             self.assertIn("No HUMAN-VERIFIED learnings yet.",
                           strict["deck"]["learnings"])
+            # No verified annotations: strict best/watch are empty.
+            self.assertIsNone(strict["deck"]["creatives"]["Alpha"]["best"])
+        finally:
+            conn.close()
+
+    def test_strict_prefers_verified_creatives(self):
+        conn = seeded_db()
+        try:
+            creative.mark_verified(conn, "a2")
+            strict = benchmarks.build_report(conn, ["Alpha"],
+                                             ["cpa", "ctr"], None,
+                                             strict_human=True)
+            best = strict["deck"]["creatives"]["Alpha"]["best"]
+            self.assertIsNotNone(best)
+            self.assertEqual(best["creative_key"], "a2")
+            self.assertTrue(best["verified"])
+            loose = benchmarks.build_report(conn, ["Alpha"],
+                                            ["cpa", "ctr"], None)
+            self.assertEqual(
+                loose["deck"]["creatives"]["Alpha"]["best"]["creative_key"],
+                "a1")
         finally:
             conn.close()
 

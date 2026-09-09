@@ -114,6 +114,7 @@ def kpis_for_rows(rows):
         "cpm": round(spend / impr * 1000, 2) if impr else 0.0,
         "vtr": round(views / impr, 4) if impr else 0.0,
         "ctr": round(clicks / impr, 4) if impr else 0.0,
+        "cpc": round(spend / clicks, 2) if clicks else 0.0,
         "cpa": round(spend / conv, 2) if conv else 0.0,
         "roas": round(revenue / spend, 4) if spend else 0.0,
     }
@@ -342,10 +343,13 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
     fmt = (fmt or "one-pager").lower()
     if fmt not in ("one-pager", "csv", "deck"):
         raise ValueError("fmt must be one-pager, csv, or deck")
-    wanted_kpis = [k for k in (kpis or []) if k in KPI_KEYS]
+    report_kpis = KPI_KEYS + ("spend", "impressions", "clicks",
+                             "conversions", "cpc")
+    wanted_kpis = [k for k in (kpis or []) if k in report_kpis]
     if not wanted_kpis:
-        raise ValueError("pick at least one KPI from %s" % sorted(KPI_KEYS))
-    comp = compare_campaigns(conn, campaigns, rank_by=wanted_kpis[0])
+        raise ValueError("pick at least one KPI from %s" % sorted(report_kpis))
+    rank_by = wanted_kpis[0] if wanted_kpis[0] in KPI_KEYS else "cpa"
+    comp = compare_campaigns(conn, campaigns, rank_by=rank_by)
     if benchmark_sel is None:
         bench = {}
     elif isinstance(benchmark_sel, str):

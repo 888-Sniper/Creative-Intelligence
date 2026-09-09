@@ -246,6 +246,23 @@ class ReportTest(unittest.TestCase):
             benchmarks.build_report(conn, ["Alpha"], ["cpa"], None, fmt="pptx")
         conn.close()
 
+    def test_totals_and_cpc_retained_not_dropped(self):
+        conn = seeded_db()
+        rep = benchmarks.build_report(conn, ["Alpha", "Beta"],
+                                      ["spend", "impressions", "cpc", "cpa"],
+                                      None, fmt="csv")
+        header = rep["csv"].split("\n")[0]
+        self.assertEqual(header, "campaign,spend,impressions,cpc,cpa")
+        self.assertIn("Alpha,200.0,20000,", rep["csv"])
+        conn.close()
+
+    def test_total_first_kpi_falls_back_to_cpa_rank(self):
+        conn = seeded_db()
+        rep = benchmarks.build_report(conn, None, ["spend", "cpa"],
+                                      None, fmt="deck")
+        self.assertEqual(rep["deck"]["rank_by"], "cpa")
+        conn.close()
+
 
 class ServerRoutesTest(unittest.TestCase):
     def _serve(self, db_path):

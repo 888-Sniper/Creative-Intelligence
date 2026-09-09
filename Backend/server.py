@@ -15,6 +15,8 @@ from creative_intel import (benchmarks, creative, export_gate, ingest,
 
 WEB_INDEX = os.path.normpath(os.path.join(os.path.dirname(
     os.path.abspath(__file__)), "..", "Web", "Index.html"))
+ASSETS_DIR = os.path.normpath(os.path.join(os.path.dirname(
+    os.path.abspath(__file__)), "..", "Web", "assets"))
 BASE = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                      ".."))
 def _fixture_dir():
@@ -115,9 +117,35 @@ class Handler(BaseHTTPRequestHandler):
     def _conn(self):
         return connect(self.db_path)
 
+    def _serve_asset(self, name):
+        """Serve a branding asset. Basename-only, extension allowlist,
+        confined to Web/assets — no path traversal."""
+        import mimetypes
+        import os
+        if "/" in name or "\\" in name or name.startswith("."):
+            return send(self, 404, {"error": "not found"})
+        if os.path.splitext(name)[1].lower() not in (
+                ".png", ".svg", ".ico", ".webp"):
+            return send(self, 404, {"error": "not found"})
+        path = os.path.join(ASSETS_DIR, name)
+        if not os.path.isfile(path):
+            return send(self, 404, {"error": "not found"})
+        with open(path, "rb") as f:
+            body = f.read()
+        ctype, _ = mimetypes.guess_type(path)
+        self.send_response(200)
+        self.send_header("Content-Type", ctype or "application/octet-stream")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "public, max-age=86400")
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self):
         url = urllib.parse.urlparse(self.path)
         q = urllib.parse.parse_qs(url.query)
+        if url.path.startswith("/assets/"):
+            self._serve_asset(url.path[len("/assets/"):])
+            return
         if url.path in ("/", "/index.html"):
             with open(WEB_INDEX, "rb") as f:
                 body = f.read()

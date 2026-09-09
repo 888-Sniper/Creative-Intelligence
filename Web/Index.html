@@ -3,61 +3,150 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Creative Intelligence</title>
+<title>Foap Creative Intelligence</title>
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
 <style>
 :root{
-  --bg:#ffffff; --fg:#1a1a1a; --muted:#5b5b5b; --card:#f4f4f5;
-  --line:#e2e2e4; --accent:#0b5fff; --good:#0a7d2c; --bad:#b00020;
+  --foap-primary:#00C7B2; --foap-primary-hover:#00A895; --foap-primary-pressed:#008F7F;
+  --foap-primary-soft:#E3F8F5; --foap-primary-faint:#F2FCFB;
+  --foap-bg:#FAFAF8; --foap-surface:#FFFFFF; --foap-surface-2:#F3F4F2;
+  --foap-text:#17211F; --foap-muted:#5F6B69; --foap-border:#E5E8E6;
+  --foap-danger:#C0362C; --foap-danger-soft:#FCECEA;
+  --foap-warn:#8A6100; --foap-warn-soft:#FDF3DC;
+  --foap-good:#0E7C5B; --foap-good-soft:#E4F4ED;
+  --foap-radius:12px; --foap-radius-sm:8px;
+  --foap-shadow:0 1px 2px rgba(23,33,31,.05),0 4px 16px rgba(23,33,31,.06);
+  --foap-font:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --bg:var(--foap-bg); --fg:var(--foap-text); --muted:var(--foap-muted);
+  --card:var(--foap-surface); --line:var(--foap-border);
+  --accent:var(--foap-primary); --good:var(--foap-good); --bad:var(--foap-danger);
 }
 [data-theme="dark"]{
-  --bg:#121214; --fg:#f2f2f2; --muted:#a8a8ad; --card:#1d1d20;
-  --line:#2e2e33; --accent:#5b9bff; --good:#4ade80; --bad:#ff7a90;
+  --foap-bg:#141817; --foap-surface:#1C2220; --foap-surface-2:#242B29;
+  --foap-text:#EFF4F2; --foap-muted:#A7B3B0; --foap-border:#2E3634;
+  --foap-primary-soft:#123B37; --foap-primary-faint:#182826;
+  --foap-shadow:0 1px 2px rgba(0,0,0,.3),0 4px 16px rgba(0,0,0,.3);
+  --bg:var(--foap-bg); --fg:var(--foap-text); --muted:var(--foap-muted);
+  --card:var(--foap-surface); --line:var(--foap-border);
+  --accent:var(--foap-primary); --good:#4CC38A; --bad:#F08A80;
 }
 *{box-sizing:border-box}
-body{background:var(--bg);color:var(--fg);font-family:system-ui,sans-serif;margin:0}
-header{display:flex;gap:8px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
-nav button{background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:8px 12px;cursor:pointer}
-nav button[aria-pressed="true"]{border-color:var(--accent);color:var(--accent)}
-main{padding:16px;max-width:1100px}
+body{background:var(--bg);color:var(--fg);font-family:var(--foap-font);margin:0;font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
+:focus-visible{outline:2px solid var(--foap-primary);outline-offset:2px;border-radius:4px}
+.app-header{position:sticky;top:0;z-index:20;background:var(--foap-surface);border-bottom:1px solid var(--line)}
+.app-header-inner{max-width:1440px;margin:0 auto;padding:10px 24px;display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--fg)}
+.brand img{height:30px;width:auto;display:block}
+[data-theme="dark"] .brand img{background:#fff;border-radius:6px;padding:2px 6px}
+.brand-fallback{font-weight:800;font-size:22px;letter-spacing:-.5px;color:var(--foap-text)}
+.brand-fallback em{font-style:normal;color:var(--foap-primary)}
+.product-name{font-size:15px;font-weight:600;color:var(--muted);border-left:1px solid var(--line);padding-left:12px;white-space:nowrap}
+.main-nav{display:flex;gap:2px;flex-wrap:wrap}
+.main-nav button{background:transparent;color:var(--fg);border:0;border-radius:8px;padding:9px 14px;cursor:pointer;font-size:14px;font-weight:600;position:relative}
+.main-nav button:hover{background:var(--foap-surface-2)}
+.main-nav button[aria-pressed="true"]{color:var(--foap-text)}
+.main-nav button[aria-pressed="true"]::after{content:"";position:absolute;left:12px;right:12px;bottom:2px;height:3px;border-radius:3px;background:var(--foap-primary)}
+.header-spacer{flex:1}
+.theme-btn{background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:999px;padding:7px 14px;cursor:pointer;font-size:13px;font-weight:600}
+.theme-btn:hover{border-color:var(--foap-primary);color:var(--foap-primary)}
+.container{max-width:1440px;margin:0 auto;padding:0 24px 48px}
+.page-title{font-size:26px;font-weight:800;letter-spacing:-.4px;margin:24px 0 2px}
+.page-sub{color:var(--muted);font-size:14px;margin:0 0 16px}
 section.view{display:none}
 section.view.active{display:block}
-.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;margin:10px 0}
-table{border-collapse:collapse;width:100%}
-th,td{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;font-size:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--foap-radius);padding:20px;margin:16px 0;box-shadow:var(--foap-shadow)}
+.card h3{margin:0 0 4px;font-size:17px;font-weight:700}
+.card h4{margin:14px 0 6px;font-size:15px}
+table{border-collapse:collapse;width:100%;background:var(--card)}
+th,td{border-bottom:1px solid var(--line);padding:10px 12px;text-align:left;font-size:14px}
+thead th,tr:first-child th{position:sticky;top:0;background:var(--card);font-size:12px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted)}
+tbody tr:hover{background:var(--foap-primary-faint)}
+tr.row-top td:first-child{border-left:3px solid var(--foap-primary)}
 .muted{color:var(--muted)}
-button.action{background:var(--accent);color:#fff;border:0;border-radius:8px;padding:8px 12px;cursor:pointer;margin-right:6px}
-button.chip{background:var(--bg);color:var(--fg);border:1px solid var(--accent);border-radius:999px;padding:4px 10px;margin:2px;cursor:pointer;font-size:13px}
-textarea{width:100%;min-height:120px;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:8px}
-input,select{background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:6px 8px}
+.empty-state{padding:28px;text-align:center;color:var(--muted);font-size:14px}
+button.action{background:var(--foap-primary);color:#062723;border:0;border-radius:999px;padding:9px 18px;cursor:pointer;margin-right:8px;font-size:14px;font-weight:700}
+button.action:hover{background:var(--foap-primary-hover)}
+button.action:active{background:var(--foap-primary-pressed)}
+button.secondary{background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:999px;padding:9px 18px;cursor:pointer;font-size:14px;font-weight:600}
+button.secondary:hover{border-color:var(--foap-primary);color:var(--foap-primary)}
+button.chip{background:var(--foap-primary-faint);color:var(--fg);border:1px solid var(--foap-primary);border-radius:999px;padding:5px 12px;margin:2px;cursor:pointer;font-size:13px;font-weight:600}
+button.chip:hover{background:var(--foap-primary-soft)}
+button.danger{background:var(--foap-danger-soft);color:var(--foap-danger);border:1px solid var(--foap-danger);border-radius:999px;padding:9px 18px;cursor:pointer;font-size:14px;font-weight:600}
+textarea{width:100%;min-height:120px;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:var(--foap-radius-sm);padding:10px;font-family:inherit}
+input,select{background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:var(--foap-radius-sm);padding:8px 10px;font-size:14px;font-family:inherit}
+input:focus,select:focus,textarea:focus{border-color:var(--foap-primary);outline:2px solid var(--foap-primary-soft)}
 input[type="text"]{min-width:130px}
 .verified{color:var(--good);font-weight:bold}
 .unverified{color:var(--bad)}
-.filter-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin-top:8px}
-.filter-grid label{display:flex;flex-direction:column;font-size:12px;gap:4px}
-.cmp-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-@media (max-width:700px){.cmp-grid{grid-template-columns:1fr}}
-video{max-width:100%;border:1px solid var(--line);border-radius:8px}
-pre{white-space:pre-wrap;word-break:break-word}
+.badge{display:inline-block;border-radius:999px;padding:2px 10px;font-size:12px;font-weight:700}
+.badge.good{background:var(--foap-good-soft);color:var(--good)}
+.badge.bad{background:var(--foap-danger-soft);color:var(--bad)}
+.filter-bar{background:var(--card);border:1px solid var(--line);border-radius:var(--foap-radius);padding:16px 20px;margin:16px 0;box-shadow:var(--foap-shadow)}
+.filter-bar h3{margin:0 0 2px;font-size:15px}
+.filter-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-top:12px}
+.filter-grid label{display:flex;flex-direction:column;font-size:12px;font-weight:600;color:var(--muted);gap:4px}
+.filter-grid input.active,.filter-grid select.active{border-color:var(--foap-primary);background:var(--foap-primary-faint)}
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin:16px 0}
+.kpi-card{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--foap-primary);border-radius:var(--foap-radius);padding:14px 16px;box-shadow:var(--foap-shadow)}
+.kpi-card .kpi-value{font-size:24px;font-weight:800;letter-spacing:-.5px}
+.kpi-card .kpi-label{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)}
+.kpi-card .kpi-delta{font-size:12px;margin-top:2px}
+.creative-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px}
+.creative-card{background:var(--card);border:1px solid var(--line);border-radius:var(--foap-radius);overflow:hidden;box-shadow:var(--foap-shadow);display:flex;flex-direction:column}
+.creative-card.selected{border-color:var(--foap-primary);box-shadow:0 0 0 2px var(--foap-primary-soft),var(--foap-shadow)}
+.creative-card .media{background:var(--foap-surface-2);min-height:150px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-weight:700;font-size:15px}
+.creative-card .body{padding:14px 16px;display:flex;flex-direction:column;gap:6px}
+.creative-card .title{font-weight:700;font-size:15px}
+.detail-layout{display:grid;grid-template-columns:minmax(0,1.6fr)minmax(280px,1fr);gap:16px;align-items:start}
+.detail-side{display:flex;flex-direction:column;gap:12px}
+.retention-bar{height:10px;border-radius:5px;background:var(--foap-surface-2);overflow:hidden;margin:4px 0}
+.retention-bar i{display:block;height:100%;background:var(--foap-primary);border-radius:5px}
+.retention-drop{color:var(--foap-danger);font-weight:700}
+.insight-panel{background:var(--foap-primary-faint);border:1px solid var(--foap-primary);border-radius:var(--foap-radius);padding:16px 20px;margin:16px 0}
+.insight-panel h4{margin:0 0 8px;color:var(--foap-text)}
+.cmp-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.thumb{background:var(--foap-primary-soft);color:var(--foap-text);border-radius:var(--foap-radius-sm);padding:28px 12px;text-align:center;font-weight:700}
+[data-theme="dark"] .thumb{background:var(--foap-primary-soft)}
+video{max-width:100%;width:100%;border:1px solid var(--line);border-radius:var(--foap-radius);background:#000}
+pre{white-space:pre-wrap;word-break:break-word;background:var(--foap-surface-2);border-radius:var(--foap-radius-sm);padding:12px;font-size:13px}
 ul.plain{list-style:none;padding:0;margin:0}
+ul.plain li{padding:6px 0;border-bottom:1px solid var(--line)}
+.ask-bar{background:var(--card);border:1px solid var(--line);border-radius:var(--foap-radius);padding:16px 20px;margin:16px 0;box-shadow:var(--foap-shadow)}
+.ask-bar h3{margin:0 0 8px;font-size:15px}
+.ask-row{display:flex;gap:8px}
+.ask-row input{flex:1}
+.report-outputs{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.report-outputs a{display:inline-block;background:var(--foap-surface-2);border:1px solid var(--line);border-radius:999px;padding:7px 14px;font-size:13px;font-weight:600;color:var(--fg);text-decoration:none}
+.report-outputs a:hover{border-color:var(--foap-primary);color:var(--foap-primary)}
+@media (max-width:1100px){.detail-layout{grid-template-columns:1fr}}
+@media (max-width:900px){.filter-grid{grid-template-columns:1fr 1fr}.kpi-grid{grid-template-columns:1fr 1fr}}
+@media (max-width:700px){.cmp-grid{grid-template-columns:1fr}.creative-grid{grid-template-columns:1fr}.app-header-inner{padding:10px 12px}.container{padding:0 12px 32px}.page-title{font-size:22px}table{display:block;overflow-x:auto}}
 </style>
 </head>
 <body>
-<header>
-<strong>Creative Intelligence</strong>
-<nav id="tabs">
-<button data-view="main" aria-pressed="true">Main</button>
-<button data-view="campaign" aria-pressed="false">Campaign</button>
-<button data-view="creative" aria-pressed="false">Creative</button>
+<header class="app-header">
+<div class="app-header-inner">
+<a class="brand" href="#" id="brand-home" aria-label="Foap Creative Intelligence home">
+<img src="assets/foap-logo.png" alt="Foap" onerror="this.style.display='none';document.getElementById('brand-fallback').style.display='inline';">
+<span class="brand-fallback" id="brand-fallback" style="display:none">foap<em>.</em></span>
+</a>
+<span class="product-name">Creative Intelligence</span>
+<nav id="tabs" class="main-nav" aria-label="Primary">
+<button data-view="main" aria-pressed="true">Overview</button>
+<button data-view="campaign" aria-pressed="false">Campaigns</button>
+<button data-view="creative" aria-pressed="false">Creatives</button>
 <button data-view="compare" aria-pressed="false">Compare</button>
-<button data-view="benchmark" aria-pressed="false">Benchmark</button>
-<button data-view="report" aria-pressed="false">Report</button>
+<button data-view="benchmark" aria-pressed="false">Benchmarks</button>
+<button data-view="report" aria-pressed="false">Reports</button>
 </nav>
-<span style="flex:1"></span>
-<button id="theme" title="Toggle light/dark">Light/Dark</button>
+<span class="header-spacer"></span>
+<button id="theme" class="theme-btn" aria-label="Toggle light and dark mode">Light/Dark</button>
+</div>
 </header>
-<div class="card" style="margin:16px 16px 0">
-<h3 style="margin:0 0 4px">Filters (drive every view below)</h3>
-<div class="muted" style="font-size:12px">Server grain exposes platform, campaign, creative, transcript and annotation fields; the remaining dimensions match case-insensitively against the available text for that view. Platform matches exactly where a platform is known.</div>
+<div class="container">
+<div class="filter-bar">
+<h3>Filters</h3>
+<div class="muted" style="font-size:12px">Every view below respects these filters — they query the canonical dimensions on the server.</div>
 <div class="filter-grid">
 <label>Client<input type="text" id="flt-client" placeholder="client"></label>
 <label>Project<input type="text" id="flt-project" placeholder="project"></label>
@@ -70,16 +159,18 @@ ul.plain{list-style:none;padding:0;margin:0}
 <label>KPI (sort)<select id="flt-kpi"><option value="all">all</option><option value="spend">spend</option><option value="ctr">ctr</option><option value="cpc">cpc</option><option value="cpa">cpa</option></select></label>
 <label>Date<input type="text" id="flt-date" placeholder="date"></label>
 </div>
-<div style="margin-top:8px"><button class="action" id="flt-clear">Clear filters</button> <span id="filter-summary" class="muted"></span></div>
+<div style="margin-top:8px"><button class="secondary" id="flt-clear">Clear filters</button> <span id="filter-summary" class="muted"></span></div>
 </div>
-<div class="card" style="margin:16px 16px 0">
-<h3 style="margin:0 0 4px">Ask data</h3>
-<div style="display:flex;gap:8px"><input type="text" id="ask-q" placeholder="Ask about spend, CTR, CPA, best creatives…" style="flex:1"><button class="action" id="ask-go">Ask</button></div>
-<div id="ask-out" class="muted">Answers POST to /api/ask and cite uploaded data first.</div>
+<div class="ask-bar">
+<h3>Ask Foap Creative Intelligence</h3>
+<div class="ask-row"><input type="text" id="ask-q" placeholder="Ask Foap Creative Intelligence about your campaign data…" aria-label="Ask about your campaign data"><button class="action" id="ask-go">Ask</button></div>
+<div class="muted" style="font-size:12px;margin-top:6px">Try: What hooks are performing best? · Which TikTok format has the lowest CPA? · Does showing the product early improve VTR? · Which campaigns should we scale?</div>
+<div id="ask-out" class="muted">Answers cite your uploaded data first.</div>
 </div>
-<main>
+<main class="container">
 <section class="view active" id="v-main">
-<h2>Main</h2>
+<h1 class="page-title">Overview</h1>
+<p class="page-sub">How are your campaigns performing? What creatives are winning? What needs attention?</p>
 <div class="card">
 <h3>Upload (Meta / TikTok CSV, Excel-as-CSV, Sheets CSV export)</h3>
 <select id="platform"><option value="meta">Meta</option><option value="tiktok">TikTok</option></select>
@@ -95,14 +186,14 @@ ul.plain{list-style:none;padding:0;margin:0}
 <label><input type="checkbox" id="override"> override (logged)</label>
 <pre id="export-out" class="muted"></pre></div>
 </section>
-<section class="view" id="v-campaign"><h2>Campaign</h2><div id="campaign-detail"></div><div id="campaigns"></div></section>
-<section class="view" id="v-creative"><h2>Creative Library</h2>
+<section class="view" id="v-campaign"><h1 class="page-title">Campaigns</h1><p class="page-sub">Select a campaign for best and worst creatives, benchmark comparison and learnings.</p><div id="campaign-detail"></div><div id="campaigns"></div></section>
+<section class="view" id="v-creative"><h1 class="page-title">Creatives</h1><p class="page-sub">Scan the work first, metrics second. Select any creative for the full review workspace.</p>
 <div class="card"><button class="action" id="run-pipe">Run pipeline on selected</button>
 <button class="action" id="verify">Mark HUMAN-VERIFIED</button>
 <span class="muted">Manual annotate: edit hook type / format, then Save.</span></div>
 <div class="card"><h3>Creative view</h3><div id="creative-detail"><p class="muted">Select a creative below.</p></div></div>
 <div id="library"></div></section>
-<section class="view" id="v-compare"><h2>Compare (side-by-side)</h2>
+<section class="view" id="v-compare"><h1 class="page-title">Compare</h1><p class="page-sub">Two modes: creatives side-by-side, or campaigns ranked with why-analysis.</p>
 <div class="card"><input id="cmp-a" placeholder="creative A key"> <input id="cmp-b" placeholder="creative B key">
 <button class="action" id="cmp-go">Compare creatives</button>
 <div class="muted" style="font-size:12px">GET /api/compare — badges note whether each side passes the current filters.</div></div>
@@ -113,7 +204,7 @@ ul.plain{list-style:none;padding:0;margin:0}
 <div class="muted" style="font-size:12px">GET /api/compare/campaigns — full KPI set plus why-analysis.</div></div>
 <div id="cmp-out"></div>
 <div id="cmp-camp-out"></div></section>
-<section class="view" id="v-benchmark"><h2>Benchmark</h2>
+<section class="view" id="v-benchmark"><h1 class="page-title">Benchmarks</h1><p class="page-sub">Saved cohorts with sample size, bands and status. Insufficient-data cohorts need more projects before they are reliable.</p>
 <div class="card"><label>Group by <select id="gb">
 <option value="hook_type">hook_type</option><option value="creator_vs_branded">creator_vs_branded</option>
 <option value="platform">platform</option><option value="campaign">campaign</option></select></label>
@@ -132,15 +223,20 @@ ul.plain{list-style:none;padding:0;margin:0}
 <div id="bb-saved" style="margin-top:8px"></div>
 <div id="bb-out" style="margin-top:8px"></div></div>
 </section>
-<section class="view" id="v-report"><h2>Report</h2>
+<section class="view" id="v-report"><h1 class="page-title">Reports</h1><p class="page-sub">Select campaigns, KPIs and a benchmark, then generate. One-pager, CSV and presentation (HTML deck) formats.</p>
 <div class="card"><h3>Campaigns</h3><div id="rep-campaigns" class="muted">—</div></div>
 <div class="card"><h3>Creatives (one-pager source)</h3><div id="rep-creatives" class="muted">—</div></div>
 <div class="card"><h3>KPIs</h3>
 <label><input type="checkbox" class="rep-kpi" value="spend" checked> spend</label>
 <label><input type="checkbox" class="rep-kpi" value="impressions" checked> impressions</label>
+<label><input type="checkbox" class="rep-kpi" value="clicks"> clicks</label>
+<label><input type="checkbox" class="rep-kpi" value="conversions"> conversions</label>
+<label><input type="checkbox" class="rep-kpi" value="cpm"> cpm</label>
+<label><input type="checkbox" class="rep-kpi" value="vtr"> vtr</label>
 <label><input type="checkbox" class="rep-kpi" value="ctr" checked> ctr</label>
 <label><input type="checkbox" class="rep-kpi" value="cpc" checked> cpc</label>
 <label><input type="checkbox" class="rep-kpi" value="cpa" checked> cpa</label>
+<label><input type="checkbox" class="rep-kpi" value="roas"> roas</label>
 </div>
 <div class="card"><h3>Benchmark</h3>
 <label>Group by <select id="rep-bench">
@@ -149,11 +245,12 @@ ul.plain{list-style:none;padding:0;margin:0}
 <label><input type="checkbox" id="rep-override"> override (logged)</label><br><br>
 <button class="action" id="rep-onepager">Generate one-pager</button>
 <button class="action" id="rep-csv">Generate CSV</button>
-<button class="action" id="rep-deck">Generate deck</button>
+<button class="action" id="rep-deck">Generate presentation (HTML deck)</button>
 <pre id="rep-out" class="muted"></pre>
-<span id="rep-links"></span></div>
+<span id="rep-links" class="report-outputs"></span></div>
 </section>
 </main>
+</div>
 <script>
 const $=id=>document.getElementById(id);
 const esc=v=>String(v??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
@@ -168,6 +265,7 @@ function filtered_path(p){
 const api=async(m,p,b)=>{const r=await fetch(filtered_path(p),{method:m,headers:{"Content-Type":"application/json"},body:b?JSON.stringify(b):undefined});const j=await r.json();if(!r.ok)throw new Error(j.error||r.status);return j;};
 document.querySelectorAll("#tabs button").forEach(b=>b.onclick=()=>{document.querySelectorAll("#tabs button").forEach(x=>x.setAttribute("aria-pressed","false"));b.setAttribute("aria-pressed","true");document.querySelectorAll(".view").forEach(v=>v.classList.remove("active"));document.querySelector("#v-"+b.dataset.view).classList.add("active");refresh();});
 $("theme").onclick=()=>{const h=document.documentElement;h.dataset.theme=h.dataset.theme==="dark"?"":"dark";};
+$("brand-home").onclick=ev=>{ev.preventDefault();show("main");};
 let selected=null;
 function active_filters(){return{
   client:$("flt-client").value.trim().toLowerCase(),
@@ -209,9 +307,9 @@ $("cmp-camp-go").onclick=async()=>{try{
 function render_campaign_compare(r){
   const kpis=["spend","impressions","clicks","conversions","cpm","vtr","ctr","cpa","roas"];
   const head="<tr><th>Campaign</th>"+kpis.map(k=>`<th>${esc(k.toUpperCase())}</th>`).join("")+"</tr>";
-  const body=(r.ranking||[]).map((c,i)=>`<tr><td>${esc(c)}${i===0?" (top)":""}</td>`+kpis.map(k=>`<td>${esc(String((r.kpis[c]||{})[k]??"—"))}</td>`).join("")+"</tr>").join("");
+  const body=(r.ranking||[]).map((c,i)=>`<tr${i===0?' class="row-top"':""}><td>${esc(c)}${i===0?" (top)":""}</td>`+kpis.map(k=>`<td>${esc(String((r.kpis[c]||{})[k]??"—"))}</td>`).join("")+"</tr>").join("");
   const why=((r.why||{}).differences||[]).map(d=>`<li>${esc(d)}</li>`).join("");
-  $("cmp-camp-out").innerHTML=`<div class="card"><h4>Ranked by ${esc(r.rank_by||"")}</h4><table>${head}${body}</table><h4>Why ${esc((r.why||{}).top||"—")} leads ${esc((r.why||{}).bottom||"—")}</h4><ul>${why||"<li>—</li>"}</ul></div>`;
+  $("cmp-camp-out").innerHTML=`<div class="card"><h4>Ranked by ${esc(r.rank_by||"")}</h4><table><thead>${head}</thead><tbody>${body}</tbody></table><div class="insight-panel"><h4>Why ${esc((r.why||{}).top||"—")} won</h4><ul class="plain">${why||"<li>—</li>"}</ul></div></div>`;
 }
 $("gb-go").onclick=bench;
 $("ask-go").onclick=ask_go;
@@ -219,8 +317,22 @@ $("bb-create").onclick=builder_create;
 $("rep-onepager").onclick=report_onepager;
 $("rep-csv").onclick=report_csv;
 $("rep-deck").onclick=report_deck;
-async function refresh(){filter_summary();kpis();campaigns();library();bench();report_lists();}
-async function kpis(){try{const c=await api("GET","/api/campaigns");let s=0,n=0;Object.values(c).forEach(g=>{s+=g.spend;n+=g.n_ads;});$("kpis").textContent=n+" ads, $"+s.toFixed(2)+" spend across "+Object.keys(c).length+" campaigns.";}catch(e){$("kpis").textContent=e.message;}}
+function mark_active_filters(){const f=active_filters();["client","project","campaign","platform","vertical","market","funnel","objective","kpi","date"].forEach(k=>{const el=$("flt-"+k);if(!el)return;const v=f[k];el.classList.toggle("active",!!v&&v!=="all");});}
+async function refresh(){mark_active_filters();filter_summary();kpis();campaigns();library();bench();report_lists();}
+async function kpis(){try{
+  const c=await api("GET","/api/campaigns");const groups=Object.values(c);
+  if(!groups.length){$("kpis").innerHTML='<div class="empty-state">Upload performance data to begin.</div>';return;}
+  let s=0,n=0;groups.forEach(g=>{s+=g.spend;n+=g.n_ads;});
+  const cpas=groups.map(g=>g.cpa).filter(v=>v>0);
+  const best=cpas.length?Math.min(...cpas):null;
+  const card=(v,l,d)=>`<div class="kpi-card"><div class="kpi-value">${v}</div><div class="kpi-label">${l}</div>${d?`<div class="kpi-delta">${d}</div>`:""}</div>`;
+  $("kpis").innerHTML=`<div class="kpi-grid">`
+    +card("$"+s.toFixed(2),"Spend","")
+    +card(String(n),"Creatives","")
+    +card(String(groups.length),"Campaigns","")
+    +card(best!=null?"$"+best.toFixed(2):"—","Best CPA",best!=null?"lowest across selected campaigns":"no conversions yet")
+    +`</div>`;
+}catch(e){$("kpis").innerHTML=`<div class="empty-state">${esc(e.message)}</div>`;}}
 async function campaigns(){try{
   const c=await api("GET","/api/campaigns");const f=active_filters();
   let entries=Object.entries(c).filter(([k])=>text_blob([k]).includes(f.campaign)&&text_match(text_blob([k]),{...f,campaign:""}));
@@ -242,17 +354,22 @@ async function campaign_detail(name){
     const delta=(med!=null)?` vs campaign-benchmark CPA $${esc(String(med))}`:"";
     const hooks={};in_camp.forEach(r=>{const h=(r.annotation||{}).hook_type;if(h)hooks[h]=(hooks[h]||0)+1;});
     const top_hook=Object.entries(hooks).sort((a,b)=>b[1]-a[1])[0];
+    const perf_card=(r,tag,cls)=>{const a=r.annotation||{};const m=r.metrics||{};
+      return `<div class="creative-card ${cls}"><div class="media">${esc(a.hook_type||"untagged hook")} · ${esc(String(a.duration_s??r.duration_s??"—"))}s</div><div class="body"><div class="title">${esc(r.name||r.creative_key)}</div><span class="badge ${tag==="Watch"?"bad":"good"}">${tag}</span><span style="font-size:13px">CPA $${esc(String(m.cpa??"—"))} · CTR ${esc(String(m.ctr??"—"))} · ROAS ${esc(String(m.roas??"—"))}</span><span class="muted" style="font-size:13px">${esc(a.creator_vs_branded||"—")} · ${esc(r.platform||"—")}</span></div></div>`;};
     box.innerHTML=`<div class="card"><h3>${esc(name)}${esc(delta)}</h3>
-    <p>Best: <strong>${esc(best.name||best.creative_key)}</strong> (CPA $${esc(String(best.metrics.cpa))}, CTR ${esc(String(best.metrics.ctr))}, ROAS ${esc(String(best.metrics.roas))})<br>
-    Watch: <strong>${esc(worst.name||worst.creative_key)}</strong> (CPA $${esc(String(worst.metrics.cpa))})<br>
-    <span class="muted">Learning: ${top_hook?esc(top_hook[0]+" leads "+in_camp.length+" creatives here"):"no hook labels yet"} · ${esc(String(in_camp.length))} creatives</span></p></div>`;
+    <div class="creative-grid" style="margin-top:12px">${best.creative_key===worst.creative_key?perf_card(best,"Only creative","selected"):perf_card(best,"Best","selected")+perf_card(worst,"Watch","")}</div>
+    <div class="insight-panel"><h4>Creative learning</h4><p style="margin:0">${top_hook?esc(top_hook[0]+" hooks lead "+top_hook[1]+" of "+in_camp.length+" creatives here"):"No hook labels yet — annotate creatives to unlock learnings."}</p></div></div>`;
   }catch(e){box.innerHTML=`<p class="muted">${esc(e.message)}</p>`;}
 }
 async function library(){
   const rows=await api("GET","/api/creatives");const f=active_filters();
   const kept=rows.filter(r=>{const a=r.annotation||{};if(f.platform!=="all"&&String(r.platform||"").toLowerCase()!==f.platform)return false;return text_match(text_blob([r.creative_key,r.name,r.transcript,a.hook_type,a.creator_vs_branded,r.status]),f);});
   creative_detail(kept);
-  $("library").innerHTML=kept.map(r=>{const a=r.annotation||{};const v=a.status==="human_verified";return `<div class="card"><label><input type="radio" name="sel" value="${esc(r.creative_key)}" ${selected===r.creative_key?"checked":""}> <strong>${esc(r.name||r.creative_key)}</strong></label> <span class="${v?"verified":"unverified"}">${v?"HUMAN-VERIFIED":"auto"}</span><br><span class="muted">hook=${esc(a.hook_type||"—")} conf=${esc(String(a.hook_confidence??"—"))} | format=${esc(a.creator_vs_branded||"—")} | ${esc(r.transcript||"no transcript")}</span><br><label>Hook <select data-k="${esc(r.creative_key)}" class="hook-sel">${["question","bold_claim","demo_open","social_proof","offer","story","pattern_interrupt","other"].map(h=>`<option ${a.hook_type===h?"selected":""}>${h}</option>`).join("")}</select></label> <label>Format <select data-k="${esc(r.creative_key)}" class="fmt-sel">${["creator","branded","hybrid"].map(h=>`<option ${a.creator_vs_branded===h?"selected":""}>${h}</option>`).join("")}</select></label> <button class="action save" data-k="${esc(r.creative_key)}">Save annotation</button></div>`;}).join("")||"<p class=muted>No creatives match the current filters.</p>";
+  $("library").className="creative-grid";
+  const kpi_key=(f.kpi&&f.kpi!=="all")?f.kpi:"cpa";
+  $("library").innerHTML=kept.map(r=>{const a=r.annotation||{};const m=r.metrics||{};const v=a.status==="human_verified";
+  const kpi_val=m[kpi_key];const kpi_txt=(kpi_val==null||kpi_val==="")?"—":(kpi_key==="spend"||kpi_key==="cpa"||kpi_key==="cpm"?"$"+kpi_val:String(kpi_val));
+  return `<div class="creative-card${selected===r.creative_key?" selected":""}"><div class="media">${esc(a.hook_type||"untagged hook")} · ${esc(String(a.duration_s??r.duration_s??"—"))}s</div><div class="body"><div class="title">${esc(r.name||r.creative_key)}</div><span class="${v?"verified":"unverified"}">${v?"HUMAN-VERIFIED":"auto"}</span><span class="muted" style="font-size:13px">${esc(r.platform||"—")} · ${esc((r.campaigns||[]).join(", ")||"—")} · ${esc(a.creator_vs_branded||"—")}</span><span style="font-size:13px"><strong>${esc(kpi_key.toUpperCase())}</strong> ${esc(kpi_txt)} · CPA $${esc(String(m.cpa??"—"))}</span><label style="font-size:13px"><input type="radio" name="sel" value="${esc(r.creative_key)}" ${selected===r.creative_key?"checked":""} aria-label="Select ${esc(r.name||r.creative_key)}"> Select</label><label style="font-size:13px">Hook <select data-k="${esc(r.creative_key)}" class="hook-sel">${["question","bold_claim","demo_open","social_proof","offer","story","pattern_interrupt","other"].map(h=>`<option ${a.hook_type===h?"selected":""}>${h}</option>`).join("")}</select></label> <label style="font-size:13px">Format <select data-k="${esc(r.creative_key)}" class="fmt-sel">${["creator","branded","hybrid"].map(h=>`<option ${a.creator_vs_branded===h?"selected":""}>${h}</option>`).join("")}</select></label> <button class="action save" data-k="${esc(r.creative_key)}">Save annotation</button></div></div>`;}).join("")||'<div class="empty-state">No creatives match the current filters.</div>';
   document.querySelectorAll("input[name=sel]").forEach(r=>r.onchange=()=>{selected=r.value;refresh();});
   document.querySelectorAll(".save").forEach(b=>b.onclick=async()=>{const k=b.dataset.k;const rows2=await api("GET","/api/creatives");const found=rows2.find(x=>x.creative_key===k);const cur=found.annotation||{schema_version:"v0",hook_confidence:0.5,brand_seconds:[],product_seconds:[],logo_seconds:[],structure:{},creator_confidence:0.5,duration_s:0,pace_cuts_per_min:0,status:"auto"};for(const s of ["hook","body","demo","supers","cta","endframe","voiceover"])cur.structure[s]=cur.structure[s]||{start_s:0,end_s:0,confidence:0};cur.schema_version="v0";cur.hook_type=document.querySelector(`.hook-sel[data-k="${CSS.escape(k)}"]`).value;cur.creator_vs_branded=document.querySelector(`.fmt-sel[data-k="${CSS.escape(k)}"]`).value;await api("POST","/api/creatives/"+encodeURIComponent(k)+"/annotate",{annotation:cur});refresh();});
   $("export-list").innerHTML=kept.map(r=>`<label><input type="checkbox" class="exp-check" value="${esc(r.creative_key)}"> ${esc(r.creative_key)}</label>`).join("<br>")||"—";
@@ -275,8 +392,9 @@ function storyboard_svg(a){
   let x=0;const W=560,H=64;
   const rects=slots.map((s,i)=>{
     const seg=st[s]||{start_s:0,end_s:0};const w=Math.max(8,Math.round(W/slots.length));
-    const hue=(i*47)%360;const label=`${s} ${seg.start_s??0}-${seg.end_s??0}s`;
-    const out=`<g><rect x="${x}" y="8" width="${w-2}" height="40" fill="hsl(${hue},45%,72%)" stroke="#888"/><text x="${x+4}" y="32" font-size="10">${esc(s)}</text><title>${esc(label)}</title></g>`;
+    const op=(0.25+0.75*(i+1)/slots.length).toFixed(2);
+    const label=`${s} ${seg.start_s??0}-${seg.end_s??0}s`;
+    const out=`<g><rect x="${x}" y="8" width="${w-2}" height="40" fill="#00C7B2" fill-opacity="${op}" stroke="#008F7F"/><text x="${x+4}" y="32" font-size="10" fill="#17211F">${esc(s)}</text><title>${esc(label)}</title></g>`;
     x+=w;return out;
   }).join("");
   return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Storyboard"><title>${esc("Storyboard, duration "+dur+"s")}</title>${rects}<text x="0" y="${H-2}" font-size="10">${esc("duration "+dur+"s")}</text></svg>`;
@@ -294,12 +412,22 @@ function creative_detail(kept){
   const brand_t=span_start(a.brand_seconds);
   const product_t=span_start(a.product_seconds);
   const media=src?`<video id="creative-video" controls preload="metadata" style="max-width:100%"><source src="${esc(src)}"></video><div class="muted" style="font-size:12px">Playing annotated source URL.</div>`:`<div>${storyboard_svg(a)}</div><div class="muted" style="font-size:12px">No annotated source URL — SVG storyboard from annotation structure.</div>`;
-  box.innerHTML=`<h4 style="margin:0 0 6px">${esc(found.name||found.creative_key)}</h4>
-  <div class="muted" style="font-size:13px">key=${esc(found.creative_key)} · platform=${esc(found.platform||"—")} · status=${esc(a.status||found.status||"auto")} · hook=${esc(a.hook_type||"—")}</div>
-  <div style="font-size:13px;margin-top:4px">spend $${esc(String(m.spend??"—"))} · CPM $${esc(String(m.cpm??"—"))} · VTR ${esc(String(m.vtr??"—"))} · CTR ${esc(String(m.ctr??"—"))} · CPA $${esc(String(m.cpa??"—"))} · ROAS ${esc(String(m.roas??"—"))}<br><span class="muted">campaigns: ${esc((found.campaigns||[]).join(", ")||"—")} · <a href="#" id="detail-bench">vs benchmark</a></span><span id="detail-bench-out" class="muted"></span></div>
-  <div style="margin:8px 0">${media}</div>
-  <div>${chip_btn("Hook",hook_t)}${chip_btn("Brand",brand_t)}${chip_btn("Product",product_t)}${chip_btn("CTA",cta_t)||""}</div>
-  <div id="retention-graph" class="muted" style="margin-top:8px">Loading retention…</div>`;
+  const kpi_row=(l,v)=>`<div style="display:flex;justify-content:space-between;font-size:14px;padding:3px 0"><span class="muted">${l}</span><strong>${v}</strong></div>`;
+  const intel_row=(l,v)=>`<div style="display:flex;justify-content:space-between;font-size:14px;padding:3px 0"><span class="muted">${l}</span><span>${v}</span></div>`;
+  box.innerHTML=`<h3 style="margin:0 0 2px">${esc(found.name||found.creative_key)}</h3>
+  <div class="muted" style="font-size:13px;margin-bottom:12px">key=${esc(found.creative_key)} · ${esc(found.platform||"—")} · <span class="${(a.status||found.status)==="human_verified"?"verified":"unverified"}">${esc(a.status||found.status||"auto")}</span></div>
+  <div class="detail-layout"><div class="detail-main">
+    <div>${media}</div>
+    <div style="margin-top:8px">${chip_btn("Hook",hook_t)}${chip_btn("Brand",brand_t)}${chip_btn("Product",product_t)}${chip_btn("CTA",cta_t)||""}</div>
+    <h4>Retention</h4>
+    <div id="retention-graph" class="muted">Loading retention…</div>
+  </div><div class="detail-side">
+    <div class="card" style="margin:0"><h4 style="margin-top:0">Performance</h4>
+    ${kpi_row("Spend","$"+esc(String(m.spend??"—")))}${kpi_row("CPM","$"+esc(String(m.cpm??"—")))}${kpi_row("VTR",esc(String(m.vtr??"—")))}${kpi_row("CTR",esc(String(m.ctr??"—")))}${kpi_row("CPA","$"+esc(String(m.cpa??"—")))}${kpi_row("ROAS",esc(String(m.roas??"—")))}
+    <div class="muted" style="font-size:13px">campaigns: ${esc((found.campaigns||[]).join(", ")||"—")} · <a href="#" id="detail-bench">vs benchmark</a><span id="detail-bench-out"></span></div></div>
+    <div class="card" style="margin:0"><h4 style="margin-top:0">Creative intelligence</h4>
+    ${intel_row("Hook",esc(a.hook_type||"—"))}${intel_row("Creator vs branded",esc(a.creator_vs_branded||"—"))}${intel_row("Duration",esc(String(a.duration_s??found.duration_s??"—"))+"s")}${intel_row("Brand appearance",esc(String(a.brand_seconds&&a.brand_seconds.length?a.brand_seconds[0].start_s+"s":"—")))}${intel_row("Product appearance",esc(String(a.product_seconds&&a.product_seconds.length?a.product_seconds[0].start_s+"s":"—")))}${intel_row("CTA",esc(a.cta||((a.structure||{}).cta?"set":"—")))}${intel_row("Voiceover",esc(a.voiceover||((a.structure||{}).voiceover?"set":"—")))}${intel_row("Supers",esc(Array.isArray(a.supers)?a.supers.join(", "):(a.supers||"—")))}${intel_row("Editing pace",esc(a.pace_cuts_per_min!=null?String(a.pace_cuts_per_min)+" cuts/min":"—"))}</div>
+  </div></div>`;
   box.querySelectorAll(".chip").forEach(ch=>ch.onclick=()=>{
     const v=document.querySelector("#creative-video");
     if(v&&Number.isFinite(Number(ch.dataset.seek))){try{v.currentTime=Number(ch.dataset.seek);}catch(e){}}
@@ -324,13 +452,14 @@ async function load_retention(key){
   }catch(e){box.innerHTML=`<span class="muted">${esc(e.message)}</span>`;}
 }
 function retention_svg(segs){
-  if(!Array.isArray(segs)||!segs.length)return '<span class="muted">No retention data.</span>';
-  const max=Math.max(1,...segs.map(s=>Number(s.drop_pts)||0));
+  if(!Array.isArray(segs)||!segs.length)return '<div class="empty-state">No retention data is available for this creative.</div>';
+  const max=Math.max(0.01,...segs.map(s=>Number(s.drop_pts)||0));
   const rows=segs.map((s,i)=>{
-    const dv=Number(s.drop_pts)||0;const w=Math.round(280*dv/max);const y=i*22;
-    return `<g><text x="0" y="${y+14}" font-size="11">${esc(String(s.segment))}</text><rect x="90" y="${y+2}" width="${w}" height="14" fill="#0b5fff"><title>${esc(String(s.segment)+": "+dv+" pts")}</title></rect><text x="${95+w}" y="${y+14}" font-size="11">${esc(String(dv))} pts (n=${esc(String(s.n_points??0))})</text></g>`;
+    const dv=Number(s.drop_pts)||0;const w=Math.round(280*dv/max);const y=i*24;
+    const worst=i>0&&dv>=Math.max(...segs.slice(0,i).map(x=>Number(x.drop_pts)||0))&&dv>0;
+    return `<g><text x="0" y="${y+15}" font-size="12" fill="#5F6B69">${esc(String(s.segment))}</text><rect x="110" y="${y+2}" width="${w}" height="15" rx="4" style="fill:var(--foap-primary)"><title>${esc(String(s.segment)+": "+dv+" pts")}</title></rect><text x="${115+w}" y="${y+15}" font-size="12" fill="${dv>0?"#C0362C":"#5F6B69"}">${esc(String(dv))} pts drop (n=${esc(String(s.n_points??0))})${worst?" — biggest drop":""}</text></g>`;
   }).join("");
-  return `<svg viewBox="0 0 460 ${segs.length*22+4}" width="100%" role="img" aria-label="Retention drop per segment"><title>${esc("Retention drop per segment from /api/retention")}</title>${rows}</svg>`;
+  return `<svg viewBox="0 0 560 ${segs.length*24+6}" width="100%" role="img" aria-label="Retention drop per segment"><title>${esc("Retention drop per segment from /api/retention")}</title>${rows}</svg>`;
 }
 function render_compare(r,a,b){
   const f=active_filters();

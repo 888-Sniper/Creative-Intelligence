@@ -210,6 +210,7 @@ ul.plain li{padding:6px 0;border-bottom:1px solid var(--line)}
 <section class="view" id="v-campaign"><h1 class="page-title">Campaigns</h1><p class="page-sub">Select a campaign for best and worst creatives, benchmark comparison and learnings.</p><div id="campaign-detail"></div><div id="campaigns"></div></section>
 <section class="view" id="v-creative"><h1 class="page-title">Creatives</h1><p class="page-sub">Scan the work first, metrics second. Select any creative for the full review workspace.</p>
 <div class="card"><button class="action" id="run-pipe">Run pipeline on selected</button>
+<label style="font-size:13px;margin-left:8px">Brand terms (optional, comma-separated) <input type="text" id="brand-terms" placeholder="e.g. foap, shop now" style="max-width:220px"></label>
 <button class="action" id="verify">Mark HUMAN-VERIFIED</button>
 <span class="muted">Manual annotate: edit hook type / format, then Save.</span>
 <div style="margin-top:10px"><h4>Media for selected creative</h4>
@@ -315,12 +316,18 @@ $("flt-clear").onclick=()=>{["flt-client","flt-project","flt-campaign","flt-vert
 function text_blob(parts){return parts.map(p=>String(p??"").toLowerCase()).join(" | ");}
 function text_match(blob,f){return["client","project","campaign","vertical","market","funnel","objective","date"].every(k=>!f[k]||blob.includes(f[k]));}
 const KPI_LOWER_BETTER=["cpa","cpc","cpm"];
+function kpi(v,money){return v==null?"—":(money?"$":"")+v;}
+function rank_val(v,lower){
+  // Uncomputable (null) always ranks last, never as a false zero.
+  if(v==null)return lower?Infinity:-Infinity;
+  const n=Number(v);return Number.isFinite(n)?n:0;
+}
 function sort_rows(entries,f){
   if(!f.kpi||f.kpi==="all")return entries;
   const k=f.kpi;
   const lower=KPI_LOWER_BETTER.includes(k);
   return entries.slice().sort((a,b)=>{
-    const va=Number(a[1][k])||0,vb=Number(b[1][k])||0;
+    const va=rank_val(a[1][k],lower),vb=rank_val(b[1][k],lower);
     return lower?va-vb:vb-va;
   });
 }
@@ -329,14 +336,14 @@ function sort_creatives(rows,f){
   const k=f.kpi;
   const lower=KPI_LOWER_BETTER.includes(k);
   return rows.slice().sort((a,b)=>{
-    const va=Number((a.metrics||{})[k])||0,vb=Number((b.metrics||{})[k])||0;
+    const va=rank_val((a.metrics||{})[k],lower),vb=rank_val((b.metrics||{})[k],lower);
     return lower?va-vb:vb-va;
   });
 }
 $("upload").onclick=async()=>{try{const r=await api("POST","/api/ingest",{platform:$("platform").value,csv:$("csv").value});$("up-status").textContent="Inserted "+r.inserted+" rows.";refresh();}catch(e){$("up-status").textContent=e.message;}};
 $("fixture").onclick=()=>{$("up-status").textContent="Run: python3 Backend/server.py --load-fixture --db Data/local.db";};
 $("export").onclick=async()=>{const keys=[...document.querySelectorAll(".exp-check:checked")].map(c=>c.value);try{const r=await api("POST","/api/export",{creative_keys:keys,override:$("override").checked});$("export-out").textContent=r.markdown;}catch(e){$("export-out").textContent="BLOCKED: "+e.message;}};
-$("run-pipe").onclick=async()=>{if(!selected)return;await api("POST","/api/pipeline/run",{creative_key:selected});refresh();};
+$("run-pipe").onclick=async()=>{if(!selected)return;await api("POST","/api/pipeline/run",{creative_key:selected,brand_terms:$("brand-terms").value});refresh();};
 $("verify").onclick=async()=>{if(!selected)return;await api("POST","/api/creatives/"+encodeURIComponent(selected)+"/verify");refresh();};
 $("cmp-go").onclick=async()=>{try{const a=$("cmp-a").value.trim(),b=$("cmp-b").value.trim();const r=await api("GET","/api/compare?a="+encodeURIComponent(a)+"&b="+encodeURIComponent(b));render_compare(r,a,b);}catch(e){$("cmp-out").innerHTML=`<p class="muted">${esc(e.message)}</p>`;}};
 $("cmp-camp-go").onclick=async()=>{try{
@@ -412,7 +419,7 @@ async function campaigns(){try{
   // free-text campaign box against names.
   let entries=Object.entries(c).filter(([k])=>!f.campaign||text_blob([k]).includes(f.campaign));
   entries=sort_rows(entries,f);
-  $("campaigns").innerHTML="<table><tr><th>Campaign</th><th>Ads</th><th>Spend</th><th>CTR</th><th>CPC</th><th>CPA</th></tr>"+entries.map(([k,g])=>`<tr><td><a href="#" data-camp="${esc(k)}">${esc(k)}</a></td><td>${esc(String(g.n_ads))}</td><td>$${esc(String(g.spend))}</td><td>${esc(String(g.ctr))}</td><td>$${esc(String(g.cpc))}</td><td>$${esc(String(g.cpa))}</td></tr>`).join("")+"</table>";
+  $("campaigns").innerHTML="<table><tr><th>Campaign</th><th>Ads</th><th>Spend</th><th>CTR</th><th>CPC</th><th>CPA</th></tr>"+entries.map(([k,g])=>`<tr><td><a href="#" data-camp="${esc(k)}">${esc(k)}</a></td><td>${esc(String(g.n_ads))}</td><td>$${esc(String(g.spend))}</td><td>${esc(kpi(g.ctr))}</td><td>${esc(kpi(g.cpc,1))}</td><td>${esc(kpi(g.cpa,1))}</td></tr>`).join("")+"</table>";
   $("campaigns").querySelectorAll("[data-camp]").forEach(a=>a.onclick=ev=>{ev.preventDefault();campaign_detail(a.dataset.camp);});
 }catch(e){$("campaigns").textContent=e.message;}}
 async function campaign_detail(name){
@@ -423,14 +430,14 @@ async function campaign_detail(name){
       api("GET","/api/benchmarks?group_by=campaign")]);
     const in_camp=rows.filter(r=>(r.campaigns||[]).includes(name));
     if(!in_camp.length){box.innerHTML=`<p class="muted">No creatives for ${esc(name)}.</p>`;return;}
-    const by_cpa=in_camp.slice().sort((a,b)=>(a.metrics.cpa||0)-(b.metrics.cpa||0));
+    const by_cpa=in_camp.slice().sort((a,b)=>rank_val(a.metrics.cpa,true)-rank_val(b.metrics.cpa,true));
     const best=by_cpa[0],worst=by_cpa[by_cpa.length-1];
     const med=bench[name]?bench[name].cpa:null;
     const delta=(med!=null)?` vs campaign-benchmark CPA $${esc(String(med))}`:"";
     const hooks={};in_camp.forEach(r=>{const h=(r.annotation||{}).hook_type;if(h)hooks[h]=(hooks[h]||0)+1;});
     const top_hook=Object.entries(hooks).sort((a,b)=>b[1]-a[1])[0];
     const perf_card=(r,tag,cls)=>{const a=r.annotation||{};const m=r.metrics||{};
-      return `<div class="creative-card ${cls}"><div class="media">${esc(a.hook_type||"untagged hook")} · ${esc(String(a.duration_s??r.duration_s??"—"))}s</div><div class="body"><div class="title">${esc(r.name||r.creative_key)}</div><span class="badge ${tag==="Watch"?"bad":"good"}">${tag}</span><span style="font-size:13px">CPA $${esc(String(m.cpa??"—"))} · CTR ${esc(String(m.ctr??"—"))} · ROAS ${esc(String(m.roas??"—"))}</span><span class="muted" style="font-size:13px">${esc(a.creator_vs_branded||"—")} · ${esc(r.platform||"—")}</span></div></div>`;};
+      return `<div class="creative-card ${cls}"><div class="media">${esc(a.hook_type||"untagged hook")} · ${esc(String(a.duration_s??r.duration_s??"—"))}s</div><div class="body"><div class="title">${esc(r.name||r.creative_key)}</div><span class="badge ${tag==="Watch"?"bad":"good"}">${tag}</span><span style="font-size:13px">CPA ${esc(kpi(m.cpa,1))} · CTR ${esc(kpi(m.ctr))} · ROAS ${esc(kpi(m.roas))}</span><span class="muted" style="font-size:13px">${esc(a.creator_vs_branded||"—")} · ${esc(r.platform||"—")}</span></div></div>`;};
     box.innerHTML=`<div class="card"><h3>${esc(name)}${esc(delta)}</h3>
     <div class="creative-grid" style="margin-top:12px">${best.creative_key===worst.creative_key?perf_card(best,"Only creative","selected"):perf_card(best,"Best","selected")+perf_card(worst,"Watch","")}</div>
     <div class="insight-panel"><h4>Creative learning</h4><p style="margin:0">${top_hook?esc(top_hook[0]+" hooks lead "+top_hook[1]+" of "+in_camp.length+" creatives here"):"No hook labels yet — annotate creatives to unlock learnings."}</p></div></div>`;
@@ -452,7 +459,7 @@ async function library(){
   const kpi_val=m[kpi_key];const kpi_txt=(kpi_val==null||kpi_val==="")?"—":(kpi_key==="spend"||kpi_key==="cpa"||kpi_key==="cpm"?"$"+kpi_val:String(kpi_val));
   const prev=pick_source(a);
   const media=prev?`<video muted playsinline preload="metadata" src="${esc(prev)}" title="Preview — click to play/pause" onclick="this.paused?this.play():this.pause()"></video>`:`${esc(a.hook_type||"untagged hook")} · ${esc(String(a.duration_s??r.duration_s??"—"))}s`;
-  return `<div class="creative-card${selected===r.creative_key?" selected":""}"><div class="media">${media}</div><div class="body"><div class="title">${esc(r.name||r.creative_key)}</div><span class="${v?"verified":"unverified"}">${v?"HUMAN-VERIFIED":"auto"}</span><span class="muted" style="font-size:13px">${esc(r.platform||"—")} · ${esc((r.campaigns||[]).join(", ")||"—")} · ${esc(a.creator_vs_branded||"—")}</span><span style="font-size:13px"><strong>${esc(kpi_key.toUpperCase())}</strong> ${esc(kpi_txt)} · CPA $${esc(String(m.cpa??"—"))}</span><label style="font-size:13px"><input type="radio" name="sel" value="${esc(r.creative_key)}" ${selected===r.creative_key?"checked":""} aria-label="Select ${esc(r.name||r.creative_key)}"> Select</label><label style="font-size:13px">Hook <select data-k="${esc(r.creative_key)}" class="hook-sel">${["question","bold_claim","demo_open","social_proof","offer","story","pattern_interrupt","other"].map(h=>`<option ${a.hook_type===h?"selected":""}>${h}</option>`).join("")}</select></label> <label style="font-size:13px">Format <select data-k="${esc(r.creative_key)}" class="fmt-sel">${["creator","branded","hybrid"].map(h=>`<option ${a.creator_vs_branded===h?"selected":""}>${h}</option>`).join("")}</select></label> <button class="action save" data-k="${esc(r.creative_key)}">Save annotation</button></div></div>`;}).join("")||'<div class="empty-state">No creatives match the current filters.</div>';
+  return `<div class="creative-card${selected===r.creative_key?" selected":""}"><div class="media">${media}</div><div class="body"><div class="title">${esc(r.name||r.creative_key)}</div><span class="${v?"verified":"unverified"}">${v?"HUMAN-VERIFIED":"auto"}</span><span class="muted" style="font-size:13px">${esc(r.platform||"—")} · ${esc((r.campaigns||[]).join(", ")||"—")} · ${esc(a.creator_vs_branded||"—")}</span><span style="font-size:13px"><strong>${esc(kpi_key.toUpperCase())}</strong> ${esc(kpi_txt)} · CPA ${esc(kpi(m.cpa,1))}</span><label style="font-size:13px"><input type="radio" name="sel" value="${esc(r.creative_key)}" ${selected===r.creative_key?"checked":""} aria-label="Select ${esc(r.name||r.creative_key)}"> Select</label><label style="font-size:13px">Hook <select data-k="${esc(r.creative_key)}" class="hook-sel">${["question","bold_claim","demo_open","social_proof","offer","story","pattern_interrupt","other"].map(h=>`<option ${a.hook_type===h?"selected":""}>${h}</option>`).join("")}</select></label> <label style="font-size:13px">Format <select data-k="${esc(r.creative_key)}" class="fmt-sel">${["creator","branded","hybrid"].map(h=>`<option ${a.creator_vs_branded===h?"selected":""}>${h}</option>`).join("")}</select></label> <button class="action save" data-k="${esc(r.creative_key)}">Save annotation</button></div></div>`;}).join("")||'<div class="empty-state">No creatives match the current filters.</div>';
   document.querySelectorAll("input[name=sel]").forEach(r=>r.onchange=()=>{selected=r.value;refresh();});
   document.querySelectorAll(".save").forEach(b=>b.onclick=async()=>{const k=b.dataset.k;const rows2=await api("GET","/api/creatives");const found=rows2.find(x=>x.creative_key===k);const cur=found.annotation||{schema_version:"v0",hook_confidence:0.5,brand_seconds:[],product_seconds:[],logo_seconds:[],structure:{},creator_confidence:0.5,duration_s:0,pace_cuts_per_min:0,status:"auto"};for(const s of ["hook","body","demo","supers","cta","endframe","voiceover"])cur.structure[s]=cur.structure[s]||{start_s:0,end_s:0,confidence:0};cur.schema_version="v0";cur.hook_type=document.querySelector(`.hook-sel[data-k="${CSS.escape(k)}"]`).value;cur.creator_vs_branded=document.querySelector(`.fmt-sel[data-k="${CSS.escape(k)}"]`).value;await api("POST","/api/creatives/"+encodeURIComponent(k)+"/annotate",{annotation:cur});refresh();});
   $("export-list").innerHTML=kept.map(r=>`<label><input type="checkbox" class="exp-check" value="${esc(r.creative_key)}"> ${esc(r.creative_key)}</label>`).join("<br>")||"—";
@@ -509,7 +516,7 @@ function creative_detail(kept){
     ${kpi_row("Spend","$"+esc(String(m.spend??"—")))}${kpi_row("CPM","$"+esc(String(m.cpm??"—")))}${kpi_row("VTR",esc(String(m.vtr??"—")))}${kpi_row("CTR",esc(String(m.ctr??"—")))}${kpi_row("CPA","$"+esc(String(m.cpa??"—")))}${kpi_row("ROAS",esc(String(m.roas??"—")))}
     <div class="muted" style="font-size:13px">campaigns: ${esc((found.campaigns||[]).join(", ")||"—")} · <a href="#" id="detail-bench">vs benchmark</a><span id="detail-bench-out"></span></div></div>
     <div class="card" style="margin:0"><h4 style="margin-top:0">Creative intelligence</h4>
-    ${intel_row("Hook",esc(a.hook_type||"—"))}${intel_row("Hook modality (visual/spoken/text)",esc(a.hook_modality||"unknown"))}${intel_row("Creator vs branded",esc(a.creator_vs_branded||"—"))}${intel_row("Duration",esc(String(a.duration_s??found.duration_s??"—"))+"s")}${intel_row("Audio word timings",Array.isArray(a.transcript_words)?esc(String(a.transcript_words.length))+" timestamped words":"—")}${intel_row("Brand appearance",esc(String(a.brand_seconds&&a.brand_seconds.length?a.brand_seconds[0].start_s+"s":"—")))}${intel_row("Product appearance",esc(String(a.product_seconds&&a.product_seconds.length?a.product_seconds[0].start_s+"s":"—")))}${intel_row("CTA",esc(a.cta||((a.structure||{}).cta?"set":"—")))}${intel_row("Voiceover",esc(a.voiceover||((a.structure||{}).voiceover?"set":"—")))}${intel_row("Supers",esc(Array.isArray(a.supers)?a.supers.join(", "):(a.supers||"—")))}${intel_row("Editing pace",esc(a.pace_cuts_per_min!=null?String(a.pace_cuts_per_min)+" cuts/min":"—"))}</div>
+    ${intel_row("Hook",esc(a.hook_type||"—"))}${intel_row("Hook modality (visual/spoken/text)",esc(a.hook_modality||"unknown"))}${intel_row("Creator vs branded",esc(a.creator_vs_branded||"—"))}${intel_row("Duration",esc(String(a.duration_s??found.duration_s??"—"))+"s")}${intel_row("Audio word timings",Array.isArray(a.transcript_words)?esc(String(a.transcript_words.length))+" timestamped words":"—")}${intel_row("Brand first mentioned (audio)",a.brand_audio_mention_s!=null?esc(String(a.brand_audio_mention_s))+"s":"—")}${intel_row("Brand appearance",esc(String(a.brand_seconds&&a.brand_seconds.length?a.brand_seconds[0].start_s+"s":"—")))}${intel_row("Product appearance",esc(String(a.product_seconds&&a.product_seconds.length?a.product_seconds[0].start_s+"s":"—")))}${intel_row("CTA",esc(a.cta||((a.structure||{}).cta?"set":"—")))}${intel_row("Voiceover",esc(a.voiceover||((a.structure||{}).voiceover?"set":"—")))}${intel_row("Supers",esc(Array.isArray(a.supers)?a.supers.join(", "):(a.supers||"—")))}${intel_row("Editing pace",esc(a.pace_cuts_per_min!=null?String(a.pace_cuts_per_min)+" cuts/min":"—"))}</div>
   </div></div>`;
   box.querySelectorAll(".chip").forEach(ch=>ch.onclick=()=>{
     const v=document.querySelector("#creative-video");
@@ -521,7 +528,7 @@ function creative_detail(kept){
     const out=box.querySelector("#detail-bench-out");
     try{
       const bench=await api("GET","/api/benchmarks?group_by=campaign");
-      const rows=(found.campaigns||[]).map(c=>`${c}: CPA $${bench[c]?bench[c].cpa:"—"} vs mine $${m.cpa??"—"}`);
+      const rows=(found.campaigns||[]).map(c=>`${c}: CPA ${bench[c]?kpi(bench[c].cpa,1):"—"} vs mine ${kpi(m.cpa,1)}`);
       out.textContent=rows.length?(" — "+rows.join("; ")):" — no campaign benchmark";
     }catch(e){out.textContent=" — "+e.message;}
   };
@@ -546,7 +553,7 @@ function retention_svg(segs){
 }
 function render_compare(r,a,b){
   const f=active_filters();
-  const kpi_row=(d,k,money)=>`<tr><th>${k.toUpperCase()}</th><td>${money?"$":""}${esc(String(d[k]??"—"))}</td></tr>`;
+  const kpi_row=(d,k,money)=>`<tr><th>${k.toUpperCase()}</th><td>${esc(kpi(d[k],money))}</td></tr>`;
   const card=key=>{
     const d=(r&&r[key])||{};const ann=d.annotation||{};
     const blob=text_blob([key,ann.hook_type,ann.creator_vs_branded]);
@@ -570,7 +577,7 @@ async function bench(){try{
   // Server enforces every canonical axis via the query string.
   let entries=Object.entries(b);
   entries=sort_rows(entries,f);
-  $("bench-out").innerHTML="<table><tr><th>Group</th><th>Ads</th><th>Spend</th><th>CTR</th><th>CPC</th><th>CPA</th></tr>"+entries.map(([k,g])=>`<tr><td>${esc(k)}</td><td>${esc(String(g.n_ads))}</td><td>$${esc(String(g.spend))}</td><td>${esc(String(g.ctr))}</td><td>$${esc(String(g.cpc))}</td><td>$${esc(String(g.cpa))}</td></tr>`).join("")+"</table>";
+  $("bench-out").innerHTML="<table><tr><th>Group</th><th>Ads</th><th>Spend</th><th>CTR</th><th>CPC</th><th>CPA</th></tr>"+entries.map(([k,g])=>`<tr><td>${esc(k)}</td><td>${esc(String(g.n_ads))}</td><td>$${esc(String(g.spend))}</td><td>${esc(kpi(g.ctr))}</td><td>${esc(kpi(g.cpc,1))}</td><td>${esc(kpi(g.cpa,1))}</td></tr>`).join("")+"</table>";
 }catch(e){$("bench-out").textContent=e.message;}}
 function cohort_filters_from_ui(){
   const f=active_filters();const out={};
@@ -680,9 +687,9 @@ async function report_deck(){
     const d=r.deck||{};
     const slides=(d.slides||[]).map(s=>{
       const cw=(d.creatives||{})[s.campaign]||{};
-      const best=cw.best?`<p>Best: ${esc(cw.best.creative_key)} (CPA $${esc(String(cw.best.cpa??"—"))})</p>`:"";
-      const worst=cw.worst?`<p>Watch: ${esc(cw.worst.creative_key)} (CPA $${esc(String(cw.worst.cpa??"—"))})</p>`:"";
-      return `<section class="slide"><h2>${esc(s.campaign)}</h2><p>${esc(Object.entries(s.kpis||{}).map(([k,v])=>k+": "+v).join(" · "))}</p>${best}${worst}</section>`;}).join("");
+      const best=cw.best?`<p>Best: ${esc(cw.best.creative_key)} (CPA ${esc(kpi(cw.best.cpa,1))})</p>`:"";
+      const worst=cw.worst?`<p>Watch: ${esc(cw.worst.creative_key)} (CPA ${esc(kpi(cw.worst.cpa,1))})</p>`:"";
+      return `<section class="slide"><h2>${esc(s.campaign)}</h2><p>${esc(Object.entries(s.kpis||{}).map(([k,v])=>k+": "+(v==null?"n/a":v)).join(" · "))}</p>${best}${worst}</section>`;}).join("");
     const why=((d.why||[]).map(w=>`<li>${esc(w)}</li>`).join(""));
     const learn=((d.learnings||[]).map(w=>`<li>${esc(w)}</li>`).join(""));
     const reco=((d.recommendations||[]).map(w=>`<li>${esc(w)}</li>`).join(""));

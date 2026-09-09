@@ -155,6 +155,8 @@ class ShellLiveTest(unittest.TestCase):
 
     def test_modality_displayed(self):
         self.assertIn("hook_modality", HTML)
+        self.assertIn("brand_audio_mention_s", HTML)
+        self.assertIn('id="brand-terms"', HTML)
 
     def test_office_labels_honest(self):
         self.assertIn("presentation (HTML deck)", HTML)

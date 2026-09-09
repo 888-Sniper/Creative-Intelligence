@@ -301,7 +301,7 @@ function filtered_path(p){
   // retention patterns and Reports read identical populations.
   // /api/compare/campaigns reuses ?campaign(s)= for its candidate
   // list, so the campaign axis is not appended there.
-  const scoped=p==="/api/campaigns"||p.startsWith("/api/benchmarks")||p==="/api/creatives"||p.startsWith("/api/compare")||p.startsWith("/api/retention/patterns");
+  const scoped=p==="/api/campaigns"||p.startsWith("/api/benchmarks")||p==="/api/creatives"||p.startsWith("/api/compare")||p.startsWith("/api/retention/patterns")||p.startsWith("/api/campaigns/recommendations");
   if(scoped){
     const skip_campaign=p.startsWith("/api/compare/campaigns");
     const f=active_filters();const q=new URLSearchParams();
@@ -485,13 +485,21 @@ async function campaign_detail(name){
     const [rows,bench]=await Promise.all([
       api("GET","/api/creatives"),
       api("GET","/api/benchmarks?group_by=campaign")]);
+    const f=active_filters();
+    const k=(f.kpi&&f.kpi!=="all")?f.kpi:"cpa";
+    // Server-side recommendations reuse the report engine over the
+    // same campaign, filters and KPI, so this view and an exported
+    // report cannot contradict each other. The legacy client bullets
+    // below are fallback only, used when the endpoint is unreachable.
+    let reco_server=null;
+    try{
+      reco_server=await api("GET","/api/campaigns/recommendations?name="+encodeURIComponent(name)+"&rank_by="+encodeURIComponent(k));
+    }catch(se){reco_server=null;}
     const in_camp=rows.filter(r=>(r.campaigns||[]).includes(name));
     if(!in_camp.length){box.innerHTML=`<p class="muted">No creatives for ${esc(name)}.</p>`;return;}
     // Best/Watch follows the globally selected KPI (and its correct
     // direction), exactly like the Creative Library ranking — never a
     // hard-coded CPA contest when the user is judging by ROAS/VTR/CTR.
-    const f=active_filters();
-    const k=(f.kpi&&f.kpi!=="all")?f.kpi:"cpa";
     const lower=KPI_LOWER_BETTER.includes(k);
     const ranked=in_camp.slice().sort((a,b)=>{
       const va=rank_val((a.metrics||{})[k],lower),vb=rank_val((b.metrics||{})[k],lower);
@@ -505,9 +513,16 @@ async function campaign_detail(name){
     const top_hook=Object.entries(hooks).sort((a,b)=>b[1]-a[1])[0];
     const perf_card=(r,tag,cls)=>{const a=r.annotation||{};const m=r.metrics||{};
       return `<div class="creative-card ${cls}"><div class="media">${esc(a.hook_type||"untagged hook")} · ${esc(String(a.duration_s??r.duration_s??"—"))}s</div><div class="body"><div class="title">${esc(r.name||r.creative_key)}</div><span class="badge ${tag==="Watch"?"bad":"good"}">${tag}</span><span style="font-size:13px">CPA ${esc(kpi(m.cpa,1))} · CTR ${esc(kpi(m.ctr))} · ROAS ${esc(kpi(m.roas))}</span><span class="muted" style="font-size:13px">${esc(a.creator_vs_branded||"—")} · ${esc(r.platform||"—")}</span></div></div>`;};
+    const legacy_reco=[`Scale: ${best.name||best.creative_key} leads on ${k.toUpperCase()} (${esc(String((best.metrics||{})[k]??"—"))}).`];
+    if(worst.creative_key!==best.creative_key)legacy_reco.push(`Review or replace: ${worst.name||worst.creative_key} trails on ${k.toUpperCase()} (${esc(String((worst.metrics||{})[k]??"—"))}).`);
+    if(top_hook&&in_camp.length>1&&top_hook[1]>=Math.ceil(in_camp.length/2))legacy_reco.push(`Hook concentration: ${top_hook[1]} of ${in_camp.length} creatives use ${top_hook[0]} — the next test should break from it.`);
+    const reco_html=(reco_server&&Array.isArray(reco_server.sections))
+      ?reco_server.sections.map(s=>`<h4>${esc(s.title)}</h4><ul class="plain">${(s.bullets||[]).map(b=>`<li>${esc(b.text)}</li>`).join("")}</ul>`).join("")
+      :`<ul class="plain">${legacy_reco.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`;
     box.innerHTML=`<div class="card"><h3>${esc(name)}${esc(delta)}</h3>
     <div class="creative-grid" style="margin-top:12px">${best.creative_key===worst.creative_key?perf_card(best,"Only creative","selected"):perf_card(best,"Best","selected")+perf_card(worst,"Watch","")}</div>
-    <div class="insight-panel"><h4>Creative learning</h4><p style="margin:0">${top_hook?esc(top_hook[0]+" hooks lead "+top_hook[1]+" of "+in_camp.length+" creatives here"):"No hook labels yet — annotate creatives to unlock learnings."}</p></div></div>`;
+    <div class="insight-panel"><h4>Creative learning</h4><p style="margin:0">${top_hook?esc(top_hook[0]+" hooks lead "+top_hook[1]+" of "+in_camp.length+" creatives here"):"No hook labels yet — annotate creatives to unlock learnings."}</p></div>
+    <div class="insight-panel"><h4>Recommendations</h4>${reco_html}</div></div>`;
   }catch(e){box.innerHTML=`<p class="muted">${esc(e.message)}</p>`;}
 }
 async function library(){

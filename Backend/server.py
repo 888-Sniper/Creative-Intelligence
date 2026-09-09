@@ -535,6 +535,15 @@ class Handler(BaseHTTPRequestHandler):
                 send(self, 200, benchmarks.benchmark(
                     conn, "campaign",
                     benchmarks.Scope.from_query(q).normalized()))
+            elif url.path == "/api/campaigns/recommendations":
+                name = q.get("name", [""])[0]
+                if not name:
+                    raise ValueError(
+                        "recommendations need a campaign name")
+                rank_by = (q.get("rank_by", ["cpa"])[0] or "cpa").lower()
+                send(self, 200, benchmarks.campaign_recommendations(
+                    conn, name,
+                    benchmarks.Scope.from_query(q).normalized(), rank_by))
             elif url.path == "/api/benchmarks":
                 send(self, 200, benchmarks.benchmark(
                     conn, q.get("group_by", ["hook_type"])[0],

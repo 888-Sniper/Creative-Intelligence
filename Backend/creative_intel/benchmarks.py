@@ -708,6 +708,307 @@ def _report_extras(conn, names, strict_human=False, scope=None,
 def _show(value):
     """Report rendering: uncomputable KPIs read n/a, never None/zero."""
     return "n/a" if value is None else value
+def _reco_fmt(rank_by, value):
+    """Measured KPI values for recommendation prose: money with $,
+    ROAS with x, VTR/CTR as percent — uncomputable reads n/a."""
+    if value is None:
+        return "n/a"
+    if rank_by in ("cpm", "cpc", "cpa"):
+        return "$%s" % value
+    if rank_by == "roas":
+        return "%sx" % value
+    return "%.2f%%" % (100.0 * value)
+
+
+def _length_bucket(duration_s):
+    if not duration_s:
+        return ""
+    if duration_s <= 15:
+        return "15s or shorter"
+    if duration_s <= 30:
+        return "15-30s"
+    return "over 30s"
+
+
+def _cta_span(cta_text):
+    """Parse the 'set Xs-Ys' CTA timing _creative_rows builds; None
+    for free-text CTAs or missing timing."""
+    import re
+    match = re.match(r"^set (\S+)s-(\S+)s$", (cta_text or "").strip())
+    if not match:
+        return None
+    try:
+        return float(match.group(1)), float(match.group(2))
+    except ValueError:
+        return None
+
+
+def campaign_recommendations(conn, campaign, scope=None, rank_by="cpa"):
+    """Scoped six-section recommendations for Campaign Detail.
+
+    Same engine as reports: _report_extras(conn, [campaign], scope,
+    rank_by) drives scale/stop/test-next, so the dashboard and an
+    exported report over the same campaign, filters and KPI cannot
+    contradict each other. rank_by follows the dashboard's selected
+    KPI with its correct direction. Every bullet is grounded in the
+    campaign's scoped rows and annotations; thin evidence yields an
+    explicit insufficient-data note instead of invented advice.
+    """
+    if rank_by not in KPI_KEYS:
+        raise ValueError("rank_by must be one of %s" % sorted(KPI_KEYS))
+    scoped = scope if isinstance(scope, Scope) else Scope(scope)
+    higher = KPI_DIRECTIONS[rank_by] == "higher"
+    lead_word = "highest" if higher else "lowest"
+    extras = _report_extras(conn, [campaign], scope=scoped, rank_by=rank_by)
+    info = extras["per_campaign"][campaign]
+    rows = info["creatives"]
+    best = info["best"]
+    worst = info["worst"]
+    n = len(rows)
+
+    def _bullet(text, verified=True):
+        return {"text": text, "verified": bool(verified)}
+
+    def _concentration():
+        counts, order = {}, []
+        for r in rows:
+            hook = r["hook_type"]
+            if hook == "unannotated":
+                continue
+            counts[hook] = counts.get(hook, 0) + 1
+            if hook not in order:
+                order.append(hook)
+        if not counts:
+            return None
+        top = max(order, key=lambda h: counts[h])
+        if n > 1 and counts[top] >= -(-n // 2):
+            verified = all(r["verified"] for r in rows
+                           if r["hook_type"] == top)
+            return (top, counts[top], verified)
+        return None
+
+    sections = []
+    # --- What worked: observed winner attributes + hook concentration.
+    worked = []
+    if not rows:
+        worked.append(_bullet(
+            "No creatives in this campaign under the current filters — "
+            "nothing to learn yet."))
+    else:
+        if best is not None:
+            key = best["creative_key"]
+            traits = []
+            if best["hook_type"] != "unannotated":
+                traits.append("%s hook" % best["hook_type"])
+            if best["creator_vs_branded"] != "unannotated":
+                traits.append("%s format" % best["creator_vs_branded"])
+            bucket = _length_bucket(best["duration_s"])
+            if bucket:
+                traits.append(bucket)
+            if traits:
+                worked.append(_bullet(
+                    "Winner %s (%s %s): %s." % (
+                        key, rank_by.upper(),
+                        _reco_fmt(rank_by, best[rank_by]),
+                        ", ".join(traits)), best["verified"]))
+            early = best["product_first_visible_s"]
+            if early is not None:
+                worked.append(_bullet(
+                    "Winner shows the product at %ss%s." % (
+                        early,
+                        " (within the first 3s)" if early <= 3 else ""),
+                    best["verified"]))
+            brand = best["brand_first_visible_s"]
+            if brand is not None:
+                worked.append(_bullet(
+                    "Winner shows the brand at %ss." % brand,
+                    best["verified"]))
+            if best["cta"]:
+                worked.append(_bullet(
+                    "Winner CTA: %s." % best["cta"], best["verified"]))
+        else:
+            worked.append(_bullet(
+                "No %s values to rank yet — collect delivery data before "
+                "naming winners." % rank_by.upper()))
+        conc = _concentration()
+        if conc is not None:
+            top, count, verified = conc
+            worked.append(_bullet(
+                "Repeat: %s hooks appear in %d of %d creatives here."
+                % (top, count, n), verified))
+    sections.append({"key": "what_worked", "title": "What worked",
+                     "bullets": worked})
+
+    # --- What to improve: observed winner-vs-Watch contrasts only.
+    gaps = []
+    if not rows:
+        gaps.append(_bullet(
+            "No creatives in scope — nothing to contrast yet."))
+    elif (worst is None or best is None
+            or worst["creative_key"] == best["creative_key"]):
+        gaps.append(_bullet(
+            "Only one ranked creative in scope — add creatives or "
+            "delivery data to contrast winners against Watch creatives."))
+    else:
+        wk = worst["creative_key"]
+        both = worst["verified"] and best["verified"]
+        if (worst["hook_type"] != "unannotated"
+                and best["hook_type"] != "unannotated"
+                and worst["hook_type"] != best["hook_type"]):
+            gaps.append(_bullet(
+                "Watch creative %s uses %s where the winner uses %s."
+                % (wk, worst["hook_type"], best["hook_type"]), both))
+        if (worst["creator_vs_branded"] != "unannotated"
+                and best["creator_vs_branded"] != "unannotated"
+                and worst["creator_vs_branded"] != best["creator_vs_branded"]):
+            gaps.append(_bullet(
+                "Watch creative %s is %s-led where the winner is %s-led."
+                % (wk, worst["creator_vs_branded"],
+                   best["creator_vs_branded"]), both))
+        wprod, bprod = (worst["product_first_visible_s"],
+                        best["product_first_visible_s"])
+        if (wprod is not None and bprod is not None and wprod > bprod):
+            gaps.append(_bullet(
+                "Move product appearance earlier: Watch creative %s "
+                "introduces the product at %ss vs %ss in the winner."
+                % (wk, wprod, bprod), both))
+        wcta = _cta_span(worst["cta"])
+        bcta = _cta_span(best["cta"])
+        if bcta is not None and wcta is None and not worst["cta"]:
+            gaps.append(_bullet(
+                "Watch creative %s has no annotated CTA; the winner sets "
+                "one at ~%ss." % (wk, bcta[0]), both))
+        elif (wcta is not None and bcta is not None
+                and wcta[0] > bcta[0]):
+            gaps.append(_bullet(
+                "Watch creative %s sets its CTA at ~%ss vs ~%ss in the "
+                "winner." % (wk, wcta[0], bcta[0]), both))
+        if not gaps:
+            gaps.append(_bullet(
+                "No annotated differences between the winner and Watch "
+                "creatives yet — annotate hook, format, product timing "
+                "and CTA to unlock contrasts."))
+    sections.append({"key": "to_improve", "title": "What to improve",
+                     "bullets": gaps})
+
+    # --- Scale: the rank_by winner, if computable.
+    scale = []
+    if best is not None and best[rank_by] is not None:
+        scale.append(_bullet(
+            "Scale: %s — %s %s at %s across %d scoped creative%s "
+            "(heuristic)." % (
+                best["creative_key"], lead_word, rank_by.upper(),
+                _reco_fmt(rank_by, best[rank_by]), n,
+                "" if n == 1 else "s"), best["verified"]))
+    else:
+        scale.append(_bullet(
+            "Not enough data to recommend scaling yet — no %s values in "
+            "scope." % rank_by.upper()))
+    sections.append({"key": "scale", "title": "Scale", "bullets": scale})
+
+    # --- Test next: a concrete concept from observed winner traits.
+    tests = []
+    if best is None:
+        tests.append(_bullet(
+            "Not enough data to brief the next concept yet."))
+    else:
+        parts = []
+        bucket = _length_bucket(best["duration_s"])
+        if bucket:
+            parts.append("a %s" % bucket)
+        if best["creator_vs_branded"] != "unannotated":
+            mode = best["creator_vs_branded"]
+            parts.append("%s-led" % ("creator" if mode == "creator"
+                                     else mode))
+        if best["hook_type"] != "unannotated":
+            parts.append("%s" % best["hook_type"])
+        early = best["product_first_visible_s"]
+        cta = _cta_span(best["cta"])
+        if len(parts) >= 2:
+            concept = "Test next: produce %s concept based on %s" % (
+                " ".join(parts), best["creative_key"])
+            details = []
+            if early is not None:
+                details.append("product visible in the first %ss" % early)
+            if cta is not None:
+                details.append("CTA around %s-%ss" % (cta[0], cta[1]))
+            if details:
+                concept += " with %s" % " and ".join(details)
+            tests.append(_bullet(concept + ".", best["verified"]))
+        else:
+            tests.append(_bullet(
+                "Annotate %s (hook, format, timing) to unlock a concrete "
+                "test-next concept." % best["creative_key"],
+                best["verified"]))
+    sections.append({"key": "test_next", "title": "Test next",
+                     "bullets": tests})
+
+    # --- Stop / watch: the trailer plus KPI-blind creatives.
+    stops = []
+    if not rows:
+        stops.append(_bullet("No creatives in scope — nothing to hold."))
+    else:
+        ranked = [r for r in rows if r[rank_by] is not None]
+        if (worst is not None and best is not None
+                and worst["creative_key"] != best["creative_key"]
+                and worst[rank_by] is not None):
+            stops.append(_bullet(
+                "Avoid scaling %s yet: %s %s vs winner %s (%s) — improve "
+                "it or collect more conversion data first (heuristic)."
+                % (worst["creative_key"], rank_by.upper(),
+                   _reco_fmt(rank_by, worst[rank_by]),
+                   best["creative_key"],
+                   _reco_fmt(rank_by, best[rank_by])),
+                worst["verified"] and best["verified"]))
+        blind = [r["creative_key"] for r in rows if r[rank_by] is None]
+        for key in blind:
+            stops.append(_bullet(
+                "%s has no %s yet — collect delivery data before judging "
+                "it." % (key, rank_by.upper())))
+        if len(ranked) <= 1 and not blind:
+            stops.append(_bullet(
+                "Only one creative in scope — nothing to hold back yet."))
+    sections.append({"key": "stop_watch", "title": "Stop / watch",
+                     "bullets": stops})
+
+    # --- Benchmark gap: campaign aggregate vs scoped peer median.
+    gaps_bench = []
+    peers = benchmark(conn, "campaign", scoped.normalized())
+    own = (peers.get(campaign) or {}).get(rank_by)
+    peer_vals = sorted(v[rank_by] for name, v in peers.items()
+                       if name != campaign and v[rank_by] is not None)
+    if own is None:
+        gaps_bench.append(_bullet(
+            "No scoped %s for this campaign yet — collect delivery data "
+            "before benchmarking it." % rank_by.upper()))
+    elif not peer_vals:
+        gaps_bench.append(_bullet(
+            "No peer campaigns in scope to benchmark against yet."))
+    else:
+        import statistics
+        median = statistics.median(peer_vals)
+        if (own < median and not higher) or (own > median and higher):
+            gaps_bench.append(_bullet(
+                "Ahead of the scoped peer median %s (%s vs %s across %d "
+                "peer campaign%s) — defend it." % (
+                    rank_by.upper(), _reco_fmt(rank_by, own),
+                    _reco_fmt(rank_by, median), len(peer_vals),
+                    "" if len(peer_vals) == 1 else "s")))
+        else:
+            gaps_bench.append(_bullet(
+                "To beat the scoped peer median %s (%s), this campaign "
+                "needs %s → %s." % (
+                    rank_by.upper(), _reco_fmt(rank_by, median),
+                    _reco_fmt(rank_by, own),
+                    _reco_fmt(rank_by, median))))
+    sections.append({"key": "benchmark_gap", "title": "Benchmark gap",
+                     "bullets": gaps_bench})
+
+    return {"campaign": campaign, "rank_by": rank_by,
+            "higher_is_better": higher, "n_creatives": n,
+            "sections": sections}
+
+
 
 
 def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,

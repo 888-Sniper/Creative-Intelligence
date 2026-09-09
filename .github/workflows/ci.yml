@@ -15,7 +15,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - name: Unit tests
-        run: python3 -m pytest tests -q
+      - name: Unit tests (stdlib unittest, no dependencies)
+        run: python3 -m unittest discover -s tests
       - name: Analysis-library self checks
         run: python3 Source/self_check.py

@@ -144,6 +144,11 @@ check("hook answer grounded + cites",
 tiktok_a = answer("Which formats perform best on TikTok?", rows, joined)
 check("tiktok answer grounded", tiktok_a["grounded"]
       and len(tiktok_a["citations"]) > 0)
+check("tiktok answer compares creator vs branded with numbers",
+      "creator" in tiktok_a["answer"] and "2.77" in tiktok_a["answer"]
+      and "3 verified" in tiktok_a["answer"])
+check("tiktok citations are tiktok-only",
+      set(tiktok_a["citations"]) <= {"GL-002-A", "GL-002-B", "HY-002-A"})
 funnel_a = answer("What is working best for lower funnel?", rows, joined)
 check("funnel answer names best creative",
       funnel_a["grounded"] and "GL-001-A" in funnel_a["answer"])
@@ -151,7 +156,13 @@ early_a = answer("Does showing the product earlier improve VTR?",
                  rows, joined)
 check("early-product answer says yes with numbers",
       early_a["grounded"] and early_a["answer"].startswith("Yes")
-      and "2.31" in early_a["answer"])
+      and "VTR" in early_a["answer"] and "36.2" in early_a["answer"]
+      and "29.0" in early_a["answer"])
+check("early-product answer compares VTR, not CPA",
+      "CPA" not in early_a["answer"] and "views" in early_a["answer"])
+check("early-product answer cites early + late creative ids",
+      {"GL-001-A", "GL-002-A", "GL-002-B", "HY-001-A"}
+      <= set(early_a["citations"]))
 split_a = answer("What is different between the top 20% and bottom 20%?",
                  rows, joined)
 check("top/bottom answer contrasts hooks",

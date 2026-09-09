@@ -17,7 +17,15 @@ WEB_INDEX = os.path.normpath(os.path.join(os.path.dirname(
     os.path.abspath(__file__)), "..", "Web", "Index.html"))
 BASE = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                      ".."))
-FIXTURES = os.path.join(BASE, "Fixtures")
+def _fixture_dir():
+    for name in ("fixtures", "Fixtures"):
+        candidate = os.path.join(BASE, name)
+        if os.path.isdir(candidate):
+            return candidate
+    return os.path.join(BASE, "fixtures")
+
+
+FIXTURES = _fixture_dir()
 
 
 def connect(db_path):
@@ -52,8 +60,10 @@ def apply_action(conn, action, payload, prov):
         rows, quarantined = ingest.parse_csv_report(
             payload["csv"], payload["platform"],
             payload.get("source", "upload"))
-        return {"inserted": ingest.insert_rows(conn, rows),
-                "quarantined": quarantined}
+        inserted = ingest.insert_rows(conn, rows)
+        return {"inserted": inserted,
+                "quarantined": quarantined,
+                "quarantined_count": len(quarantined)}
     if action == "annotate":
         creative.save_annotation(conn, payload["creative_key"],
                                  payload["annotation"])
@@ -97,6 +107,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         conn = self._conn()
         try:
+            # EXPERT 2 (COHORTS+COMPARE) hook: appended routes below; ingest/load_fixtures untouched.
+            if expert2_dispatch_get(self, conn, url, q):
+                return
             if url.path == "/api/health":
                 send(self, 200, {"ok": True, "provider_mode": self.prov.mode,
                                  "keys": providers.key_status(),
@@ -154,6 +167,9 @@ class Handler(BaseHTTPRequestHandler):
         payload = read_json(self)
         conn = self._conn()
         try:
+            # EXPERT 2 (COHORTS+COMPARE) hook: appended routes below; ingest/load_fixtures untouched.
+            if expert2_dispatch_post(self, conn, url, payload):
+                return
             if url.path == "/api/ingest":
                 action = "ingest"
             elif url.path == "/api/pipeline/run":
@@ -270,3 +286,113 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+# === EXPERT 2 (COHORTS+COMPARE) APPENDED ROUTES — do not move above; ingest/load_fixtures untouched. ===
+"""Multi-campaign compare, cohort benchmark, and report-generation routes.
+
+New endpoints (all JSON):
+  GET  /api/compare/campaigns?campaigns=A,B&rank_by=cpa
+  GET  /api/cohorts                                   list saved cohorts
+  POST /api/cohorts          {name, filters}          save a cohort
+  GET  /api/cohorts/build?name=X&metric=cpa           build saved/ad-hoc cohort
+  POST /api/report           {campaigns, kpis, benchmark, format}
+The legacy GET /api/compare?a=&b= and /api/benchmarks paths above are unchanged.
+"""
+
+
+def _csv_param(value):
+    if isinstance(value, list):
+        out = []
+        for item in value:
+            out.extend(str(item).split(","))
+        return [v.strip() for v in out if v.strip()]
+    return [v.strip() for v in str(value or "").split(",") if v.strip()]
+
+
+def expert2_compare_route(conn, query):
+    from creative_intel import benchmarks as _bench
+    campaigns = _csv_param(query.get("campaigns", [""])[0]
+                           if "campaigns" in query else query.get("campaign", [""]))
+    rank_by = (query.get("rank_by", ["cpa"])[0] or "cpa").lower()
+    return _bench.compare_campaigns(
+        conn, campaigns or None, rank_by=rank_by)
+
+
+def expert2_cohort_build_route(conn, query):
+    from creative_intel import cohorts as _cohorts
+    metric = (query.get("metric", ["cpa"])[0] or "cpa").lower()
+    if query.get("name", [""])[0]:
+        return _cohorts.build_cohort(conn, name=query["name"][0], metric=metric)
+    filt = {}
+    for key in ("vertical", "platform", "funnel", "objective", "market", "client"):
+        vals = _csv_param(query.get(key, [""])[0]) if key in query else []
+        if vals:
+            filt[key] = vals
+    for key in ("include_projects", "exclude_projects"):
+        vals = _csv_param(query.get(key, [""])[0]) if key in query else []
+        if vals:
+            filt[key] = vals
+    return _cohorts.build_cohort(conn, filters=filt, metric=metric)
+
+
+def expert2_report_route(conn, payload):
+    from creative_intel import benchmarks as _bench
+    campaigns = payload.get("campaigns") or None
+    kpis = payload.get("kpis") or ["cpa", "ctr"]
+    benchmark_sel = payload.get("benchmark")
+    fmt = payload.get("format", "one-pager")
+    return _bench.build_report(conn, campaigns, kpis, benchmark_sel, fmt)
+
+
+def expert2_dispatch_get(handler, conn, url, query):
+    """Handle EXPERT 2 GET routes. Returns True when the request was served."""
+    if url.path == "/api/compare/campaigns":
+        try:
+            send(handler, 200, expert2_compare_route(conn, query))
+        except ValueError as e:
+            send(handler, 409, {"error": str(e)})
+        return True
+    if url.path == "/api/cohorts":
+        from creative_intel import cohorts as _cohorts
+        try:
+            send(handler, 200, _cohorts.list_cohorts(conn))
+        except ValueError as e:
+            send(handler, 409, {"error": str(e)})
+        return True
+    if url.path == "/api/cohorts/build":
+        try:
+            send(handler, 200, expert2_cohort_build_route(conn, query))
+        except ValueError as e:
+            send(handler, 409, {"error": str(e)})
+        return True
+    return False
+
+
+def expert2_dispatch_post(handler, conn, url, payload):
+    """Handle EXPERT 2 POST routes. Returns True when the request was served."""
+    if url.path == "/api/cohorts":
+        from creative_intel import cohorts as _cohorts
+        try:
+            result = _cohorts.save_cohort(conn, payload.get("name", ""),
+                                          payload.get("filters", {}))
+        except ValueError as e:
+            send(handler, 409, {"error": str(e)})
+            return True
+        send(handler, 200, result)
+        return True
+    if url.path == "/api/compare/campaigns":
+        try:
+            send(handler, 200, expert2_compare_route(
+                conn, {"campaigns": [",".join(payload.get("campaigns", []) or [])],
+                       "rank_by": [payload.get("rank_by", "cpa")]}))
+        except ValueError as e:
+            send(handler, 409, {"error": str(e)})
+        return True
+    if url.path == "/api/report":
+        try:
+            send(handler, 200, expert2_report_route(conn, payload))
+        except ValueError as e:
+            send(handler, 409, {"error": str(e)})
+        return True
+    return False

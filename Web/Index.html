@@ -15,10 +15,10 @@
 }
 *{box-sizing:border-box}
 body{background:var(--bg);color:var(--fg);font-family:system-ui,sans-serif;margin:0}
-header{display:flex;gap:8px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line)}
+header{display:flex;gap:8px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
 nav button{background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:8px 12px;cursor:pointer}
 nav button[aria-pressed="true"]{border-color:var(--accent);color:var(--accent)}
-main{padding:16px;max-width:1000px}
+main{padding:16px;max-width:1100px}
 section.view{display:none}
 section.view.active{display:block}
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;margin:10px 0}
@@ -26,10 +26,19 @@ table{border-collapse:collapse;width:100%}
 th,td{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;font-size:14px}
 .muted{color:var(--muted)}
 button.action{background:var(--accent);color:#fff;border:0;border-radius:8px;padding:8px 12px;cursor:pointer;margin-right:6px}
+button.chip{background:var(--bg);color:var(--fg);border:1px solid var(--accent);border-radius:999px;padding:4px 10px;margin:2px;cursor:pointer;font-size:13px}
 textarea{width:100%;min-height:120px;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:8px}
 input,select{background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:6px 8px}
+input[type="text"]{min-width:130px}
 .verified{color:var(--good);font-weight:bold}
 .unverified{color:var(--bad)}
+.filter-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin-top:8px}
+.filter-grid label{display:flex;flex-direction:column;font-size:12px;gap:4px}
+.cmp-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media (max-width:700px){.cmp-grid{grid-template-columns:1fr}}
+video{max-width:100%;border:1px solid var(--line);border-radius:8px}
+pre{white-space:pre-wrap;word-break:break-word}
+ul.plain{list-style:none;padding:0;margin:0}
 </style>
 </head>
 <body>
@@ -41,10 +50,33 @@ input,select{background:var(--bg);color:var(--fg);border:1px solid var(--line);b
 <button data-view="creative" aria-pressed="false">Creative</button>
 <button data-view="compare" aria-pressed="false">Compare</button>
 <button data-view="benchmark" aria-pressed="false">Benchmark</button>
+<button data-view="report" aria-pressed="false">Report</button>
 </nav>
 <span style="flex:1"></span>
 <button id="theme" title="Toggle light/dark">Light/Dark</button>
 </header>
+<div class="card" style="margin:16px 16px 0">
+<h3 style="margin:0 0 4px">Filters (drive every view below)</h3>
+<div class="muted" style="font-size:12px">Server grain exposes platform, campaign, creative, transcript and annotation fields; the remaining dimensions match case-insensitively against the available text for that view. Platform matches exactly where a platform is known.</div>
+<div class="filter-grid">
+<label>Client<input type="text" id="flt-client" placeholder="client"></label>
+<label>Project<input type="text" id="flt-project" placeholder="project"></label>
+<label>Campaign<input type="text" id="flt-campaign" placeholder="campaign"></label>
+<label>Platform<select id="flt-platform"><option value="all">all</option><option value="meta">meta</option><option value="tiktok">tiktok</option></select></label>
+<label>Vertical<input type="text" id="flt-vertical" placeholder="vertical"></label>
+<label>Market<input type="text" id="flt-market" placeholder="market"></label>
+<label>Funnel<input type="text" id="flt-funnel" placeholder="funnel"></label>
+<label>Objective<input type="text" id="flt-objective" placeholder="objective"></label>
+<label>KPI (sort)<select id="flt-kpi"><option value="all">all</option><option value="spend">spend</option><option value="ctr">ctr</option><option value="cpc">cpc</option><option value="cpa">cpa</option></select></label>
+<label>Date<input type="text" id="flt-date" placeholder="date"></label>
+</div>
+<div style="margin-top:8px"><button class="action" id="flt-clear">Clear filters</button> <span id="filter-summary" class="muted"></span></div>
+</div>
+<div class="card" style="margin:16px 16px 0">
+<h3 style="margin:0 0 4px">Ask data</h3>
+<div style="display:flex;gap:8px"><input type="text" id="ask-q" placeholder="Ask about spend, CTR, CPA, best creatives…" style="flex:1"><button class="action" id="ask-go">Ask</button></div>
+<div id="ask-out" class="muted">Answers POST to /api/ask and cite uploaded data first.</div>
+</div>
 <main>
 <section class="view active" id="v-main">
 <h2>Main</h2>
@@ -68,17 +100,53 @@ input,select{background:var(--bg);color:var(--fg);border:1px solid var(--line);b
 <div class="card"><button class="action" id="run-pipe">Run pipeline on selected</button>
 <button class="action" id="verify">Mark HUMAN-VERIFIED</button>
 <span class="muted">Manual annotate: edit hook type / format, then Save.</span></div>
+<div class="card"><h3>Creative view</h3><div id="creative-detail"><p class="muted">Select a creative below.</p></div></div>
 <div id="library"></div></section>
-<section class="view" id="v-compare"><h2>Compare</h2>
+<section class="view" id="v-compare"><h2>Compare (side-by-side)</h2>
 <div class="card"><input id="cmp-a" placeholder="creative A key"> <input id="cmp-b" placeholder="creative B key">
-<button class="action" id="cmp-go">Compare</button></div>
+<button class="action" id="cmp-go">Compare</button>
+<div class="muted" style="font-size:12px">GET /api/compare — badges note whether each side passes the current filters.</div></div>
 <div id="cmp-out"></div></section>
 <section class="view" id="v-benchmark"><h2>Benchmark</h2>
 <div class="card"><label>Group by <select id="gb">
 <option value="hook_type">hook_type</option><option value="creator_vs_branded">creator_vs_branded</option>
 <option value="platform">platform</option><option value="campaign">campaign</option></select></label>
 <button class="action" id="gb-go">Refresh</button></div>
-<div id="bench-out"></div></section>
+<div id="bench-out"></div>
+<div class="card"><h3>Benchmark builder</h3>
+<div class="filter-grid">
+<label>Filter text<input type="text" id="bb-filter" placeholder="substring over group"></label>
+<label>Group by<select id="bb-group">
+<option value="hook_type">hook_type</option><option value="creator_vs_branded">creator_vs_branded</option>
+<option value="platform">platform</option><option value="campaign">campaign</option></select></label>
+<label>Include (comma-separated)<input type="text" id="bb-include" placeholder="optional"></label>
+<label>Exclude (comma-separated)<input type="text" id="bb-exclude" placeholder="optional"></label>
+</div>
+<div style="margin-top:8px"><button class="action" id="bb-create">Create</button></div>
+<div id="bb-saved" style="margin-top:8px"></div>
+<div id="bb-out" style="margin-top:8px"></div></div>
+</section>
+<section class="view" id="v-report"><h2>Report</h2>
+<div class="card"><h3>Campaigns</h3><div id="rep-campaigns" class="muted">—</div></div>
+<div class="card"><h3>Creatives (one-pager source)</h3><div id="rep-creatives" class="muted">—</div></div>
+<div class="card"><h3>KPIs</h3>
+<label><input type="checkbox" class="rep-kpi" value="spend" checked> spend</label>
+<label><input type="checkbox" class="rep-kpi" value="impressions" checked> impressions</label>
+<label><input type="checkbox" class="rep-kpi" value="ctr" checked> ctr</label>
+<label><input type="checkbox" class="rep-kpi" value="cpc" checked> cpc</label>
+<label><input type="checkbox" class="rep-kpi" value="cpa" checked> cpa</label>
+</div>
+<div class="card"><h3>Benchmark</h3>
+<label>Group by <select id="rep-bench">
+<option value="hook_type">hook_type</option><option value="creator_vs_branded">creator_vs_branded</option>
+<option value="platform">platform</option><option value="campaign">campaign</option></select></label>
+<label><input type="checkbox" id="rep-override"> override (logged)</label><br><br>
+<button class="action" id="rep-onepager">Generate one-pager</button>
+<button class="action" id="rep-csv">Generate CSV</button>
+<button class="action" id="rep-deck">Generate deck</button>
+<pre id="rep-out" class="muted"></pre>
+<span id="rep-links"></span></div>
+</section>
 </main>
 <script>
 const $=id=>document.getElementById(id);
@@ -87,22 +155,237 @@ const api=async(m,p,b)=>{const r=await fetch(p,{method:m,headers:{"Content-Type"
 document.querySelectorAll("#tabs button").forEach(b=>b.onclick=()=>{document.querySelectorAll("#tabs button").forEach(x=>x.setAttribute("aria-pressed","false"));b.setAttribute("aria-pressed","true");document.querySelectorAll(".view").forEach(v=>v.classList.remove("active"));document.querySelector("#v-"+b.dataset.view).classList.add("active");refresh();});
 $("theme").onclick=()=>{const h=document.documentElement;h.dataset.theme=h.dataset.theme==="dark"?"":"dark";};
 let selected=null;
+const saved_builders=[];
+function active_filters(){return{
+  client:$("flt-client").value.trim().toLowerCase(),
+  project:$("flt-project").value.trim().toLowerCase(),
+  campaign:$("flt-campaign").value.trim().toLowerCase(),
+  platform:$("flt-platform").value,
+  vertical:$("flt-vertical").value.trim().toLowerCase(),
+  market:$("flt-market").value.trim().toLowerCase(),
+  funnel:$("flt-funnel").value.trim().toLowerCase(),
+  objective:$("flt-objective").value.trim().toLowerCase(),
+  kpi:$("flt-kpi").value,
+  date:$("flt-date").value.trim().toLowerCase()};}
+function filter_summary(){
+  const f=active_filters();
+  const bits=Object.entries(f).filter(([,v])=>v&&v!=="all").map(([k,v])=>k+"="+v);
+  $("filter-summary").textContent=bits.length?("Active: "+bits.join(", ")):"No filters active.";
+}
+["flt-client","flt-project","flt-campaign","flt-platform","flt-vertical","flt-market","flt-funnel","flt-objective","flt-kpi","flt-date"].forEach(id=>$(id).addEventListener("input",refresh));
+$("flt-clear").onclick=()=>{["flt-client","flt-project","flt-campaign","flt-vertical","flt-market","flt-funnel","flt-objective","flt-date"].forEach(id=>$(id).value="");$("flt-platform").value="all";$("flt-kpi").value="all";refresh();};
+function text_blob(parts){return parts.map(p=>String(p??"").toLowerCase()).join(" | ");}
+function text_match(blob,f){return["client","project","campaign","vertical","market","funnel","objective","date"].every(k=>!f[k]||blob.includes(f[k]));}
+function sort_rows(entries,f){
+  if(!f.kpi||f.kpi==="all")return entries;
+  const k=f.kpi;
+  return entries.slice().sort((a,b)=>(Number(b[1][k])||0)-(Number(a[1][k])||0));
+}
 $("upload").onclick=async()=>{try{const r=await api("POST","/api/ingest",{platform:$("platform").value,csv:$("csv").value});$("up-status").textContent="Inserted "+r.inserted+" rows.";refresh();}catch(e){$("up-status").textContent=e.message;}};
 $("fixture").onclick=()=>{$("up-status").textContent="Run: python3 Backend/server.py --load-fixture --db Data/local.db";};
 $("export").onclick=async()=>{const keys=[...document.querySelectorAll(".exp-check:checked")].map(c=>c.value);try{const r=await api("POST","/api/export",{creative_keys:keys,override:$("override").checked});$("export-out").textContent=r.markdown;}catch(e){$("export-out").textContent="BLOCKED: "+e.message;}};
 $("run-pipe").onclick=async()=>{if(!selected)return;await api("POST","/api/pipeline/run",{creative_key:selected});refresh();};
 $("verify").onclick=async()=>{if(!selected)return;await api("POST","/api/creatives/"+encodeURIComponent(selected)+"/verify");refresh();};
-$("cmp-go").onclick=async()=>{const r=await api("GET","/api/compare?a="+encodeURIComponent($("cmp-a").value)+"&b="+encodeURIComponent($("cmp-b").value));$("cmp-out").textContent=JSON.stringify(r,null,2);};
+$("cmp-go").onclick=async()=>{try{const a=$("cmp-a").value.trim(),b=$("cmp-b").value.trim();const r=await api("GET","/api/compare?a="+encodeURIComponent(a)+"&b="+encodeURIComponent(b));render_compare(r,a,b);}catch(e){$("cmp-out").innerHTML=`<p class="muted">${esc(e.message)}</p>`;}};
 $("gb-go").onclick=bench;
-async function refresh(){kpis();campaigns();library();bench();}
+$("ask-go").onclick=ask_go;
+$("bb-create").onclick=builder_create;
+$("rep-onepager").onclick=report_onepager;
+$("rep-csv").onclick=report_csv;
+$("rep-deck").onclick=report_deck;
+async function refresh(){filter_summary();kpis();campaigns();library();bench();report_lists();}
 async function kpis(){try{const c=await api("GET","/api/campaigns");let s=0,n=0;Object.values(c).forEach(g=>{s+=g.spend;n+=g.n_ads;});$("kpis").textContent=n+" ads, $"+s.toFixed(2)+" spend across "+Object.keys(c).length+" campaigns.";}catch(e){$("kpis").textContent=e.message;}}
-async function campaigns(){try{const c=await api("GET","/api/campaigns");$("campaigns").innerHTML="<table><tr><th>Campaign</th><th>Ads</th><th>Spend</th><th>CTR</th><th>CPC</th><th>CPA</th></tr>"+Object.entries(c).map(([k,g])=>`<tr><td>${esc(k)}</td><td>${g.n_ads}</td><td>$${g.spend}</td><td>${g.ctr}</td><td>$${g.cpc}</td><td>$${g.cpa}</td></tr>`).join("")+"</table>";}catch(e){$("campaigns").textContent=e.message;}}
-async function library(){const rows=await api("GET","/api/creatives");$("library").innerHTML=rows.map(r=>{const a=r.annotation||{};const v=a.status==="human_verified";return `<div class="card"><label><input type="radio" name="sel" value="${esc(r.creative_key)}" ${selected===r.creative_key?"checked":""}> <strong>${esc(r.name||r.creative_key)}</strong></label> <span class="${v?"verified":"unverified"}">${v?"HUMAN-VERIFIED":"auto"}</span><br><span class="muted">hook=${esc(a.hook_type||"—")} conf=${a.hook_confidence??"—"} | format=${esc(a.creator_vs_branded||"—")} | ${esc(r.transcript||"no transcript")}</span><br><label>Hook <select data-k="${esc(r.creative_key)}" class="hook-sel">${["question","bold_claim","demo_open","social_proof","offer","story","pattern_interrupt","other"].map(h=>`<option ${a.hook_type===h?"selected":""}>${h}</option>`).join("")}</select></label> <label>Format <select data-k="${esc(r.creative_key)}" class="fmt-sel">${["creator","branded","hybrid"].map(h=>`<option ${a.creator_vs_branded===h?"selected":""}>${h}</option>`).join("")}</select></label> <button class="action save" data-k="${esc(r.creative_key)}">Save annotation</button></div>`;}).join("")||"<p class=muted>No creatives yet — upload or load fixture.</p>";
-document.querySelectorAll("input[name=sel]").forEach(r=>r.onchange=()=>selected=r.value);
-document.querySelectorAll(".save").forEach(b=>b.onclick=async()=>{const k=b.dataset.k;const rows2=await api("GET","/api/creatives");const found=rows2.find(x=>x.creative_key===k);const cur=found.annotation||{schema_version:"v0",hook_confidence:0.5,brand_seconds:[],product_seconds:[],logo_seconds:[],structure:{},creator_confidence:0.5,duration_s:0,pace_cuts_per_min:0,status:"auto"};for(const s of ["hook","body","demo","supers","cta","endframe","voiceover"])cur.structure[s]=cur.structure[s]||{start_s:0,end_s:0,confidence:0};cur.schema_version="v0";cur.hook_type=document.querySelector(`.hook-sel[data-k="${k}"]`).value;cur.creator_vs_branded=document.querySelector(`.fmt-sel[data-k="${k}"]`).value;await api("POST","/api/creatives/"+encodeURIComponent(k)+"/annotate",{annotation:cur});refresh();});
-$("export-list").innerHTML=rows.map(r=>`<label><input type="checkbox" class="exp-check" value="${esc(r.creative_key)}"> ${esc(r.creative_key)}</label>`).join("<br>")||"—";}
-async function bench(){try{const b=await api("GET","/api/benchmarks?group_by="+$("gb").value);$("bench-out").innerHTML="<table><tr><th>Group</th><th>Ads</th><th>Spend</th><th>CTR</th><th>CPC</th><th>CPA</th></tr>"+Object.entries(b).map(([k,g])=>`<tr><td>${esc(k)}</td><td>${g.n_ads}</td><td>$${g.spend}</td><td>${g.ctr}</td><td>$${g.cpc}</td><td>$${g.cpa}</td></tr>`).join("")+"</table>";}catch(e){$("bench-out").textContent=e.message;}}
+async function campaigns(){try{
+  const c=await api("GET","/api/campaigns");const f=active_filters();
+  let entries=Object.entries(c).filter(([k])=>text_blob([k]).includes(f.campaign)&&text_match(text_blob([k]),{...f,campaign:""}));
+  entries=sort_rows(entries,f);
+  $("campaigns").innerHTML="<table><tr><th>Campaign</th><th>Ads</th><th>Spend</th><th>CTR</th><th>CPC</th><th>CPA</th></tr>"+entries.map(([k,g])=>`<tr><td>${esc(k)}</td><td>${esc(String(g.n_ads))}</td><td>$${esc(String(g.spend))}</td><td>${esc(String(g.ctr))}</td><td>$${esc(String(g.cpc))}</td><td>$${esc(String(g.cpa))}</td></tr>`).join("")+"</table>";
+}catch(e){$("campaigns").textContent=e.message;}}
+async function library(){
+  const rows=await api("GET","/api/creatives");const f=active_filters();
+  const kept=rows.filter(r=>{const a=r.annotation||{};if(f.platform!=="all"&&String(r.platform||"").toLowerCase()!==f.platform)return false;return text_match(text_blob([r.creative_key,r.name,r.transcript,a.hook_type,a.creator_vs_branded,r.status]),f);});
+  creative_detail(kept);
+  $("library").innerHTML=kept.map(r=>{const a=r.annotation||{};const v=a.status==="human_verified";return `<div class="card"><label><input type="radio" name="sel" value="${esc(r.creative_key)}" ${selected===r.creative_key?"checked":""}> <strong>${esc(r.name||r.creative_key)}</strong></label> <span class="${v?"verified":"unverified"}">${v?"HUMAN-VERIFIED":"auto"}</span><br><span class="muted">hook=${esc(a.hook_type||"—")} conf=${esc(String(a.hook_confidence??"—"))} | format=${esc(a.creator_vs_branded||"—")} | ${esc(r.transcript||"no transcript")}</span><br><label>Hook <select data-k="${esc(r.creative_key)}" class="hook-sel">${["question","bold_claim","demo_open","social_proof","offer","story","pattern_interrupt","other"].map(h=>`<option ${a.hook_type===h?"selected":""}>${h}</option>`).join("")}</select></label> <label>Format <select data-k="${esc(r.creative_key)}" class="fmt-sel">${["creator","branded","hybrid"].map(h=>`<option ${a.creator_vs_branded===h?"selected":""}>${h}</option>`).join("")}</select></label> <button class="action save" data-k="${esc(r.creative_key)}">Save annotation</button></div>`;}).join("")||"<p class=muted>No creatives match the current filters.</p>";
+  document.querySelectorAll("input[name=sel]").forEach(r=>r.onchange=()=>{selected=r.value;refresh();});
+  document.querySelectorAll(".save").forEach(b=>b.onclick=async()=>{const k=b.dataset.k;const rows2=await api("GET","/api/creatives");const found=rows2.find(x=>x.creative_key===k);const cur=found.annotation||{schema_version:"v0",hook_confidence:0.5,brand_seconds:[],product_seconds:[],logo_seconds:[],structure:{},creator_confidence:0.5,duration_s:0,pace_cuts_per_min:0,status:"auto"};for(const s of ["hook","body","demo","supers","cta","endframe","voiceover"])cur.structure[s]=cur.structure[s]||{start_s:0,end_s:0,confidence:0};cur.schema_version="v0";cur.hook_type=document.querySelector(`.hook-sel[data-k="${CSS.escape(k)}"]`).value;cur.creator_vs_branded=document.querySelector(`.fmt-sel[data-k="${CSS.escape(k)}"]`).value;await api("POST","/api/creatives/"+encodeURIComponent(k)+"/annotate",{annotation:cur});refresh();});
+  $("export-list").innerHTML=kept.map(r=>`<label><input type="checkbox" class="exp-check" value="${esc(r.creative_key)}"> ${esc(r.creative_key)}</label>`).join("<br>")||"—";
+}
+function pick_source(a){
+  for(const k of ["source_url","video_url","sourceUrl","videoUrl"]){
+    const u=a[k];
+    if(typeof u==="string"&&/^(https?:|blob:)/.test(u.trim()))return u.trim();
+  }
+  return null;
+}
+function span_start(spans){if(!Array.isArray(spans)||!spans.length)return null;const t=Number(spans[0].start_s);return Number.isFinite(t)?t:null;}
+function chip_btn(label,t){
+  if(t===null||t===undefined||!Number.isFinite(Number(t)))return "";
+  return `<button class="chip" data-seek="${esc(String(t))}">${esc(label)} @ ${esc(String(t))}s</button>`;
+}
+function storyboard_svg(a){
+  const slots=["hook","body","demo","supers","cta","endframe","voiceover"];
+  const st=a.structure||{};const dur=Number(a.duration_s)||30;
+  let x=0;const W=560,H=64;
+  const rects=slots.map((s,i)=>{
+    const seg=st[s]||{start_s:0,end_s:0};const w=Math.max(8,Math.round(W/slots.length));
+    const hue=(i*47)%360;const label=`${s} ${seg.start_s??0}-${seg.end_s??0}s`;
+    const out=`<g><rect x="${x}" y="8" width="${w-2}" height="40" fill="hsl(${hue},45%,72%)" stroke="#888"/><text x="${x+4}" y="32" font-size="10">${esc(s)}</text><title>${esc(label)}</title></g>`;
+    x+=w;return out;
+  }).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Storyboard"><title>${esc("Storyboard, duration "+dur+"s")}</title>${rects}<text x="0" y="${H-2}" font-size="10">${esc("duration "+dur+"s")}</text></svg>`;
+}
+function creative_detail(kept){
+  const box=$("creative-detail");
+  if(!selected){box.innerHTML='<p class="muted">Select a creative below.</p>';return;}
+  const found=(kept||[]).find(x=>x.creative_key===selected);
+  if(!found){box.innerHTML=`<p class="muted">${esc("Selected creative is hidden by the current filters.")}</p>`;return;}
+  const a=found.annotation||{};
+  const src=pick_source(a);
+  const hook_t=(a.structure||{}).hook?Number((a.structure||{}).hook.start_s):NaN;
+  const cta_t=(a.structure||{}).cta?Number((a.structure||{}).cta.start_s):NaN;
+  const brand_t=span_start(a.brand_seconds);
+  const product_t=span_start(a.product_seconds);
+  const media=src?`<video id="creative-video" controls preload="metadata" style="max-width:100%"><source src="${esc(src)}"></video><div class="muted" style="font-size:12px">Playing annotated source URL.</div>`:`<div>${storyboard_svg(a)}</div><div class="muted" style="font-size:12px">No annotated source URL — SVG storyboard from annotation structure.</div>`;
+  box.innerHTML=`<h4 style="margin:0 0 6px">${esc(found.name||found.creative_key)}</h4>
+  <div class="muted" style="font-size:13px">key=${esc(found.creative_key)} · platform=${esc(found.platform||"—")} · status=${esc(a.status||found.status||"auto")} · hook=${esc(a.hook_type||"—")}</div>
+  <div style="margin:8px 0">${media}</div>
+  <div>${chip_btn("Hook",hook_t)}${chip_btn("Brand",brand_t)}${chip_btn("Product",product_t)}${chip_btn("CTA",cta_t)||""}</div>
+  <div id="retention-graph" class="muted" style="margin-top:8px">Loading retention…</div>`;
+  box.querySelectorAll(".chip").forEach(ch=>ch.onclick=()=>{
+    const v=document.querySelector("#creative-video");
+    if(v&&Number.isFinite(Number(ch.dataset.seek))){try{v.currentTime=Number(ch.dataset.seek);}catch(e){}}
+  });
+  load_retention(selected);
+}
+async function load_retention(key){
+  const box=$("retention-graph");if(!box)return;
+  try{
+    const segs=await api("GET","/api/retention?creative_key="+encodeURIComponent(key));
+    box.innerHTML=retention_svg(segs);
+  }catch(e){box.innerHTML=`<span class="muted">${esc(e.message)}</span>`;}
+}
+function retention_svg(segs){
+  if(!Array.isArray(segs)||!segs.length)return '<span class="muted">No retention data.</span>';
+  const max=Math.max(1,...segs.map(s=>Number(s.drop_pts)||0));
+  const rows=segs.map((s,i)=>{
+    const dv=Number(s.drop_pts)||0;const w=Math.round(280*dv/max);const y=i*22;
+    return `<g><text x="0" y="${y+14}" font-size="11">${esc(String(s.segment))}</text><rect x="90" y="${y+2}" width="${w}" height="14" fill="#0b5fff"><title>${esc(String(s.segment)+": "+dv+" pts")}</title></rect><text x="${95+w}" y="${y+14}" font-size="11">${esc(String(dv))} pts (n=${esc(String(s.n_points??0))})</text></g>`;
+  }).join("");
+  return `<svg viewBox="0 0 460 ${segs.length*22+4}" width="100%" role="img" aria-label="Retention drop per segment"><title>${esc("Retention drop per segment from /api/retention")}</title>${rows}</svg>`;
+}
+function render_compare(r,a,b){
+  const f=active_filters();
+  const card=key=>{
+    const d=(r&&r[key])||{};const ann=d.annotation||{};
+    const blob=text_blob([key,ann.hook_type,ann.creator_vs_branded]);
+    const pass=(f.platform==="all"?"—":blob.includes(f.platform))&&(text_match(blob,f)?"passes filters":"filtered out");
+    return `<div class="card"><h3>${esc(key||"(empty)")}</h3>
+    <div class="muted" style="font-size:12px">${esc(String(pass))}</div>
+    <table><tr><th>Spend</th><td>$${esc(String(d.spend??"—"))}</td></tr>
+    <tr><th>CTR</th><td>${esc(String(d.ctr??"—"))}</td></tr>
+    <tr><th>CPA</th><td>$${esc(String(d.cpa??"—"))}</td></tr>
+    <tr><th>Hook</th><td>${esc(ann.hook_type||"—")}</td></tr>
+    <tr><th>Format</th><td>${esc(ann.creator_vs_branded||"—")}</td></tr>
+    <tr><th>Status</th><td>${esc(ann.status||"—")}</td></tr></table></div>`;
+  };
+  $("cmp-out").innerHTML=`<div class="cmp-grid">${card(a)}${card(b)}</div>`;
+}
+async function bench(){try{
+  const b=await api("GET","/api/benchmarks?group_by="+encodeURIComponent($("gb").value));
+  const f=active_filters();
+  let entries=Object.entries(b).filter(([k])=>text_match(text_blob([k]),f));
+  if($("gb").value==="platform"&&f.platform!=="all")entries=entries.filter(([k])=>k.toLowerCase()===f.platform);
+  entries=sort_rows(entries,f);
+  $("bench-out").innerHTML="<table><tr><th>Group</th><th>Ads</th><th>Spend</th><th>CTR</th><th>CPC</th><th>CPA</th></tr>"+entries.map(([k,g])=>`<tr><td>${esc(k)}</td><td>${esc(String(g.n_ads))}</td><td>$${esc(String(g.spend))}</td><td>${esc(String(g.ctr))}</td><td>$${esc(String(g.cpc))}</td><td>$${esc(String(g.cpa))}</td></tr>`).join("")+"</table>";
+}catch(e){$("bench-out").textContent=e.message;}}
+async function builder_create(){
+  try{
+    const group_by=$("bb-group").value;
+    const data=await api("GET","/api/benchmarks?group_by="+encodeURIComponent(group_by));
+    const filt=$("bb-filter").value.trim().toLowerCase();
+    const inc=$("bb-include").value.split(",").map(s=>s.trim()).filter(Boolean);
+    const exc=$("bb-exclude").value.split(",").map(s=>s.trim()).filter(Boolean);
+    const rows=Object.entries(data).filter(([k])=>{
+      if(filt&&!k.toLowerCase().includes(filt))return false;
+      if(inc.length&&!inc.includes(k))return false;
+      if(exc.includes(k))return false;
+      return true;
+    });
+    const name="Benchmark "+(saved_builders.length+1)+" ("+group_by+")";
+    saved_builders.push({name:name,group_by:group_by,rows:rows});
+    render_builders();
+  }catch(e){$("bb-out").innerHTML=`<p class="muted">${esc(e.message)}</p>`;}
+}
+function render_builders(){
+  $("bb-saved").innerHTML=saved_builders.length?("<ul class='plain'>"+saved_builders.map((b,i)=>`<li>${esc(b.name)} — ${esc(String(b.rows.length))} groups <button class="chip" data-bb="${esc(String(i))}">Show</button></li>`).join("")+"</ul>"):'<span class="muted">No saved benchmarks yet.</span>';
+  $("bb-saved").querySelectorAll("[data-bb]").forEach(btn=>btn.onclick=()=>{
+    const b=saved_builders[Number(btn.dataset.bb)];
+    $("bb-out").innerHTML="<h4>"+esc(b.name)+"</h4><table><tr><th>Group</th><th>Ads</th><th>Spend</th><th>CTR</th><th>CPC</th><th>CPA</th></tr>"+b.rows.map(([k,g])=>`<tr><td>${esc(k)}</td><td>${esc(String(g.n_ads))}</td><td>$${esc(String(g.spend))}</td><td>${esc(String(g.ctr))}</td><td>$${esc(String(g.cpc))}</td><td>$${esc(String(g.cpa))}</td></tr>`).join("")+"</table>";
+  });
+  if(saved_builders.length){$("bb-saved").querySelector("[data-bb]").click();}
+}
+async function ask_go(){
+  const q=$("ask-q").value;
+  if(!q.trim()){$("ask-out").textContent="Type a question first.";return;}
+  try{
+    const r=await api("POST","/api/ask",{question:q});
+    const srcs=Array.isArray(r.sources)?r.sources:[];
+    $("ask-out").innerHTML=`<p>${esc(r.answer)}</p><p class="muted">sources: ${srcs.map(s=>esc(s)).join(", ")||"—"}${r.review_id?` · review ${esc(String(r.review_id))} opened — export stays blocked until reviews are marked reviewed`:""}</p>`;
+  }catch(e){$("ask-out").innerHTML=`<p class="muted">${esc(e.message)}</p>`;}
+}
+async function report_lists(){
+  try{
+    const c=await api("GET","/api/campaigns");const f=active_filters();
+    const keys=Object.keys(c).filter(k=>text_blob([k]).includes(f.campaign)&&text_match(text_blob([k]),{...f,campaign:""}));
+    $("rep-campaigns").innerHTML=keys.map(k=>`<label><input type="checkbox" class="rep-campaign" value="${esc(k)}" checked> ${esc(k)}</label>`).join("<br>")||'<span class="muted">No campaigns.</span>';
+  }catch(e){$("rep-campaigns").textContent=e.message;}
+  try{
+    const rows=await api("GET","/api/creatives");const f=active_filters();
+    const kept=rows.filter(r=>{if(f.platform!=="all"&&String(r.platform||"").toLowerCase()!==f.platform)return false;return text_match(text_blob([r.creative_key,r.name]),f);});
+    $("rep-creatives").innerHTML=kept.map(r=>`<label><input type="checkbox" class="rep-creative" value="${esc(r.creative_key)}"> ${esc(r.name||r.creative_key)}</label>`).join("<br>")||'<span class="muted">No creatives.</span>';
+  }catch(e){$("rep-creatives").textContent=e.message;}
+}
+function checked_vals(sel){return[...document.querySelectorAll(sel+":checked")].map(c=>c.value);}
+async function report_onepager(){
+  const keys=checked_vals(".rep-creative");
+  try{
+    const r=await api("POST","/api/export",{creative_keys:keys,override:$("rep-override").checked});
+    $("rep-out").textContent=r.markdown;
+    const blob=new Blob([r.markdown],{type:"text/markdown"});
+    $("rep-links").innerHTML=`<a download="one-pager.md" href="${esc(URL.createObjectURL(blob))}">Download one-pager.md</a>`;
+  }catch(e){$("rep-out").textContent="BLOCKED: "+e.message;$("rep-links").innerHTML="";}
+}
+async function report_csv(){
+  try{
+    const camps=await api("GET","/api/campaigns");
+    const want=checked_vals(".rep-campaign");const kpis=checked_vals(".rep-kpi");
+    const cols=["campaign"].concat(kpis.length?kpis:["spend","cpa"]);
+    const lines=[cols.join(",")];
+    Object.entries(camps).filter(([k])=>!want.length||want.includes(k)).forEach(([k,g])=>{
+      lines.push(cols.map(c=>c==="campaign"?('"'+String(k).replace(/"/g,'""')+'"'):String(g[c]??"")).join(","));
+    });
+    const csv_text=lines.join("\n")+"\n";
+    $("rep-out").textContent=csv_text;
+    $("rep-links").innerHTML=`<a download="report.csv" href="${esc(URL.createObjectURL(new Blob([csv_text],{type:"text/csv"})))}">Download report.csv</a>`;
+  }catch(e){$("rep-out").textContent="BLOCKED: "+e.message;}
+}
+async function report_deck(){
+  try{
+    const camps=await api("GET","/api/campaigns");
+    const bench_data=await api("GET","/api/benchmarks?group_by="+encodeURIComponent($("rep-bench").value));
+    const want=checked_vals(".rep-campaign");const kpis=checked_vals(".rep-kpi");
+    const camp_rows=Object.entries(camps).filter(([k])=>!want.length||want.includes(k));
+    const esc_html=s=>esc(s);
+    const slides=camp_rows.map(([k,g])=>`<section class="slide"><h2>${esc_html(k)}</h2><p>${kpis.map(kpi=>esc_html(kpi)+": "+esc_html(String(g[kpi]??"—"))).join(" · ")||esc_html("spend: "+g.spend)}</p></section>`).join("");
+    const bench_rows=Object.entries(bench_data).map(([k,g])=>`<li>${esc_html(k)}: CPA $${esc_html(String(g.cpa))}, CTR ${esc_html(String(g.ctr))}</li>`).join("");
+    const deck_html=`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>${esc_html("Client deck")}</title><style>body{font-family:system-ui,sans-serif;color:#1a1a1a;margin:0}.slide{padding:48px;page-break-after:always;border-bottom:2px solid #e2e2e0}</style></head><body><h1 style="padding:48px 48px 0">${esc_html("Creative performance")}</h1>${slides}<section class="slide"><h2>${esc_html("Benchmarks ("+$("rep-bench").value+")")}</h2><ul>${bench_rows}</ul></section></body></html>`;
+    $("rep-out").textContent="Deck built: "+camp_rows.length+" campaign slides + 1 benchmark slide.";
+    $("rep-links").innerHTML=`<a download="deck.html" href="${esc(URL.createObjectURL(new Blob([deck_html],{type:"text/html"})))}">Download deck.html</a>`;
+  }catch(e){$("rep-out").textContent="BLOCKED: "+e.message;}
+}
 refresh();
 </script>
 </body>
 </html>
+
+

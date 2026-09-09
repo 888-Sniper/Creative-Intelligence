@@ -14,7 +14,9 @@ import math
 CANONICAL_FIELDS = ("platform", "campaign", "adset", "ad_name",
                     "creative_key", "spend", "impressions", "clicks",
                     "conversions", "video_views", "views_25", "views_50",
-                    "views_75", "views_100")
+                    "views_75", "views_100", "client", "project",
+                    "vertical", "market", "objective", "funnel_stage",
+                    "date", "revenue")
 
 _ALIASES = {
     "platform": {"platform"},
@@ -31,11 +33,23 @@ _ALIASES = {
     "views_50": {"50% views", "video watches at 50%", "views_50"},
     "views_75": {"75% views", "video watches at 75%", "views_75"},
     "views_100": {"100% views", "completions", "video watches at 100%", "views_100"},
+    "client": {"client", "client name", "account", "account name", "advertiser"},
+    "project": {"project", "project name"},
+    "vertical": {"vertical", "industry", "category"},
+    "market": {"market", "market name", "country", "region", "geo"},
+    "objective": {"objective", "campaign objective", "optimization goal",
+                  "optimisation goal"},
+    "funnel_stage": {"funnel stage", "funnel_stage", "funnel", "stage"},
+    "date": {"date", "day", "reporting date", "report date"},
+    "revenue": {"revenue", "purchase value", "purchase conversion value",
+                "conversion value", "total revenue", "total purchase value",
+                "shop revenue"},
 }
 
 _NUMERIC = {"spend": float, "impressions": int, "clicks": int,
             "conversions": float, "video_views": int, "views_25": int,
-            "views_50": int, "views_75": int, "views_100": int}
+            "views_50": int, "views_75": int, "views_100": int,
+            "revenue": float}
 
 
 def _norm(header):
@@ -140,13 +154,22 @@ def parse_workbook(path, platform, source="upload"):
 
 
 def insert_rows(conn, rows):
+    defaults = {"client": "", "project": "", "vertical": "", "market": "",
+                "objective": "", "funnel_stage": "", "date": "",
+                "revenue": 0.0}
+    normalised = [dict(defaults, **row) for row in rows]
     conn.executemany(
         "INSERT INTO ads (platform, source, campaign, adset, ad_name, creative_key,"
         " spend, impressions, clicks, conversions, video_views,"
-        " views_25, views_50, views_75, views_100)"
+        " views_25, views_50, views_75, views_100,"
+        " client, project, vertical, market, objective, funnel_stage,"
+        " date, revenue)"
         " VALUES (:platform, :source, :campaign, :adset, :ad_name, :creative_key,"
         " :spend, :impressions, :clicks, :conversions, :video_views,"
-        " :views_25, :views_50, :views_75, :views_100)", rows)
+        " :views_25, :views_50, :views_75, :views_100,"
+        " :client, :project, :vertical, :market, :objective, :funnel_stage,"
+        " :date, :revenue)", normalised)
+    rows = normalised
     for row in rows:
         conn.execute(
             "INSERT OR IGNORE INTO creatives (creative_key, platform, name)"

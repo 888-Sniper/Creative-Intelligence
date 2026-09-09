@@ -5,10 +5,13 @@ the creative IDs behind it. Questions outside the data return grounded=False
 with an insufficient-data message instead of generic marketing advice.
 """
 
+import math
+
 from benchmarks import spend_weighted_mean
-from creative import best_by_element, early_vs_late, weighted_cpa
+from creative import best_by_element, weighted_cpa
 
 SHORT_S = 15
+PRODUCT_EARLY_S = 3.0
 
 
 def _scope(joined, platform=None, funnel=None):
@@ -36,6 +39,34 @@ def _length_split(joined):
     return short, long
 
 
+def _timing_split(joined, threshold=PRODUCT_EARLY_S):
+    """Split rows by product-first-visible seconds; non-numeric junk excluded."""
+    early, late = [], []
+    for row in joined:
+        val = row.get("product_first_visible_s")
+        if isinstance(val, bool):
+            continue
+        try:
+            sec = float(val)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(sec):
+            continue
+        (early if sec <= threshold else late).append(row)
+    return early, late
+
+
+def _pooled_vtr(rows):
+    """Pooled VTR = sum(video_views) / sum(impr), plus the raw totals."""
+    impr = sum(r.get("impr", 0) or 0 for r in rows)
+    views = sum(r.get("video_views", 0) or 0 for r in rows)
+    return (views / impr if impr else 0.0), views, impr
+
+
+def _ids(rows):
+    return sorted({r["creative_id"] for r in rows if r.get("creative_id")})
+
+
 def answer(question, rows, joined):
     """Return {answer, citations, grounded} for a natural-language question."""
     q = question.lower()
@@ -48,15 +79,59 @@ def answer(question, rows, joined):
                 "answer": f"{top['value'].title()} hooks lead with weighted "
                           f"CPA {top['cpa']:.2f} across {top['n']} creatives."}
 
-    if "tiktok" in q or "format" in q:
-        plats = best_by_element(joined, "platform")
-        top = plats[0]
+    if ("vtr" in q or "view-through" in q or "view through" in q
+            or (("early" in q or "earlier" in q or "timing" in q)
+                and "product" in q)):
+        early, late = _timing_split(joined)
+        if not early or not late:
+            return {"grounded": False, "citations": [],
+                    "answer": "Insufficient data: need creatives with both "
+                              "early and late product appearance to compare "
+                              "VTR."}
+        evtr, eviews, eimpr = _pooled_vtr(early)
+        lvtr, lviews, limpr = _pooled_vtr(late)
+        verdict = "yes" if evtr > lvtr else "no"
+        early_cites = _cites(early)
+        cites = early_cites + [c for c in _cites(late) if c not in early_cites]
         return {"grounded": True,
-                "citations": _cites([r for r in joined
-                                     if r.get("platform") == top["value"]]),
-                "answer": f"{top['value'].title()} leads on weighted CPA "
-                          f"({top['cpa']:.2f}). Drill into hooks and product "
-                          f"timing before shifting budget."}
+                "citations": cites,
+                "answer": f"{verdict.title()}: product before second "
+                          f"{PRODUCT_EARLY_S:.0f} holds VTR "
+                          f"{evtr * 100:.1f}% ({eviews:,.0f} views / "
+                          f"{eimpr:,.0f} impr across {len(early)} creatives: "
+                          f"{', '.join(_ids(early))}) vs "
+                          f"{lvtr * 100:.1f}% ({lviews:,.0f} views / "
+                          f"{limpr:,.0f} impr across {len(late)} creatives: "
+                          f"{', '.join(_ids(late))}) for late appearance."}
+
+    if "tiktok" in q or "format" in q:
+        tik = [r for r in joined if r.get("platform") == "tiktok"]
+        if not tik:
+            return {"grounded": False, "citations": [],
+                    "answer": "Insufficient data: no TikTok creatives in the "
+                              "uploaded data yet."}
+        creators = [r for r in tik
+                    if r.get("creator_vs_branded") == "creator"]
+        branded = [r for r in tik
+                   if r.get("creator_vs_branded") == "branded"]
+        if not creators or not branded:
+            present, missing = ((creators, "branded") if creators
+                                else (branded, "creator"))
+            cpa = weighted_cpa(present)
+            return {"grounded": True, "citations": _cites(tik),
+                    "answer": f"TikTok runs {len(tik)} verified creatives, "
+                              f"all {present[0]['creator_vs_branded']}-led "
+                              f"({', '.join(_ids(present))}) at weighted CPA "
+                              f"{cpa:.2f}; no verified {missing} TikTok "
+                              f"creatives to compare yet."}
+        ccpa, bcpa = weighted_cpa(creators), weighted_cpa(branded)
+        winner = "Creator" if ccpa <= bcpa else "Branded"
+        return {"grounded": True, "citations": _cites(tik),
+                "answer": f"{winner} wins on TikTok: creator "
+                          f"({', '.join(_ids(creators))}) weighted CPA "
+                          f"{ccpa:.2f} across {len(creators)} creatives vs "
+                          f"branded ({', '.join(_ids(branded))}) weighted CPA "
+                          f"{bcpa:.2f} across {len(branded)} creatives."}
 
     if "funnel" in q or "lower" in q:
         lower = [r for r in joined if r.get("funnel_stage") == "lower"]
@@ -70,18 +145,6 @@ def answer(question, rows, joined):
                           f"{best.get('cpa', 0):.2f}. Creator-led shorts with "
                           f"early product appearance dominate the top."}
 
-    if "earlier" in q or "early" in q or ("product" in q and "vtr" in q):
-        timing = early_vs_late(joined)
-        verdict = ("yes" if timing["early_cpa"] < timing["late_cpa"] else "no")
-        return {"grounded": True,
-                "citations": _cites(joined),
-                "answer": f"{verdict.title()}: product before second "
-                          f"{timing['threshold_s']:.0f} averages CPA "
-                          f"{timing['early_cpa']:.2f} vs "
-                          f"{timing['late_cpa']:.2f} for late appearance "
-                          f"({timing['early_n']} vs {timing['late_n']} "
-                          f"creatives)."}
-
     if "top" in q and "bottom" in q or ("20%" in q) or ("20 percent" in q):
         ordered = sorted(joined, key=lambda r: r.get("cpa", 0))
         cut = max(1, len(ordered) // 5)
@@ -91,8 +154,11 @@ def answer(question, rows, joined):
         return {"grounded": True,
                 "citations": _cites(top + bottom),
                 "answer": f"Top uses {sorted(top_hooks)} hooks with early "
-                          f"product; bottom uses {sorted(bottom_hooks)} with "
-                          f"later product and longer runtimes."}
+                          f"product (n={len(top)}: "
+                          f"{', '.join(_ids(top))}); bottom uses "
+                          f"{sorted(bottom_hooks)} with later product and "
+                          f"longer runtimes (n={len(bottom)}: "
+                          f"{', '.join(_ids(bottom))})."}
 
     if "length" in q or "long" in q or "short" in q or "15" in q:
         short, long = _length_split(joined)
@@ -115,7 +181,7 @@ def answer(question, rows, joined):
                           f"the product before second 3 and a Shop now CTA."}
 
     return {"grounded": False, "citations": [],
-            "answer": "Insufficient data: I can answer about hooks, "
-                      "platforms, funnel stage, product timing, top vs "
+            "answer": "Insufficient data: I can answer about hooks, TikTok "
+                      "formats, funnel stage, product timing vs VTR, top vs "
                       "bottom performers, video length, and what to create "
                       "next — all from uploaded creatives."}

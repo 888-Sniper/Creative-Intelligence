@@ -170,6 +170,47 @@ class CrossEngineTest(unittest.TestCase):
         conn.close()
 
 
+class LaunchPathTest(unittest.TestCase):
+    def test_normal_launch_serves_new_routes(self):
+        """Reproduces `python3 Backend/server.py`: module-level code must
+        fully execute (no NameError from definitions after main())."""
+        import server
+        import socket
+        import subprocess
+        import time
+        import urllib.request
+        sock = socket.socket()
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+        sock.close()
+        db = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
+        proc = subprocess.Popen(
+            [sys.executable, server.__file__, "--db", db,
+             "--port", str(port)],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        try:
+            body = None
+            deadline = time.time() + 20
+            while time.time() < deadline:
+                try:
+                    with urllib.request.urlopen(
+                            "http://127.0.0.1:%d/api/cohorts" % port,
+                            timeout=2) as resp:
+                        body = resp.read().decode()
+                    break
+                except OSError:
+                    time.sleep(0.2)
+            self.assertIsNotNone(body, "server never came up on launch path")
+            self.assertEqual(json.loads(body), [])
+        finally:
+            proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            os.unlink(db)
+
+
 class ReplayTest(unittest.TestCase):
     def test_log_round_trip(self):
         import server

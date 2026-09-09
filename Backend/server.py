@@ -284,11 +284,7 @@ def main():
     srv.serve_forever()
 
 
-if __name__ == "__main__":
-    main()
-
-
-# === EXPERT 2 (COHORTS+COMPARE) APPENDED ROUTES — do not move above; ingest/load_fixtures untouched. ===
+# === EXPERT 2 (COHORTS+COMPARE) APPENDED ROUTES ===
 """Multi-campaign compare, cohort benchmark, and report-generation routes.
 
 New endpoints (all JSON):
@@ -396,3 +392,7 @@ def expert2_dispatch_post(handler, conn, url, payload):
             send(handler, 409, {"error": str(e)})
         return True
     return False
+
+
+if __name__ == "__main__":
+    main()

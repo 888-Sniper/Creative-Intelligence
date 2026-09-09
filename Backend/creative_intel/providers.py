@@ -226,7 +226,10 @@ class MockVision:
 
     def annotate(self, frames, images=None):
         return [{"t_sec": f["t_sec"], "label": "mock-frame",
-                 "brand_visible": f["t_sec"] < 3.0, "confidence": 0.5}
+                 "brand_visible": f["t_sec"] < 3.0, "confidence": 0.5,
+                 "product_visible": False, "logo_visible": False,
+                 "text_overlay": "", "cta_visible": False,
+                 "end_frame": False, "cut": False}
                 for f in frames]
 
 
@@ -248,8 +251,28 @@ class MockLlm:
         if brand:
             ann["brand_seconds"] = [{"start_s": min(brand), "end_s": max(brand),
                                      "modality": "V"}]
+        product = [l["t_sec"] for l in labels if l.get("product_visible")]
+        if product:
+            ann["product_seconds"] = [{"start_s": min(product),
+                                       "end_s": max(product),
+                                       "modality": "V"}]
+        logo = [l["t_sec"] for l in labels if l.get("logo_visible")]
+        if logo:
+            ann["logo_seconds"] = [{"start_s": min(logo),
+                                    "end_s": max(logo), "modality": "V"}]
+        cta = [l["t_sec"] for l in labels if l.get("cta_visible")]
+        if cta:
+            ann["structure"]["cta"] = {"start_s": min(cta),
+                                       "end_s": max(cta), "confidence": 0.5}
+        ends = [l["t_sec"] for l in labels if l.get("end_frame")]
+        if ends:
+            ann["structure"]["endframe"] = {"start_s": min(ends),
+                                            "end_s": max(ends),
+                                            "confidence": 0.5}
         ann["structure"]["hook"] = {"start_s": 0.0, "end_s": 3.0, "confidence": 0.6}
-        ann["structure"]["cta"] = {"start_s": 25.0, "end_s": 30.0, "confidence": 0.5}
+        if not cta:
+            ann["structure"]["cta"] = {"start_s": 25.0, "end_s": 30.0,
+                                       "confidence": 0.5}
         ann["duration_s"] = 30.0
         return ann
 
@@ -373,8 +396,18 @@ ENDPOINTS = {
 VISION_PROMPT = (
     "You analyse ad-creative frames. Reply with ONE JSON object only: "
     '{"frames": [{"t_sec": <number>, "label": "<short>", '
-    '"brand_visible": <true|false>, "confidence": <0..1>}]}. '
-    "One entry per supplied image, in order; t_sec values are: %s.")
+    '"brand_visible": <true|false>, '
+    '"product_visible": <true|false>, '
+    '"logo_visible": <true|false>, '
+    '"text_overlay": "<on-screen copy, or empty>", '
+    '"cta_visible": <true|false>, '
+    '"end_frame": <true if this looks like the closing card/frame>, '
+    '"cut": <true if the scene changed since the previous frame>, '
+    '"confidence": <0..1>}]}. '
+    "One entry per supplied image, in order; t_sec values are: %s. "
+    "Flag product shots, logo appearances, overlaid text, calls to "
+    "action and the end frame explicitly — do not leave that to "
+    "guesswork downstream.")
 
 STRUCTURE_PROMPT = (
     "You structure ad-creative analysis. Reply with ONE JSON object only "
@@ -384,10 +417,15 @@ STRUCTURE_PROMPT = (
     "said in the transcript, text if it is overlaid copy, unknown if "
     "unclear), "
     "hook_confidence (0..1), brand_seconds/product_seconds/logo_seconds "
-    "(arrays of {start_s, end_s}), structure (object with hook, body, "
-    "demo, supers, cta, endframe, voiceover each {start_s, end_s, "
-    "confidence}), creator_vs_branded (creator|branded|hybrid), "
-    "creator_confidence (0..1), duration_s, pace_cuts_per_min. "
+    "(arrays of {start_s, end_s} — derive them from the per-frame "
+    "brand_visible/product_visible/logo_visible flags at their t_sec "
+    "values, never from the free-text labels alone), structure "
+    "(object with hook, body, demo, supers, cta, endframe, voiceover "
+    "each {start_s, end_s, confidence} — set cta/endframe from the "
+    "cta_visible/end_frame flags and text_overlay copy), "
+    "creator_vs_branded (creator|branded|hybrid), "
+    "creator_confidence (0..1), duration_s, pace_cuts_per_min "
+    "(count the frames with cut=true). "
     "Transcript: %s\nVision labels: %s")
 
 
@@ -637,12 +675,27 @@ class LiveVision:
         return [{"t_sec": round(i * every_s, 1)} for i in range(n)]
 
     def annotate(self, frames, images=None):
+        """Annotate every supplied image, batching at MAX_IMAGES per
+        model call. Frames beyond the first batch used to be silently
+        dropped (images[:6]), which concentrated analysis on the
+        opening seconds and could miss a late CTA/end-frame entirely;
+        every batch is now sent and the labels concatenated in time
+        order. Any batch failure still fails closed."""
         if not images:
             raise ProviderUnavailable(
                 "no frame images: upload creative media first")
-        use = images[:self.MAX_IMAGES]
-        t_secs = [f.get("t_sec", 0) for f in frames[:len(use)]]
+        t_all = [f.get("t_sec", 0) for f in frames]
+        out = []
+        for start in range(0, len(images), self.MAX_IMAGES):
+            use = images[start:start + self.MAX_IMAGES]
+            t_secs = [(t_all[start + i] if start + i < len(t_all) else 0)
+                      for i in range(len(use))]
+            out.extend(self._annotate_batch(use, t_secs))
+        if not out:
+            raise ProviderUnavailable("vision returned no usable frames")
+        return out
 
+    def _annotate_batch(self, use, t_secs):
         def call(item):
             provider, model, _tier = item
             client = make_chat(provider, model)
@@ -661,6 +714,12 @@ class LiveVision:
                         "t_sec": float(entry.get("t_sec", t_secs[i] if i < len(t_secs) else 0)),
                         "label": str(entry.get("label", "frame"))[:80],
                         "brand_visible": bool(entry.get("brand_visible", False)),
+                        "product_visible": bool(entry.get("product_visible", False)),
+                        "logo_visible": bool(entry.get("logo_visible", False)),
+                        "text_overlay": str(entry.get("text_overlay", ""))[:120],
+                        "cta_visible": bool(entry.get("cta_visible", False)),
+                        "end_frame": bool(entry.get("end_frame", False)),
+                        "cut": bool(entry.get("cut", False)),
                         "confidence": min(1.0, max(0.0, float(
                             entry.get("confidence", 0.5))))})
                 except (TypeError, ValueError, IndexError):

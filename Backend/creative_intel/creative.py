@@ -206,11 +206,23 @@ def run_pipeline(conn, creative_key, providers, media=None, brand_terms=None):
     conn.execute("UPDATE creatives SET transcript=? WHERE creative_key=?",
                  (transcript, creative_key))
 
-    frames = providers.vision.sample_frames(creative_key)
+    times = media.get("image_times")
+    if times:
+        # Frames extracted for these exact seconds (full-video plan:
+        # dense opening, even middle, end-frame sample). Telling the
+        # vision model the true seconds is what makes late CTA /
+        # logo / end-frame timing exact instead of front-loaded.
+        frames = [{"t_sec": t} for t in times]
+    else:
+        frames = providers.vision.sample_frames(creative_key)
     stages.append({"stage": "frame-sample", "frames": len(frames),
+                   "covers_s": max([f["t_sec"] for f in frames] + [0]),
                    "confidence": 1.0 if frames else 0.0})
 
     labels = providers.vision.annotate(frames, images=media.get("images"))
+    if media.get("duration_s"):
+        conn.execute("UPDATE creatives SET duration_s=? WHERE creative_key=?",
+                     (media["duration_s"], creative_key))
     stages.append({"stage": "vision-annotate", "labels": len(labels),
                    "confidence": sum(l.get("confidence", 0) for l in labels)
                    / len(labels) if labels else 0.0})

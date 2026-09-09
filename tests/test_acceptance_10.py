@@ -772,6 +772,167 @@ class ReportBenchmarkScopeTest(unittest.TestCase):
                          round(150.0 / 18, 2))
 
 
+class SamplePlanTest(unittest.TestCase):
+    """Full-video sample plans: dense hook window, even middle,
+    guaranteed end frame, hard cap."""
+
+    def test_thirty_second_plan(self):
+        from creative_intel import video as video_mod
+        self.assertEqual(
+            video_mod.sample_times(30.0),
+            [0, 1, 2, 3, 6, 9, 12, 15, 18, 21, 24, 27, 29.5])
+
+    def test_end_frame_guaranteed(self):
+        from creative_intel import video as video_mod
+        for duration in (7.0, 15.0, 30.0, 45.0, 120.0):
+            times = video_mod.sample_times(duration)
+            self.assertEqual(times, sorted(set(times)))
+            self.assertLessEqual(len(times), video_mod.MAX_FRAMES)
+            self.assertEqual(times[0], 0)
+            self.assertGreaterEqual(times[-1], duration - 0.6)
+            for head in (0, 1, 2, 3):
+                self.assertIn(head, times)
+
+    def test_short_clip_stays_sane(self):
+        from creative_intel import video as video_mod
+        times = video_mod.sample_times(2.0)
+        self.assertEqual(times[0], 0)
+        self.assertGreaterEqual(times[-1], 1.4)
+        self.assertLessEqual(len(times), video_mod.MAX_FRAMES)
+
+
+class VisionBatchingTest(unittest.TestCase):
+    """LiveVision sends every image in MAX_IMAGES batches."""
+
+    def test_batches_cover_all_images_in_order(self):
+        seen = []
+
+        class Chunked(providers.LiveVision):
+            def _annotate_batch(self, use, t_secs):
+                seen.append((len(use), list(t_secs)))
+                return [{"t_sec": t, "label": "stub", "brand_visible": False,
+                         "product_visible": False, "logo_visible": False,
+                         "text_overlay": "", "cta_visible": False,
+                         "end_frame": False, "cut": False,
+                         "confidence": 0.9} for t in t_secs]
+
+        vision = Chunked([("x", "y", "active")])
+        frames = [{"t_sec": float(t)} for t in range(13)]
+        labels = vision.annotate(frames, images=["img%d" % i for i in range(13)])
+        self.assertEqual([n for n, _ts in seen], [6, 6, 1])
+        self.assertEqual([l["t_sec"] for l in labels],
+                         [float(t) for t in range(13)])
+
+    def test_empty_images_still_fail_closed(self):
+        vision = providers.LiveVision([("x", "y", "active")])
+        with self.assertRaises(providers.ProviderUnavailable):
+            vision.annotate([{"t_sec": 0.0}], images=[])
+
+
+class LateEventCoverageTest(unittest.TestCase):
+    """30s+ video with a visual event near the end, end to end.
+
+    A fake vision adapter flags product/CTA only at t>=30s. The old
+    front-loaded pipeline (10 default frames, first 6 images kept)
+    could never see past ~15s; the full-video plan must surface the
+    late event in the annotation with exact timing.
+    """
+
+    def setUp(self):
+        from creative_intel import video as video_mod
+        if not video_mod.have_ffmpeg():
+            self.skipTest("needs ffmpeg")
+        import subprocess
+        self.conn = fresh_acc_db()
+        self.tmp = tempfile.mkdtemp(prefix="acc-late-")
+        self.clip = os.path.join(self.tmp, "late.mp4")
+        subprocess.run(
+            ["ffmpeg", "-y", "-v", "error",
+             "-f", "lavfi", "-i", "color=c=green:s=64x64:d=35",
+             "-f", "lavfi", "-i", "sine=frequency=440:duration=35",
+             "-pix_fmt", "yuv420p", "-shortest", self.clip],
+            check=True, timeout=180)
+        self.conn.execute(
+            "INSERT INTO creatives (creative_key, platform, name)"
+            " VALUES ('late-creative', 'meta', 'late-creative')")
+        self.conn.commit()
+
+    def tearDown(self):
+        self.conn.close()
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_late_product_and_cta_survive(self):
+        import types
+        from creative_intel import video as video_mod
+        prepared = video_mod.prepare(
+            self.clip, os.path.join(self.tmp, "derived"))
+        self.assertGreater(len(prepared["images"]), 6)
+        self.assertGreaterEqual(prepared["image_times"][-1], 33.0)
+
+        calls = {}
+
+        class FakeVision:
+            def sample_frames(self, creative_key, every_s=3.0,
+                              duration_s=30.0):
+                raise AssertionError("bundle times must win")
+
+            def annotate(self, frames, images=None):
+                calls["frames"] = [f["t_sec"] for f in frames]
+                calls["n_images"] = len(images or [])
+                out = []
+                for f in frames:
+                    t = f["t_sec"]
+                    out.append({"t_sec": t, "label": "test-frame",
+                                "brand_visible": False,
+                                "product_visible": t >= 30.0,
+                                "logo_visible": False, "text_overlay": "",
+                                "cta_visible": t >= 33.0,
+                                "end_frame": t >= 34.0, "cut": False,
+                                "confidence": 0.9})
+                return out
+
+        prov = types.SimpleNamespace(stt=providers.MockStt(),
+                                     vision=FakeVision(),
+                                     llm=providers.MockLlm())
+        got = creative.run_pipeline(
+            self.conn, "late-creative", prov,
+            media={"audio": prepared["audio"],
+                   "images": prepared["images"],
+                   "image_times": prepared["image_times"],
+                   "duration_s": prepared["duration_s"]},
+            brand_terms=["Foap"])
+        # Vision saw every extracted image with true timestamps.
+        self.assertEqual(calls["n_images"], len(prepared["images"]))
+        self.assertGreaterEqual(max(calls["frames"]), 33.0)
+        ann = got["annotation"]
+        product = ann["product_seconds"][0]["start_s"]
+        self.assertGreaterEqual(product, 30.0)
+        cta = ann["structure"]["cta"]
+        self.assertGreaterEqual(cta["start_s"], 33.0)
+        end = ann["structure"]["endframe"]
+        self.assertGreaterEqual(end["start_s"], 34.0)
+        dur = self.conn.execute(
+            "SELECT duration_s FROM creatives WHERE creative_key=?",
+            ("late-creative",)).fetchone()[0]
+        self.assertGreaterEqual(dur, 34.0)
+
+
+class CampaignKpiBestWatchTest(unittest.TestCase):
+    """Campaign Best/Watch follows the selected KPI, not hard-coded CPA."""
+
+    def test_no_hardcoded_cpa_rank(self):
+        root = os.path.join(os.path.dirname(__file__), "..")
+        with open(os.path.join(root, "Web", "Index.html")) as f:
+            html = f.read()
+        start = html.index("async function campaign_detail")
+        end = html.index("async function library", start)
+        body = html[start:end]
+        self.assertNotIn("by_cpa", body)
+        self.assertNotIn("a.metrics.cpa,true", body)
+        self.assertIn("campaign-benchmark ${k.toUpperCase()}", body)
+        self.assertIn("active_filters()", body)
+
+
 class RetentionCurveTest(unittest.TestCase):
     def setUp(self):
         self.conn = fresh_acc_db()

@@ -91,10 +91,12 @@ def make_vision_stub():
             if self.mode == "error":
                 self._send(500, {"error": "boom"})
                 return
-            if "brand_visible" in text or "frames" in text:
+            if "You analyse ad-creative frames" in text:
                 frame = {"t_sec": 0.0, "label": "stub-open",
                          "brand_visible": True, "confidence": 0.9}
                 content = json.dumps({"frames": [frame]})
+            elif "You structure ad-creative analysis" in text:
+                content = json.dumps(VALID_ANN)
             else:
                 content = json.dumps(VALID_ANN)
             self._send(200, {"choices": [{"message": {"content": content}}]})

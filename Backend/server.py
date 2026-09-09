@@ -235,7 +235,9 @@ def apply_action(conn, action, payload, prov, media_dir=None):
                 bundle["videos"][0],
                 os.path.join(_media_dir(media_dir), "derived"))
             bundle = dict(bundle, audio=prepared["audio"],
-                          images=prepared["images"])
+                          images=prepared["images"],
+                          image_times=prepared["image_times"],
+                          duration_s=prepared["duration_s"])
         terms = payload.get("brand_terms") or []
         if isinstance(terms, str):
             terms = [t.strip() for t in terms.split(",")]

@@ -449,10 +449,20 @@ async function campaign_detail(name){
       api("GET","/api/benchmarks?group_by=campaign")]);
     const in_camp=rows.filter(r=>(r.campaigns||[]).includes(name));
     if(!in_camp.length){box.innerHTML=`<p class="muted">No creatives for ${esc(name)}.</p>`;return;}
-    const by_cpa=in_camp.slice().sort((a,b)=>rank_val(a.metrics.cpa,true)-rank_val(b.metrics.cpa,true));
-    const best=by_cpa[0],worst=by_cpa[by_cpa.length-1];
-    const med=bench[name]?bench[name].cpa:null;
-    const delta=(med!=null)?` vs campaign-benchmark CPA $${esc(String(med))}`:"";
+    // Best/Watch follows the globally selected KPI (and its correct
+    // direction), exactly like the Creative Library ranking — never a
+    // hard-coded CPA contest when the user is judging by ROAS/VTR/CTR.
+    const f=active_filters();
+    const k=(f.kpi&&f.kpi!=="all")?f.kpi:"cpa";
+    const lower=KPI_LOWER_BETTER.includes(k);
+    const ranked=in_camp.slice().sort((a,b)=>{
+      const va=rank_val((a.metrics||{})[k],lower),vb=rank_val((b.metrics||{})[k],lower);
+      return lower?va-vb:vb-va;
+    });
+    const best=ranked[0],worst=ranked[ranked.length-1];
+    const med=bench[name]?bench[name][k]:null;
+    const sym=["spend","cpa","cpc","cpm"].includes(k)?"$":"";
+    const delta=(med!=null)?` vs campaign-benchmark ${k.toUpperCase()} ${sym}${esc(String(med))}`:"";
     const hooks={};in_camp.forEach(r=>{const h=(r.annotation||{}).hook_type;if(h)hooks[h]=(hooks[h]||0)+1;});
     const top_hook=Object.entries(hooks).sort((a,b)=>b[1]-a[1])[0];
     const perf_card=(r,tag,cls)=>{const a=r.annotation||{};const m=r.metrics||{};

@@ -143,8 +143,18 @@ class ShellLiveTest(unittest.TestCase):
                     "meta-since", "meta-until", "tt-adv", "tt-start",
                     "tt-end", "meta-go", "tt-go", "conn-status",
                     "media-file", "media-go", "media-status", "prov-status",
-                    "rep-pptx", "rep-xlsx"):
+                    "rep-pptx", "rep-xlsx", "rep-strict"):
             self.assertIn('id="%s"' % cid, HTML)
+
+    def test_kpi_ranking_complete_and_directed(self):
+        for kpi in ("cpm", "vtr", "roas"):
+            self.assertIn('value="%s"' % kpi, HTML)
+        self.assertIn('KPI_LOWER_BETTER=["cpa","cpc","cpm"]', HTML)
+        self.assertIn("sort_creatives", HTML)
+        self.assertIn("/api/creatives", HTML)
+
+    def test_modality_displayed(self):
+        self.assertIn("hook_modality", HTML)
 
     def test_office_labels_honest(self):
         self.assertIn("presentation (HTML deck)", HTML)

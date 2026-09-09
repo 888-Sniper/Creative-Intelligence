@@ -156,7 +156,7 @@ ul.plain li{padding:6px 0;border-bottom:1px solid var(--line)}
 <label>Market<input type="text" id="flt-market" placeholder="market"></label>
 <label>Funnel<input type="text" id="flt-funnel" placeholder="funnel"></label>
 <label>Objective<input type="text" id="flt-objective" placeholder="objective"></label>
-<label>KPI (sort)<select id="flt-kpi"><option value="all">all</option><option value="spend">spend</option><option value="ctr">ctr</option><option value="cpc">cpc</option><option value="cpa">cpa</option></select></label>
+<label>KPI (sort)<select id="flt-kpi"><option value="all">all</option><option value="spend">spend</option><option value="ctr">ctr</option><option value="cpc">cpc</option><option value="cpa">cpa</option><option value="cpm">cpm</option><option value="vtr">vtr</option><option value="roas">roas</option></select></label>
 <label>Date<input type="text" id="flt-date" placeholder="date"></label>
 </div>
 <div style="margin-top:8px"><button class="secondary" id="flt-clear">Clear filters</button> <span id="filter-summary" class="muted"></span></div>
@@ -266,7 +266,8 @@ ul.plain li{padding:6px 0;border-bottom:1px solid var(--line)}
 <label>Group by <select id="rep-bench">
 <option value="hook_type">hook_type</option><option value="creator_vs_branded">creator_vs_branded</option>
 <option value="platform">platform</option><option value="campaign">campaign</option></select></label>
-<label><input type="checkbox" id="rep-override"> override (logged)</label><br><br>
+<label><input type="checkbox" id="rep-override"> override (logged)</label>
+<label><input type="checkbox" id="rep-strict"> HUMAN-VERIFIED insights only</label><br><br>
 <button class="action" id="rep-onepager">Generate one-pager</button>
 <button class="action" id="rep-csv">Generate CSV</button>
 <button class="action" id="rep-pptx">Generate PowerPoint (.pptx)</button>
@@ -281,7 +282,7 @@ ul.plain li{padding:6px 0;border-bottom:1px solid var(--line)}
 const $=id=>document.getElementById(id);
 const esc=v=>String(v??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 function filtered_path(p){
-  if(p==="/api/campaigns"||p.startsWith("/api/benchmarks")){
+  if(p==="/api/campaigns"||p.startsWith("/api/benchmarks")||p==="/api/creatives"){
     const f=active_filters();const q=new URLSearchParams();
     ["platform","vertical","market","funnel","objective","client","project","date"].forEach(k=>{const v=f[k];if(v&&v!=="all")q.append(k,v);});
     const s=q.toString();if(s)p+=(p.includes("?")?"&":"?")+s;
@@ -313,10 +314,24 @@ function filter_summary(){
 $("flt-clear").onclick=()=>{["flt-client","flt-project","flt-campaign","flt-vertical","flt-market","flt-funnel","flt-objective","flt-date"].forEach(id=>$(id).value="");$("flt-platform").value="all";$("flt-kpi").value="all";refresh();};
 function text_blob(parts){return parts.map(p=>String(p??"").toLowerCase()).join(" | ");}
 function text_match(blob,f){return["client","project","campaign","vertical","market","funnel","objective","date"].every(k=>!f[k]||blob.includes(f[k]));}
+const KPI_LOWER_BETTER=["cpa","cpc","cpm"];
 function sort_rows(entries,f){
   if(!f.kpi||f.kpi==="all")return entries;
   const k=f.kpi;
-  return entries.slice().sort((a,b)=>(Number(b[1][k])||0)-(Number(a[1][k])||0));
+  const lower=KPI_LOWER_BETTER.includes(k);
+  return entries.slice().sort((a,b)=>{
+    const va=Number(a[1][k])||0,vb=Number(b[1][k])||0;
+    return lower?va-vb:vb-va;
+  });
+}
+function sort_creatives(rows,f){
+  if(!f.kpi||f.kpi==="all")return rows;
+  const k=f.kpi;
+  const lower=KPI_LOWER_BETTER.includes(k);
+  return rows.slice().sort((a,b)=>{
+    const va=Number((a.metrics||{})[k])||0,vb=Number((b.metrics||{})[k])||0;
+    return lower?va-vb:vb-va;
+  });
 }
 $("upload").onclick=async()=>{try{const r=await api("POST","/api/ingest",{platform:$("platform").value,csv:$("csv").value});$("up-status").textContent="Inserted "+r.inserted+" rows.";refresh();}catch(e){$("up-status").textContent=e.message;}};
 $("fixture").onclick=()=>{$("up-status").textContent="Run: python3 Backend/server.py --load-fixture --db Data/local.db";};
@@ -393,7 +408,9 @@ async function kpis(){try{
 }catch(e){$("kpis").innerHTML=`<div class="empty-state">${esc(e.message)}</div>`;}}
 async function campaigns(){try{
   const c=await api("GET","/api/campaigns");const f=active_filters();
-  let entries=Object.entries(c).filter(([k])=>text_blob([k]).includes(f.campaign)&&text_match(text_blob([k]),{...f,campaign:""}));
+  // Server enforces every canonical axis; the client only matches the
+  // free-text campaign box against names.
+  let entries=Object.entries(c).filter(([k])=>!f.campaign||text_blob([k]).includes(f.campaign));
   entries=sort_rows(entries,f);
   $("campaigns").innerHTML="<table><tr><th>Campaign</th><th>Ads</th><th>Spend</th><th>CTR</th><th>CPC</th><th>CPA</th></tr>"+entries.map(([k,g])=>`<tr><td><a href="#" data-camp="${esc(k)}">${esc(k)}</a></td><td>${esc(String(g.n_ads))}</td><td>$${esc(String(g.spend))}</td><td>${esc(String(g.ctr))}</td><td>$${esc(String(g.cpc))}</td><td>$${esc(String(g.cpa))}</td></tr>`).join("")+"</table>";
   $("campaigns").querySelectorAll("[data-camp]").forEach(a=>a.onclick=ev=>{ev.preventDefault();campaign_detail(a.dataset.camp);});
@@ -421,7 +438,13 @@ async function campaign_detail(name){
 }
 async function library(){
   const rows=await api("GET","/api/creatives");const f=active_filters();
-  const kept=rows.filter(r=>{const a=r.annotation||{};if(f.platform!=="all"&&String(r.platform||"").toLowerCase()!==f.platform)return false;return text_match(text_blob([r.creative_key,r.name,r.transcript,a.hook_type,a.creator_vs_branded,r.status]),f);});
+  // Server already enforces every canonical axis; the client only
+  // matches free-text campaign names (dimensions live on ads rows,
+  // not in this blob, so axis-matching here would wrongly hide rows).
+  const kept=sort_creatives(rows.filter(r=>{
+    if(!f.campaign)return true;
+    return text_blob([r.creative_key,r.name,(r.campaigns||[]).join(" ")]).includes(f.campaign);
+  }),f);
   creative_detail(kept);
   $("library").className="creative-grid";
   const kpi_key=(f.kpi&&f.kpi!=="all")?f.kpi:"cpa";
@@ -486,7 +509,7 @@ function creative_detail(kept){
     ${kpi_row("Spend","$"+esc(String(m.spend??"—")))}${kpi_row("CPM","$"+esc(String(m.cpm??"—")))}${kpi_row("VTR",esc(String(m.vtr??"—")))}${kpi_row("CTR",esc(String(m.ctr??"—")))}${kpi_row("CPA","$"+esc(String(m.cpa??"—")))}${kpi_row("ROAS",esc(String(m.roas??"—")))}
     <div class="muted" style="font-size:13px">campaigns: ${esc((found.campaigns||[]).join(", ")||"—")} · <a href="#" id="detail-bench">vs benchmark</a><span id="detail-bench-out"></span></div></div>
     <div class="card" style="margin:0"><h4 style="margin-top:0">Creative intelligence</h4>
-    ${intel_row("Hook",esc(a.hook_type||"—"))}${intel_row("Creator vs branded",esc(a.creator_vs_branded||"—"))}${intel_row("Duration",esc(String(a.duration_s??found.duration_s??"—"))+"s")}${intel_row("Brand appearance",esc(String(a.brand_seconds&&a.brand_seconds.length?a.brand_seconds[0].start_s+"s":"—")))}${intel_row("Product appearance",esc(String(a.product_seconds&&a.product_seconds.length?a.product_seconds[0].start_s+"s":"—")))}${intel_row("CTA",esc(a.cta||((a.structure||{}).cta?"set":"—")))}${intel_row("Voiceover",esc(a.voiceover||((a.structure||{}).voiceover?"set":"—")))}${intel_row("Supers",esc(Array.isArray(a.supers)?a.supers.join(", "):(a.supers||"—")))}${intel_row("Editing pace",esc(a.pace_cuts_per_min!=null?String(a.pace_cuts_per_min)+" cuts/min":"—"))}</div>
+    ${intel_row("Hook",esc(a.hook_type||"—"))}${intel_row("Hook modality (visual/spoken/text)",esc(a.hook_modality||"unknown"))}${intel_row("Creator vs branded",esc(a.creator_vs_branded||"—"))}${intel_row("Duration",esc(String(a.duration_s??found.duration_s??"—"))+"s")}${intel_row("Audio word timings",Array.isArray(a.transcript_words)?esc(String(a.transcript_words.length))+" timestamped words":"—")}${intel_row("Brand appearance",esc(String(a.brand_seconds&&a.brand_seconds.length?a.brand_seconds[0].start_s+"s":"—")))}${intel_row("Product appearance",esc(String(a.product_seconds&&a.product_seconds.length?a.product_seconds[0].start_s+"s":"—")))}${intel_row("CTA",esc(a.cta||((a.structure||{}).cta?"set":"—")))}${intel_row("Voiceover",esc(a.voiceover||((a.structure||{}).voiceover?"set":"—")))}${intel_row("Supers",esc(Array.isArray(a.supers)?a.supers.join(", "):(a.supers||"—")))}${intel_row("Editing pace",esc(a.pace_cuts_per_min!=null?String(a.pace_cuts_per_min)+" cuts/min":"—"))}</div>
   </div></div>`;
   box.querySelectorAll(".chip").forEach(ch=>ch.onclick=()=>{
     const v=document.querySelector("#creative-video");
@@ -544,8 +567,8 @@ function render_compare(r,a,b){
 async function bench(){try{
   const b=await api("GET","/api/benchmarks?group_by="+encodeURIComponent($("gb").value));
   const f=active_filters();
-  let entries=Object.entries(b).filter(([k])=>text_match(text_blob([k]),f));
-  if($("gb").value==="platform"&&f.platform!=="all")entries=entries.filter(([k])=>k.toLowerCase()===f.platform);
+  // Server enforces every canonical axis via the query string.
+  let entries=Object.entries(b);
   entries=sort_rows(entries,f);
   $("bench-out").innerHTML="<table><tr><th>Group</th><th>Ads</th><th>Spend</th><th>CTR</th><th>CPC</th><th>CPA</th></tr>"+entries.map(([k,g])=>`<tr><td>${esc(k)}</td><td>${esc(String(g.n_ads))}</td><td>$${esc(String(g.spend))}</td><td>${esc(String(g.ctr))}</td><td>$${esc(String(g.cpc))}</td><td>$${esc(String(g.cpa))}</td></tr>`).join("")+"</table>";
 }catch(e){$("bench-out").textContent=e.message;}}
@@ -596,12 +619,12 @@ async function ask_go(){
 async function report_lists(){
   try{
     const c=await api("GET","/api/campaigns");const f=active_filters();
-    const keys=Object.keys(c).filter(k=>text_blob([k]).includes(f.campaign)&&text_match(text_blob([k]),{...f,campaign:""}));
+    const keys=Object.keys(c).filter(k=>!f.campaign||text_blob([k]).includes(f.campaign));
     $("rep-campaigns").innerHTML=keys.map(k=>`<label><input type="checkbox" class="rep-campaign" value="${esc(k)}" checked> ${esc(k)}</label>`).join("<br>")||'<span class="muted">No campaigns.</span>';
   }catch(e){$("rep-campaigns").textContent=e.message;}
   try{
     const rows=await api("GET","/api/creatives");const f=active_filters();
-    const kept=rows.filter(r=>{if(f.platform!=="all"&&String(r.platform||"").toLowerCase()!==f.platform)return false;return text_match(text_blob([r.creative_key,r.name]),f);});
+    const kept=rows.filter(r=>!f.campaign||text_blob([r.creative_key,r.name,(r.campaigns||[]).join(" ")]).includes(f.campaign));
     $("rep-creatives").innerHTML=kept.map(r=>`<label><input type="checkbox" class="rep-creative" value="${esc(r.creative_key)}"> ${esc(r.name||r.creative_key)}</label>`).join("<br>")||'<span class="muted">No creatives.</span>';
   }catch(e){$("rep-creatives").textContent=e.message;}
 }
@@ -612,7 +635,8 @@ function report_body(){
   return{campaigns:camps.length?camps:null,
     kpis:kpis.length?kpis:["cpa","ctr"],
     benchmark:$("rep-bench").value,
-    override:$("rep-override").checked};
+    override:$("rep-override").checked,
+    strict_human:$("rep-strict").checked};
 }
 function download_link(filename,mime,text){
   $("rep-links").innerHTML=`<a download="${esc(filename)}" href="${esc(URL.createObjectURL(new Blob([text],{type:mime})))}">Download ${esc(filename)}</a>`;

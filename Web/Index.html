@@ -39,8 +39,6 @@ body{background:var(--bg);color:var(--fg);font-family:var(--foap-font);margin:0;
 .brand{display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--fg)}
 .brand img{height:30px;width:auto;display:block}
 [data-theme="dark"] .brand img{background:#fff;border-radius:6px;padding:2px 6px}
-.brand-fallback{font-weight:800;font-size:22px;letter-spacing:-.5px;color:var(--foap-text)}
-.brand-fallback em{font-style:normal;color:var(--foap-primary)}
 .product-name{font-size:15px;font-weight:600;color:var(--muted);border-left:1px solid var(--line);padding-left:12px;white-space:nowrap}
 .main-nav{display:flex;gap:2px;flex-wrap:wrap}
 .main-nav button{background:transparent;color:var(--fg);border:0;border-radius:8px;padding:9px 14px;cursor:pointer;font-size:14px;font-weight:600;position:relative}
@@ -95,7 +93,8 @@ input[type="text"]{min-width:130px}
 .creative-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px}
 .creative-card{background:var(--card);border:1px solid var(--line);border-radius:var(--foap-radius);overflow:hidden;box-shadow:var(--foap-shadow);display:flex;flex-direction:column}
 .creative-card.selected{border-color:var(--foap-primary);box-shadow:0 0 0 2px var(--foap-primary-soft),var(--foap-shadow)}
-.creative-card .media{background:var(--foap-surface-2);min-height:150px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-weight:700;font-size:15px}
+.creative-card .media{background:var(--foap-surface-2);min-height:150px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-weight:700;font-size:15px;overflow:hidden}
+.creative-card .media video{width:100%;height:170px;object-fit:cover;display:block;background:#000;cursor:pointer}
 .creative-card .body{padding:14px 16px;display:flex;flex-direction:column;gap:6px}
 .creative-card .title{font-weight:700;font-size:15px}
 .detail-layout{display:grid;grid-template-columns:minmax(0,1.6fr)minmax(280px,1fr);gap:16px;align-items:start}
@@ -129,7 +128,7 @@ ul.plain li{padding:6px 0;border-bottom:1px solid var(--line)}
 <div class="app-header-inner">
 <a class="brand" href="#" id="brand-home" aria-label="Foap Creative Intelligence home">
 <img src="assets/foap-logo.png" alt="Foap" onerror="this.style.display='none';document.getElementById('brand-fallback').style.display='inline';">
-<span class="brand-fallback" id="brand-fallback" style="display:none">foap<em>.</em></span>
+<span id="brand-fallback" style="display:none"><img src="assets/foap-mark.png" alt="Foap" style="height:30px;width:auto;display:block" onerror="this.outerHTML='Foap'"></span>
 </a>
 <span class="product-name">Creative Intelligence</span>
 <nav id="tabs" class="main-nav" aria-label="Primary">
@@ -168,7 +167,7 @@ ul.plain li{padding:6px 0;border-bottom:1px solid var(--line)}
 <div class="muted" style="font-size:12px;margin-top:6px">Try: What hooks are performing best? · Which TikTok format has the lowest CPA? · Does showing the product early improve VTR? · Which campaigns should we scale?</div>
 <div id="ask-out" class="muted">Answers cite your uploaded data first.</div>
 </div>
-<main class="container">
+<main>
 <section class="view active" id="v-main">
 <h1 class="page-title">Overview</h1>
 <p class="page-sub">How are your campaigns performing? What creatives are winning? What needs attention?</p>
@@ -379,7 +378,9 @@ async function library(){
   const kpi_key=(f.kpi&&f.kpi!=="all")?f.kpi:"cpa";
   $("library").innerHTML=kept.map(r=>{const a=r.annotation||{};const m=r.metrics||{};const v=a.status==="human_verified";
   const kpi_val=m[kpi_key];const kpi_txt=(kpi_val==null||kpi_val==="")?"—":(kpi_key==="spend"||kpi_key==="cpa"||kpi_key==="cpm"?"$"+kpi_val:String(kpi_val));
-  return `<div class="creative-card${selected===r.creative_key?" selected":""}"><div class="media">${esc(a.hook_type||"untagged hook")} · ${esc(String(a.duration_s??r.duration_s??"—"))}s</div><div class="body"><div class="title">${esc(r.name||r.creative_key)}</div><span class="${v?"verified":"unverified"}">${v?"HUMAN-VERIFIED":"auto"}</span><span class="muted" style="font-size:13px">${esc(r.platform||"—")} · ${esc((r.campaigns||[]).join(", ")||"—")} · ${esc(a.creator_vs_branded||"—")}</span><span style="font-size:13px"><strong>${esc(kpi_key.toUpperCase())}</strong> ${esc(kpi_txt)} · CPA $${esc(String(m.cpa??"—"))}</span><label style="font-size:13px"><input type="radio" name="sel" value="${esc(r.creative_key)}" ${selected===r.creative_key?"checked":""} aria-label="Select ${esc(r.name||r.creative_key)}"> Select</label><label style="font-size:13px">Hook <select data-k="${esc(r.creative_key)}" class="hook-sel">${["question","bold_claim","demo_open","social_proof","offer","story","pattern_interrupt","other"].map(h=>`<option ${a.hook_type===h?"selected":""}>${h}</option>`).join("")}</select></label> <label style="font-size:13px">Format <select data-k="${esc(r.creative_key)}" class="fmt-sel">${["creator","branded","hybrid"].map(h=>`<option ${a.creator_vs_branded===h?"selected":""}>${h}</option>`).join("")}</select></label> <button class="action save" data-k="${esc(r.creative_key)}">Save annotation</button></div></div>`;}).join("")||'<div class="empty-state">No creatives match the current filters.</div>';
+  const prev=pick_source(a);
+  const media=prev?`<video muted playsinline preload="metadata" src="${esc(prev)}" title="Preview — click to play/pause" onclick="this.paused?this.play():this.pause()"></video>`:`${esc(a.hook_type||"untagged hook")} · ${esc(String(a.duration_s??r.duration_s??"—"))}s`;
+  return `<div class="creative-card${selected===r.creative_key?" selected":""}"><div class="media">${media}</div><div class="body"><div class="title">${esc(r.name||r.creative_key)}</div><span class="${v?"verified":"unverified"}">${v?"HUMAN-VERIFIED":"auto"}</span><span class="muted" style="font-size:13px">${esc(r.platform||"—")} · ${esc((r.campaigns||[]).join(", ")||"—")} · ${esc(a.creator_vs_branded||"—")}</span><span style="font-size:13px"><strong>${esc(kpi_key.toUpperCase())}</strong> ${esc(kpi_txt)} · CPA $${esc(String(m.cpa??"—"))}</span><label style="font-size:13px"><input type="radio" name="sel" value="${esc(r.creative_key)}" ${selected===r.creative_key?"checked":""} aria-label="Select ${esc(r.name||r.creative_key)}"> Select</label><label style="font-size:13px">Hook <select data-k="${esc(r.creative_key)}" class="hook-sel">${["question","bold_claim","demo_open","social_proof","offer","story","pattern_interrupt","other"].map(h=>`<option ${a.hook_type===h?"selected":""}>${h}</option>`).join("")}</select></label> <label style="font-size:13px">Format <select data-k="${esc(r.creative_key)}" class="fmt-sel">${["creator","branded","hybrid"].map(h=>`<option ${a.creator_vs_branded===h?"selected":""}>${h}</option>`).join("")}</select></label> <button class="action save" data-k="${esc(r.creative_key)}">Save annotation</button></div></div>`;}).join("")||'<div class="empty-state">No creatives match the current filters.</div>';
   document.querySelectorAll("input[name=sel]").forEach(r=>r.onchange=()=>{selected=r.value;refresh();});
   document.querySelectorAll(".save").forEach(b=>b.onclick=async()=>{const k=b.dataset.k;const rows2=await api("GET","/api/creatives");const found=rows2.find(x=>x.creative_key===k);const cur=found.annotation||{schema_version:"v0",hook_confidence:0.5,brand_seconds:[],product_seconds:[],logo_seconds:[],structure:{},creator_confidence:0.5,duration_s:0,pace_cuts_per_min:0,status:"auto"};for(const s of ["hook","body","demo","supers","cta","endframe","voiceover"])cur.structure[s]=cur.structure[s]||{start_s:0,end_s:0,confidence:0};cur.schema_version="v0";cur.hook_type=document.querySelector(`.hook-sel[data-k="${CSS.escape(k)}"]`).value;cur.creator_vs_branded=document.querySelector(`.fmt-sel[data-k="${CSS.escape(k)}"]`).value;await api("POST","/api/creatives/"+encodeURIComponent(k)+"/annotate",{annotation:cur});refresh();});
   $("export-list").innerHTML=kept.map(r=>`<label><input type="checkbox" class="exp-check" value="${esc(r.creative_key)}"> ${esc(r.creative_key)}</label>`).join("<br>")||"—";

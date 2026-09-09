@@ -116,6 +116,27 @@ class ShellLiveTest(unittest.TestCase):
                       "CPA", "ROAS", "Best CPA"):
             self.assertIn(label, HTML)
 
+    def test_logo_fallback_uses_official_mark(self):
+        # No redrawn "foap." wordmark: fallback is the official mark,
+        # degrading to plain text only if both assets fail.
+        self.assertIn('id="brand-fallback"', HTML)
+        self.assertIn("assets/foap-mark.png", HTML)
+        self.assertNotIn("brand-fallback\"", HTML.replace(
+            'id="brand-fallback"', ""))
+        self.assertNotIn("foap<em>", HTML)
+        self.assertIn("outerHTML='Foap'", HTML)
+
+    def test_no_nested_container(self):
+        self.assertNotIn('<main class="container">', HTML)
+        self.assertIn("<main>", HTML)
+
+    def test_creative_grid_media_first(self):
+        # Grid cards render a real muted preview when an annotated
+        # source URL exists, else keep the text placeholder.
+        self.assertIn("playsinline", HTML)
+        self.assertIn(".creative-card .media video", HTML)
+        self.assertIn("pick_source(a)", HTML)
+
     def test_asset_sandbox(self):
         import urllib.error
         for bad in ("/assets/../Index.html", "/assets/.hidden",

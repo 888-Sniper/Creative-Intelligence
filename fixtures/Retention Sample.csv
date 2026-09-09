@@ -1,0 +1,11 @@
+creative_key,t_sec,retention_pct
+hook-question-v1,0,100
+hook-question-v1,3,82
+hook-question-v1,10,64
+hook-question-v1,25,41
+hook-question-v1,30,35
+demo-open-v1,0,100
+demo-open-v1,3,90
+demo-open-v1,10,71
+demo-open-v1,25,50
+demo-open-v1,30,44

@@ -1,0 +1,9 @@
+creative_id,campaign_id,platform,creator_vs_branded,duration_s,hook_type,hook_text_0_3s,product_first_visible_s,brand_first_visible_s,brand_first_audible_s,cta,structure,human_verified,confidence
+GL-001-A,GL-001,meta,creator,12,spoken,Tired of dull skin?,1.5,2.0,2.5,Shop now,hook>demo>cta,true,0.90
+GL-001-B,GL-001,meta,branded,25,visual,,8.0,5.0,6.0,Learn more,hook>demo>cta>endframe,true,0.85
+GL-002-A,GL-002,tiktok,creator,9,text,3 reasons your moisturizer fails,2.0,3.0,2.0,Shop now,hook>demo>cta,true,0.90
+GL-002-B,GL-002,tiktok,creator,21,spoken,My dermatologist told me this,7.0,9.0,4.0,Link in bio,hook>setup>demo>cta,true,0.80
+GL-003-A,GL-003,meta,creator,11,spoken,Stop buying this serum,1.0,1.5,1.5,Shop now,hook>demo>cta,true,0.92
+DD-001-A,DD-001,tiktok,branded,30,visual,,12.0,15.0,10.0,Follow,hook>setup>demo>cta>endframe,false,0.60
+HY-001-A,HY-001,meta,branded,15,text,Why your skin barrier is broken,4.0,2.0,5.0,Shop now,hook>demo>proof>cta,true,0.88
+HY-002-A,HY-002,tiktok,creator,14,spoken,I tested 5 moisturizers,3.0,4.0,3.5,Shop now,hook>demo>cta,true,0.87

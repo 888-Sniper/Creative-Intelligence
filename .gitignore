@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+
+# Local data (never commit databases or exports)
+Data/
+*.db
+*.sqlite
+*.sqlite-journal
+
+# Web build + deps (regenerable)
+Web/dist/
+apps/Web/node_modules/
+node_modules/
+
+# Secrets and local config
+.env
+*.env
+*.key
+*.pem
+
+# OS / editor
+.DS_Store
+.idea/
+*.swp

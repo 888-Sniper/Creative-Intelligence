@@ -1,0 +1,9 @@
+client,project,campaign_id,creative_id,platform,vertical,market,objective,funnel_stage,date,spend,impr,clicks,video_views,conversions,revenue
+Maison Lumiere,Glow Launch,GL-001,GL-001-A,meta,Beauty,Spain,Conversions,lower,2026-08-01,120.00,40000,900,12000,60,540.00
+Maison Lumiere,Glow Launch,GL-001,GL-001-B,meta,Beauty,Spain,Conversions,lower,2026-08-01,80.00,30000,540,7500,28,224.00
+Maison Lumiere,Glow Launch,GL-002,GL-002-A,tiktok,Beauty,Spain,Conversions,lower,2026-08-01,100.00,80000,1600,30000,45,405.00
+Maison Lumiere,Glow Launch,GL-002,GL-002-B,tiktok,Beauty,Spain,Conversions,lower,2026-08-01,60.00,50000,750,15000,18,144.00
+Maison Lumiere,Glow Retarget,GL-003,GL-003-A,meta,Beauty,Spain,Conversions,lower,2026-08-02,50.00,15000,450,4500,25,225.00
+Maison Lumiere,Dew Drop Test,DD-001,DD-001-A,tiktok,Beauty,Spain,Video Views,top,2026-08-02,40.00,60000,900,24000,5,0.00
+Atelier Nord,Hydra Push,HY-001,HY-001-A,meta,Beauty,Spain,Conversions,lower,2026-08-02,200.00,70000,1400,21000,80,800.00
+Atelier Nord,Hydra Push,HY-002,HY-002-A,tiktok,Beauty,Spain,Conversions,lower,2026-08-02,90.00,65000,1100,26000,30,270.00

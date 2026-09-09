@@ -1,0 +1,7 @@
+Campaign Name,Ad Set Name,Ad Name,Day,Amount Spent,Impressions,Link Clicks,Results,Purchase Conversion Value,Video Views,Currency
+Winter Sale,Prospecting AU,UGC Hook A,2026-08-01,120.50,15230,412,18,640.00,3200,AUD
+Winter Sale,Prospecting AU,UGC Hook B,2026-08-01,98.20,12110,355,12,410.50,2980,AUD
+Winter Sale,Retargeting,Static Offer,2026-08-02,64.00,8010,210,9,305.00,0,USD
+Spring Launch,Prospecting US,Creator Cut 1,08/03/2026,210.75,28400,690,25,980.00,5400,USD
+Spring Launch,Prospecting US,Creator Cut 2,08/03/2026,187.40,25100,602,21,840.25,4900,USD
+Winter Sale,Prospecting AU,Broken Date Row,not-a-date,50.00,5000,100,5,100.00,500,AUD

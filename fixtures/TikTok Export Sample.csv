@@ -1,0 +1,7 @@
+Campaign,Ad Group,Ad,Date,Cost,Impression,Click,Conversion,Total Purchase Value,Video Views,Currency
+Winter Sale,Spark AU,Hook A,2026-08-01,88.30,18900,520,15,502.00,6100,AUD
+Winter Sale,Spark AU,Hook C,2026-08-02,72.10,15400,441,11,388.75,5200,AUD
+Spring Launch,Spark US,Cut 1,2026-08-03,150.00,31200,810,28,1120.00,8900,USD
+Spring Launch,Spark US,Bad Spend,2026-08-03,-40.00,8000,200,4,120.00,1500,USD
+Spring Launch,Spark EU,Cut 2,2026-08-04,130.00,22000,600,19,720.00,6100,EUR
+Winter Sale,Spark AU,Mystery Money,2026-08-04,60.00,9000,250,6,200.00,1800,XXQ

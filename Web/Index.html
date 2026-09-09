@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Creative Intelligence</title>
+<style>
+:root{
+  --bg:#ffffff; --fg:#1a1a1a; --muted:#5b5b5b; --card:#f4f4f5;
+  --line:#e2e2e4; --accent:#0b5fff; --good:#0a7d2c; --bad:#b00020;
+}
+[data-theme="dark"]{
+  --bg:#121214; --fg:#f2f2f2; --muted:#a8a8ad; --card:#1d1d20;
+  --line:#2e2e33; --accent:#5b9bff; --good:#4ade80; --bad:#ff7a90;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:system-ui,sans-serif;margin:0}
+header{display:flex;gap:8px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line)}
+nav button{background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:8px 12px;cursor:pointer}
+nav button[aria-pressed="true"]{border-color:var(--accent);color:var(--accent)}
+main{padding:16px;max-width:1000px}
+section.view{display:none}
+section.view.active{display:block}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;margin:10px 0}
+table{border-collapse:collapse;width:100%}
+th,td{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;font-size:14px}
+.muted{color:var(--muted)}
+button.action{background:var(--accent);color:#fff;border:0;border-radius:8px;padding:8px 12px;cursor:pointer;margin-right:6px}
+textarea{width:100%;min-height:120px;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:8px}
+input,select{background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:6px 8px}
+.verified{color:var(--good);font-weight:bold}
+.unverified{color:var(--bad)}
+</style>
+</head>
+<body>
+<header>
+<strong>Creative Intelligence</strong>
+<nav id="tabs">
+<button data-view="main" aria-pressed="true">Main</button>
+<button data-view="campaign" aria-pressed="false">Campaign</button>
+<button data-view="creative" aria-pressed="false">Creative</button>
+<button data-view="compare" aria-pressed="false">Compare</button>
+<button data-view="benchmark" aria-pressed="false">Benchmark</button>
+</nav>
+<span style="flex:1"></span>
+<button id="theme" title="Toggle light/dark">Light/Dark</button>
+</header>
+<main>
+<section class="view active" id="v-main">
+<h2>Main</h2>
+<div class="card">
+<h3>Upload (Meta / TikTok CSV, Excel-as-CSV, Sheets CSV export)</h3>
+<select id="platform"><option value="meta">Meta</option><option value="tiktok">TikTok</option></select>
+<textarea id="csv" placeholder="Paste CSV export text here"></textarea><br><br>
+<button class="action" id="upload">Upload</button>
+<button class="action" id="fixture">Load Fixture (server --load-fixture)</button>
+<span id="up-status" class="muted"></span>
+</div>
+<div class="card"><h3>KPIs</h3><div id="kpis">—</div></div>
+<div class="card"><h3>Gated one-pager export</h3>
+<div id="export-list"></div>
+<button class="action" id="export">Export one-pager</button>
+<label><input type="checkbox" id="override"> override (logged)</label>
+<pre id="export-out" class="muted"></pre></div>
+</section>
+<section class="view" id="v-campaign"><h2>Campaign</h2><div id="campaigns"></div></section>
+<section class="view" id="v-creative"><h2>Creative Library</h2>
+<div class="card"><button class="action" id="run-pipe">Run pipeline on selected</button>
+<button class="action" id="verify">Mark HUMAN-VERIFIED</button>
+<span class="muted">Manual annotate: edit hook type / format, then Save.</span></div>
+<div id="library"></div></section>
+<section class="view" id="v-compare"><h2>Compare</h2>
+<div class="card"><input id="cmp-a" placeholder="creative A key"> <input id="cmp-b" placeholder="creative B key">
+<button class="action" id="cmp-go">Compare</button></div>
+<div id="cmp-out"></div></section>
+<section class="view" id="v-benchmark"><h2>Benchmark</h2>
+<div class="card"><label>Group by <select id="gb">
+<option value="hook_type">hook_type</option><option value="creator_vs_branded">creator_vs_branded</option>
+<option value="platform">platform</option><option value="campaign">campaign</option></select></label>
+<button class="action" id="gb-go">Refresh</button></div>
+<div id="bench-out"></div></section>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const esc=v=>String(v??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+const api=async(m,p,b)=>{const r=await fetch(p,{method:m,headers:{"Content-Type":"application/json"},body:b?JSON.stringify(b):undefined});const j=await r.json();if(!r.ok)throw new Error(j.error||r.status);return j;};
+document.querySelectorAll("#tabs button").forEach(b=>b.onclick=()=>{document.querySelectorAll("#tabs button").forEach(x=>x.setAttribute("aria-pressed","false"));b.setAttribute("aria-pressed","true");document.querySelectorAll(".view").forEach(v=>v.classList.remove("active"));document.querySelector("#v-"+b.dataset.view).classList.add("active");refresh();});
+$("theme").onclick=()=>{const h=document.documentElement;h.dataset.theme=h.dataset.theme==="dark"?"":"dark";};
+let selected=null;
+$("upload").onclick=async()=>{try{const r=await api("POST","/api/ingest",{platform:$("platform").value,csv:$("csv").value});$("up-status").textContent="Inserted "+r.inserted+" rows.";refresh();}catch(e){$("up-status").textContent=e.message;}};
+$("fixture").onclick=()=>{$("up-status").textContent="Run: python3 Backend/server.py --load-fixture --db Data/local.db";};
+$("export").onclick=async()=>{const keys=[...document.querySelectorAll(".exp-check:checked")].map(c=>c.value);try{const r=await api("POST","/api/export",{creative_keys:keys,override:$("override").checked});$("export-out").textContent=r.markdown;}catch(e){$("export-out").textContent="BLOCKED: "+e.message;}};
+$("run-pipe").onclick=async()=>{if(!selected)return;await api("POST","/api/pipeline/run",{creative_key:selected});refresh();};
+$("verify").onclick=async()=>{if(!selected)return;await api("POST","/api/creatives/"+encodeURIComponent(selected)+"/verify");refresh();};
+$("cmp-go").onclick=async()=>{const r=await api("GET","/api/compare?a="+encodeURIComponent($("cmp-a").value)+"&b="+encodeURIComponent($("cmp-b").value));$("cmp-out").textContent=JSON.stringify(r,null,2);};
+$("gb-go").onclick=bench;
+async function refresh(){kpis();campaigns();library();bench();}
+async function kpis(){try{const c=await api("GET","/api/campaigns");let s=0,n=0;Object.values(c).forEach(g=>{s+=g.spend;n+=g.n_ads;});$("kpis").textContent=n+" ads, $"+s.toFixed(2)+" spend across "+Object.keys(c).length+" campaigns.";}catch(e){$("kpis").textContent=e.message;}}
+async function campaigns(){try{const c=await api("GET","/api/campaigns");$("campaigns").innerHTML="<table><tr><th>Campaign</th><th>Ads</th><th>Spend</th><th>CTR</th><th>CPC</th><th>CPA</th></tr>"+Object.entries(c).map(([k,g])=>`<tr><td>${esc(k)}</td><td>${g.n_ads}</td><td>$${g.spend}</td><td>${g.ctr}</td><td>$${g.cpc}</td><td>$${g.cpa}</td></tr>`).join("")+"</table>";}catch(e){$("campaigns").textContent=e.message;}}
+async function library(){const rows=await api("GET","/api/creatives");$("library").innerHTML=rows.map(r=>{const a=r.annotation||{};const v=a.status==="human_verified";return `<div class="card"><label><input type="radio" name="sel" value="${esc(r.creative_key)}" ${selected===r.creative_key?"checked":""}> <strong>${esc(r.name||r.creative_key)}</strong></label> <span class="${v?"verified":"unverified"}">${v?"HUMAN-VERIFIED":"auto"}</span><br><span class="muted">hook=${esc(a.hook_type||"—")} conf=${a.hook_confidence??"—"} | format=${esc(a.creator_vs_branded||"—")} | ${esc(r.transcript||"no transcript")}</span><br><label>Hook <select data-k="${esc(r.creative_key)}" class="hook-sel">${["question","bold_claim","demo_open","social_proof","offer","story","pattern_interrupt","other"].map(h=>`<option ${a.hook_type===h?"selected":""}>${h}</option>`).join("")}</select></label> <label>Format <select data-k="${esc(r.creative_key)}" class="fmt-sel">${["creator","branded","hybrid"].map(h=>`<option ${a.creator_vs_branded===h?"selected":""}>${h}</option>`).join("")}</select></label> <button class="action save" data-k="${esc(r.creative_key)}">Save annotation</button></div>`;}).join("")||"<p class=muted>No creatives yet — upload or load fixture.</p>";
+document.querySelectorAll("input[name=sel]").forEach(r=>r.onchange=()=>selected=r.value);
+document.querySelectorAll(".save").forEach(b=>b.onclick=async()=>{const k=b.dataset.k;const rows2=await api("GET","/api/creatives");const found=rows2.find(x=>x.creative_key===k);const cur=found.annotation||{schema_version:"v0",hook_confidence:0.5,brand_seconds:[],product_seconds:[],logo_seconds:[],structure:{},creator_confidence:0.5,duration_s:0,pace_cuts_per_min:0,status:"auto"};for(const s of ["hook","body","demo","supers","cta","endframe","voiceover"])cur.structure[s]=cur.structure[s]||{start_s:0,end_s:0,confidence:0};cur.schema_version="v0";cur.hook_type=document.querySelector(`.hook-sel[data-k="${k}"]`).value;cur.creator_vs_branded=document.querySelector(`.fmt-sel[data-k="${k}"]`).value;await api("POST","/api/creatives/"+encodeURIComponent(k)+"/annotate",{annotation:cur});refresh();});
+$("export-list").innerHTML=rows.map(r=>`<label><input type="checkbox" class="exp-check" value="${esc(r.creative_key)}"> ${esc(r.creative_key)}</label>`).join("<br>")||"—";}
+async function bench(){try{const b=await api("GET","/api/benchmarks?group_by="+$("gb").value);$("bench-out").innerHTML="<table><tr><th>Group</th><th>Ads</th><th>Spend</th><th>CTR</th><th>CPC</th><th>CPA</th></tr>"+Object.entries(b).map(([k,g])=>`<tr><td>${esc(k)}</td><td>${g.n_ads}</td><td>$${g.spend}</td><td>${g.ctr}</td><td>$${g.cpc}</td><td>$${g.cpa}</td></tr>`).join("")+"</table>";}catch(e){$("bench-out").textContent=e.message;}}
+refresh();
+</script>
+</body>
+</html>

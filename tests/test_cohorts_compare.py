@@ -23,9 +23,9 @@ TIKTOK = ("Campaign,Ad,Video Name,Spend,Impressions,Clicks,Results\n"
 
 
 DIM_CSV = ("Campaign,Ad Name,Creative Name,Amount Spent,Impressions,"
-           "Link Clicks,Conversions,Vertical,Market,Funnel Stage\n"
-           "C1,A1,hook-a,100,10000,200,10,Beauty,Spain,lower\n"
-           "C2,A2,hook-b,300,30000,300,15,Food,France,top\n")
+           "Link Clicks,Conversions,Vertical,Market,Funnel Stage,Date\n"
+           "C1,A1,hook-a,100,10000,200,10,Beauty,Spain,lower,2026-08-01\n"
+           "C2,A2,hook-b,300,30000,300,15,Food,France,top,2026-08-02\n")
 
 
 def fresh_db():
@@ -71,6 +71,31 @@ class FilterParamsTest(unittest.TestCase):
             {"vertical": ["Beauty"], "platform": ["all", ""],
              "hack": ["x"]}), {"vertical": ["Beauty"]})
         self.assertEqual(server._filters_from_query({}), {})
+
+    def test_project_filter_uses_campaign_fallback(self):
+        # Fixture rows carry no project column: identity falls back to
+        # campaign, matched case-insensitively like the UI sends it.
+        got = benchmarks.benchmark(self.conn, "campaign",
+                                   {"include_projects": ["c1"]})
+        self.assertEqual(sorted(got), ["C1"])
+
+    def test_exclude_projects_case_insensitive(self):
+        got = benchmarks.benchmark(self.conn, "campaign",
+                                   {"exclude_projects": ["C1"]})
+        self.assertEqual(sorted(got), ["C2"])
+
+    def test_date_filter_exact_day(self):
+        rows = benchmarks.all_rows(self.conn)
+        dates = sorted({r.get("date") for r in rows if r.get("date")})
+        self.assertTrue(dates)
+        got = benchmarks.benchmark(self.conn, "campaign",
+                                   {"date": [dates[0]]})
+        self.assertEqual(len(got), 1)
+
+    def test_project_query_param_maps_to_include(self):
+        import server
+        self.assertEqual(server._filters_from_query({"project": ["c1"]}),
+                         {"include_projects": ["c1"]})
 
 
 def seeded_db():

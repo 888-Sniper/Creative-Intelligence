@@ -154,7 +154,7 @@ const esc=v=>String(v??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>
 function filtered_path(p){
   if(p==="/api/campaigns"||p.startsWith("/api/benchmarks")){
     const f=active_filters();const q=new URLSearchParams();
-    ["platform","vertical","market","funnel","objective","client"].forEach(k=>{const v=f[k];if(v&&v!=="all")q.append(k,v);});
+    ["platform","vertical","market","funnel","objective","client","project","date"].forEach(k=>{const v=f[k];if(v&&v!=="all")q.append(k,v);});
     const s=q.toString();if(s)p+=(p.includes("?")?"&":"?")+s;
   }
   return p;

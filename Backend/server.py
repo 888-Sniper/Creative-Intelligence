@@ -44,20 +44,24 @@ def send(handler, code, obj):
 
 
 FILTER_AXES = ("platform", "vertical", "funnel", "objective",
-               "market", "client")
+               "market", "client", "date")
 
 
 def _filters_from_query(query):
     """Canonical dimension filters from URL query params.
 
     Multi-values per axis allowed (?vertical=Beauty&vertical=Food).
-    "all" and blanks mean no constraint.
+    "all" and blanks mean no constraint. "project" maps to the
+    include_projects list (project identity falls back to campaign).
     """
     out = {}
     for axis in FILTER_AXES:
         vals = [v for v in query.get(axis, []) if v not in ("", "all")]
         if vals:
             out[axis] = vals
+    projects = [v for v in query.get("project", []) if v not in ("", "all")]
+    if projects:
+        out["include_projects"] = projects
     return out
 
 

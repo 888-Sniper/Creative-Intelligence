@@ -78,7 +78,8 @@ that key (extra axes may arrive via annotations or future columns).
 Project identity is row["project"] when present, else row["campaign"].
 """
 
-FILTER_KEYS = ("vertical", "platform", "funnel", "objective", "market", "client")
+FILTER_KEYS = ("vertical", "platform", "funnel", "objective", "market",
+               "client", "date")
 
 KPI_KEYS = ("cpm", "vtr", "ctr", "cpa", "roas")
 
@@ -190,9 +191,12 @@ def match_filters(row, filters):
             if actual not in wanted:
                 return False
     filt = filters or {}
-    if filt.get("include_projects") and project_of(row) not in filt["include_projects"]:
+    project = str(project_of(row) or "").lower()
+    if filt.get("include_projects") and project not in [
+            str(p).lower() for p in filt["include_projects"]]:
         return False
-    if filt.get("exclude_projects") and project_of(row) in filt["exclude_projects"]:
+    if filt.get("exclude_projects") and project in [
+            str(p).lower() for p in filt["exclude_projects"]]:
         return False
     return True
 

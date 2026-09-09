@@ -52,13 +52,16 @@ def _enrich(conn, rows):
     return out
 
 
-def benchmark(conn, group_by="hook_type"):
+def benchmark(conn, group_by="hook_type", filters=None):
     if group_by not in GROUPABLE:
         raise ValueError("group_by must be one of %s" % (sorted(GROUPABLE),))
     conn.row_factory = None
     cols = [c[0] for c in conn.execute("SELECT * FROM ads LIMIT 0").description]
     rows = [dict(zip(cols, v)) for v in conn.execute("SELECT * FROM ads").fetchall()]
     rows = _enrich(conn, rows)
+    if filters:
+        filt = normalize_filters(filters)
+        rows = [r for r in rows if match_filters(r, filt)]
     groups = {}
     for r in rows:
         groups.setdefault(r[group_by] or "(unannotated)", []).append(r)
@@ -227,9 +230,12 @@ def benchmark_filtered(conn, filters=None, metric="cpa"):
             "kpis": kpis_for_rows(rows)}
 
 
-def campaign_kpis(conn, campaigns=None):
+def campaign_kpis(conn, campaigns=None, filters=None):
     """Per-campaign KPIs (CPM/VTR/CTR/CPA/ROAS) over enriched ad rows."""
     rows = all_rows(conn)
+    if filters:
+        filt = normalize_filters(filters)
+        rows = [r for r in rows if match_filters(r, filt)]
     groups = {}
     for r in rows:
         groups.setdefault(r.get("campaign") or "(uncategorised)", []).append(r)

@@ -1149,6 +1149,48 @@ class ReportKpiAwarenessTest(unittest.TestCase):
     def test_bad_rank_rejected(self):
         with self.assertRaises(ValueError):
             benchmarks._report_extras(self.conn, ["CampX"], rank_by="bogus")
+        with self.assertRaises(ValueError):
+            benchmarks.build_report(self.conn, ["CampX"], ["cpa"], None,
+                                    "one-pager", rank_by="bogus")
+
+    def test_explicit_rank_by_beats_kpi_order(self):
+        # KPIs list Spend first (the old silent decider); the explicit
+        # rank control must win either way, end to end via the route.
+        payload = {"campaigns": ["CampX"],
+                   "kpis": ["spend", "impressions", "roas"],
+                   "format": "one-pager", "rank_by": "roas"}
+        rep = server.expert2_report_route(self.conn, payload)
+        best = [l for l in rep["markdown"].splitlines()
+                if l.startswith("- CampX best:")]
+        self.assertEqual(len(best), 1)
+        self.assertIn("roas-champ", best[0])
+        self.assertIn("(ROAS 5.0,", best[0])
+        self.assertNotIn("CPA $", best[0])
+        payload["rank_by"] = "cpa"
+        rep = server.expert2_report_route(self.conn, payload)
+        best = [l for l in rep["markdown"].splitlines()
+                if l.startswith("- CampX best:")]
+        self.assertEqual(len(best), 1)
+        self.assertIn("cpa-champ", best[0])
+        self.assertIn("(CPA $10.0,", best[0])
+        self.assertNotIn("ROAS", best[0])
+
+    def test_deck_best_names_rank_metric(self):
+        rep = server.expert2_report_route(
+            self.conn, {"campaigns": ["CampX"], "kpis": ["roas"],
+                        "format": "deck", "rank_by": "roas"})
+        best = rep["deck"]["creatives"]["CampX"]["best"]
+        self.assertEqual(best["creative_key"], "roas-champ")
+        self.assertEqual(best["roas"], 5.0)
+
+    def test_ui_rank_control_wired(self):
+        root = os.path.join(os.path.dirname(__file__), "..")
+        with open(os.path.join(root, "Web", "Index.html")) as f:
+            html = f.read()
+        self.assertIn('id="rep-rank"', html)
+        for value in ("cpa", "cpm", "ctr", "vtr", "roas"):
+            self.assertIn('value="%s"' % value, html)
+        self.assertIn('rank_by:$("rep-rank").value', html)
 
 
 class RetentionCurveTest(unittest.TestCase):

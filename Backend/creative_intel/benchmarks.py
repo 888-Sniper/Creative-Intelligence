@@ -712,7 +712,7 @@ def _show(value):
 
 def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
                  fmt="one-pager", strict_human=False, filters=None,
-                 benchmark_scope="filters"):
+                 benchmark_scope="filters", rank_by=None):
     """Generate a report over selected campaigns + KPIs + benchmark.
 
     fmt is "one-pager" (markdown), "csv", "deck" (slide JSON),
@@ -728,6 +728,11 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
     (default: the selected benchmark is computed over the same
     scope, labelled as such) or "global" (explicit opt-out: the
     benchmark reads the whole dataset and is labelled global).
+    rank_by is the explicit Best/Watch contention metric (the UI's
+    "Rank Best/Watch by" control sends it). When omitted it falls
+    back to the first rankable selected KPI, else CPA — but callers
+    should always send it explicitly so checkbox order can never
+    silently decide the winner.
     """
     fmt = (fmt or "one-pager").lower()
     if fmt not in ("one-pager", "csv", "deck", "pptx", "xlsx"):
@@ -737,7 +742,10 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
     wanted_kpis = [k for k in (kpis or []) if k in report_kpis]
     if not wanted_kpis:
         raise ValueError("pick at least one KPI from %s" % sorted(report_kpis))
-    rank_by = wanted_kpis[0] if wanted_kpis[0] in KPI_KEYS else "cpa"
+    if rank_by is None:
+        rank_by = wanted_kpis[0] if wanted_kpis[0] in KPI_KEYS else "cpa"
+    if rank_by not in KPI_KEYS:
+        raise ValueError("rank_by must be one of %s" % sorted(KPI_KEYS))
     scope = filters if isinstance(filters, Scope) else Scope(filters)
     comp = compare_campaigns(conn, campaigns, rank_by=rank_by,
                              filters=scope)
@@ -822,16 +830,14 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
         best = extras["per_campaign"][name]["best"]
         worst = extras["per_campaign"][name]["worst"]
         if best:
-            lines.append("- %s best: %s (%s %s | CPA $%s, CTR %s, %s / %s)" % (
+            lines.append("- %s best: %s (%s %s, %s / %s)" % (
                 name, best["creative_key"], comp["rank_by"].upper(),
                 _show_rank(best[comp["rank_by"]]),
-                _show(best["cpa"]), _show(best["ctr"]),
                 best["hook_type"], best["creator_vs_branded"]))
         if worst:
-            lines.append("- %s watch: %s (%s %s | CPA $%s, CTR %s, %s / %s)" % (
+            lines.append("- %s watch: %s (%s %s, %s / %s)" % (
                 name, worst["creative_key"], comp["rank_by"].upper(),
                 _show_rank(worst[comp["rank_by"]]),
-                _show(worst["cpa"]), _show(worst["ctr"]),
                 worst["hook_type"], worst["creator_vs_branded"]))
     lines += ["", "## Creative learnings", ""]
     lines += ["- %s" % l for l in extras["learnings"]] or ["- —"]
@@ -877,16 +883,14 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
                 best = deck["creatives"][name]["best"]
                 worst = deck["creatives"][name]["worst"]
                 if best:
-                    bullets.append("Best creative: %s (%s %s | CPA $%s, %s / %s)" % (
+                    bullets.append("Best creative: %s (%s %s, %s / %s)" % (
                         best["creative_key"], comp["rank_by"].upper(),
                         _show_rank(best[comp["rank_by"]]),
-                        _show(best["cpa"]),
                         best["hook_type"], best["creator_vs_branded"]))
                 if worst:
-                    bullets.append("Watch: %s (%s %s | CPA $%s, %s / %s)" % (
+                    bullets.append("Watch: %s (%s %s, %s / %s)" % (
                         worst["creative_key"], comp["rank_by"].upper(),
                         _show_rank(worst[comp["rank_by"]]),
-                        _show(worst["cpa"]),
                         worst["hook_type"], worst["creator_vs_branded"]))
                 slides.append({"title": name, "bullets": bullets})
             why_title = ("Why %s leads" % comp["why"]["top"]

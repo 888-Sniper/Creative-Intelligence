@@ -278,6 +278,8 @@ ul.plain li{padding:6px 0;border-bottom:1px solid var(--line)}
 <option value="platform">platform</option><option value="campaign">campaign</option></select></label>
 <label>Benchmark scope <select id="rep-bench-scope">
 <option value="filters">Current filters</option><option value="global">Global</option></select></label>
+<label>Rank Best/Watch by <select id="rep-rank">
+<option value="cpa">CPA</option><option value="cpm">CPM</option><option value="ctr">CTR</option><option value="vtr">VTR</option><option value="roas">ROAS</option></select></label>
 <label><input type="checkbox" id="rep-override"> override (logged)</label>
 <label><input type="checkbox" id="rep-strict"> HUMAN-VERIFIED insights only</label><br><br>
 <button class="action" id="rep-onepager">Generate one-pager</button>
@@ -776,6 +778,7 @@ function report_body(){
     kpis:kpis.length?kpis:["cpa","ctr"],
     benchmark:$("rep-bench").value,
     benchmark_scope:$("rep-bench-scope").value,
+    rank_by:$("rep-rank").value,
     override:$("rep-override").checked,
     strict_human:$("rep-strict").checked,
     filters:scope_filters()};

@@ -887,7 +887,8 @@ def expert2_report_route(conn, payload):
                                  strict_human=bool(payload.get("strict_human")),
                                  filters=payload.get("filters"),
                                  benchmark_scope=payload.get(
-                                     "benchmark_scope", "filters"))
+                                     "benchmark_scope", "filters"),
+                                 rank_by=payload.get("rank_by"))
     if override:
         replay.log(conn, "report-override",
                    {"campaigns": campaigns, "format": fmt,

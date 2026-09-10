@@ -286,7 +286,8 @@ _XLSX_STYLES = (
     '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
     '<cellXfs count="2">'
     '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
-    '<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFill="1" applyFont="1"/>'
+    '<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFill="1" applyFont="1"'
+    ' applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>'
     "</cellXfs></styleSheet>" % SPREADSHEET)
 
 

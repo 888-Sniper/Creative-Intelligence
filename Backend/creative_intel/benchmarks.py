@@ -1,6 +1,7 @@
 """Spend-weighted benchmarks over the canonical ads dataset."""
 
 import json
+import re
 
 GROUPABLE = ("platform", "campaign", "hook_type", "creator_vs_branded",
              "edit_style")
@@ -1340,6 +1341,32 @@ def campaign_recommendations(conn, campaign, scope=None, rank_by="cpa"):
             "sections": sections}
 
 
+_HEADER_ACRONYMS = frozenset({
+    "cpa", "ctr", "cpc", "cpm", "cpl", "cpsv", "vtr", "roas", "cta"})
+
+
+def _display_label(field):
+    """Workbook column label: Title Case with metric acronyms in caps."""
+    label = str(field).strip()
+    if label.endswith("_s"):
+        label = label[:-2] + " (s)"
+    words = []
+    for token in re.split(r"[_\s]+", label):
+        if not token:
+            continue
+        lowered = token.lower()
+        core = lowered.strip("()")
+        if lowered == "(s)":
+            words.append("(s)")
+        elif core in _HEADER_ACRONYMS:
+            words.append(token.replace(token.strip("()"), core.upper()))
+        elif lowered == "vs":
+            words.append("vs")
+        else:
+            words.append(token.title())
+    return " ".join(words)
+
+
 def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
                  fmt="one-pager", strict_human=False, filters=None,
                  benchmark_scope="filters", rank_by=None):
@@ -1656,8 +1683,11 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
                "header": raw_header,
                "rows": [row + [scope.describe()] for row in raw_rows]
                or [[None] * len(raw_header)]}
-        blob = ooxml.build_xlsx([sheet, why, creatives, all_creatives,
-                                 raw, bsheet, learn, reco])
+        sheets = [sheet, why, creatives, all_creatives,
+                  raw, bsheet, learn, reco]
+        for entry in sheets:
+            entry["header"] = [_display_label(h) for h in entry["header"]]
+        blob = ooxml.build_xlsx(sheets)
         return {"format": "xlsx", "filename": "campaign-report.xlsx",
                 "xlsx_b64": base64.b64encode(blob).decode(),
                 "markdown": markdown, "csv": csv_text, "deck": deck}

@@ -460,18 +460,18 @@ class Gate8XlsxCompletenessTest(unittest.TestCase):
     def test_all_creatives_has_every_classification(self):
         _zf, names, strings = self._sheets()
         joined = "\n".join(strings)
-        for header in ("client", "project", "campaign", "platform",
-                       "vertical", "market", "funnel", "objective",
-                       "date", "creative", "spend", "impressions",
-                       "clicks", "conversions", "video_views", "revenue",
-                       "cpm", "vtr", "ctr", "cpc", "cpa", "roas",
-                       "hook_type", "hook_modality", "creator_vs_branded",
-                       "duration_s", "brand_first_visible_s",
-                       "product_first_visible_s", "logo_first_visible_s",
-                       "brand_audio_mention_s", "brand_audio_approx",
-                       "cta", "supers", "voiceover",
-                       "editing_pace_cuts_per_min", "structure",
-                       "status", "human_verified"):
+        for header in ("Client", "Project", "Campaign", "Platform",
+                       "Vertical", "Market", "Funnel", "Objective",
+                       "Date", "Creative", "Spend", "Impressions",
+                       "Clicks", "Conversions", "Video Views", "Revenue",
+                       "CPM", "VTR", "CTR", "CPC", "CPA", "ROAS",
+                       "Hook Type", "Hook Modality", "Creator vs Branded",
+                       "Duration (s)", "Brand First Visible (s)",
+                       "Product First Visible (s)", "Logo First Visible (s)",
+                       "Brand Audio Mention (s)", "Brand Audio Approx",
+                       "CTA", "Supers", "Voiceover",
+                       "Editing Pace Cuts Per Min", "Structure",
+                       "Status", "Human Verified"):
             self.assertIn(header, joined, "missing XLSX column %s" % header)
         # Every creative is present, with its hook classification.
         for key in ("shared-creative", "spain-only", "null-cpa"):
@@ -485,7 +485,7 @@ class Gate8XlsxCompletenessTest(unittest.TestCase):
         _zf, _names, strings = self._sheets()
         joined = "\n".join(strings)
         for token in ("CampA", "CampB", "A1", "B1", "shared-creative",
-                      "creative_key", "funnel_stage"):
+                      "Creative Key", "Funnel Stage"):
             self.assertIn(token, joined,
                           "raw sheet missing %s" % token)
 
@@ -1408,7 +1408,7 @@ class EditStyleTest(unittest.TestCase):
         strings = " ".join(re.findall(
             r"<t[^>]*>(.*?)</t>",
             zf.read("xl/sharedStrings.xml").decode("utf-8")))
-        self.assertIn("edit_style", strings)
+        self.assertIn("Edit Style", strings)
         self.assertIn("product_demo", strings)
 
     def test_ask_answers_styles(self):

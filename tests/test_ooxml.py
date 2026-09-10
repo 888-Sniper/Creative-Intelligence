@@ -71,6 +71,7 @@ class XlsxTest(unittest.TestCase):
         self.assertIn("xl/worksheets/sheet1.xml", files)
         assert_all_xml_valid(self, files)
         self.assertIn(b"00C7B2", files["xl/styles.xml"])
+        self.assertIn(b'horizontal="center"', files["xl/styles.xml"])
 
     def test_roundtrip(self):
         rows = [["Alpha", 120.5, 0.0125, True], ["Beta", 0, 0.0, False]]
@@ -126,8 +127,8 @@ class ReportBinaryTest(unittest.TestCase):
                                       "xlsx")
         self.assertEqual(rep["format"], "xlsx")
         rows = ooxml.parse_xlsx(base64.b64decode(rep["xlsx_b64"]))
-        self.assertEqual([r["campaign"] for r in rows], ["Alpha", "Beta"])
-        self.assertIn("cpa", rows[0])
+        self.assertEqual([r["Campaign"] for r in rows], ["Alpha", "Beta"])
+        self.assertIn("CPA", rows[0])
 
     def test_bad_format_still_rejected(self):
         with self.assertRaises(ValueError):

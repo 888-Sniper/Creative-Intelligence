@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
 from fastapi import APIRouter, Depends, HTTPException, Request  # noqa: E402
 from fastapi.responses import FileResponse, Response  # noqa: E402
 
-import server as legacy  # noqa: E402
+from ci_backend import actions as legacy  # noqa: E402
 from ci_backend import employees as emp  # noqa: E402
 from ci_backend.deps import (  # noqa: E402
     get_current_employee,

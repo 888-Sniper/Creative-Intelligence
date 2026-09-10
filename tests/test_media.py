@@ -17,6 +17,8 @@ import urllib.request
 from http.server import HTTPServer
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Backend"))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from auth_help import authed, req as areq
 
 from creative_intel import creative, media, schema
 
@@ -117,6 +119,7 @@ class MediaLiveTest(unittest.TestCase):
         conn.commit()
         conn.close()
         server.Handler.db_path = cls._db
+        cls.cookie = authed(cls._db)
         cls._srv = HTTPServer(("127.0.0.1", 0), server.Handler)
         cls.port = cls._srv.server_address[1]
         cls._thread = threading.Thread(target=cls._srv.serve_forever,
@@ -134,7 +137,8 @@ class MediaLiveTest(unittest.TestCase):
         req = urllib.request.Request(
             "http://127.0.0.1:%d%s" % (self.port, path),
             data=json.dumps(payload).encode(),
-            headers={"Content-Type": "application/json"}, method="POST")
+            headers={"Content-Type": "application/json",
+                     "Cookie": self.cookie}, method="POST")
         with urllib.request.urlopen(req, timeout=10) as resp:
             return resp.status, json.loads(resp.read())
 
@@ -144,7 +148,8 @@ class MediaLiveTest(unittest.TestCase):
             "content_b64": B64PNG})
         self.assertEqual(status, 200)
         with urllib.request.urlopen(
-                "http://127.0.0.1:%d%s" % (self.port, rec["url"]),
+                areq("http://127.0.0.1:%d%s" % (self.port, rec["url"]),
+                     self.cookie),
                 timeout=10) as resp:
             self.assertEqual(resp.status, 200)
             self.assertIn("image/png", resp.headers.get("Content-Type"))
@@ -163,7 +168,9 @@ class MediaLiveTest(unittest.TestCase):
         for bad in ("/media/../Index.html", "/media/abc", "/media/99999"):
             try:
                 urllib.request.urlopen(
-                    "http://127.0.0.1:%d%s" % (self.port, bad), timeout=10)
+                    areq("http://127.0.0.1:%d%s" % (self.port, bad),
+                         self.cookie),
+                    timeout=10)
                 self.fail("served %s" % bad)
             except urllib.error.HTTPError as exc:
                 self.assertEqual(exc.code, 404)

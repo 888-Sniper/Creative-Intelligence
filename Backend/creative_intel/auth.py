@@ -586,19 +586,6 @@ def me(conn, token):
                 "workos_configured": workos_configured()}
 
 
-def enforced(conn):
-    """Access control is live once any employee record exists.
-
-    A pristine database (no identities at all) runs in setup mode so
-    first-run and the pre-auth test suite keep working; the moment
-    the first login or pre-add creates an employee, every protected
-    route requires a live session for an active employee. There is no
-    override flag — enforcement is purely a function of DB state.
-    """
-    row = conn.execute("SELECT COUNT(*) FROM employees").fetchone()
-    return bool(row and row[0])
-
-
 def valid_session(conn, token):
     """Employee behind a live session token, or None.
 
@@ -710,6 +697,23 @@ def admin_create(conn, admin_id, email, first_name="", last_name="",
     return get_employee(conn, emp_id)
 
 
+def _active_admins(conn, exclude_id=""):
+    """IDs of active admins, optionally excluding one employee."""
+    return [r[0] for r in conn.execute(
+        "SELECT id FROM employees WHERE role='admin' AND status='active'"
+        + (" AND id<>?" if exclude_id else ""),
+        (exclude_id,) if exclude_id else ()).fetchall()]
+
+
+def _refuse_last_admin(conn, employee_id):
+    """Forbid an operation that would leave zero active admins."""
+    emp = get_employee(conn, employee_id)
+    if emp and emp.get("role") == "admin" \
+            and emp.get("status") == "active" \
+            and not _active_admins(conn, employee_id):
+        raise AuthError("Refused: at least one active admin must remain.")
+
+
 def admin_set_status(conn, admin_id, employee_id, new_status, action):
     """Approve/suspend/reactivate/revoke with transition validation."""
     emp = get_employee(conn, employee_id)
@@ -720,6 +724,8 @@ def admin_set_status(conn, admin_id, employee_id, new_status, action):
     if new_status not in TRANSITIONS.get(emp.get("status") or "", ()):
         raise AuthError("Cannot move %s to %s."
                         % (emp.get("status"), new_status))
+    if new_status in ("suspended", "revoked"):
+        _refuse_last_admin(conn, employee_id)
     now = utcnow()
     approved_at = emp.get("approved_at") or ""
     approved_by = emp.get("approved_by") or ""
@@ -745,6 +751,8 @@ def admin_set_role(conn, admin_id, employee_id, role):
         raise AuthError("Employee not found.")
     if emp.get("role") == role:
         return emp
+    if role != "admin" and (emp.get("status") or "") == "active":
+        _refuse_last_admin(conn, employee_id)
     conn.execute("UPDATE employees SET role=?, updated_at=? WHERE id=?",
                  (role, utcnow(), employee_id))
     audit(conn, employee_id, admin_id, "ROLE_CHANGED",

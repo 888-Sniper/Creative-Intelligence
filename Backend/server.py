@@ -74,13 +74,12 @@ def _guard(handler, conn, admin=False):
     """Default-deny gate. Returns (True, employee-or-None).
 
     Sends 401 (no/expired session) or 403 (wrong status/role) and
-    returns (False, None) when denied. Setup mode (zero employee
-    records) allows data routes through; admin routes never bypass.
+    returns (False, None) when denied. There is no setup bypass:
+    zero employees means login is required, and only the configured
+    bootstrap-admin identity can become the first admin.
     """
     if admin:
         return _guard_admin(handler, conn)
-    if not auth.enforced(conn):
-        return True, None
     try:
         emp, _gate = auth.authorize(
             conn, auth.token_from_headers(handler.headers))

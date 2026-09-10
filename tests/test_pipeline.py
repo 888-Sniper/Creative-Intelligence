@@ -12,6 +12,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Source"))
 
 from creative_intel import (benchmarks, creative, export_gate, ingest,
                             providers, retention, schema)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from auth_help import authed
 
 META_CSV = ("Campaign,Ad Name,Creative Name,Amount Spent,Impressions,Link Clicks,"
             "Conversions\nC1,A1,hook-a,100,10000,200,10\nC1,A2,hook-b,300,30000,300,15\n")
@@ -216,18 +218,28 @@ class LaunchPathTest(unittest.TestCase):
              "--port", str(port)],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         try:
-            body = None
+            code = None
             deadline = time.time() + 20
             while time.time() < deadline:
                 try:
                     with urllib.request.urlopen(
                             "http://127.0.0.1:%d/api/cohorts" % port,
                             timeout=2) as resp:
-                        body = resp.read().decode()
+                        code = resp.status
+                    break
+                except urllib.error.HTTPError as exc:
+                    code = exc.code
                     break
                 except OSError:
                     time.sleep(0.2)
-            self.assertIsNotNone(body, "server never came up on launch path")
+            # Fresh database: locked from the very first launch.
+            self.assertEqual(code, 401, "server never came up on launch path")
+            cookie = authed(db)
+            req = urllib.request.Request(
+                "http://127.0.0.1:%d/api/cohorts" % port,
+                headers={"Cookie": cookie})
+            with urllib.request.urlopen(req, timeout=2) as resp:
+                body = resp.read().decode()
             self.assertEqual(json.loads(body), [])
         finally:
             proc.terminate()
@@ -259,11 +271,14 @@ class LaunchContractTest(unittest.TestCase):
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         base = "http://127.0.0.1:%d" % port
 
+        cookie = authed(db)
+
         def call(method, path, body=None):
             data = json.dumps(body).encode() if body is not None else None
             req = urllib.request.Request(
                 base + path, data=data,
-                headers={"Content-Type": "application/json"})
+                headers={"Content-Type": "application/json",
+                         "Cookie": cookie})
             deadline = time.time() + 20
             while True:
                 try:

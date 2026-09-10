@@ -13,6 +13,8 @@ from http.server import HTTPServer
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Backend"))
 
 from creative_intel import benchmarks, creative, ingest, schema
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from auth_help import authed, req as areq
 
 CSV = ("campaign,ad set,ad name,spend,impressions,clicks,conversions,"
        "revenue,market,date\n"
@@ -254,9 +256,10 @@ class CampaignRecoHttpTest(unittest.TestCase):
             thread.start()
             try:
                 base = "http://127.0.0.1:%d" % port
+                cookie = authed(db)
                 with urllib.request.urlopen(
-                        base + "/api/campaigns/recommendations"
-                        "?name=Alpha&rank_by=roas") as resp:
+                        areq(base + "/api/campaigns/recommendations"
+                             "?name=Alpha&rank_by=roas", cookie)) as resp:
                     out = json.loads(resp.read())
                 self.assertEqual(out["rank_by"], "roas")
                 self.assertEqual(len(out["sections"]), 6)
@@ -266,7 +269,7 @@ class CampaignRecoHttpTest(unittest.TestCase):
 
                 def _get(path):
                     try:
-                        urllib.request.urlopen(base + path)
+                        urllib.request.urlopen(areq(base + path, cookie))
                         self.fail("expected 409 for %s" % path)
                     except urllib.error.HTTPError as exc:
                         self.assertEqual(exc.code, 409)
@@ -278,13 +281,13 @@ class CampaignRecoHttpTest(unittest.TestCase):
                             "?name=Alpha&rank_by=clicks")
                 self.assertIn("rank_by", body["error"])
                 with urllib.request.urlopen(
-                        base + "/api/campaigns/recommendations"
-                        "?name=Alpha&rank_by=cpc") as resp:
+                        areq(base + "/api/campaigns/recommendations"
+                             "?name=Alpha&rank_by=cpc", cookie)) as resp:
                     cpc = json.loads(resp.read())
                 self.assertEqual(cpc["rank_by"], "cpc")
                 with urllib.request.urlopen(
-                        base + "/api/campaigns/recommendations"
-                        "?name=Alpha&rank_by=spend") as resp:
+                        areq(base + "/api/campaigns/recommendations"
+                             "?name=Alpha&rank_by=spend", cookie)) as resp:
                     spend = json.loads(resp.read())
                 self.assertEqual(spend["rank_by"], "cpa")
                 self.assertEqual(spend["rank_by_requested"], "spend")
@@ -321,9 +324,11 @@ class CampaignRecoHttpTest(unittest.TestCase):
             thread.start()
             try:
                 base = "http://127.0.0.1:%d" % port
+                cookie = authed(db)
 
                 def _get_json(path):
-                    with urllib.request.urlopen(base + path) as resp:
+                    with urllib.request.urlopen(
+                            areq(base + path, cookie)) as resp:
                         return json.loads(resp.read())
 
                 p1 = _get_json("/api/campaigns/recommendations"

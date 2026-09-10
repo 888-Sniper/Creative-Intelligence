@@ -35,6 +35,8 @@ from creative_intel import (benchmarks, creative, ingest, providers, qa,  # noqa
                             retention, schema)
 from creative_intel.benchmarks import Scope  # noqa: E402
 import server  # noqa: E402  (route-level scope threading)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from auth_help import authed  # noqa: E402
 
 ACC_CSV = ("Campaign,Ad Name,Creative Name,Amount Spent,Impressions,"
            "Link Clicks,Conversions,Video Views,Revenue,"
@@ -669,6 +671,7 @@ def _test_port():
                     thread=threading.Thread(
                         target=srv.serve_forever, daemon=True))
         _SRV["thread"].start()
+        _SRV["cookie"] = authed(path)
     return _SRV["port"]
 
 
@@ -683,18 +686,22 @@ def tearDownModule():
 
 def _fetch(path, timeout=10):
     import urllib.request
-    with urllib.request.urlopen(
-            "http://127.0.0.1:%d%s" % (_test_port(), path),
-            timeout=timeout) as resp:
+    _test_port()
+    req = urllib.request.Request(
+        "http://127.0.0.1:%d%s" % (_SRV["port"], path),
+        headers={"Cookie": _SRV["cookie"]})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read())
 
 
 def _post(path, body, timeout=10):
     import urllib.request
+    _test_port()
     req = urllib.request.Request(
-        "http://127.0.0.1:%d%s" % (_test_port(), path),
+        "http://127.0.0.1:%d%s" % (_SRV["port"], path),
         data=json.dumps(body).encode(),
-        headers={"Content-Type": "application/json"})
+        headers={"Content-Type": "application/json",
+                 "Cookie": _SRV["cookie"]})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read())
 

@@ -17,6 +17,9 @@ from http.server import HTTPServer
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Backend"))
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from auth_help import authed
+
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 HTML = open(os.path.join(ROOT, "Web", "Index.html")).read()
 
@@ -209,13 +212,15 @@ class ShellLiveTest(unittest.TestCase):
     def test_report_office_formats_end_to_end(self):
         import base64
         import urllib.request
+        cookie = authed(self._db)
+        headers = {"Content-Type": "application/json", "Cookie": cookie}
         csv_payload = ("Campaign,Spend,Impressions,Clicks,Conversions\n"
                        "LiveCamp,50,5000,100,5\n").encode()
         req = urllib.request.Request(
             "http://127.0.0.1:%d/api/ingest" % self.port, data=json.dumps(
                 {"platform": "meta",
                  "csv": csv_payload.decode()}).encode(),
-            headers={"Content-Type": "application/json"}, method="POST")
+            headers=headers, method="POST")
         with urllib.request.urlopen(req, timeout=5):
             pass
         for fmt, key in (("pptx", "pptx_b64"), ("xlsx", "xlsx_b64")):
@@ -223,7 +228,7 @@ class ShellLiveTest(unittest.TestCase):
                 "http://127.0.0.1:%d/api/report" % self.port,
                 data=json.dumps({"format": fmt,
                                  "kpis": ["cpa", "ctr"]}).encode(),
-                headers={"Content-Type": "application/json"}, method="POST")
+                headers=headers, method="POST")
             with urllib.request.urlopen(req, timeout=5) as resp:
                 rep = json.loads(resp.read())
             self.assertEqual(rep["format"], fmt)

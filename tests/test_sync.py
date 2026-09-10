@@ -13,6 +13,8 @@ from http.server import HTTPServer
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Backend"))
 
 from creative_intel import ingest, schema, sync
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from auth_help import authed, req as areq
 
 CSV = ("campaign,ad set,ad name,spend,impressions,clicks,conversions,date\n"
        "CampA,Set1,ad-1,10,1000,20,2,2026-08-01\n"
@@ -289,8 +291,9 @@ class ServerSyncTest(unittest.TestCase):
             thread.start()
             try:
                 base = "http://127.0.0.1:%d" % port
+                cookie = authed(db)
                 with urllib.request.urlopen(
-                        base + "/api/sync/status") as resp:
+                        areq(base + "/api/sync/status", cookie)) as resp:
                     st = json.loads(resp.read())
                 self.assertEqual(st["sources"], {})
                 self.assertEqual(st["recent"], [])
@@ -298,7 +301,8 @@ class ServerSyncTest(unittest.TestCase):
                 req = urllib.request.Request(
                     base + "/api/sync/run",
                     data=json.dumps({"source": "meta"}).encode(),
-                    headers={"Content-Type": "application/json"})
+                    headers={"Content-Type": "application/json",
+                             "Cookie": cookie})
                 try:
                     urllib.request.urlopen(req)
                     self.fail("expected 409")

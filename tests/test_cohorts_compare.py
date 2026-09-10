@@ -11,6 +11,8 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Backend"))
 
 from creative_intel import benchmarks, cohorts, creative, ingest, schema  # noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from auth_help import authed, req as areq  # noqa: E402
 
 META = ("Campaign,Ad Name,Creative Name,Amount Spent,Impressions,"
         "Link Clicks,Conversions\n"
@@ -292,32 +294,35 @@ class ServerRoutesTest(unittest.TestCase):
             httpd, port = self._serve(db)
             try:
                 base = "http://127.0.0.1:%d" % port
+                cookie = authed(db)
                 with urllib.request.urlopen(
-                        base + "/api/compare/campaigns?campaigns=Alpha,Beta"
-                        "&rank_by=cpa") as resp:
+                        areq(base + "/api/compare/campaigns?campaigns=Alpha,Beta"
+                             "&rank_by=cpa", cookie)) as resp:
                     comp = json.loads(resp.read())
                 self.assertEqual(comp["ranking"][0], "Alpha")
                 self.assertTrue(comp["why"]["differences"])
                 payload = json.dumps({"name": "meta-only",
                                       "filters": {"platform": "meta"}}).encode()
                 req = urllib.request.Request(base + "/api/cohorts", data=payload,
-                                             headers={"Content-Type": "application/json"})
+                                             headers={"Content-Type": "application/json",
+                                                      "Cookie": cookie})
                 with urllib.request.urlopen(req) as resp:
                     saved = json.loads(resp.read())
                 self.assertEqual(saved["name"], "meta-only")
-                with urllib.request.urlopen(base + "/api/cohorts/build?name=meta-only") as resp:
+                with urllib.request.urlopen(areq(base + "/api/cohorts/build?name=meta-only", cookie)) as resp:
                     built = json.loads(resp.read())
                 self.assertEqual(built["n_ads"], 5)
                 payload = json.dumps({"campaigns": ["Alpha", "Beta"],
                                       "kpis": ["cpa", "ctr"],
                                       "format": "csv"}).encode()
                 req = urllib.request.Request(base + "/api/report", data=payload,
-                                             headers={"Content-Type": "application/json"})
+                                             headers={"Content-Type": "application/json",
+                                                      "Cookie": cookie})
                 with urllib.request.urlopen(req) as resp:
                     rep = json.loads(resp.read())
                 self.assertIn("Alpha,10.0", rep["csv"])
                 # Legacy routes still serve.
-                with urllib.request.urlopen(base + "/api/benchmarks?group_by=campaign") as resp:
+                with urllib.request.urlopen(areq(base + "/api/benchmarks?group_by=campaign", cookie)) as resp:
                     legacy = json.loads(resp.read())
                 self.assertIn("Alpha", legacy)
             finally:
@@ -359,8 +364,9 @@ class CreativeCompareParityTest(unittest.TestCase):
             try:
                 import urllib.request
                 base = "http://127.0.0.1:%d" % port
+                cookie = authed(db)
                 with urllib.request.urlopen(
-                        base + "/api/compare?a=cka&b=ckb") as resp:
+                        areq(base + "/api/compare?a=cka&b=ckb", cookie)) as resp:
                     got = json.loads(resp.read())
                 for key in ("cka", "ckb"):
                     for kpi in ("spend", "impressions", "clicks",
@@ -440,18 +446,19 @@ class CreativesFilterTest(unittest.TestCase):
             ingest.insert_rows(conn, ingest.parse_csv(DIM_CSV, "meta"))
             conn.close()
             httpd, thread, base = self._serve(db)
+            cookie = authed(db)
             try:
-                with urllib.request.urlopen(base + "/api/creatives") as resp:
+                with urllib.request.urlopen(areq(base + "/api/creatives", cookie)) as resp:
                     all_keys = sorted(r["creative_key"]
                                       for r in json.loads(resp.read()))
                 self.assertEqual(all_keys, ["hook-a", "hook-b"])
                 with urllib.request.urlopen(
-                        base + "/api/creatives?vertical=Beauty") as resp:
+                        areq(base + "/api/creatives?vertical=Beauty", cookie)) as resp:
                     got = sorted(r["creative_key"]
                                  for r in json.loads(resp.read()))
                 self.assertEqual(got, ["hook-a"])
                 with urllib.request.urlopen(
-                        base + "/api/creatives?vertical=Food") as resp:
+                        areq(base + "/api/creatives?vertical=Food", cookie)) as resp:
                     got = sorted(r["creative_key"]
                                  for r in json.loads(resp.read()))
                 self.assertEqual(got, ["hook-b"])

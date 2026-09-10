@@ -367,7 +367,7 @@ class EmployeeGateTest(AuthCase):
             conn.close()
 
 
-class HttpAuthTest(AuthCase):
+class HttpHelpers:
     def _serve(self, db_path):
         import server as srv
         srv.Handler.db_path = db_path
@@ -409,15 +409,102 @@ class HttpAuthTest(AuthCase):
                 return value.split(";", 1)[0]
         return ""
 
-    def test_setup_mode_passthrough(self):
-        # Pristine DB (no employees): pre-auth suite keeps working.
+
+class LastAdminTest(AuthCase, HttpHelpers):
+    def _two_admins(self, conn):
+        a = auth.admin_create(conn, "root", "a@foap.test", role="admin")
+        b = auth.admin_create(conn, "root", "b@foap.test", role="admin")
+        return a, b
+
+    def test_sole_admin_cannot_be_suspended_revoked_demoted(self):
+        conn = _conn()
+        try:
+            solo = auth.admin_create(conn, "root", "solo@foap.test",
+                                     role="admin")
+            for op in (lambda: auth.admin_set_status(
+                    conn, "root", solo["id"], "suspended",
+                    "EMPLOYEE_SUSPENDED"),
+                       lambda: auth.admin_set_status(
+                    conn, "root", solo["id"], "revoked",
+                    "EMPLOYEE_REVOKED"),
+                       lambda: auth.admin_set_role(
+                    conn, "root", solo["id"], "employee")):
+                with self.assertRaises(auth.AuthError):
+                    op()
+            emp = auth.get_employee(conn, solo["id"])
+            self.assertEqual((emp["role"], emp["status"]),
+                             ("admin", "active"))
+            # Refusals leave no audit trail behind.
+            self.assertEqual(
+                [e["action"] for e in auth.admin_audit_list(conn)],
+                ["EMPLOYEE_CREATED"])
+        finally:
+            conn.close()
+
+    def test_second_admin_makes_ops_legal(self):
+        conn = _conn()
+        try:
+            a, b = self._two_admins(conn)
+            auth.admin_set_role(conn, a["id"], b["id"], "employee")
+            self.assertEqual(
+                auth.get_employee(conn, b["id"])["role"], "employee")
+            auth.admin_set_status(conn, a["id"], b["id"], "suspended",
+                                  "EMPLOYEE_SUSPENDED")
+            auth.admin_set_status(conn, a["id"], b["id"], "active",
+                                  "EMPLOYEE_REACTIVATED")
+            # Now A is the last active admin again: suspending A fails.
+            with self.assertRaises(auth.AuthError):
+                auth.admin_set_status(conn, a["id"], a["id"], "suspended",
+                                      "EMPLOYEE_SUSPENDED")
+        finally:
+            conn.close()
+
+    def test_last_admin_rule_over_http(self):
+        db = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
+        try:
+            conn = sqlite3.connect(db)
+            schema.init_db(conn)
+            boss = auth.admin_create(conn, "root", "boss@foap.test",
+                                     role="admin")
+            token, _e, _c = self._oauth_login(conn, {
+                "workos_user_id": "w-boss", "email": "boss@foap.test",
+                "first_name": "B", "last_name": "", "avatar_url": "",
+                "verified": True, "provider": "google"})
+            conn.close()
+            httpd, thread, port = self._serve(db)
+            try:
+                base = "http://127.0.0.1:%d" % port
+                admin = "ci_session=" + token
+                code, _h, body = self._call(
+                    base, "/api/admin/employees/%s/revoke" % boss["id"],
+                    {}, cookie=admin)
+                self.assertEqual(code, 409)
+                self.assertIn("admin", body["error"].lower())
+            finally:
+                httpd.shutdown()
+                httpd.server_close()
+                thread.join(timeout=10)
+        finally:
+            os.unlink(db)
+
+
+
+class HttpAuthTest(AuthCase, HttpHelpers):
+    def test_fresh_db_denies_anonymous(self):
+        # Zero employees: every data API still requires login.
         db = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
         try:
             self._open(db)
             httpd, thread, port = self._serve(db)
             try:
                 base = "http://127.0.0.1:%d" % port
-                code, _h, _b = self._call(base, "/api/campaigns")
+                for path in ("/api/campaigns", "/api/benchmarks",
+                             "/api/admin/employees"):
+                    code, _h, body = self._call(base, path)
+                    self.assertIn(code, (401, 403))
+                    self.assertIn(body.get("gate"), ("login", "pending",
+                                                     "forbidden"))
+                code, _h, body = self._call(base, "/api/health")
                 self.assertEqual(code, 200)
             finally:
                 httpd.shutdown()
@@ -425,6 +512,24 @@ class HttpAuthTest(AuthCase):
                 thread.join(timeout=10)
         finally:
             os.unlink(db)
+
+    def test_bootstrap_from_zero_employees(self):
+        # Fresh DB + configured admin email: first OAuth login mints
+        # the first (admin) employee; anyone else stays pending.
+        os.environ["CREATIVE_INTEL_ADMIN_EMAIL"] = "founder@foap.test"
+        conn = _conn()
+        try:
+            token, emp, created = self._oauth_login(conn, {
+                "workos_user_id": "w-root", "email": "founder@foap.test",
+                "first_name": "F", "last_name": "", "avatar_url": "",
+                "verified": True, "provider": "google"})
+            self.assertTrue(created)
+            self.assertEqual((emp["role"], emp["status"]),
+                             ("admin", "active"))
+            _emp, gate = auth.authorize(conn, token)
+            self.assertEqual(gate, "app")
+        finally:
+            conn.close()
 
     def test_pending_cannot_touch_data(self):
         # Goal items 9 + 18 (frontend flags can't bypass the backend).

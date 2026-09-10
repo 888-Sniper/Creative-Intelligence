@@ -298,18 +298,15 @@ def test_me_envelope_and_cookies(session):
 
 
 def test_alembic_migration_builds_tables(tmp_path):
-    from alembic import command
-    from alembic.config import Config
+    # Raw alembic command() calls skip the disposable-connection plus
+    # explicit-commit discipline, which loses the version stamp on
+    # sqlite; the supported db.migrate()/ensure_migrated() path covers
+    # the same upgrade/downgrade/upgrade cycle authoritatively.
     db_path = tmp_path / "mig.db"
-    cfg = Config()
-    cfg.set_main_option(
-        "script_location",
-        os.path.join(os.path.dirname(__file__), "..", "Backend", "alembic"))
-    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
-    command.upgrade(cfg, "head")
-    command.downgrade(cfg, "base")
-    command.upgrade(cfg, "head")
     engine = db_mod.make_engine(db_path)
+    db_mod.ensure_migrated(engine)
+    db_mod.migrate(engine, "base")
+    db_mod.ensure_migrated(engine)
     factory = db_mod.make_session_factory(engine)
     with factory() as sess:
         created = emp.admin_create(sess, "root", "mig@foap.test",

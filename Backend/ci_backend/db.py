@@ -9,7 +9,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from sqlalchemy import Index, String, Text, create_engine, event
+from sqlalchemy import (CheckConstraint, ForeignKey, Index, String, Text,
+                     create_engine, event)
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 
@@ -37,6 +38,11 @@ class Employee(Base):
     __table_args__ = (
         Index("employees_workos_uid", "workos_user_id", unique=True),
         Index("employees_email", "email", unique=True),
+        CheckConstraint("role IN ('admin', 'employee')",
+                        name="ck_employees_role"),
+        CheckConstraint(
+            "status IN ('pending', 'active', 'suspended', 'revoked')",
+            name="ck_employees_status"),
     )
 
 
@@ -44,7 +50,8 @@ class AuthSession(Base):
     __tablename__ = "auth_sessions"
 
     token_hash: Mapped[str] = mapped_column(String, primary_key=True)
-    employee_id: Mapped[str] = mapped_column(String, default="")
+    employee_id: Mapped[str] = mapped_column(
+        String, ForeignKey("employees.id"), default="")
     workos_user_id: Mapped[str] = mapped_column(String, default="")
     created_at: Mapped[str] = mapped_column(String, default="")
     last_seen_at: Mapped[str] = mapped_column(String, default="")
@@ -63,8 +70,12 @@ class AuthPending(Base):
 class EmployeeAudit(Base):
     __tablename__ = "employee_audit"
 
+    # target_id references employees (history is never rewritten); note
+    # there is deliberately NO foreign key on admin_id, which also
+    # carries bootstrap/test markers such as "root" by design.
     id: Mapped[str] = mapped_column(String, primary_key=True)
-    target_id: Mapped[str] = mapped_column(String, default="")
+    target_id: Mapped[str] = mapped_column(
+        String, ForeignKey("employees.id"), default="")
     admin_id: Mapped[str] = mapped_column(String, default="")
     action: Mapped[str] = mapped_column(String, default="")
     prev_value: Mapped[str] = mapped_column(String, default="")
@@ -96,6 +107,97 @@ def make_session_factory(engine):
 def init_db(engine) -> None:
     """Create missing auth tables. Safe to call repeatedly (tests + boot)."""
     Base.metadata.create_all(engine)
+
+
+def alembic_script_location() -> str:
+    from pathlib import Path as _Path
+    return str(_Path(__file__).resolve().parent.parent / "alembic")
+
+
+def ensure_migrated(engine) -> None:
+    """Bring identity tables to Alembic head (authoritative path).
+
+    Fresh databases upgrade from scratch. Databases created by the
+    legacy create_all path carry the 0001 shape, so they are stamped
+    0001 first and then upgraded — never rebuilt, never wiped.
+    """
+    from sqlalchemy import inspect as _inspect
+    from alembic.config import Config as _Config
+    from alembic import command as _command
+    from alembic.migration import MigrationContext as _MigrationContext
+    cfg = _Config()
+    cfg.set_main_option("script_location", alembic_script_location())
+    with engine.connect() as conn:
+        ctx = _MigrationContext.configure(conn)
+        heads = ctx.get_current_heads()
+        legacy = _inspect(conn).has_table("employees")
+    if heads:
+        return
+    # Migrations run on a disposable engine: the FK enforcement
+    # window in env.py must never touch pooled connections, and the
+    # explicit commit persists DML (pysqlite autocommits DDL but
+    # would roll back an uncommitted version stamp on close).
+    from sqlalchemy import create_engine as _create_engine
+    migrant = _create_engine("sqlite:///%s" % engine.url.database,
+                             future=True)
+    try:
+        with migrant.connect() as conn:
+            cfg.attributes["connection"] = conn
+            if legacy:
+                _command.stamp(cfg, "0001")
+            _command.upgrade(cfg, "head")
+            conn.commit()
+    finally:
+        migrant.dispose()
+
+
+def migrate(engine, revision: str) -> None:
+    """Move identity tables to an explicit revision (tests/ops).
+
+    Same disposable-connection discipline as ensure_migrated.
+    """
+    from sqlalchemy import create_engine as _create_engine
+    from alembic.config import Config as _Config
+    from alembic import command as _command
+    cfg = _Config()
+    cfg.set_main_option("script_location", alembic_script_location())
+    migrant = _create_engine("sqlite:///%s" % engine.url.database,
+                             future=True)
+    try:
+        with migrant.connect() as conn:
+            cfg.attributes["connection"] = conn
+            if revision == "base":
+                _command.downgrade(cfg, "base")
+            elif revision.startswith("-") or ":" in revision:
+                raise ValueError("unsupported revision %r" % (revision,))
+            elif _is_downgrade(engine, revision):
+                _command.downgrade(cfg, revision)
+            else:
+                _command.upgrade(cfg, revision)
+            conn.commit()
+    finally:
+        migrant.dispose()
+
+
+def _is_downgrade(engine, revision: str) -> bool:
+    from alembic.script import ScriptDirectory as _ScriptDirectory
+    from alembic.config import Config as _Config
+    from alembic.migration import MigrationContext as _MigrationContext
+    cfg = _Config()
+    cfg.set_main_option("script_location", alembic_script_location())
+    script = _ScriptDirectory.from_config(cfg)
+    order = [r.revision for r in script.walk_revisions()]
+    with engine.connect() as conn:
+        ctx = _MigrationContext.configure(conn)
+        heads = ctx.get_current_heads()
+    if not heads:
+        return False
+    try:
+        # walk_revisions() yields head-first, so a downgrade target
+        # sits LATER in the order than the current head.
+        return order.index(revision) > order.index(heads[0])
+    except ValueError:
+        return False
 
 
 def session_scope(factory) -> Session:

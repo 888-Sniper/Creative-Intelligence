@@ -17,13 +17,13 @@ from fastapi import Depends, HTTPException, Request  # noqa: E402
 
 from ci_backend import employees as emp  # noqa: E402
 from ci_backend.config import Settings  # noqa: E402
-from ci_backend.db import init_db, make_engine, make_session_factory  # noqa: E402
+from ci_backend.db import ensure_migrated, make_engine, make_session_factory  # noqa: E402
 
 
 def bind_database(app, db_path: str):
     """Attach engine + factories to the app. Called once at startup."""
     engine = make_engine(db_path)
-    init_db(engine)
+    ensure_migrated(engine)
     app.state.ci_engine = engine
     app.state.ci_sessions = make_session_factory(engine)
     app.state.ci_db_path = str(db_path)

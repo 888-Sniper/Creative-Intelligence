@@ -559,6 +559,8 @@ def test_frontend_gates():
     assert "Admin" in html and "Employees" in html
     assert "Profile" in html and "profile-save" in html
     assert "/api/auth/me/avatar" in html and "pref-dark" in html
+    assert "retention-playhead" in html and "ontimeupdate" in html
+    assert "cmp-creative-rank" in html and "Attributes side-by-side" in html
     for secret in ("CREATIVE_INTEL_KEY_WORKOS", "sk-live", "sk_test"):
         assert secret not in html
     assert "localStorage" not in html

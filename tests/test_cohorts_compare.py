@@ -36,6 +36,37 @@ def fresh_db():
     return conn
 
 
+class CohortScopeTest(unittest.TestCase):
+    SCOPE_CSV = ("Campaign,Ad Name,Creative Name,Amount Spent,Impressions,"
+                 "Link Clicks,Conversions,Vertical,Market,Funnel Stage,Date\n"
+                 "C1,A1,hook-a,100,10000,200,10,Beauty,Spain,lower,2026-08-01\n"
+                 "C1,A2,hook-b,100,10000,200,10,Beauty,Spain,lower,2026-08-02\n"
+                 "C2,A3,hook-c,100,10000,200,10,Beauty,Spain,lower,2026-08-03\n")
+
+    def _db(self):
+        conn = fresh_db()
+        ingest.insert_rows(
+            conn, ingest.parse_csv(self.SCOPE_CSV, "meta", "upload"))
+        return conn
+
+    def test_build_copies_campaign_and_dates(self):
+        from ci_backend import actions as server
+        conn = self._db()
+        try:
+            got = server.expert2_cohort_build_route(conn, {
+                "metric": ["cpa"], "campaign": ["C1"],
+                "date_from": ["2026-08-02"], "date_to": ["2026-08-02"]})
+            self.assertEqual(got["filters"]["campaign"], ["C1"])
+            self.assertEqual(got["filters"]["date_from"], "2026-08-02")
+            self.assertEqual(got["filters"]["date_to"], "2026-08-02")
+            self.assertEqual(got["n_ads"], 1)
+            all_rows = server.expert2_cohort_build_route(
+                conn, {"metric": ["cpa"]})
+            self.assertEqual(all_rows["n_ads"], 3)
+        finally:
+            conn.close()
+
+
 class RevenueProvenanceTest(unittest.TestCase):
     REV = ("Campaign,Ad Name,Creative Name,Amount Spent,Impressions,"
            "Link Clicks,Conversions,Revenue\n"

@@ -1016,6 +1016,55 @@ class MultiCompareTest(unittest.TestCase):
         self.assertIn("top", pair["why"])
         self.assertIn("differences", pair["why"])
 
+    def test_rank_creatives_follows_direction(self):
+        per = {"x": {"cpa": 10.0, "ctr": 0.01, "roas": None},
+               "y": {"cpa": 5.0, "ctr": 0.03, "roas": None},
+               "z": {"cpa": None, "ctr": None, "roas": None}}
+        ranking, winner = server._rank_creatives(["x", "y", "z"], per, "cpa")
+        self.assertEqual((ranking, winner), (["y", "x", "z"], "y"))
+        ranking, winner = server._rank_creatives(["x", "y", "z"], per, "ctr")
+        self.assertEqual((ranking, winner), (["y", "x", "z"], "y"))
+        # Missing never converts to zero: z ranks last, never first.
+        ranking, winner = server._rank_creatives(["z", "x"], per, "cpa")
+        self.assertEqual(winner, "x")
+        ranking, winner = server._rank_creatives(
+            ["z"], {"z": {"cpa": None}}, "cpa")
+        self.assertIsNone(winner)
+        with self.assertRaises(ValueError):
+            server.build_compare(self.conn, {"rank_by": ["nonsense"]})
+
+    def test_attribute_table_side_by_side(self):
+        table = server._attribute_table({
+            "x": {"hook_type": "question", "hook_modality": "spoken",
+                  "creator_vs_branded": "creator", "edit_style": "ugc",
+                  "duration_s": 30.0, "product_seconds": [{"start_s": 2.0}],
+                  "brand_seconds": [], "logo_seconds": [],
+                  "brand_audio_mention_s": 5.0, "cta": "buy now",
+                  "supers": ["50% off"], "pace_cuts_per_min": 12.0,
+                  "structure": {"voiceover": {"start_s": 0.0, "end_s": 3.0}},
+                  "status": "human_verified"},
+            "y": None})
+        by_label = {row["attribute"]: row["values"] for row in table}
+        self.assertEqual(len(table), 15)
+        self.assertEqual(by_label["Hook type"], {"x": "question", "y": None})
+        self.assertEqual(by_label["Product first appears (s)"],
+                         {"x": 2.0, "y": None})
+        self.assertEqual(by_label["Brand first appears (s)"],
+                         {"x": None, "y": None})
+        self.assertEqual(by_label["Voiceover"], {"x": "set", "y": None})
+        self.assertEqual(by_label["Verification status"],
+                         {"x": "human_verified", "y": None})
+
+    def test_route_accepts_rank_by(self):
+        got = _fetch("/api/compare?key=shared-creative&key=spain-only"
+                     "&rank_by=ctr")
+        self.assertEqual(got["rank_by"], "ctr")
+        self.assertIn("ranking", got)
+        self.assertIn("winner", got)
+        self.assertEqual(len(got["attributes"]), 15)
+        r = _test_port().get("/api/compare?key=shared-creative&rank_by=nope")
+        self.assertEqual(r.status_code, 409)
+
     def test_route_rejects_seventh_key(self):
         query = "&".join("key=k%d" % i for i in range(7))
         r = _test_port().get("/api/compare?" + query)

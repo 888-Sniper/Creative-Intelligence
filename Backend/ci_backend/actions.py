@@ -495,7 +495,9 @@ def build_creatives_list(conn, q):
             "ctr": round(clicks / impr, 4) if impr else None,
             "cpc": round(spend / clicks, 2) if clicks else None,
             "cpa": round(spend / conv, 2) if conv else None,
-            "roas": round(rev / spend, 4) if spend else None}
+            "roas": benchmarks.roas_of(
+                rev, spend,
+                any(v.get("revenue_reported") for v in agg_rows))}
         r["scope"] = scope.describe()
         ann = conn.execute(
             "SELECT annotation_json FROM annotations WHERE creative_key=?",
@@ -505,9 +507,80 @@ def build_creatives_list(conn, q):
     return kept
 
 
+COMPARE_RANK_METRICS = ("cpm", "vtr", "ctr", "cpc", "cpa", "roas")
+
+COMPARE_RANK_DIRECTIONS = {"cpm": "lower", "vtr": "higher", "ctr": "higher",
+                           "cpc": "lower", "cpa": "lower", "roas": "higher"}
+
+
+def _attribute_table(anns):
+    """Side-by-side creative attributes (None == not annotated).
+
+    Mirrors the why-analysis inputs so the table and the narrative
+    can never disagree about what was observed.
+    """
+    rows = []
+    for label, get in (
+            ("Hook type", lambda a: a.get("hook_type")),
+            ("Hook modality", lambda a: a.get("hook_modality")),
+            ("Creator vs branded", lambda a: a.get("creator_vs_branded")),
+            ("Edit style", lambda a: a.get("edit_style")),
+            ("Duration (s)", lambda a: a.get("duration_s")),
+            ("Product first appears (s)",
+             lambda a: _span_start(a, "product_seconds")),
+            ("Brand first appears (s)",
+             lambda a: _span_start(a, "brand_seconds")),
+            ("Logo first appears (s)",
+             lambda a: _span_start(a, "logo_seconds")),
+            ("Audible brand mention (s)",
+             lambda a: a.get("brand_audio_mention_s")),
+            ("CTA", lambda a: (a.get("cta")
+                               or (_slot_set(a, "cta") and "set") or None)),
+            ("Supers", lambda a: a.get("supers") or None),
+            ("Voiceover", lambda a: ("set" if _slot_set(a, "voiceover")
+                                     else None)),
+            ("Pace (cuts/min)", lambda a: a.get("pace_cuts_per_min")),
+            ("Structure", lambda a: ", ".join(
+                sorted(s for s in ((a.get("structure") or {}).keys())
+                       if _slot_set(a, s))) or None),
+            ("Verification status", lambda a: a.get("status"))):
+        values = {}
+        for key, ann in anns.items():
+            try:
+                values[key] = get(ann or {}) if ann else None
+            except Exception:
+                values[key] = None
+        rows.append({"attribute": label, "values": values})
+    return rows
+
+
+def _rank_creatives(keys, per, rank_by):
+    """Rank creative keys by rank_by (None always ranks last).
+
+    Returns (ranking, winner); winner is None when every candidate's
+    KPI is uncomputable. Never converts missing values to zero.
+    """
+    higher = COMPARE_RANK_DIRECTIONS[rank_by] == "higher"
+
+    def _key(key):
+        value = per.get(key, {}).get(rank_by)
+        if value is None:
+            return (1, 0.0)
+        return (0, -value if higher else value)
+
+    ranking = sorted(keys, key=_key)
+    if all(per.get(key, {}).get(rank_by) is None for key in ranking):
+        return ranking, None
+    return ranking, ranking[0]
+
+
 def build_compare(conn, q):
     """N-way creative compare with why-analysis (shared)."""
     from creative_intel import benchmarks as _bench2
+    rank_by = (q.get("rank_by", ["cpa"])[0] or "cpa").lower()
+    if rank_by not in COMPARE_RANK_METRICS:
+        raise ValueError("rank_by must be one of %s"
+                         % list(COMPARE_RANK_METRICS))
     legacy = [q.get("a", [""])[0], q.get("b", [""])[0]]
     keys = [k for k in q.get("key", []) if k]
     if not keys:
@@ -562,7 +635,14 @@ def build_compare(conn, q):
     else:
         out["why"] = _multi_why(
             keys, {k: out.get(k, {}) for k in keys})
+    ranking, winner = _rank_creatives(
+        keys, {k: out.get(k, {}) for k in keys}, rank_by)
     out["keys"] = keys
+    out["rank_by"] = rank_by
+    out["ranking"] = ranking
+    out["winner"] = winner
+    out["attributes"] = _attribute_table(
+        {k: (out.get(k, {}) or {}).get("annotation") for k in keys})
     out["scope"] = scope.describe()
     return out
 
@@ -634,8 +714,12 @@ def expert2_cohort_build_route(conn, query):
         return _cohorts.build_cohort(conn, cohort_id=cohort_id, metric=metric)
     if query.get("name", [""])[0]:
         return _cohorts.build_cohort(conn, name=query["name"][0], metric=metric)
+    # The whole active scope is copied: every filter-bar axis the
+    # benchmarks understand, including campaign, exact date and the
+    # date range. Include/exclude project lists override afterwards.
     filt = {}
-    for key in ("vertical", "platform", "funnel", "objective", "market", "client"):
+    for key in ("vertical", "platform", "funnel", "objective", "market",
+                "client", "campaign", "date", "date_from", "date_to"):
         vals = _csv_param(query.get(key, [""])[0]) if key in query else []
         if vals:
             filt[key] = vals

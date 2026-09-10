@@ -244,6 +244,7 @@ ul.plain li{padding:6px 0;border-bottom:1px solid var(--line)}
 <section class="view" id="v-compare"><h1 class="page-title">Compare</h1><p class="page-sub">Two modes: creatives side-by-side, or campaigns ranked with why-analysis.</p>
 <div class="card"><input id="cmp-a" placeholder="creative A key"> <input id="cmp-b" placeholder="creative B key">
 <input id="cmp-extra" placeholder="more keys, comma-separated (up to 4 more)" style="width:60%">
+<label>Rank by <select id="cmp-creative-rank"><option value="cpa">CPA</option><option value="cpm">CPM</option><option value="vtr">VTR</option><option value="ctr">CTR</option><option value="cpc">CPC</option><option value="roas">ROAS</option></select></label>
 <button class="action" id="cmp-go">Compare creatives</button>
 <div class="muted" style="font-size:12px">GET /api/compare — 2 to 6 creatives, side by side with per-metric leaders. Every side is computed over the current top filter bar scope.</div></div>
 <div class="card"><h3>Campaign compare</h3>
@@ -617,7 +618,8 @@ $("cmp-go").onclick=async()=>{try{
   const keys=[$("cmp-a").value.trim(),$("cmp-b").value.trim(),...$("cmp-extra").value.split(",").map(s=>s.trim()).filter(Boolean)];
   const seen=[...new Set(keys.filter(Boolean))].slice(0,6);
   if(seen.length<2){$("cmp-out").innerHTML='<p class="muted">Enter at least two creative keys (up to six).</p>';return;}
-  const r=await api("GET","/api/compare?"+seen.map(k=>"key="+encodeURIComponent(k)).join("&"));
+  const rank=$("cmp-creative-rank").value;
+  const r=await api("GET","/api/compare?"+seen.map(k=>"key="+encodeURIComponent(k)).join("&")+"&rank_by="+encodeURIComponent(rank));
   render_compare(r,seen);
 }catch(e){$("cmp-out").innerHTML=`<p class="muted">${esc(e.message)}</p>`;}};
 $("cmp-camp-go").onclick=async()=>{try{
@@ -891,7 +893,34 @@ async function load_retention(key){
       const v=document.querySelector("#creative-video");
       if(v&&Number.isFinite(Number(btn.dataset.seek))){try{v.currentTime=Number(btn.dataset.seek);}catch(e){}}
     });
+    attach_retention_playhead(curve);
   }catch(e){box.innerHTML=`<span class="muted">${esc(e.message)}</span>`;}
+}
+function attach_retention_playhead(curve){
+  // Reverse playback sync: while the video plays, the playhead line
+  // on the retention graph follows video.currentTime. Click-to-seek
+  // (graph -> video) keeps working alongside it.
+  const v=document.querySelector("#creative-video");
+  const head=document.querySelector("#retention-playhead");
+  const label=document.querySelector("#retention-playhead-label");
+  const svg=document.querySelector("#retention-svg");
+  if(!v||!head||!label||!svg)return;
+  const pts=curve&&Array.isArray(curve.points)?curve.points:[];
+  const max_t=Number(svg.dataset.maxT)||1;
+  const X=t=>44+Math.min(Math.max(Number(t)||0,0),max_t)/max_t*508;
+  const at=t=>{
+    let best=null;
+    pts.forEach(p=>{const dt=Math.abs(Number(p.t)-t);if(best==null||dt<best.dt)best={dt:dt,p:Number(p.p)};});
+    return best?best.p:null;
+  };
+  v.ontimeupdate=()=>{
+    const t=Number(v.currentTime)||0;
+    head.setAttribute("x1",X(t));head.setAttribute("x2",X(t));
+    head.style.visibility="visible";
+    const pct=at(t);
+    label.setAttribute("x",Math.min(X(t)+4,540));
+    label.textContent=t.toFixed(1)+"s"+(pct==null?"":" · "+pct+"%");
+  };
 }
 function audio_timing_txt(a){
   const tw=Array.isArray(a.transcript_words)?a.transcript_words:[];
@@ -934,7 +963,7 @@ function retention_curve(curve,evs){
   let drops="";
   (evs||[]).forEach(e=>{drops+=`<rect x="${X(Number(e.start_s)||0)}" y="${MT}" width="${Math.max(3,X(Number(e.end_s)||0)-X(Number(e.start_s)||0))}" height="${PH}" fill="#C0362C" opacity="0.16" style="cursor:pointer" data-seek="${esc(String(e.seek_s??0))}"><title>Drop −${esc(String(e.drop_pts))} pts (${esc(String(e.start_s))}–${esc(String(e.end_s))}s) — click to seek</title></rect>`;});
   const dots=pts.map(p=>`<circle cx="${X(Number(p.t))}" cy="${Y(Number(p.p))}" r="2.5" style="fill:var(--foap-primary)"><title>${esc(String(p.t))}s — ${esc(String(p.p))}%</title></circle>`).join("");
-  return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Retention percentage over time"><title>Retention % vs time from /api/retention/curve; shaded bands are detected drop windows (click to seek)</title>${grid}${ticks}${marks}<polyline points="${line}" fill="none" stroke-width="2" style="stroke:var(--foap-primary)"/>${dots}${drops}</svg>`
+  return `<svg id="retention-svg" data-max-t="${max_t}" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Retention percentage over time"><title>Retention % vs time from /api/retention/curve; shaded bands are detected drop windows (click to seek)</title>${grid}${ticks}${marks}<polyline points="${line}" fill="none" stroke-width="2" style="stroke:var(--foap-primary)"/>${dots}${drops}<line id="retention-playhead" x1="${ML}" y1="${MT}" x2="${ML}" y2="${MT+PH}" stroke="#17211F" stroke-width="2" style="visibility:hidden"/><text id="retention-playhead-label" x="${ML+4}" y="${MT+12}" font-size="11" font-weight="700" fill="#17211F"></text></svg>`
     +'<p class="muted" style="font-size:12px">Curve: retention % over time. Teal band = hook window. Dashed lines = first product / brand / CTA. Red bands = detected drops (click to seek the video).</p>';
 }
 function retention_drops(evs){
@@ -988,8 +1017,14 @@ function render_compare(r,keys){
   const why=((r&&r.why&&r.why.differences)||[]).map(d=>`<li>${esc(d)}</li>`).join("");
   const top=(r&&r.why&&r.why.top)||null;
   const head=top?(arr.length>2?`${esc(top)} leads the comparison`:`Why ${esc(top)} won`):"Insufficient data / no winner";
+  const rank_by=(r&&r.rank_by)||"cpa";
+  const rank_line=(r&&r.winner)?`Winner by ${esc(rank_by.toUpperCase())}: ${esc(r.winner)} — order: ${arr.map(k=>esc(k)).join(" · ")}`:"No winner: the selected KPI is unmeasurable for every side.";
+  const attrs=Array.isArray(r&&r.attributes)?r.attributes:[];
+  const attr_table=attrs.length?(`<div class="card"><h4>Attributes side-by-side</h4><table><tr><th>Attribute</th>${arr.map(k=>`<th>${esc(k||"(empty)")}</th>`).join("")}</tr>`
+    +attrs.map(row=>`<tr><th>${esc(row.attribute)}</th>${arr.map(k=>`<td>${esc(String((row.values||{})[k]??"—"))}</td>`).join("")}</tr>`).join("")+"</table></div>"):"";
   $("cmp-out").innerHTML=`<div class="cmp-grid">${arr.map(k=>card(k)).join("")}</div>`
-    +`<div class="insight-panel"><h4>${head}</h4><p class="muted" style="font-size:12px">Scope: ${esc(scope)}</p><ul class="plain">${why||"<li>—</li>"}</ul></div>`;
+    +`<div class="insight-panel"><h4>${head}</h4><p class="muted" style="font-size:12px">Scope: ${esc(scope)} · Ranked by ${esc(rank_by.toUpperCase())}</p><p>${esc(rank_line)}</p><ul class="plain">${why||"<li>—</li>"}</ul></div>`
+    +attr_table;
 }
 async function bench(){try{
   const b=await api("GET","/api/benchmarks?group_by="+encodeURIComponent($("gb").value));
@@ -1002,7 +1037,7 @@ async function bench(){try{
 }catch(e){$("bench-out").textContent=e.message;}}
 function cohort_filters_from_ui(){
   const f=active_filters();const out={};
-  ["platform","vertical","market","funnel","objective","client"].forEach(k=>{if(f[k]&&f[k]!=="all")out[k]=[f[k]];});
+  ["platform","vertical","market","funnel","objective","client","project","campaign","date","date_from","date_to"].forEach(k=>{if(f[k]&&f[k]!=="all")out[k]=[f[k]];});
   const inc=$("bb-include").value.split(",").map(s=>s.trim()).filter(Boolean);
   const exc=$("bb-exclude").value.split(",").map(s=>s.trim()).filter(Boolean);
   if(inc.length)out.include_projects=inc;

@@ -17,8 +17,10 @@ Creative Intelligence/
 ├── docs/
 │   ├── Architecture.md
 │   └── PROVIDERS.md           # provider mirror (cf. Nextly AI docs/PROVIDERS.md)
-├── Backend/                   # stdlib-only Python (sqlite3 + http.server)
-│   └── creative_intel/        # importable package
+├── Backend/                   # FastAPI service (Nextly-aligned stack)
+│   ├── ci_backend/            # app, routers, SQLAlchemy store, WorkOS client
+│   ├── alembic/               # employee-access migrations
+│   └── creative_intel/        # importable analytics library
 ├── Source/                    # analysis library: adapters, benchmarks,
 │                              # creative analysis, Q&A, reports, dashboard,
 │                              # providers, deck export + self_check suite
@@ -27,22 +29,28 @@ Creative Intelligence/
 ├── Web/
 │   └── Index.html             # Main / Campaign / Creative / Compare / Benchmark views
 ├── fixtures/                  # sample CSVs (Title Case file names)
-└── tests/                     # unittest suite (stdlib only)
+├── pyproject.toml             # Nextly-aligned dependencies + pytest config
+└── tests/                     # pytest suite (unittest files run under both)
 ```
 
-## Quickstart (no dependencies, no secrets)
+## Quickstart
 
 ```bash
 cd "/Users/simrandhillon/University Studies/Creative Intelligence"
-python3 -m unittest discover -s tests -v          # run tests
+python3 -m pip install "fastapi>=0.115" "uvicorn[standard]>=0.32" \
+  "pydantic>=2.10" "pydantic-settings>=2.6" "sqlalchemy>=2.0" \
+  "alembic>=1.14" "httpx>=0.28" "python-multipart>=0.0.12" \
+  "keyring>=25.0" "pytest>=8.3" "pytest-asyncio>=0.24"
+python3 -m pytest tests/ -q                        # full suite (Nextly stack)
+python3 -m unittest discover -s tests              # legacy runner (same tests)
 python3 Source/self_check.py                      # analysis-library checks
-python3 Backend/server.py --db Data/local.db      # serve UI + API on 127.0.0.1:4321
+python3 Backend/ci_backend/main.py --db Data/local.db   # serve on 127.0.0.1:4321
 ```
 
 Open `http://127.0.0.1:4321`. Fixture load + replay:
 
 ```bash
-python3 Backend/server.py --load-fixture --db Data/local.db
+python3 Backend/ci_backend/main.py --load-fixture --db Data/local.db
 curl -X POST http://127.0.0.1:4321/api/replay/run
 ```
 

@@ -1,7 +1,9 @@
 name: CI
 
-# Independent gate for main: the full local suite (stdlib only,
-# no secrets, no network) must pass on every push and pull request.
+# Independent gate for main: dependency install, the full pytest suite
+# (Nextly-aligned stack, no secrets, no network), the legacy unittest
+# runner, and the analysis-library self checks must pass on every push
+# and pull request.
 on:
   push:
     branches: [main]
@@ -15,7 +17,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - name: Unit tests (stdlib unittest, no dependencies)
+      - name: Install dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install "fastapi>=0.115" "uvicorn[standard]>=0.32" \
+            "pydantic>=2.10" "pydantic-settings>=2.6" "sqlalchemy>=2.0" \
+            "alembic>=1.14" "httpx>=0.28" "python-multipart>=0.0.12" \
+            "keyring>=25.0" "pytest>=8.3" "pytest-asyncio>=0.24"
+      - name: Pytest suite (FastAPI + SQLAlchemy + httpx)
+        run: python3 -m pytest tests/ -q
+      - name: Legacy unittest runner
         run: python3 -m unittest discover -s tests
       - name: Analysis-library self checks
         run: python3 Source/self_check.py

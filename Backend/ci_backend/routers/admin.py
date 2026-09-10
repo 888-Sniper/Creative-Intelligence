@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from ci_backend import employees as emp
+from ci_backend import security_log
 from ci_backend.deps import (
     admin_rate_limit,
     get_current_admin,
@@ -89,6 +90,9 @@ def revoke_employee_sessions(employee_id: str, request: Request,
         count = emp.revoke_all_sessions(db, admin.id, unquote(employee_id))
     except emp.StoreError as exc:
         raise HTTPException(status_code=404, detail={"error": str(exc)})
+    security_log.event("session_revocation", actor=admin.id,
+                       target=unquote(employee_id),
+                       detail="%d session(s) revoked by admin" % count)
     return {"ok": True, "revoked": count}
 
 
@@ -121,10 +125,16 @@ async def employee_action(employee_id: str, verb: str, request: Request,
             status, action = _MOVES[verb]
             employee = emp.admin_set_status(
                 db, admin.id, target, status, action)
+            security_log.event("employee_status_change", actor=admin.id,
+                               target=target,
+                               detail="status=%s" % status)
         elif verb == "role":
             body = _validated(RoleChange, raw)
             employee = emp.admin_set_role(
                 db, admin.id, target, body.role)
+            security_log.event("role_change", actor=admin.id,
+                               target=target,
+                               detail="role=%s" % body.role)
         else:
             raise HTTPException(status_code=404,
                                 detail={"error": "not found"})

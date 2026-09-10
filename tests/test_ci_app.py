@@ -385,6 +385,35 @@ def test_sync_job_admin_api(tmp_path, monkeypatch):
     assert [j["name"] for j in http.get("/api/sync/jobs").json()["jobs"]] == ["B"]
 
 
+def test_security_log_emits_no_secrets(tmp_path, monkeypatch, caplog):
+    import logging
+    caplog.set_level(logging.INFO, logger="creative_intel.security")
+    http, _db = make_client(tmp_path, admin_email="boss@foap.test")
+    oauth_login(http, monkeypatch, dict(IDENT, id="w-boss",
+                                        email="boss@foap.test"))
+    newcomer = dict(IDENT, id="w-new", email="new@foap.test")
+    stub_exchange(monkeypatch, newcomer)
+    http2 = TestClient(http.app, raise_server_exceptions=False)
+    r = http2.post("/api/auth/oauth/start", json={"provider": "google"})
+    http2.post("/api/auth/oauth/finish",
+               json={"code": "auth_code", "state": r.json()["state"]})
+    staff = http.get("/api/admin/employees").json()["employees"]
+    target = next(e for e in staff if e["email"] == "new@foap.test")
+    assert http.post("/api/admin/employees/%s/approve" % target["id"],
+                     json={}).status_code == 200
+    assert http.post("/api/admin/employees/%s/suspend" % target["id"],
+                     json={}).status_code == 200
+    http.post("/api/auth/logout", json={})
+    text = caplog.text
+    assert "login_success" in text
+    assert "employee_status_change" in text
+    assert "logout" in text
+    for secret in ("auth_code", "secret-workos-key", "ci_session="):
+        assert secret not in text
+    # Session tokens live only in Set-Cookie, never in log lines.
+    assert "action=login_success" in text
+
+
 def test_oversize_body_rejected(tmp_path, monkeypatch):
     from ci_backend.config import Settings
     from ci_backend.app import create_app

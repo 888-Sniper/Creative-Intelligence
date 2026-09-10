@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from starlette.datastructures import UploadFile
 
 from ci_backend import employees as emp
+from ci_backend import security_log
 from ci_backend.actions import _media_dir
 from ci_backend import oauth as oauth_mod
 from ci_backend import workos as workos_mod
@@ -175,6 +176,10 @@ def callback(request: Request, db=Depends(get_db),
         identity = oauth_mod.finish_oauth(db, code, state, settings)
         token, _employee, _created = emp.login_identity(
             db, identity, settings)
+        security_log.event("login_success", target=_employee.id,
+                           detail="oauth callback gate=%s" % (
+                               "app" if _employee.status == "active"
+                               else _employee.status))
     except (emp.StoreError, emp.Denied, HTTPException) as exc:
         from urllib.parse import quote
         detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
@@ -216,8 +221,11 @@ async def oauth_finish(request: Request, db=Depends(get_db),
             db, body.get("code", ""), body.get("state", ""), settings)
         token, employee, _created = emp.login_identity(
             db, identity, settings)
+        security_log.event("login_success", target=employee.id,
+                           detail="oauth finish")
     except (emp.StoreError, emp.Denied,
             workos_mod.WorkOSError) as exc:
+        security_log.event("login_failure", detail="oauth finish")
         raise HTTPException(status_code=409, detail={"error": str(exc)})
     gate = "app" if employee.status == "active" else employee.status
     response = _issue({"ok": True, "gate": gate,
@@ -303,7 +311,11 @@ async def password_reset(request: Request, settings: Settings = Depends(get_sett
 @router.post("/logout")
 def logout(request: Request, db=Depends(get_db),
            settings: Settings = Depends(get_settings)):
-    emp.destroy_session(db, bearer_token(request))
+    token = bearer_token(request)
+    known = emp.valid_session(db, token) is not None
+    emp.destroy_session(db, token)
+    if known:
+        security_log.event("logout")
     return _issue({"ok": True}, clear=True,
                   secure=settings.cookie_secure)
 
@@ -317,6 +329,9 @@ def revoke_own_sessions(request: Request, db=Depends(get_db),
         raise HTTPException(status_code=401, detail={
             "error": "Sign in to continue.", "gate": "login"})
     count = emp.revoke_all_sessions(db, caller.id, caller.id)
+    security_log.event("session_revocation", actor=caller.id,
+                       target=caller.id,
+                       detail="%d session(s) self-revoked" % count)
     return _issue({"ok": True, "revoked": count}, clear=True,
                   secure=settings.cookie_secure)
 

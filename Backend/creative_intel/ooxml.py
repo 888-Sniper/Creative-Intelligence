@@ -147,8 +147,8 @@ _PPTX_MASTER = (
     '<p:sldLayoutIdLst><p:sldLayoutId id="2147483649" r:id="rId1"/></p:sldLayoutIdLst>'
     "<p:txStyles><p:titleStyle><a:lvl1pPr><a:defRPr sz=\"4400\" b=\"1\"><a:solidFill><a:srgbClr"
     " val=\"17211F\"/></a:solidFill></a:defRPr></a:lvl1pPr></p:titleStyle>"
-    "<p:bodyStyle><a:lvl1pPr><a:defRPr sz=\"2400\"/></a:lvl1pPr></p:bodyStyle>"
-    "<p:otherStyle><a:lvl1pPr><a:defRPr sz=\"2400\"/></a:lvl1pPr></p:otherStyle></p:txStyles>"
+    "<p:bodyStyle><a:lvl1pPr><a:defRPr sz=\"1200\"/></a:lvl1pPr></p:bodyStyle>"
+    "<p:otherStyle><a:lvl1pPr><a:defRPr sz=\"1200\"/></a:lvl1pPr></p:otherStyle></p:txStyles>"
     "</p:sldMaster>" % (DRAWING, PRESENTATION, NAMES["rels"].replace(
         "/package/2006/relationships",
         "/officeDocument/2006/relationships")))
@@ -170,7 +170,7 @@ _PPTX_LAYOUT = (
         "/officeDocument/2006/relationships")))
 
 
-def _pptx_paragraphs(title, bullets, title_size=4000):
+def _pptx_paragraphs(title, bullets, title_size=1400):
     out = ['<p:sp><p:nvSpPr><p:cNvPr id="2" name="Title"/>'
            "<p:cNvSpPr/><p:nvPr/></p:nvSpPr>"
            '<p:spPr><a:xfrm><a:off x="457200" y="274320"/>'
@@ -188,7 +188,7 @@ def _pptx_paragraphs(title, bullets, title_size=4000):
     for bullet in bullets:
         body.append('<a:p><a:pPr marL="228600" indent="-228600">'
                     '<a:buChar char="•"/></a:pPr>'
-                    '<a:r><a:rPr lang="en-US" sz="2400">'
+                    '<a:r><a:rPr lang="en-US" sz="1200">'
                     '<a:solidFill><a:srgbClr val="17211F"/></a:solidFill>'
                     "</a:rPr><a:t>%s</a:t></a:r></a:p>" % escape(str(bullet)))
     body.append("</p:txBody></p:sp>")

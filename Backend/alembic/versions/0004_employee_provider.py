@@ -12,8 +12,8 @@ depends_on = None
 
 
 def upgrade() -> None:
-    from alembic import op
     import sqlalchemy as sa
+    from alembic import op
     existing = {c["name"] for c in
                 op.get_bind().dialect.get_columns(
                     op.get_bind(), "employees")}

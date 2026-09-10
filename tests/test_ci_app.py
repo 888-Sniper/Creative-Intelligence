@@ -749,6 +749,12 @@ def test_react_build_served_when_present(client, tmp_path, monkeypatch):
 
 
 def test_react_index_carries_strict_csp(client):
+    import ci_backend.actions as actions_mod
+    if not os.path.isfile(actions_mod.react_index()) or \
+            actions_mod.react_index() == actions_mod.WEB_INDEX:
+        pytest.skip("no built React frontend: dist/ is gitignored and "
+                    "built in the frontend CI job, which covers the shell "
+                    "end to end")
     r = client.get("/")
     csp = r.headers.get("content-security-policy", "")
     # This dev tree has a built React frontend, so the strict policy

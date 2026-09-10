@@ -324,6 +324,23 @@ def test_revoke_all_sessions_self_and_admin(tmp_path, monkeypatch):
     assert r.status_code == 404
 
 
+def test_oauth_callback_replay_rejected(tmp_path, monkeypatch):
+    http, _db = make_client(tmp_path, admin_email="boss@foap.test")
+    stub_exchange(monkeypatch, dict(IDENT, id="w-boss",
+                                    email="boss@foap.test"))
+    r = http.post("/api/auth/oauth/start", json={"provider": "google"})
+    state = r.json()["state"]
+    first = http.post("/api/auth/oauth/finish",
+                      json={"code": "auth_code", "state": state})
+    assert first.status_code == 200
+    replay = http.post("/api/auth/oauth/finish",
+                       json={"code": "auth_code", "state": state})
+    assert replay.status_code == 409
+    unknown = http.post("/api/auth/oauth/finish",
+                        json={"code": "auth_code", "state": "no-such-state"})
+    assert unknown.status_code == 409
+
+
 def test_auth_rate_limit(client):
     statuses = set()
     for _i in range(35):

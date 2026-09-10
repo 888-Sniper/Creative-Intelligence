@@ -25,6 +25,13 @@ def start_oauth(db: Session, provider: str, redirect: str = "",
         raise emp.StoreError("Unknown sign-in provider.")
     if not workos_mod.workos_configured(settings):
         raise emp.StoreError("WorkOS is not configured.")
+    # Exact redirect allowlisting: the callback target must be the
+    # configured redirect URI (or empty for the default). An
+    # attacker-supplied redirect_uri is rejected instead of being
+    # forwarded to WorkOS.
+    allowed = workos_mod.redirect_uri(settings)
+    if redirect and redirect != allowed:
+        raise emp.StoreError("Unknown redirect target.")
     emp.sweep_pending(db)
     verifier, challenge = workos_mod.pkce_pair()
     state = secrets.token_urlsafe(16)

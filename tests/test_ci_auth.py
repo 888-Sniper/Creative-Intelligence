@@ -191,6 +191,68 @@ def test_audit_trail(session):
         (employee.id, "pending", "active")
 
 
+def test_oauth_redirect_allowlist(session):
+    from ci_backend import oauth as oauth_mod
+    settings = Settings(workos_client_id="client_test",
+                        key_workos="[REDACTED]",
+                        workos_redirect_uri="http://127.0.0.1:4321/api/auth/callback")
+    with pytest.raises(emp.StoreError):
+        oauth_mod.start_oauth(session, "google",
+                              "https://evil.test/callback", settings)
+    out = oauth_mod.start_oauth(
+        session, "google",
+        "http://127.0.0.1:4321/api/auth/callback", settings)
+    assert out["state"] and "127.0.0.1" in out["url"]
+    out = oauth_mod.start_oauth(session, "github", "", settings)
+    assert "GitHubOAuth" in out["url"]
+
+
+def test_pkce_s256_property():
+    import base64
+    import hashlib
+    verifier, challenge = workos_mod.pkce_pair()
+    expected = base64.urlsafe_b64encode(
+        hashlib.sha256(verifier.encode("ascii")).digest()).rstrip(b"=").decode()
+    assert challenge == expected
+    v2, _c2 = workos_mod.pkce_pair()
+    assert v2 != verifier
+
+
+def test_finish_rejects_unverified_identity(session, monkeypatch):
+    from ci_backend import oauth as oauth_mod
+    settings = Settings(workos_client_id="client_test",
+                        key_workos="[REDACTED]")
+    out = oauth_mod.start_oauth(session, "google", "", settings)
+    monkeypatch.setattr(
+        "ci_backend.workos.authenticate_code",
+        lambda code, verifier, settings=None: {"user": {
+            "id": "w-x", "email": "x@foap.test", "email_verified": False}})
+    with pytest.raises(emp.StoreError):
+        oauth_mod.finish_oauth(session, "auth_code", out["state"], settings)
+    # State is single-use: the failed attempt consumed it.
+    with pytest.raises(emp.StoreError):
+        oauth_mod.finish_oauth(session, "auth_code", out["state"], settings)
+
+    out = oauth_mod.start_oauth(session, "google", "", settings)
+    monkeypatch.setattr(
+        "ci_backend.workos.authenticate_code",
+        lambda code, verifier, settings=None: {"user": {
+            "id": "", "email": "noid@foap.test", "email_verified": True}})
+    with pytest.raises(emp.StoreError):
+        oauth_mod.finish_oauth(session, "auth_code", out["state"], settings)
+
+
+def test_authorize_url_leaks_no_secret():
+    settings = Settings(workos_client_id="client_test",
+                        key_workos="[REDACTED]")
+    url = workos_mod.authorization_url(provider="google", state="s",
+                                       code_challenge="c",
+                                       redirect="", settings=settings)
+    assert "client_test" in url
+    assert "secret-workos-key" not in url
+    assert "code_challenge_method=S256" in url
+
+
 def test_pending_states_single_use(session):
     emp.pending_put(session, "st", "google", "verifier")
     row = emp.pending_pop(session, "st")

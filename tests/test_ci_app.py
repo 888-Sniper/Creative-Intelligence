@@ -384,6 +384,23 @@ def test_sync_job_admin_api(tmp_path, monkeypatch):
     assert [j["name"] for j in http.get("/api/sync/jobs").json()["jobs"]] == ["B"]
 
 
+def test_request_models_reject_garbage(tmp_path, monkeypatch):
+    http, _db = make_client(tmp_path, admin_email="boss@foap.test")
+    oauth_login(http, monkeypatch, dict(IDENT, id="w-boss",
+                                        email="boss@foap.test"))
+    me = http.get("/api/auth/me").json()["employee"]
+    assert http.post("/api/admin/employees",
+                     json={"email": "x@foap.test",
+                           "role": "superuser"}).status_code == 409
+    assert http.post("/api/admin/employees/%s/role" % me["id"],
+                     json={"role": ""}).status_code == 409
+    assert http.get("/api/admin/employees?filter=bogus").status_code == 409
+    assert http.patch("/api/auth/me",
+                      json={"first_name": 123}).status_code == 409
+    assert http.patch("/api/sync/jobs/nope",
+                      json={"enabled": "yes"}).status_code in (404, 409)
+
+
 def test_oauth_state_cookie_binding(tmp_path, monkeypatch):
     http, _db = make_client(tmp_path, admin_email="boss@foap.test")
     stub_exchange(monkeypatch, dict(IDENT, id="w-boss",

@@ -66,12 +66,16 @@ async def update_me(request: Request, db=Depends(get_db)):
         raise HTTPException(
             status_code=401 if exc.gate == "login" else 403,
             detail={"error": str(exc), "gate": exc.gate})
-    body = await json_payload(request)
+    raw = await json_payload(request)
+    try:
+        body = emp.ProfileUpdate.model_validate(raw or {})
+    except Exception as exc:
+        raise HTTPException(status_code=409,
+                            detail={"error": "Invalid profile: %s" % exc})
     try:
         updated = emp.update_profile(
-            db, employee.id, first_name=body.get("first_name"),
-            last_name=body.get("last_name"),
-            avatar_url=body.get("avatar_url"))
+            db, employee.id, first_name=body.first_name,
+            last_name=body.last_name, avatar_url=body.avatar_url)
     except emp.StoreError as exc:
         raise HTTPException(status_code=409, detail={"error": str(exc)})
     return {"ok": True,

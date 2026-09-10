@@ -33,10 +33,9 @@ branch is retired; do not use it.
    - TCP 443 from the internet
    - Never expose 4321.
 3. Register a free DuckDNS hostname (default `creative-intelligence`;
-   alternatives if taken: `foap-creative`, `foap-ci`,
-   `creative-intelligence-foap`, `foap-demo-ci`) and note its token.
-   Nobody can do this for you: the hostname is claimed in your
-   DuckDNS account.
+   alternatives if taken: `creative-intelligence-foap`, `foap-ci`,
+   `foap-demo-ci`) and note its token. Nobody can do this for you:
+   the hostname is claimed in your DuckDNS account.
 4. Have ready: admin email, WorkOS client ID + API key, provider keys
    (at least one STT, one vision, one LLM adapter), and optionally
    Google OAuth credentials.

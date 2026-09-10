@@ -42,6 +42,7 @@ interface CompareResponse {
 interface CampaignCompareResponse {
   kpis: Record<string, Record<string, number | null>>;
   ranking: string[];
+  winner?: string | null;
   rank_by?: string;
   why?: { top?: string | null; differences?: string[] };
   scope?: string;
@@ -201,18 +202,24 @@ export function ComparePage() {
     }
   }
 
-  const creativeTop = creativeData?.why?.top ?? null;
+  // One winner, controlled by the selected rank_by: the backend pins
+  // why.top to the rank winner, and this page reads winner everywhere.
+  const creativeWinner = creativeData?.winner ?? null;
   const creativeRankBy = creativeData?.rank_by ?? creativeRank;
-  const creativeHead = creativeTop
+  const creativeHead = creativeWinner
     ? creativeKeys.length > 2
-      ? `${creativeTop} leads the comparison`
-      : `Why ${creativeTop} won`
+      ? `${creativeWinner} leads the comparison`
+      : `Why ${creativeWinner} won`
     : "Insufficient data / no winner";
   const creativeRankLine = creativeData?.winner
     ? `Winner by ${creativeRankBy.toUpperCase()}: ${creativeData.winner} — order: ${creativeKeys.join(" · ")}`
     : "No winner: the selected KPI is unmeasurable for every side.";
 
-  const campaignWinner = campaignData?.why?.top ?? null;
+  const campaignWinner = campaignData?.winner ?? null;
+  const campaignRankBy = campaignData?.rank_by ?? campaignRank;
+  const campaignRankLine = campaignWinner
+    ? `Winner by ${campaignRankBy.toUpperCase()}: ${campaignWinner}`
+    : "No winner: the selected KPI is unmeasurable for every campaign.";
 
   return (
     <>
@@ -296,7 +303,7 @@ export function ComparePage() {
                   <div className="card" key={key}>
                     <h3>
                       {key || "(empty)"}
-                      {creativeTop === key && key ? " (top)" : ""}
+                      {creativeWinner === key && key ? " (top)" : ""}
                     </h3>
                     <div className="muted" style={{ fontSize: 12 }}>
                       Scope: {creativeData.scope ?? "All data"} — KPIs computed over scoped rows only
@@ -384,6 +391,7 @@ export function ComparePage() {
             <p className="muted" style={{ fontSize: 12 }}>
               Scope: {campaignData.scope ?? "All data"}
             </p>
+            <p>{campaignRankLine}</p>
             <table>
               <thead>
                 <tr>

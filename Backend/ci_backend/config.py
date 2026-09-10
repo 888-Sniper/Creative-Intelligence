@@ -45,6 +45,13 @@ class Settings(BaseSettings):
 
     admin_email: str = ""
 
+    master_key: str = ""
+    """Master key for stored OAuth secret encryption (Fernet).
+
+    Set CREATIVE_INTEL_MASTER_KEY on servers. On developer Macs an
+    OS-keychain key is auto-provisioned when this is empty.
+    """
+
     max_json_bytes: int = 25 * 1024 * 1024
     """Largest accepted JSON body (ingest payloads ride inside JSON).
 

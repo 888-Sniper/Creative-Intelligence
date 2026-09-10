@@ -446,6 +446,33 @@ class CreativeCompareParityTest(unittest.TestCase):
         finally:
             os.unlink(db)
 
+    def test_rank_by_roas_crowns_single_roas_winner(self):
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from conftest import make_client, mint_admin
+        db = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
+        try:
+            conn = sqlite3.connect(db)
+            schema.init_db(conn)
+            ingest.insert_rows(conn, ingest.parse_csv(
+                "Campaign,Ad Name,Creative Name,Amount Spent,Impressions,"
+                "Link Clicks,Conversions,Video Views,Revenue\n"
+                "C,ca,cka,100,10000,200,10,3000,150\n"
+                "C,cb,ckb,300,30000,300,10,3000,900\n", "meta"))
+            conn.close()
+            _client = make_client(db)
+            _client.headers.update(mint_admin(db))
+            got = _client.get("/api/compare?a=cka&b=ckb&rank_by=roas").json()
+            # CPA-top is cka (10 vs 30) but the ROAS winner is ckb
+            # (3.0 vs 1.5): one winner, controlled by rank_by.
+            self.assertEqual(got["cka"]["cpa"], 10.0)
+            self.assertEqual(got["ckb"]["roas"], 3.0)
+            self.assertEqual(got["rank_by"], "roas")
+            self.assertEqual(got["ranking"], ["ckb", "cka"])
+            self.assertEqual(got["winner"], "ckb")
+            self.assertEqual(got["why"]["top"], "ckb")
+        finally:
+            os.unlink(db)
+
     def test_why_empty_selection(self):
         from ci_backend import actions as server
         why = server._creative_why("", "", {}, {})

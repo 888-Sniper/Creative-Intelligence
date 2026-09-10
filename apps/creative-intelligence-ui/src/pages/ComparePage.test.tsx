@@ -58,6 +58,7 @@ const campaignPayload = {
     "Camp B": { spend: 300, impressions: 20000, clicks: 100, conversions: 10, cpm: 15, vtr: 0.3, ctr: 0.005, cpa: 30, roas: 1 },
   },
   ranking: ["Camp A", "Camp B"],
+  winner: "Camp A",
   rank_by: "cpa",
   why: { top: "Camp A", bottom: "Camp B", differences: ["hook_type differs: Camp A has question; Camp B has demo_open"] },
   scope: "All data",
@@ -159,6 +160,7 @@ describe("ComparePage", () => {
       expect(screen.getByText("Why Camp A won")).toBeDefined();
     });
     expect(screen.getByText("Ranked by cpa")).toBeDefined();
+    expect(screen.getByText("Winner by CPA: Camp A")).toBeDefined();
     const fetchMock = window.fetch as unknown as ReturnType<typeof vi.fn>;
     const calledUrl = String(fetchMock.mock.calls[0]?.[0] ?? "");
     expect(calledUrl.startsWith("/api/compare/campaigns")).toBe(true);

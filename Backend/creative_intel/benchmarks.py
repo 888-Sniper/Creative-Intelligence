@@ -564,7 +564,7 @@ def compare_campaigns(conn, campaigns=None, rank_by="cpa", filters=None):
                                % rank_by.upper()],
                "details": {}}
         return {"kpis": per, "ranking": ranking, "rank_by": rank_by,
-                "why": why, "scope": scope.describe()}
+                "winner": None, "why": why, "scope": scope.describe()}
     top, bottom = ranking[0], ranking[-1]
     why = {"metric": rank_by, "top": top, "bottom": bottom, "differences": [],
            "details": {}}
@@ -594,7 +594,7 @@ def compare_campaigns(conn, campaigns=None, rank_by="cpa", filters=None):
             why["differences"].append(
                 "same elements on every axis: gap is execution/scale, not mix")
     return {"kpis": per, "ranking": ranking, "rank_by": rank_by,
-            "why": why, "scope": scope.describe()}
+            "winner": top, "why": why, "scope": scope.describe()}
 
 
 def _span_min(ann, key):

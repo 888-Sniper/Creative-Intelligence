@@ -395,6 +395,8 @@ def apply_action(conn, action, payload, prov, media_dir=None, actor=""):
         return creative.run_pipeline(conn, payload["creative_key"], prov,
                                      media=bundle, brand_terms=terms or None)
     if action == "media-upload":
+        if not isinstance(payload, dict) or not payload.get("creative_key"):
+            raise ValueError("media upload needs creative_key")
         return media.save_media(
             conn, _media_dir(media_dir), payload["creative_key"],
             payload.get("filename", ""), payload.get("content_b64", ""),
@@ -668,6 +670,11 @@ def build_compare(conn, q):
     out["rank_by"] = rank_by
     out["ranking"] = ranking
     out["winner"] = winner
+    # One winner, controlled by the selected rank_by: the pairwise and
+    # N-way why-analyses crown a hardcoded CPA/CTR favourite, which
+    # contradicts the ranking whenever another KPI is selected.
+    if isinstance(out.get("why"), dict):
+        out["why"]["top"] = winner
     out["attributes"] = _attribute_table(
         {k: (out.get(k, {}) or {}).get("annotation") for k in keys})
     out["scope"] = scope.describe()

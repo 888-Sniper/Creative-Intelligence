@@ -70,10 +70,17 @@ Public links keep working with no setup. For private files:
    `CREATIVE_INTEL_GOOGLE_CLIENT_ID` / `CREATIVE_INTEL_GOOGLE_REDIRECT_URI`
    and store the client secret in the OS keychain (`creative-intel-google`)
    or `CREATIVE_INTEL_GOOGLE_CLIENT_SECRET` for CI/non-macOS.
-2. Open Settings → Google Drive → Connect Google Drive and approve
-   read-only access. Short-lived access tokens stay in the server database;
-   the refresh token stays in the OS keychain; the browser never sees either.
-3. Add `"google_auth": true` to a `sheets`/`drive` sync-job params object
+2. Set `CREATIVE_INTEL_MASTER_KEY` (generate with `python3 -c "from
+   cryptography.fernet import Fernet;
+   print(Fernet.generate_key().decode())"`). It encrypts stored refresh
+   tokens; without it Google connect fails closed. Developer Macs
+   auto-provision a keychain key when it is unset.
+3. Open Settings → Google Drive → Connect Google Drive and approve
+   read-only access. Access tokens (short-lived) and refresh tokens
+   (encrypted) stay in the server database; the browser never sees either.
+   Only read-only Drive scope is requested, and the granted scope is
+   verified. Disconnect revokes at Google and wipes local state.
+4. Add `"google_auth": true` to a `sheets`/`drive` sync-job params object
    (or a `/api/connect-*` payload). Without it, sync uses the public-link
    path; without a connection it fails closed with "Connect Google Drive
    in Settings". Disconnect anytime in Settings; the server wipes both tokens.

@@ -533,6 +533,126 @@ def apply_action(conn, action, payload, prov, media_dir=None):
     raise ValueError("unknown action %r" % action)
 
 
+
+
+def build_creatives_list(conn, q):
+    """Creatives with cohort-correct scoped metrics (shared)."""
+    cols = ["creative_key", "platform", "name", "duration_s",
+            "status", "transcript"]
+    rows = [dict(zip(cols, r)) for r in conn.execute(
+        "SELECT creative_key, platform, name, duration_s, status,"
+        " transcript FROM creatives")]
+    from creative_intel import benchmarks as _bench
+    scope = _bench.Scope.from_query(q)
+    norm = scope.normalized()
+    ad_cols = [c[0] for c in conn.execute(
+        "SELECT * FROM ads LIMIT 0").description]
+    kept = []
+    for r in rows:
+        ad_rows = [dict(zip(ad_cols, v)) for v in conn.execute(
+            "SELECT * FROM ads WHERE creative_key=?",
+            (r["creative_key"],)).fetchall()]
+        # Cohort-correct metrics: only rows passing the
+        # shared scope feed the KPI aggregation (a Spain
+        # filter must never show France-blended CPA; a
+        # Campaign-A filter must never blend Campaign B).
+        matched = [ad for ad in ad_rows
+                   if _bench.match_filters(ad, norm)]
+        if ad_rows and not matched:
+            # Performance exists but nothing is inside
+            # the scope: hide the card. A creative with
+            # media but no performance rows yet stays
+            # visible (zero metrics) so it can be
+            # annotated and pipelined.
+            continue
+        agg_rows = matched
+        spend = sum(v["spend"] for v in agg_rows)
+        impr = sum(v["impressions"] for v in agg_rows)
+        clicks = sum(v["clicks"] for v in agg_rows)
+        conv = sum(v["conversions"] for v in agg_rows)
+        views = sum(v["video_views"] for v in agg_rows)
+        rev = sum(v["revenue"] for v in agg_rows)
+        r["campaigns"] = sorted({v["campaign"] for v in agg_rows
+                                 if v["campaign"]})
+        r["metrics"] = {
+            "spend": round(spend, 2), "impressions": impr,
+            "clicks": clicks, "conversions": conv,
+            "video_views": views, "revenue": round(rev, 2),
+            "cpm": round(spend / impr * 1000, 2) if impr else None,
+            "vtr": round(views / impr, 4) if impr else None,
+            "ctr": round(clicks / impr, 4) if impr else None,
+            "cpc": round(spend / clicks, 2) if clicks else None,
+            "cpa": round(spend / conv, 2) if conv else None,
+            "roas": round(rev / spend, 4) if spend else None}
+        r["scope"] = scope.describe()
+        ann = conn.execute(
+            "SELECT annotation_json FROM annotations WHERE creative_key=?",
+            (r["creative_key"],)).fetchone()
+        r["annotation"] = json.loads(ann[0]) if ann else None
+        kept.append(r)
+    return kept
+
+
+def build_compare(conn, q):
+    """N-way creative compare with why-analysis (shared)."""
+    from creative_intel import benchmarks as _bench2
+    legacy = [q.get("a", [""])[0], q.get("b", [""])[0]]
+    keys = [k for k in q.get("key", []) if k]
+    if not keys:
+        keys = legacy
+    seen, ordered = set(), []
+    for k in keys:
+        if k not in seen:
+            seen.add(k)
+            ordered.append(k)
+    keys = ordered[:6]
+    if len(ordered) > 6:
+        raise ValueError("compare takes at most 6 creatives")
+    if not keys:
+        keys = ["", ""]
+    scope = _bench2.Scope.from_query(q)
+    ad_cols = [c[0] for c in conn.execute(
+        "SELECT * FROM ads LIMIT 0").description]
+    out = {}
+    for key in keys:
+        rows = [dict(zip(ad_cols, v)) for v in conn.execute(
+            "SELECT * FROM ads WHERE creative_key=?",
+            (key,)).fetchall()]
+        # Same scope as every other surface: a Spain
+        # comparison never blends France rows.
+        rows = [r for r in rows if scope.match(r)]
+        spend = sum(r["spend"] for r in rows)
+        impr = sum(r["impressions"] for r in rows)
+        clicks = sum(r["clicks"] for r in rows)
+        conv = sum(r["conversions"] for r in rows)
+        views = sum(r["video_views"] or 0 for r in rows)
+        revenue = sum(r["revenue"] or 0 for r in rows)
+        ann = conn.execute("SELECT annotation_json FROM annotations"
+                           " WHERE creative_key=?", (key,)).fetchone()
+        out[key] = {"spend": round(spend, 2),
+                    "impressions": impr,
+                    "clicks": clicks,
+                    "conversions": conv,
+                    "cpm": round(spend / impr * 1000, 2) if impr else None,
+                    "vtr": round(views / impr, 4) if impr else None,
+                    "ctr": round(clicks / impr, 4) if impr else None,
+                    "cpc": round(spend / clicks, 2) if clicks else None,
+                    "cpa": round(spend / conv, 2) if conv else None,
+                    "roas": round(revenue / spend, 4) if spend else None,
+                    "scope": scope.describe(),
+                    "annotation": json.loads(ann[0]) if ann else None}
+    if len(keys) == 2:
+        out["why"] = _creative_why(keys[0], keys[1],
+                                   out.get(keys[0], {}),
+                                   out.get(keys[1], {}))
+    else:
+        out["why"] = _multi_why(
+            keys, {k: out.get(k, {}) for k in keys})
+    out["keys"] = keys
+    out["scope"] = scope.describe()
+    return out
+
+
 class Handler(BaseHTTPRequestHandler):
     db_path = "local.db"
     prov = providers.Providers()
@@ -689,120 +809,12 @@ class Handler(BaseHTTPRequestHandler):
                     conn, q.get("group_by", ["hook_type"])[0],
                     benchmarks.Scope.from_query(q).normalized()))
             elif url.path == "/api/creatives":
-                cols = ["creative_key", "platform", "name", "duration_s",
-                        "status", "transcript"]
-                rows = [dict(zip(cols, r)) for r in conn.execute(
-                    "SELECT creative_key, platform, name, duration_s, status,"
-                    " transcript FROM creatives")]
-                from creative_intel import benchmarks as _bench
-                scope = _bench.Scope.from_query(q)
-                norm = scope.normalized()
-                ad_cols = [c[0] for c in conn.execute(
-                    "SELECT * FROM ads LIMIT 0").description]
-                kept = []
-                for r in rows:
-                    ad_rows = [dict(zip(ad_cols, v)) for v in conn.execute(
-                        "SELECT * FROM ads WHERE creative_key=?",
-                        (r["creative_key"],)).fetchall()]
-                    # Cohort-correct metrics: only rows passing the
-                    # shared scope feed the KPI aggregation (a Spain
-                    # filter must never show France-blended CPA; a
-                    # Campaign-A filter must never blend Campaign B).
-                    matched = [ad for ad in ad_rows
-                               if _bench.match_filters(ad, norm)]
-                    if ad_rows and not matched:
-                        # Performance exists but nothing is inside
-                        # the scope: hide the card. A creative with
-                        # media but no performance rows yet stays
-                        # visible (zero metrics) so it can be
-                        # annotated and pipelined.
-                        continue
-                    agg_rows = matched
-                    spend = sum(v["spend"] for v in agg_rows)
-                    impr = sum(v["impressions"] for v in agg_rows)
-                    clicks = sum(v["clicks"] for v in agg_rows)
-                    conv = sum(v["conversions"] for v in agg_rows)
-                    views = sum(v["video_views"] for v in agg_rows)
-                    rev = sum(v["revenue"] for v in agg_rows)
-                    r["campaigns"] = sorted({v["campaign"] for v in agg_rows
-                                             if v["campaign"]})
-                    r["metrics"] = {
-                        "spend": round(spend, 2), "impressions": impr,
-                        "clicks": clicks, "conversions": conv,
-                        "video_views": views, "revenue": round(rev, 2),
-                        "cpm": round(spend / impr * 1000, 2) if impr else None,
-                        "vtr": round(views / impr, 4) if impr else None,
-                        "ctr": round(clicks / impr, 4) if impr else None,
-                        "cpc": round(spend / clicks, 2) if clicks else None,
-                        "cpa": round(spend / conv, 2) if conv else None,
-                        "roas": round(rev / spend, 4) if spend else None}
-                    r["scope"] = scope.describe()
-                    ann = conn.execute(
-                        "SELECT annotation_json FROM annotations WHERE creative_key=?",
-                        (r["creative_key"],)).fetchone()
-                    r["annotation"] = json.loads(ann[0]) if ann else None
-                    kept.append(r)
-                send(self, 200, kept)
+                send(self, 200, build_creatives_list(conn, q))
             elif url.path == "/api/retention":
                 key = q.get("creative_key", [""])[0]
                 send(self, 200, retention.join_segments(conn, key))
             elif url.path == "/api/compare":
-                from creative_intel import benchmarks as _bench2
-                legacy = [q.get("a", [""])[0], q.get("b", [""])[0]]
-                keys = [k for k in q.get("key", []) if k]
-                if not keys:
-                    keys = legacy
-                seen, ordered = set(), []
-                for k in keys:
-                    if k not in seen:
-                        seen.add(k)
-                        ordered.append(k)
-                keys = ordered[:6]
-                if len(ordered) > 6:
-                    raise ValueError("compare takes at most 6 creatives")
-                if not keys:
-                    keys = ["", ""]
-                scope = _bench2.Scope.from_query(q)
-                ad_cols = [c[0] for c in conn.execute(
-                    "SELECT * FROM ads LIMIT 0").description]
-                out = {}
-                for key in keys:
-                    rows = [dict(zip(ad_cols, v)) for v in conn.execute(
-                        "SELECT * FROM ads WHERE creative_key=?",
-                        (key,)).fetchall()]
-                    # Same scope as every other surface: a Spain
-                    # comparison never blends France rows.
-                    rows = [r for r in rows if scope.match(r)]
-                    spend = sum(r["spend"] for r in rows)
-                    impr = sum(r["impressions"] for r in rows)
-                    clicks = sum(r["clicks"] for r in rows)
-                    conv = sum(r["conversions"] for r in rows)
-                    views = sum(r["video_views"] or 0 for r in rows)
-                    revenue = sum(r["revenue"] or 0 for r in rows)
-                    ann = conn.execute("SELECT annotation_json FROM annotations"
-                                       " WHERE creative_key=?", (key,)).fetchone()
-                    out[key] = {"spend": round(spend, 2),
-                                "impressions": impr,
-                                "clicks": clicks,
-                                "conversions": conv,
-                                "cpm": round(spend / impr * 1000, 2) if impr else None,
-                                "vtr": round(views / impr, 4) if impr else None,
-                                "ctr": round(clicks / impr, 4) if impr else None,
-                                "cpc": round(spend / clicks, 2) if clicks else None,
-                                "cpa": round(spend / conv, 2) if conv else None,
-                                "roas": round(revenue / spend, 4) if spend else None,
-                                "scope": scope.describe(),
-                                "annotation": json.loads(ann[0]) if ann else None}
-                if len(keys) == 2:
-                    out["why"] = _creative_why(keys[0], keys[1],
-                                               out.get(keys[0], {}),
-                                               out.get(keys[1], {}))
-                else:
-                    out["why"] = _multi_why(
-                        keys, {k: out.get(k, {}) for k in keys})
-                out["keys"] = keys
-                out["scope"] = scope.describe()
-                send(self, 200, out)
+                send(self, 200, build_compare(conn, q))
             elif url.path == "/api/retention/patterns":
                 from creative_intel import benchmarks as _bench3
                 send(self, 200, retention.patterns(

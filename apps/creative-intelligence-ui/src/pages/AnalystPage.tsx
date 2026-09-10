@@ -211,8 +211,8 @@ export function AnalystPage() {
   async function decideFinding(findingId: string, decision: "accepted" | "rejected") {
     setError(null);
     try {
-      await api("POST", `/api/analyst/findings/${encodeURIComponent(findingId)}/decision`, {
-        decision,
+      await api("POST", `/api/analyst/findings/${encodeURIComponent(findingId)}`, {
+        status: decision,
       });
       setMessages((prev) =>
         prev.map((m) =>

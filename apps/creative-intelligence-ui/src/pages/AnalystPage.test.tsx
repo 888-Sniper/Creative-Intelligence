@@ -149,10 +149,16 @@ describe("AnalystPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save to next-flight plan" }));
     const fetchMock = window.fetch as unknown as ReturnType<typeof vi.fn>;
     await waitFor(() => {
-      const called = fetchMock.mock.calls.some((c) =>
-        String(c[0]).includes("/api/analyst/findings/f-1/decision"),
+      const call = fetchMock.mock.calls.find((c) =>
+        String(c[0]).includes("/api/analyst/findings/f-1"),
       );
-      expect(called).toBe(true);
+      expect(call).toBeDefined();
+      // Backend contract: POST /api/analyst/findings/{id} with
+      // {"status"} — no /decision suffix, no "decision" key.
+      expect(String(call?.[0])).not.toContain("/decision");
+      expect(JSON.parse(String(call?.[1]?.body))).toEqual({
+        status: "accepted",
+      });
     });
   });
 });

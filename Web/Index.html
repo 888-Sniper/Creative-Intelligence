@@ -158,7 +158,10 @@ ul.plain li{padding:6px 0;border-bottom:1px solid var(--line)}
 <label>Objective<input type="text" id="flt-objective" placeholder="objective"></label>
 <label>KPI (sort)<select id="flt-kpi"><option value="all">all</option><option value="spend">spend</option><option value="ctr">ctr</option><option value="cpc">cpc</option><option value="cpa">cpa</option><option value="cpm">cpm</option><option value="vtr">vtr</option><option value="roas">roas</option></select></label>
 <label>Date<input type="text" id="flt-date" placeholder="date"></label>
+<label>From<input type="date" id="flt-date-from" aria-label="From date"></label>
+<label>To<input type="date" id="flt-date-to" aria-label="To date"></label>
 </div>
+<div style="margin-top:8px"><span class="muted" style="font-size:12px">Presets:</span> <button class="secondary" data-range="7">Last 7 days</button> <button class="secondary" data-range="30">Last 30 days</button> <button class="secondary" data-range="90">Last 90 days</button></div>
 <div style="margin-top:8px"><button class="secondary" id="flt-clear">Clear filters</button> <span id="filter-summary" class="muted"></span></div>
 </div>
 <div class="ask-bar">
@@ -235,10 +238,19 @@ ul.plain li{padding:6px 0;border-bottom:1px solid var(--line)}
 <button class="action" id="cmp-camp-go">Compare campaigns</button>
 <div class="muted" style="font-size:12px">GET /api/compare/campaigns — full KPI set plus why-analysis.</div></div>
 <div id="cmp-out"></div>
-<div id="cmp-camp-out"></div></section>
+<div id="cmp-camp-out"></div>
+<div class="card"><h3>Period comparison</h3>
+<div class="muted" style="font-size:12px">Period A vs Period B over the identical scoped population (GET /api/compare/periods follows the top filter bar, except its own dates).</div>
+<div class="filter-grid">
+<label>A from<input type="date" id="per-a-from"></label><label>A to<input type="date" id="per-a-to"></label>
+<label>B from<input type="date" id="per-b-from"></label><label>B to<input type="date" id="per-b-to"></label>
+</div>
+<div style="margin-top:8px"><button class="action" id="per-go">Compare periods</button></div>
+<div id="per-out" class="muted" style="margin-top:8px">—</div></div></section>
 <section class="view" id="v-benchmark"><h1 class="page-title">Benchmarks</h1><p class="page-sub">Saved cohorts with sample size, bands and status. Insufficient-data cohorts need more projects before they are reliable.</p>
 <div class="card"><label>Group by <select id="gb">
 <option value="hook_type">hook_type</option><option value="creator_vs_branded">creator_vs_branded</option>
+<option value="edit_style">edit_style</option>
 <option value="platform">platform</option><option value="campaign">campaign</option></select></label>
 <button class="action" id="gb-go">Refresh</button></div>
 <div id="bench-out"></div>
@@ -281,6 +293,7 @@ ul.plain li{padding:6px 0;border-bottom:1px solid var(--line)}
 <div class="card"><h3>Benchmark</h3>
 <label>Group by <select id="rep-bench">
 <option value="hook_type">hook_type</option><option value="creator_vs_branded">creator_vs_branded</option>
+<option value="edit_style">edit_style</option>
 <option value="platform">platform</option><option value="campaign">campaign</option></select></label>
 <label>Benchmark scope <select id="rep-bench-scope">
 <option value="filters">Current filters</option><option value="global">Global</option></select></label>
@@ -310,15 +323,16 @@ function filtered_path(p){
   const scoped=p==="/api/campaigns"||p.startsWith("/api/benchmarks")||p==="/api/creatives"||p.startsWith("/api/compare")||p.startsWith("/api/retention/patterns")||p.startsWith("/api/campaigns/recommendations");
   if(scoped){
     const skip_campaign=p.startsWith("/api/compare/campaigns");
+    const skip_dates=p.startsWith("/api/compare/periods");
     const f=active_filters();const q=new URLSearchParams();
-    ["platform","vertical","market","funnel","objective","client","project","campaign","date"].forEach(k=>{if(skip_campaign&&k==="campaign")return;const v=f[k];if(v&&v!=="all")q.append(k,v);});
+    ["platform","vertical","market","funnel","objective","client","project","campaign","date","date_from","date_to"].forEach(k=>{if(skip_campaign&&k==="campaign")return;if(skip_dates&&(k==="date_from"||k==="date_to"))return;const v=f[k];if(v&&v!=="all")q.append(k,v);});
     const s=q.toString();if(s)p+=(p.includes("?")?"&":"?")+s;
   }
   return p;
 }
 function scope_filters(){
   const f=active_filters();const out={};
-  ["platform","vertical","market","funnel","objective","client","project","campaign","date"].forEach(k=>{const v=f[k];if(v&&v!=="all")out[k]=[v];});
+  ["platform","vertical","market","funnel","objective","client","project","campaign","date","date_from","date_to"].forEach(k=>{const v=f[k];if(v&&v!=="all")out[k]=[v];});
   return out;
 }
 const api=async(m,p,b)=>{const r=await fetch(filtered_path(p),{method:m,headers:{"Content-Type":"application/json"},body:b?JSON.stringify(b):undefined});const j=await r.json();if(!r.ok)throw new Error(j.error||r.status);return j;};
@@ -336,14 +350,20 @@ function active_filters(){return{
   funnel:$("flt-funnel").value.trim().toLowerCase(),
   objective:$("flt-objective").value.trim().toLowerCase(),
   kpi:$("flt-kpi").value,
-  date:$("flt-date").value.trim().toLowerCase()};}
+  date:$("flt-date").value.trim().toLowerCase(),
+  date_from:$("flt-date-from").value,
+  date_to:$("flt-date-to").value};}
 function filter_summary(){
   const f=active_filters();
   const bits=Object.entries(f).filter(([,v])=>v&&v!=="all").map(([k,v])=>k+"="+v);
   $("filter-summary").textContent=bits.length?("Active: "+bits.join(", ")):"No filters active.";
 }
-["flt-client","flt-project","flt-campaign","flt-platform","flt-vertical","flt-market","flt-funnel","flt-objective","flt-kpi","flt-date"].forEach(id=>$(id).addEventListener("input",refresh));
-$("flt-clear").onclick=()=>{["flt-client","flt-project","flt-campaign","flt-vertical","flt-market","flt-funnel","flt-objective","flt-date"].forEach(id=>$(id).value="");$("flt-platform").value="all";$("flt-kpi").value="all";refresh();};
+["flt-client","flt-project","flt-campaign","flt-platform","flt-vertical","flt-market","flt-funnel","flt-objective","flt-kpi","flt-date","flt-date-from","flt-date-to"].forEach(id=>$(id).addEventListener("input",refresh));
+$("flt-clear").onclick=()=>{["flt-client","flt-project","flt-campaign","flt-vertical","flt-market","flt-funnel","flt-objective","flt-date","flt-date-from","flt-date-to"].forEach(id=>$(id).value="");$("flt-platform").value="all";$("flt-kpi").value="all";refresh();};
+document.querySelectorAll("[data-range]").forEach(b=>b.onclick=()=>{
+  const days=Number(b.dataset.range);const to=new Date();const from=new Date(to.getTime()-(days-1)*86400000);
+  const iso=d=>d.toISOString().slice(0,10);
+  $("flt-date-from").value=iso(from);$("flt-date-to").value=iso(to);refresh();});
 function text_blob(parts){return parts.map(p=>String(p??"").toLowerCase()).join(" | ");}
 function text_match(blob,f){return["client","project","campaign","vertical","market","funnel","objective","date"].every(k=>!f[k]||blob.includes(f[k]));}
 const KPI_LOWER_BETTER=["cpa","cpc","cpm"];
@@ -376,6 +396,14 @@ $("fixture").onclick=()=>{$("up-status").textContent="Run: python3 Backend/serve
 $("export").onclick=async()=>{const keys=[...document.querySelectorAll(".exp-check:checked")].map(c=>c.value);try{const r=await api("POST","/api/export",{creative_keys:keys,override:$("override").checked});$("export-out").textContent=r.markdown;}catch(e){$("export-out").textContent="BLOCKED: "+e.message;}};
 $("run-pipe").onclick=async()=>{if(!selected)return;await api("POST","/api/pipeline/run",{creative_key:selected,brand_terms:$("brand-terms").value});refresh();};
 $("verify").onclick=async()=>{if(!selected)return;await api("POST","/api/creatives/"+encodeURIComponent(selected)+"/verify");refresh();};
+$("per-go").onclick=async()=>{try{
+  const q=["a_from","a_to","b_from","b_to"].map(k=>{const v=$( "per-"+k.replace("_","-")).value;if(!v)throw new Error("Fill all four period dates.");return k+"="+encodeURIComponent(v);}).join("&");
+  const r=await api("GET","/api/compare/periods?"+q);
+  const kpis=["spend","impressions","clicks","conversions","cpm","vtr","ctr","cpc","cpa","roas"];
+  const head="<tr><th>KPI</th><th>"+esc(r.a.label)+" ("+esc(r.a.from)+".."+esc(r.a.to)+", n="+esc(String(r.a.n_ads))+")</th><th>"+esc(r.b.label)+" ("+esc(r.b.from)+".."+esc(r.b.to)+", n="+esc(String(r.b.n_ads))+")</th><th>B−A</th></tr>";
+  const body=kpis.map(m=>`<tr><td>${m.toUpperCase()}</td><td>${esc(String(r.a.kpis[m]??"—"))}</td><td>${esc(String(r.b.kpis[m]??"—"))}</td><td>${esc(String(r.delta[m]??"—"))}</td></tr>`).join("");
+  $("per-out").innerHTML=`<p class="muted" style="font-size:12px">Scope: ${esc(r.scope||"All data")}</p><table><thead>${head}</thead><tbody>${body}</tbody></table>`;
+}catch(e){$("per-out").innerHTML=`<p class="muted">${esc(e.message)}</p>`;}};
 $("cmp-go").onclick=async()=>{try{
   const keys=[$("cmp-a").value.trim(),$("cmp-b").value.trim(),...$("cmp-extra").value.split(",").map(s=>s.trim()).filter(Boolean)];
   const seen=[...new Set(keys.filter(Boolean))].slice(0,6);
@@ -410,8 +438,8 @@ async function render_views(){try{
 }catch(e){$("view-list").innerHTML=`<span class="muted">${esc(e.message)}</span>`;}}
 function apply_view(st){
   const f=(st&&st.filters)||{};
-  ["client","project","campaign","platform","vertical","market","funnel","objective","date"].forEach(k=>{
-    const el=$("flt-"+k);if(!el)return;
+  ["client","project","campaign","platform","vertical","market","funnel","objective","date","date_from","date_to"].forEach(k=>{
+    const el=$("flt-"+k.replace("_","-"));if(!el)return;
     let v=(f[k]||[])[0];
     if(v==null||v==="")v=(k==="platform")?"all":"";
     if(k==="platform"&&!["all","meta","tiktok"].includes(v))v="all";
@@ -438,7 +466,7 @@ $("sync-meta").onclick=()=>sync_now("meta");
 $("sync-tiktok").onclick=()=>sync_now("tiktok");
 $("media-go").onclick=media_go;
 $("xlsx-file").addEventListener("change",xlsx_go);
-function mark_active_filters(){const f=active_filters();["client","project","campaign","platform","vertical","market","funnel","objective","kpi","date"].forEach(k=>{const el=$("flt-"+k);if(!el)return;const v=f[k];el.classList.toggle("active",!!v&&v!=="all");});}
+function mark_active_filters(){const f=active_filters();["client","project","campaign","platform","vertical","market","funnel","objective","kpi","date","date_from","date_to"].forEach(k=>{const el=$("flt-"+k.replace("_","-"));if(!el)return;const v=f[k];el.classList.toggle("active",!!v&&v!=="all");});}
 async function refresh(){mark_active_filters();filter_summary();kpis();campaigns();library();bench();report_lists();prov_status();sync_status();}
 async function sync_status(){try{
   const s=await api("GET","/api/sync/status");
@@ -502,11 +530,11 @@ async function campaigns(){try{
 async function campaign_detail(name){
   const box=$("campaign-detail");
   try{
+    const f=active_filters();
+    const k=(f.kpi&&f.kpi!=="all")?f.kpi:"cpa";
     const [rows,bench]=await Promise.all([
       api("GET","/api/creatives"),
       api("GET","/api/benchmarks?group_by=campaign")]);
-    const f=active_filters();
-    const k=(f.kpi&&f.kpi!=="all")?f.kpi:"cpa";
     // Server-side recommendations reuse the report engine over the
     // same campaign, filters and KPI, so this view and an exported
     // report cannot contradict each other. The legacy client bullets
@@ -533,13 +561,18 @@ async function campaign_detail(name){
     const top_hook=Object.entries(hooks).sort((a,b)=>b[1]-a[1])[0];
     const perf_card=(r,tag,cls)=>{const a=r.annotation||{};const m=r.metrics||{};
       return `<div class="creative-card ${cls}"><div class="media">${esc(a.hook_type||"untagged hook")} · ${esc(String(a.duration_s??r.duration_s??"—"))}s</div><div class="body"><div class="title">${esc(r.name||r.creative_key)}</div><span class="badge ${tag==="Watch"?"bad":"good"}">${tag}</span><span style="font-size:13px">CPA ${esc(kpi(m.cpa,1))} · CTR ${esc(kpi(m.ctr))} · ROAS ${esc(kpi(m.roas))}</span><span class="muted" style="font-size:13px">${esc(a.creator_vs_branded||"—")} · ${esc(r.platform||"—")}</span></div></div>`;};
+    const g=bench[name]||{};
+    const summary=["spend","impressions","clicks","conversions","cpm","vtr","ctr","cpc","cpa","roas"].map(m=>`<tr><th>${m.toUpperCase()}</th><td>${esc(String(g[m]??"—"))}</td></tr>`).join("");
+    const rank_list=ranked.map((r,i)=>`<li>#${i+1} ${esc(r.name||r.creative_key)} — ${k.toUpperCase()} ${esc(String((r.metrics||{})[k]??"—"))}</li>`).join("");
     const legacy_reco=[`Scale: ${best.name||best.creative_key} leads on ${k.toUpperCase()} (${esc(String((best.metrics||{})[k]??"—"))}).`];
     if(worst.creative_key!==best.creative_key)legacy_reco.push(`Review or replace: ${worst.name||worst.creative_key} trails on ${k.toUpperCase()} (${esc(String((worst.metrics||{})[k]??"—"))}).`);
     if(top_hook&&in_camp.length>1&&top_hook[1]>=Math.ceil(in_camp.length/2))legacy_reco.push(`Hook concentration: ${top_hook[1]} of ${in_camp.length} creatives use ${top_hook[0]} — the next test should break from it.`);
     const reco_html=(reco_server&&Array.isArray(reco_server.sections))
-      ?reco_server.sections.map(s=>`<h4>${esc(s.title)}</h4><ul class="plain">${(s.bullets||[]).map(b=>`<li>${esc(b.text)}</li>`).join("")}</ul>`).join("")
+      ?((reco_server.notice?`<p class="muted">${esc(reco_server.notice)}</p>`:"")+reco_server.sections.map(s=>`<h4>${esc(s.title)}</h4><ul class="plain">${(s.bullets||[]).map(b=>`<li>${esc(b.text)}</li>`).join("")}</ul>`).join(""))
       :`<ul class="plain">${legacy_reco.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`;
     box.innerHTML=`<div class="card"><h3>${esc(name)}${esc(delta)}</h3>
+    <div class="cmp-grid"><div><h4>Campaign totals (scoped)</h4><table>${summary}</table></div>
+    <div><h4>Creatives ranked by ${k.toUpperCase()}</h4><ul class="plain">${rank_list}</ul></div></div>
     <div class="creative-grid" style="margin-top:12px">${best.creative_key===worst.creative_key?perf_card(best,"Only creative","selected"):perf_card(best,"Best","selected")+perf_card(worst,"Watch","")}</div>
     <div class="insight-panel"><h4>Creative learning</h4><p style="margin:0">${top_hook?esc(top_hook[0]+" hooks lead "+top_hook[1]+" of "+in_camp.length+" creatives here"):"No hook labels yet — annotate creatives to unlock learnings."}</p></div>
     <div class="insight-panel"><h4>Recommendations</h4>${reco_html}</div></div>`;
@@ -618,7 +651,7 @@ function creative_detail(kept){
     ${kpi_row("Spend","$"+esc(String(m.spend??"—")))}${kpi_row("CPM","$"+esc(String(m.cpm??"—")))}${kpi_row("VTR",esc(String(m.vtr??"—")))}${kpi_row("CTR",esc(String(m.ctr??"—")))}${kpi_row("CPA","$"+esc(String(m.cpa??"—")))}${kpi_row("ROAS",esc(String(m.roas??"—")))}
     <div class="muted" style="font-size:13px">campaigns: ${esc((found.campaigns||[]).join(", ")||"—")} · <a href="#" id="detail-bench">vs benchmark</a><span id="detail-bench-out"></span></div></div>
     <div class="card" style="margin:0"><h4 style="margin-top:0">Creative intelligence</h4>
-    ${intel_row("Hook",esc(a.hook_type||"—"))}${intel_row("Hook modality (visual/spoken/text)",esc(a.hook_modality||"unknown"))}${intel_row("Creator vs branded",esc(a.creator_vs_branded||"—"))}${intel_row("Duration",esc(String(a.duration_s??found.duration_s??"—"))+"s")}${intel_row("Audio timings",audio_timing_txt(a))}${intel_row("Brand first mentioned (audio)",brand_audio_txt(a))}${intel_row("Brand appearance",esc(String(a.brand_seconds&&a.brand_seconds.length?a.brand_seconds[0].start_s+"s":"—")))}${intel_row("Product appearance",esc(String(a.product_seconds&&a.product_seconds.length?a.product_seconds[0].start_s+"s":"—")))}${intel_row("CTA",esc(a.cta||((a.structure||{}).cta?"set":"—")))}${intel_row("Voiceover",esc(a.voiceover||((a.structure||{}).voiceover?"set":"—")))}${intel_row("Supers",esc(Array.isArray(a.supers)?a.supers.join(", "):(a.supers||"—")))}${intel_row("Editing pace",esc(a.pace_cuts_per_min!=null?String(a.pace_cuts_per_min)+" cuts/min":"—"))}</div>
+    ${intel_row("Hook",esc(a.hook_type||"—"))}${intel_row("Hook modality (visual/spoken/text)",esc(a.hook_modality||"unknown"))}${intel_row("Creator vs branded",esc(a.creator_vs_branded||"—"))}${intel_row("Edit style",esc(a.edit_style||"—"))}${intel_row("Duration",esc(String(a.duration_s??found.duration_s??"—"))+"s")}${intel_row("Audio timings",audio_timing_txt(a))}${intel_row("Brand first mentioned (audio)",brand_audio_txt(a))}${intel_row("Brand appearance",esc(String(a.brand_seconds&&a.brand_seconds.length?a.brand_seconds[0].start_s+"s":"—")))}${intel_row("Product appearance",esc(String(a.product_seconds&&a.product_seconds.length?a.product_seconds[0].start_s+"s":"—")))}${intel_row("CTA",esc(a.cta||((a.structure||{}).cta?"set":"—")))}${intel_row("Voiceover",esc(a.voiceover||((a.structure||{}).voiceover?"set":"—")))}${intel_row("Supers",esc(supers_txt(a)))}${intel_row("Editing pace",esc(a.pace_cuts_per_min!=null?String(a.pace_cuts_per_min)+" cuts/min":"—"))}</div>
   </div></div>`;
   box.querySelectorAll(".chip").forEach(ch=>ch.onclick=()=>{
     const v=document.querySelector("#creative-video");
@@ -656,6 +689,13 @@ function audio_timing_txt(a){
   if(!tw.length)return "—";
   const levels=[...new Set(tw.map(e=>e.level||"word"))];
   return `${tw.length} timings (${levels.join("/")}-level)`;
+}
+function supers_txt(a){
+  if(Array.isArray(a.supers)&&a.supers.length)return a.supers.join(", ");
+  if(typeof a.supers==="string"&&a.supers.trim())return a.supers;
+  const s=(a.structure||{}).supers||{};
+  if((s.end_s||0)>(s.start_s||0))return `set ${s.start_s}–${s.end_s}s (from structure)`;
+  return "—";
 }
 function brand_audio_txt(a){
   if(a.brand_audio_mention_s==null)return "—";
@@ -733,6 +773,7 @@ function render_compare(r,keys){
     <table>${kpi_row(d,"spend",1)}${kpi_row(d,"impressions")}${kpi_row(d,"clicks")}${kpi_row(d,"conversions")}${kpi_row(d,"cpm",1)}${kpi_row(d,"vtr")}${kpi_row(d,"ctr")}${kpi_row(d,"cpc",1)}${kpi_row(d,"cpa",1)}${kpi_row(d,"roas")}
     <tr><th>Hook</th><td>${esc(ann.hook_type||"—")}</td></tr>
     <tr><th>Format</th><td>${esc(ann.creator_vs_branded||"—")}</td></tr>
+    <tr><th>Edit style</th><td>${esc(ann.edit_style||"—")}</td></tr>
     <tr><th>Status</th><td>${esc(ann.status||"—")}</td></tr></table></div>`;
   };
   const why=((r&&r.why&&r.why.differences)||[]).map(d=>`<li>${esc(d)}</li>`).join("");

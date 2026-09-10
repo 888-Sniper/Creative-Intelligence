@@ -20,29 +20,37 @@ def _structure(conn, creative_key):
     return json.loads(row[0])
 
 
+SYNTH_SOURCE = "quartile_synthesized"
+
+
 def synthesize_from_quartiles(conn):
     """Build retention curves from imported view quartiles.
 
     Meta/TikTok exports carry views_25/50/75/100 per ad row but no
-    time series. For every creative WITHOUT any retention rows,
-    quartile views are summed across its ads rows and converted to
-    % of impressions at 0/25/50/75/100% of duration (t=0 is 100% by
-    definition: everyone who counted as an impression saw the first
-    frame). Duration comes from creatives.duration_s, else the
-    annotation, else 30s. Manual uploads always win: creatives that
-    already have retention rows are left untouched. Returns the
-    number of creatives synthesized.
+    time series. For every creative, quartile views are summed across
+    its ads rows and converted to % of impressions at 0/25/50/75/100%
+    of duration (t=0 is 100% by definition: everyone who counted as
+    an impression saw the first frame). Duration comes from
+    creatives.duration_s, else the annotation, else 30s.
+    Manual rows always win: a creative with any source='manual' row
+    gets no synthetic points and keeps every manual point, so partial
+    hand-supplied curves are never collapsed by a sync. Rows
+    previously synthesized (source = 'quartile_synthesized') are
+    deleted and rebuilt, so re-imports with changed quartile metrics
+    refresh the curve instead of going stale. Returns the number of
+    creatives (re)built.
     """
     import json
-    have = {r[0] for r in conn.execute(
-        "SELECT DISTINCT creative_key FROM retention").fetchall()}
+    manual = {r[0] for r in conn.execute(
+        "SELECT DISTINCT creative_key FROM retention"
+        " WHERE source='manual'").fetchall()}
     cols = [c[0] for c in conn.execute(
         "SELECT * FROM ads LIMIT 0").description]
     by_key = {}
     for v in conn.execute("SELECT * FROM ads").fetchall():
         row = dict(zip(cols, v))
         key = row.get("creative_key")
-        if not key or key in have:
+        if not key or key in manual:
             continue
         agg = by_key.setdefault(key, {"impr": 0, "q": [0, 0, 0, 0]})
         agg["impr"] += row.get("impressions") or 0
@@ -69,9 +77,12 @@ def synthesize_from_quartiles(conn):
         for frac, views in zip((0.25, 0.5, 0.75, 1.0), agg["q"]):
             pts.append((round(frac * duration, 2),
                         round(min(100.0, views * 100.0 / agg["impr"]), 2)))
+        conn.execute("DELETE FROM retention WHERE creative_key=?"
+                     " AND source=?", (key, SYNTH_SOURCE))
         conn.executemany(
-            "INSERT INTO retention (creative_key, t_sec, retention_pct)"
-            " VALUES (?, ?, ?)", [(key, t, p) for t, p in pts])
+            "INSERT INTO retention (creative_key, t_sec, retention_pct,"
+            " source) VALUES (?, ?, ?, ?)",
+            [(key, t, p, SYNTH_SOURCE) for t, p in pts])
         done += 1
     return done
 

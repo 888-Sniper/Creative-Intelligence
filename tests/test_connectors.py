@@ -58,25 +58,58 @@ class StubHandler(BaseHTTPRequestHandler):
             self._send(200, "<!DOCTYPE html><html>login</html>", "text/html")
         elif "/insights" in self.path:
             query = parse_qs(urlparse(self.path).query)
-            StubHandler.seen["token"] = query.get("access_token", [""])[0]
-            self._send(200, {"data": [{
-                "campaign_name": "MetaCamp", "adset_name": "Set",
-                "ad_name": "meta-ad", "spend": "42.5", "impressions": "4200",
-                "clicks": "84",
-                "actions": [{"action_type": "purchase", "value": 7}],
-                "video_play_actions": [{"value": 900}]}]})
+            tok = query.get("access_token", [""])[0]
+            if tok:
+                StubHandler.seen["token"] = tok
+            if "after=" in self.path:
+                self._send(200, {"data": [{
+                    "campaign_name": "MetaCamp2", "adset_name": "Set",
+                    "ad_name": "meta-ad-2", "spend": "10.0",
+                    "impressions": "1000", "clicks": "10",
+                    "actions": [{"action_type": "purchase", "value": 1}],
+                    "video_play_actions": [{"value": 100}]}]})
+            else:
+                host = self.headers.get("Host", "127.0.0.1")
+                tok = query.get("access_token", [""])[0]
+                # Like real Graph paging cursors, the next URL carries
+                # the token so follow-up pages stay authenticated.
+                self._send(200, {"data": [{
+                    "campaign_name": "MetaCamp", "adset_name": "Set",
+                    "ad_name": "meta-ad", "spend": "42.5",
+                    "impressions": "4200", "clicks": "84",
+                    "actions": [{"action_type": "purchase", "value": 7}],
+                    "video_play_actions": [{"value": 900}]}],
+                    "paging": {"next": "http://%s/act/insights?after=page2"
+                               "&access_token=%s" % (host, tok)}})
         else:
             self._send(404, {"error": "no stub"})
 
     def do_POST(self):
         StubHandler.seen["access_token"] = self.headers.get("Access-Token")
         length = int(self.headers.get("Content-Length", 0))
-        StubHandler.seen["body"] = self.rfile.read(length)
-        self._send(200, {"code": 0, "data": {"list": [{
-            "dimensions": {"campaign_id": "TikCamp", "adgroup_id": "g",
-                           "ad_id": "tt-ad"},
-            "metrics": {"spend": 15.0, "impressions": 1500, "clicks": 30,
-                        "conversion": 3, "video_views": 400}}]}})
+        body = self.rfile.read(length)
+        StubHandler.seen["body"] = body
+        try:
+            page = (json.loads(body.decode("utf-8") or "{}")).get("page", 1)
+        except ValueError:
+            page = 1
+        StubHandler.seen["page"] = page
+        if page >= 2:
+            rows = [{
+                "dimensions": {"campaign_id": "TikCamp2", "adgroup_id": "g",
+                               "ad_id": "tt-ad-2"},
+                "metrics": {"spend": 25.0, "impressions": 2500, "clicks": 50,
+                            "conversion": 5, "video_views": 600}}]
+        else:
+            rows = [{
+                "dimensions": {"campaign_id": "TikCamp", "adgroup_id": "g",
+                               "ad_id": "tt-ad"},
+                "metrics": {"spend": 15.0, "impressions": 1500, "clicks": 30,
+                            "conversion": 3, "video_views": 400}}]
+        self._send(200, {"code": 0, "data": {
+            "list": rows,
+            "page_info": {"page": page, "page_size": 1,
+                          "total_number": 2}}})
 
 
 class ConnectorTest(unittest.TestCase):
@@ -136,11 +169,13 @@ class ConnectorTest(unittest.TestCase):
         text = connectors.meta_insights_csv("123", "2026-08-01", "2026-08-31")
         self.assertEqual(StubHandler.seen.get("token"), "dummy-meta-token")
         rows, quar = ingest.parse_csv_report(text, "meta", "meta-api")
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["campaign"], "MetaCamp")
+        # Pagination followed: both stub pages land in one CSV.
+        self.assertEqual([r["campaign"] for r in rows],
+                         ["MetaCamp", "MetaCamp2"])
         self.assertEqual(rows[0]["spend"], 42.5)
         self.assertEqual(rows[0]["conversions"], 7.0)
         self.assertEqual(rows[0]["video_views"], 900)
+        self.assertEqual(rows[1]["spend"], 10.0)
         self.assertEqual(quar, [])
 
     def test_tiktok_report_end_to_end(self):
@@ -150,9 +185,12 @@ class ConnectorTest(unittest.TestCase):
         self.assertEqual(StubHandler.seen.get("access_token"),
                          "dummy-tt-token")
         rows, _quar = ingest.parse_csv_report(text, "tiktok", "tiktok-api")
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["campaign"], "TikCamp")
+        # Page 2 requested and merged via page_info total_number.
+        self.assertEqual(StubHandler.seen.get("page"), 2)
+        self.assertEqual([r["campaign"] for r in rows],
+                         ["TikCamp", "TikCamp2"])
         self.assertEqual(rows[0]["conversions"], 3.0)
+        self.assertEqual(rows[1]["conversions"], 5.0)
 
     def test_platform_needs_token(self):
         for fn, args in (
@@ -213,9 +251,9 @@ class ConnectorTest(unittest.TestCase):
                 conn, "connect-meta",
                 {"ad_account_id": "123", "since": "2026-08-01",
                  "until": "2026-08-31"}, None)
-            self.assertEqual(out["inserted"], 1)
+            self.assertEqual(out["inserted"], 2)
             n = conn.execute("SELECT COUNT(*) FROM ads").fetchone()[0]
-            self.assertEqual(n, 1)
+            self.assertEqual(n, 2)
         finally:
             conn.close()
 

@@ -247,6 +247,9 @@ class MockLlm:
             ann["hook_type"] = "offer"
         ann["hook_confidence"] = 0.55
         ann["creator_confidence"] = 0.5
+        ann["edit_style"] = ("product_demo" if ann.get("product_seconds")
+                             else "talking_head")
+        ann["edit_confidence"] = 0.5
         brand = [l["t_sec"] for l in labels if l.get("brand_visible")]
         if brand:
             ann["brand_seconds"] = [{"start_s": min(brand), "end_s": max(brand),
@@ -424,8 +427,10 @@ STRUCTURE_PROMPT = (
     "each {start_s, end_s, confidence} — set cta/endframe from the "
     "cta_visible/end_frame flags and text_overlay copy), "
     "creator_vs_branded (creator|branded|hybrid), "
-    "creator_confidence (0..1), duration_s, pace_cuts_per_min "
-    "(count the frames with cut=true). "
+    "creator_confidence (0..1), edit_style (one of talking_head, ugc, "
+    "product_demo, montage, slideshow_static, cinematic, testimonial, "
+    "screen_recording, mixed, other), edit_confidence (0..1), "
+    "duration_s, pace_cuts_per_min (count the frames with cut=true). "
     "Transcript: %s\nVision labels: %s")
 
 

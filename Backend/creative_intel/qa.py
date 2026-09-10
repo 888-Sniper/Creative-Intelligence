@@ -16,6 +16,7 @@ import json
 import math
 
 PRODUCT_EARLY_S = 3.0
+BRAND_EARLY_S = 3.0
 
 SOURCE_PRIORITY = ("Uploaded CSV", "Annotation", "ASR Transcript",
                    "Benchmark Derived")
@@ -110,12 +111,15 @@ def _fact_pack(conn, limit=8, scope=None):
     impr = sum(r["impressions"] for r in rows)
     clicks = sum(r["clicks"] for r in rows)
     conv = sum(r["conversions"] for r in rows)
-    by_campaign, by_hook, by_format = {}, {}, {}
+    by_campaign, by_hook, by_format, by_style = {}, {}, {}, {}
     for r in rows:
         by_campaign.setdefault(r["campaign"] or "(uncategorised)", []).append(r)
         hook = (anns.get(r["creative_key"], {}) or {}).get("hook_type")
         if hook:
             by_hook.setdefault(hook, []).append(r)
+        style = (anns.get(r["creative_key"], {}) or {}).get("edit_style")
+        if style:
+            by_style.setdefault(style, []).append(r)
         if (r["platform"] or "").lower() == "tiktok":
             mode = (anns.get(r["creative_key"], {}) or {}).get(
                 "creator_vs_branded") or "(unannotated)"
@@ -148,7 +152,33 @@ def _fact_pack(conn, limit=8, scope=None):
         views = sum(x["video_views"] for x in group)
         return round(views / impr, 4) if impr else None
 
+    def _timed(group):
+        stats = _kpis(group)
+        stats["vtr"] = _vtr(group)
+        return stats
+
+    def _timing_block(early_group, late_group):
+        block = {}
+        if early_group:
+            block["early"] = {
+                "n_creatives": len({x["creative_key"]
+                                    for x in early_group}),
+                **_timed(early_group)}
+        else:
+            block["early"] = None
+        if late_group:
+            block["late"] = {
+                "n_creatives": len({x["creative_key"]
+                                    for x in late_group}),
+                **_timed(late_group)}
+        else:
+            block["late"] = None
+        return block
+
     early, late = [], []
+    brand_early, brand_late = [], []
+    logo_early, logo_late = [], []
+    audio_early, audio_late = [], []
     with_cta, without_cta = [], []
     slot_hits = {}
     durations = {}
@@ -157,11 +187,28 @@ def _fact_pack(conn, limit=8, scope=None):
                            (key,)).fetchone()
         if got and got[0]:
             durations[key] = got[0]
+    def _span_min(ann, key):
+        spans = (ann or {}).get(key) or []
+        starts = [s.get("start_s") for s in spans
+                  if isinstance(s, dict)
+                  and isinstance(s.get("start_s"), (int, float))
+                  and not isinstance(s.get("start_s"), bool)]
+        return min(starts) if starts else None
+
     for r in rows:
         ann = anns.get(r["creative_key"], {}) or {}
         start = _product_start(ann)
         if start is not None:
             (early if start <= PRODUCT_EARLY_S else late).append(r)
+        brand = _span_min(ann, "brand_seconds")
+        if brand is not None:
+            (brand_early if brand <= BRAND_EARLY_S else brand_late).append(r)
+        logo = _span_min(ann, "logo_seconds")
+        if logo is not None:
+            (logo_early if logo <= BRAND_EARLY_S else logo_late).append(r)
+        mention = ann.get("brand_audio_mention_s")
+        if isinstance(mention, (int, float)) and not isinstance(mention, bool):
+            (audio_early if mention <= BRAND_EARLY_S else audio_late).append(r)
         struct = ann.get("structure") or {}
         cta = ann.get("cta") or (struct.get("cta") or {})
         has_cta = bool(isinstance(cta, str) and cta.strip()) or (
@@ -227,6 +274,11 @@ def _fact_pack(conn, limit=8, scope=None):
                       by_hook.items(),
                       key=lambda kv: sum(x["spend"] for x in kv[1]),
                       reverse=True)[:limit]],
+        "styles": [{"style": style, **_kpis(group)}
+                   for style, group in sorted(
+                       by_style.items(),
+                       key=lambda kv: sum(x["spend"] for x in kv[1]),
+                       reverse=True)[:limit]],
         "formats": [{"format": mode, **_kpis(group)}
                     for mode, group in sorted(
                         by_format.items(),
@@ -253,6 +305,12 @@ def _fact_pack(conn, limit=8, scope=None):
                       "vtr": _vtr(early)} if early else None,
             "late": {"n_creatives": len({x["creative_key"] for x in late}),
                      "vtr": _vtr(late)} if late else None},
+        "brand_timing": {"cutoff_s": BRAND_EARLY_S,
+                         **_timing_block(brand_early, brand_late)},
+        "logo_timing": {"cutoff_s": BRAND_EARLY_S,
+                        **_timing_block(logo_early, logo_late)},
+        "audio_timing": {"cutoff_s": BRAND_EARLY_S,
+                         **_timing_block(audio_early, audio_late)},
         "lengths": [{"bucket": bucket, **_kpis(group)} for bucket, group in
                     by_length.items() if group],
         "cta": {"with_cta": _kpis(with_cta) if with_cta else None,
@@ -272,11 +330,15 @@ _USED_SOURCES = {
     "totals": ("Uploaded CSV", "Benchmark Derived"),
     "campaigns": ("Uploaded CSV", "Benchmark Derived"),
     "hooks": ("Annotation", "Uploaded CSV", "Benchmark Derived"),
+    "styles": ("Annotation", "Uploaded CSV", "Benchmark Derived"),
     "formats": ("Annotation", "Uploaded CSV", "Benchmark Derived"),
     "funnel": ("Uploaded CSV", "Benchmark Derived"),
     "verticals": ("Uploaded CSV", "Benchmark Derived"),
     "markets": ("Uploaded CSV", "Benchmark Derived"),
     "product_timing": ("Annotation", "Uploaded CSV", "Benchmark Derived"),
+    "brand_timing": ("Annotation", "Uploaded CSV", "Benchmark Derived"),
+    "logo_timing": ("Annotation", "Uploaded CSV", "Benchmark Derived"),
+    "audio_timing": ("Annotation", "Uploaded CSV", "Benchmark Derived"),
     "lengths": ("Uploaded CSV", "Benchmark Derived"),
     "cta": ("Annotation", "Uploaded CSV", "Benchmark Derived"),
     "structure": ("Annotation",),
@@ -504,6 +566,64 @@ def answer(conn, question, llm=None, scope=None):
     def _money(value):
         return ("$%s" % f"{value:,.2f}") if value is not None else "n/a"
 
+    if any(w in q for w in ("style", "editing", "talking head", "ugc",
+                            "montage", "cinematic", "testimonial")):
+        styles = scoped_pack()["styles"]
+        if not styles:
+            parts.append("No editing-style labels in scope yet — annotate "
+                         "creatives to unlock style comparisons.")
+            cite("Annotation")
+        else:
+            bits = ["%s: %d creatives at %s spend, CPA %s" % (
+                s["style"], s["n_creatives"], _money(s["spend"]),
+                _money(s["cpa"])) for s in styles]
+            parts.append("Editing styles in scope — " + "; ".join(bits) + ".")
+            cite("Uploaded CSV")
+            cite("Annotation")
+            cite("Benchmark Derived")
+    def _timing_bits(label, timing):
+        bits = []
+        for side, when in (("early", "within the first %ss"),
+                           ("late", "after %ss")):
+            group = timing[side]
+            if group:
+                bits.append(
+                    "%s %s: %d creatives at %s spend, VTR %s, CTR %s, CPA %s"
+                    % (label, when % timing["cutoff_s"],
+                       group["n_creatives"], _money(group["spend"]),
+                       ("%.2f%%" % (100.0 * group["vtr"])
+                        if group.get("vtr") is not None else "n/a"),
+                       ("%.2f%%" % (100.0 * group["ctr"])
+                        if group.get("ctr") is not None else "n/a"),
+                       _money(group["cpa"])))
+        return bits
+
+    if "brand" in q or "logo" in q:
+        for label, key in (("Brand", "brand_timing"),
+                           ("Logo", "logo_timing")):
+            timing = scoped_pack()[key]
+            bits = _timing_bits(label, timing)
+            if not bits:
+                parts.append("No %s appearance timings annotated in scope "
+                             "yet." % label.lower())
+                cite("Annotation")
+            else:
+                parts.append("; ".join(bits) + ".")
+                cite("Uploaded CSV")
+                cite("Annotation")
+                cite("Benchmark Derived")
+    if any(w in q for w in ("audio", "mention", "said", "spoken")):
+        timing = scoped_pack()["audio_timing"]
+        bits = _timing_bits("Audible brand mention", timing)
+        if not bits:
+            parts.append("No audible brand mentions timed in scope yet — "
+                         "run the pipeline with brand terms to unlock this.")
+            cite("Annotation")
+        else:
+            parts.append("; ".join(bits) + ".")
+            cite("Uploaded CSV")
+            cite("Annotation")
+            cite("Benchmark Derived")
     if "hook" in q:
         hooks = scoped_pack()["hooks"]
         if not hooks:
@@ -659,9 +779,10 @@ def answer(conn, question, llm=None, scope=None):
     if not parts:
         spend = sum(r["spend"] for r in rows)
         parts.append("Insufficient data: I can answer about spend, CTR, CPA, "
-                     "VTR, TikTok formats, best creatives, hooks, video "
-                     "length, CTA, funnel, markets, verticals, top-vs-bottom, "
-                     "retention, or structure — all from uploaded rows. The "
+                     "VTR, TikTok formats, best creatives, hooks, editing "
+                     "styles, video length, CTA, funnel, markets, verticals, "
+                     "top-vs-bottom, retention, structure, or brand timing — "
+                     "all from uploaded rows. The "
                      "dataset holds %d uploaded rows at $%s total spend."
                      % (len(rows), f"{spend:,.2f}"))
         cite("Uploaded CSV")

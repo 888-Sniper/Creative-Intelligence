@@ -173,7 +173,8 @@ class RetentionTest(unittest.TestCase):
         ingest.insert_rows(conn, ingest.parse_csv(META_CSV, "meta"))
         creative.run_pipeline(conn, "hook-a", prov)
         conn.executemany(
-            "INSERT INTO retention VALUES (?, ?, ?)",
+            "INSERT INTO retention (creative_key, t_sec, retention_pct)"
+            " VALUES (?, ?, ?)",
             [("hook-a", 0.0, 100.0), ("hook-a", 3.0, 80.0),
              ("hook-a", 27.0, 40.0)])
         segs = {s["segment"]: s for s in retention.join_segments(conn, "hook-a")}

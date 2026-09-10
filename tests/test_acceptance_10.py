@@ -80,7 +80,8 @@ def fresh_acc_db():
     shared.update({
         "hook_type": "demo_open", "hook_modality": "spoken",
         "hook_confidence": 0.8, "creator_vs_branded": "creator",
-        "creator_confidence": 0.8, "duration_s": 30.0,
+        "creator_confidence": 0.8, "edit_style": "product_demo",
+        "edit_confidence": 0.8, "duration_s": 30.0,
         "brand_seconds": [{"start_s": 0.5, "end_s": 2.0}],
         "product_seconds": [{"start_s": 6.2, "end_s": 15.0}],
         "structure": _struct(
@@ -100,7 +101,8 @@ def fresh_acc_db():
     spain.update({
         "hook_type": "question", "hook_modality": "visual",
         "hook_confidence": 0.6, "creator_vs_branded": "branded",
-        "creator_confidence": 0.6, "duration_s": 12.0,
+        "creator_confidence": 0.6, "edit_style": "talking_head",
+        "edit_confidence": 0.6, "duration_s": 12.0,
         "structure": _struct(
             hook={"start_s": 0.0, "end_s": 3.0, "confidence": 0.7},
             body={"start_s": 3.0, "end_s": 10.0, "confidence": 0.7}),
@@ -110,7 +112,8 @@ def fresh_acc_db():
     offer = creative.blank_annotation()
     offer.update({"hook_type": "offer", "hook_modality": "text",
                   "hook_confidence": 0.6, "creator_vs_branded": "hybrid",
-                  "creator_confidence": 0.6, "duration_s": 18.0})
+                  "creator_confidence": 0.6, "edit_style": "montage",
+                  "edit_confidence": 0.6, "duration_s": 18.0})
     creative.save_annotation(conn, "france-offer", offer)
     conn.execute("UPDATE creatives SET status='human_verified'"
                  " WHERE creative_key='shared-creative'")
@@ -1145,9 +1148,12 @@ class ReportKpiAwarenessTest(unittest.TestCase):
         # so there is no best rather than an arbitrary pick.
         self.assertIsNone(extras["per_campaign"]["CampY"]["best"])
         self.assertIsNone(extras["per_campaign"]["CampY"]["worst"])
+        # The thin single market is noted, never ranked.
+        self.assertTrue(any("too early to judge" in r
+                            for r in extras["recommendations"]))
         rep = benchmarks.build_report(self.conn, ["CampY"], ["cpa"],
                                       None, "one-pager")
-        self.assertIn("No CPA values to rank yet", rep["markdown"])
+        self.assertIn("too early to judge", rep["markdown"])
 
     def test_bad_rank_rejected(self):
         with self.assertRaises(ValueError):
@@ -1194,6 +1200,356 @@ class ReportKpiAwarenessTest(unittest.TestCase):
         for value in ("cpa", "cpm", "ctr", "vtr", "roas"):
             self.assertIn('value="%s"' % value, html)
         self.assertIn('rank_by:$("rep-rank").value', html)
+
+
+class QuartileSynthesisTest(unittest.TestCase):
+    Q_CSV = ("Campaign,Ad Name,Creative Name,Amount Spent,Impressions,"
+             "Link Clicks,Conversions,Video Views,views_25,views_50,"
+             "views_75,views_100,Revenue,Client,Project,Vertical,Market,"
+             "Objective,Funnel Stage,Date\n"
+             "QCamp,Q1,quart-creative,100,10000,200,10,6000,8000,6000,4000,"
+             "2000,250,Foap,Proj1,Beauty,Spain,Sales,Lower,2026-08-01\n")
+
+    def _db(self):
+        conn = sqlite3.connect(":memory:")
+        schema.init_db(conn)
+        return conn
+
+    def test_quartiles_become_curve(self):
+        conn = self._db()
+        try:
+            ingest.insert_rows(conn, ingest.parse_csv(self.Q_CSV, "meta"))
+            pts = conn.execute(
+                "SELECT t_sec, retention_pct FROM retention"
+                " WHERE creative_key=? ORDER BY t_sec",
+                ("quart-creative",)).fetchall()
+            self.assertEqual(pts, [(0.0, 100.0), (7.5, 80.0), (15.0, 60.0),
+                                   (22.5, 40.0), (30.0, 20.0)])
+        finally:
+            conn.close()
+
+    def test_manual_curves_win(self):
+        conn = self._db()
+        try:
+            conn.execute("INSERT INTO retention (creative_key, t_sec,"
+                         " retention_pct) VALUES ('quart-creative', 0, 99)")
+            ingest.insert_rows(conn, ingest.parse_csv(self.Q_CSV, "meta"))
+            pts = conn.execute(
+                "SELECT t_sec, retention_pct FROM retention"
+                " WHERE creative_key=?", ("quart-creative",)).fetchall()
+            self.assertEqual(pts, [(0, 99)])
+        finally:
+            conn.close()
+
+    def test_no_quartiles_no_curve(self):
+        conn = self._db()
+        try:
+            ingest.insert_rows(conn, ingest.parse_csv(ACC_CSV, "meta"))
+            n = conn.execute("SELECT COUNT(*) FROM retention").fetchone()[0]
+            self.assertEqual(n, 0)
+        finally:
+            conn.close()
+
+    def test_synth_rows_are_stamped(self):
+        conn = self._db()
+        try:
+            ingest.upsert_rows(conn, ingest.parse_csv(self.Q_CSV, "meta"))
+            sources = {r[0] for r in conn.execute(
+                "SELECT DISTINCT source FROM retention").fetchall()}
+            self.assertEqual(sources, {"quartile_synthesized"})
+        finally:
+            conn.close()
+
+    def test_synth_refreshes_on_reimport(self):
+        conn = self._db()
+        try:
+            ingest.upsert_rows(conn, ingest.parse_csv(self.Q_CSV, "meta"))
+            first = conn.execute(
+                "SELECT t_sec, retention_pct FROM retention"
+                " WHERE creative_key=? ORDER BY t_sec",
+                ("quart-creative",)).fetchall()
+            self.assertEqual(len(first), 5)
+            changed = self.Q_CSV.replace(",2000,250,", ",9000,250,", 1)
+            ingest.upsert_rows(conn, ingest.parse_csv(changed, "meta"))
+            pts = conn.execute(
+                "SELECT t_sec, retention_pct FROM retention"
+                " WHERE creative_key=? ORDER BY t_sec",
+                ("quart-creative",)).fetchall()
+            self.assertEqual(len(pts), 5)
+            self.assertEqual(pts[-1], (30.0, 90.0))
+        finally:
+            conn.close()
+
+    def test_manual_rows_survive_reimport(self):
+        conn = self._db()
+        try:
+            ingest.upsert_rows(conn, ingest.parse_csv(self.Q_CSV, "meta"))
+            conn.execute(
+                "INSERT OR REPLACE INTO retention (creative_key, t_sec,"
+                " retention_pct, source) VALUES ('quart-creative', 0, 99,"
+                " 'manual')")
+            conn.commit()
+            changed = self.Q_CSV.replace(",2000,250,", ",9000,250,", 1)
+            ingest.upsert_rows(conn, ingest.parse_csv(changed, "meta"))
+            pts = conn.execute(
+                "SELECT t_sec, retention_pct, source FROM retention"
+                " WHERE creative_key=? ORDER BY t_sec",
+                ("quart-creative",)).fetchall()
+            # Manual point intact; the key is skipped wholesale so the
+            # reimport neither overwrites it nor duplicates siblings.
+            self.assertEqual(len(pts), 5)
+            self.assertEqual(pts[0], (0, 99, "manual"))
+            self.assertEqual(
+                [p[1] for p in pts],
+                [99, 80.0, 60.0, 40.0, 20.0])
+        finally:
+            conn.close()
+
+    def test_migrate_adds_retention_source(self):
+        conn = sqlite3.connect(":memory:")
+        try:
+            conn.execute(
+                "CREATE TABLE ads (id INTEGER PRIMARY KEY, platform TEXT,"
+                " source TEXT, campaign TEXT, adset TEXT, ad_name TEXT,"
+                " creative_key TEXT, spend REAL, impressions INTEGER,"
+                " clicks INTEGER, conversions REAL, video_views INTEGER,"
+                " views_25 INTEGER, views_50 INTEGER, views_75 INTEGER,"
+                " views_100 INTEGER, client TEXT, project TEXT,"
+                " vertical TEXT, market TEXT, objective TEXT,"
+                " funnel_stage TEXT, date TEXT, revenue REAL)")
+            conn.execute(
+                "CREATE TABLE retention (creative_key TEXT NOT NULL,"
+                " t_sec REAL NOT NULL, retention_pct REAL NOT NULL,"
+                " PRIMARY KEY (creative_key, t_sec))")
+            conn.execute("INSERT INTO retention VALUES ('k', 0, 99)")
+            schema.migrate(conn)
+            cols = [r[1] for r in
+                    conn.execute("PRAGMA table_info(retention)")]
+            self.assertIn("source", cols)
+            self.assertEqual(
+                conn.execute("SELECT source FROM retention").fetchone()[0],
+                "manual")
+        finally:
+            conn.close()
+
+
+class EditStyleTest(unittest.TestCase):
+    def setUp(self):
+        self.conn = fresh_acc_db()
+
+    def tearDown(self):
+        self.conn.close()
+
+    def test_taxonomy_validates(self):
+        ann = creative.blank_annotation()
+        ann["edit_style"] = "ugc"
+        self.assertEqual(creative.validate(ann), [])
+        ann["edit_style"] = "shaky-cam"
+        self.assertTrue(any("edit_style" in e
+                            for e in creative.validate(ann)))
+
+    def test_benchmark_groups_by_style(self):
+        bench = benchmarks.benchmark(self.conn, "edit_style")
+        self.assertEqual(bench["product_demo"]["spend"], 300.0)
+        self.assertIn("talking_head", bench)
+        self.assertIn("montage", bench)
+
+    def test_rows_and_xlsx_carry_style(self):
+        rows = benchmarks._creative_rows(self.conn, "CampA")
+        shared = next(r for r in rows
+                      if r["creative_key"] == "shared-creative")
+        self.assertEqual(shared["edit_style"], "product_demo")
+        rep = benchmarks.build_report(self.conn, ["CampA"], ["cpa"],
+                                      None, "xlsx")
+        import base64
+        import io
+        import re
+        import zipfile
+        zf = zipfile.ZipFile(io.BytesIO(base64.b64decode(rep["xlsx_b64"])))
+        strings = " ".join(re.findall(
+            r"<t[^>]*>(.*?)</t>",
+            zf.read("xl/sharedStrings.xml").decode("utf-8")))
+        self.assertIn("edit_style", strings)
+        self.assertIn("product_demo", strings)
+
+    def test_ask_answers_styles(self):
+        out = qa.answer(self.conn, "Which editing style wins?", SPAIN)
+        self.assertIn("product_demo", out["answer"])
+
+    def test_compare_contrasts_style(self):
+        why = server._creative_why(
+            "x", "y",
+            {"conversions": 5, "cpa": 10.0, "ctr": 0.02,
+             "impressions": 1000,
+             "annotation": {"hook_type": "question",
+                            "creator_vs_branded": "creator",
+                            "edit_style": "ugc"}},
+            {"conversions": 5, "cpa": 12.0, "ctr": 0.02,
+             "impressions": 1000,
+             "annotation": {"hook_type": "question",
+                            "creator_vs_branded": "creator",
+                            "edit_style": "montage"}})
+        self.assertTrue(any("uses style ugc" in d
+                            for d in why["differences"]))
+
+
+class BrandTimingTest(unittest.TestCase):
+    BT_CSV = ("Campaign,Ad Name,Creative Name,Amount Spent,Impressions,"
+              "Link Clicks,Conversions,Video Views,Revenue,Client,Project,"
+              "Vertical,Market,Objective,Funnel Stage,Date\n"
+              "CampB,B1,early-brand,100,10000,200,10,6000,250,"
+              "Foap,Proj1,Beauty,Spain,Sales,Lower,2026-08-01\n"
+              "CampB,B2,late-brand,100,10000,100,5,3000,100,"
+              "Foap,Proj1,Beauty,Spain,Sales,Lower,2026-08-02\n")
+
+    def setUp(self):
+        self.conn = sqlite3.connect(":memory:")
+        schema.init_db(self.conn)
+        ingest.insert_rows(self.conn, ingest.parse_csv(self.BT_CSV, "meta"))
+        early = creative.blank_annotation()
+        early.update({
+            "brand_seconds": [{"start_s": 0.5, "end_s": 2.0}],
+            "logo_seconds": [{"start_s": 1.0, "end_s": 2.0}],
+            "transcript_words": [{"w": "foap", "t": 1.0, "level": "word"}],
+            "brand_audio_mention_s": 1.0, "brand_audio_approx": False,
+            "brand_audio_matches": [{"term": "foap", "t": 1.0,
+                                     "approx": False}]})
+        creative.save_annotation(self.conn, "early-brand", early)
+        late = creative.blank_annotation()
+        late.update({
+            "brand_seconds": [{"start_s": 8.0, "end_s": 12.0}],
+            "logo_seconds": [{"start_s": 9.0, "end_s": 12.0}],
+            "transcript_words": [{"w": "foap", "t": 9.0, "level": "word"}],
+            "brand_audio_mention_s": 9.0, "brand_audio_approx": False,
+            "brand_audio_matches": [{"term": "foap", "t": 9.0,
+                                     "approx": False}]})
+        creative.save_annotation(self.conn, "late-brand", late)
+
+    def tearDown(self):
+        self.conn.close()
+
+    def test_brand_timing_split(self):
+        out = qa.answer(self.conn, "Does early brand appearance win?")
+        self.assertIn("Brand within the first 3.0s", out["answer"])
+        self.assertIn("Brand after 3.0s", out["answer"])
+
+    def test_logo_timing_split(self):
+        out = qa.answer(self.conn, "Which logo timing wins?")
+        self.assertIn("Logo within the first 3.0s", out["answer"])
+
+    def test_audio_timing_split(self):
+        out = qa.answer(self.conn, "When is the brand mentioned in audio?")
+        self.assertIn("Audible brand mention within the first 3.0s",
+                      out["answer"])
+
+
+class DateRangeTest(unittest.TestCase):
+    def setUp(self):
+        self.conn = fresh_acc_db()
+
+    def tearDown(self):
+        self.conn.close()
+
+    def test_range_matches_window_only(self):
+        scope = Scope({"date_from": ["2026-08-01"],
+                       "date_to": ["2026-08-03"]})
+        cols = [c[0] for c in self.conn.execute(
+            "SELECT * FROM ads LIMIT 0").description]
+        rows = [dict(zip(cols, v)) for v in self.conn.execute(
+            "SELECT * FROM ads").fetchall()]
+        kept = sorted(r["ad_name"] for r in rows if scope.match(r))
+        self.assertEqual(kept, ["A1", "A2", "B1"])
+
+    def test_undated_rows_out_of_range(self):
+        scope = Scope({"date_from": ["2026-08-01"]})
+        self.assertFalse(scope.match({"date": ""}))
+        self.assertTrue(scope.match({"date": "2026-09-01"}))
+
+    def test_bad_day_rejected(self):
+        with self.assertRaises(ValueError):
+            Scope({"date_from": ["08/01/2026"]}).normalized()
+        with self.assertRaises(ValueError):
+            Scope({"date_to": ["2026-13-01"]}).normalized()
+
+    def test_reversed_window_rejected(self):
+        with self.assertRaises(ValueError):
+            benchmarks.compare_periods(self.conn, "2026-08-05",
+                                       "2026-08-01", "2026-08-04",
+                                       "2026-08-07")
+
+    def test_periods_split_and_delta(self):
+        got = benchmarks.compare_periods(
+            self.conn, "2026-08-01", "2026-08-03",
+            "2026-08-04", "2026-08-07")
+        self.assertEqual(got["a"]["n_ads"], 3)
+        self.assertEqual(got["a"]["kpis"]["spend"], 350.0)
+        self.assertEqual(got["b"]["n_ads"], 4)
+        self.assertEqual(got["b"]["kpis"]["spend"], 210.0)
+        self.assertEqual(got["delta"]["spend"], -140.0)
+
+    def test_periods_route(self):
+        got = _fetch("/api/compare/periods?a_from=2026-08-01"
+                     "&a_to=2026-08-03&b_from=2026-08-04&b_to=2026-08-07")
+        self.assertEqual(got["a"]["kpis"]["spend"], 350.0)
+        self.assertEqual(got["delta"]["spend"], -140.0)
+        self.assertEqual(got["scope"], "All data")
+
+    def test_periods_route_rejects_reversed(self):
+        import urllib.error
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            _fetch("/api/compare/periods?a_from=2026-08-05&a_to=2026-08-01"
+                   "&b_from=2026-08-04&b_to=2026-08-07")
+        self.assertEqual(ctx.exception.code, 409)
+
+    def test_describe_shows_range(self):
+        scope = Scope({"market": ["Spain"],
+                       "date_from": ["2026-08-01"],
+                       "date_to": ["2026-08-03"]})
+        self.assertIn("2026-08-01..2026-08-03", scope.describe())
+
+
+class BriefsAndMarketsTest(unittest.TestCase):
+    def setUp(self):
+        self.conn = fresh_acc_db()
+
+    def tearDown(self):
+        self.conn.close()
+
+    def test_briefs_are_specific_and_verified_aligned(self):
+        extras = benchmarks._report_extras(self.conn, ["CampA", "CampB"],
+                                           rank_by="cpa")
+        recos = extras["recommendations"]
+        self.assertEqual(len(recos),
+                         len(extras["recommendations_verified"]))
+        self.assertTrue(any(r.startswith("SCALE —") for r in recos))
+        self.assertTrue(any(r.startswith("STOP —") for r in recos))
+        self.assertTrue(any("Brief more 'demo_open' hooks" in r
+                            for r in recos))
+        self.assertTrue(any("branded formats lead on CPA" in r
+                            for r in recos))
+        self.assertTrue(any("Brief <=" in r for r in recos))
+        self.assertTrue(any("CTA at ~25.0s" in r for r in recos))
+        self.assertTrue(any("MARKET — Spain leads" in r for r in recos))
+        self.assertTrue(any("MARKET — France underperforms" in r
+                            for r in recos))
+
+    def test_markets_table_and_section(self):
+        extras = benchmarks._report_extras(self.conn, ["CampA", "CampB"],
+                                           rank_by="cpa")
+        by_name = {m["market"]: m for m in extras["markets"]}
+        self.assertEqual(by_name["Spain"]["spend"], 150.0)
+        self.assertTrue(by_name["Spain"]["qualified"])
+        # France clears both thresholds (310 spend, 5 conversions).
+        self.assertTrue(by_name["France"]["qualified"])
+        self.assertEqual(by_name["France"]["spend"], 310.0)
+        rep = benchmarks.build_report(self.conn, ["CampA", "CampB"],
+                                      ["cpa"], None, "one-pager")
+        self.assertIn("## Markets (scoped)", rep["markdown"])
+        # CampA alone leaves France thin ($30 spend): noted, not ranked.
+        thin = benchmarks._report_extras(self.conn, ["CampA"],
+                                         rank_by="cpa")
+        self.assertTrue(any("too early to judge" in r
+                            for r in thin["recommendations"]))
 
 
 class RetentionCurveTest(unittest.TestCase):

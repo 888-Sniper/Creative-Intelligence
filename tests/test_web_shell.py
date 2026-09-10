@@ -173,6 +173,24 @@ class ShellLiveTest(unittest.TestCase):
         self.assertIn('rank_by:$("rep-rank").value', HTML)
         self.assertIn('$("rep-rank").value=st.rank_by', HTML)
 
+    def test_campaign_detail_rich(self):
+        for needle in ("Campaign totals (scoped)", "Creatives ranked by",
+                       "Recommendations", "Review or replace",
+                       "Hook concentration"):
+            self.assertIn(needle, HTML)
+
+    def test_supers_falls_back_to_structure(self):
+        self.assertIn("supers_txt", HTML)
+        self.assertIn("from structure", HTML)
+
+    def test_date_ranges_and_periods(self):
+        for cid in ("flt-date-from", "flt-date-to", "per-a-from",
+                    "per-a-to", "per-b-from", "per-b-to", "per-go",
+                    "per-out"):
+            self.assertIn('id="%s"' % cid, HTML)
+        self.assertIn("/api/compare/periods", HTML)
+        self.assertIn("data-range", HTML)
+
     def test_modality_displayed(self):
         self.assertIn("hook_modality", HTML)
         self.assertIn("brand_audio_mention_s", HTML)

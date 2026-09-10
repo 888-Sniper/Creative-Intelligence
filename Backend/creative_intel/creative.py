@@ -21,6 +21,10 @@ HOOK_TYPES = ("question", "bold_claim", "demo_open", "social_proof",
 
 HOOK_MODALITIES = ("visual", "spoken", "text", "unknown")
 
+EDIT_STYLES = ("talking_head", "ugc", "product_demo", "montage",
+               "slideshow_static", "cinematic", "testimonial",
+               "screen_recording", "mixed", "other")
+
 MAX_BRAND_TERMS = 20
 
 
@@ -108,6 +112,8 @@ def blank_annotation():
                       for slot in STRUCTURE_SLOTS},
         "creator_vs_branded": "branded",
         "creator_confidence": 0.0,
+        "edit_style": "other",
+        "edit_confidence": 0.0,
         "duration_s": 0.0,
         "pace_cuts_per_min": 0.0,
         "status": "auto",
@@ -123,6 +129,8 @@ def validate(ann):
     if ("hook_modality" in ann and
             ann.get("hook_modality") not in HOOK_MODALITIES):
         errors.append("hook_modality must be one of %s" % (list(HOOK_MODALITIES),))
+    if "edit_style" in ann and ann.get("edit_style") not in EDIT_STYLES:
+        errors.append("edit_style must be one of %s" % (list(EDIT_STYLES),))
     if ann.get("creator_vs_branded") not in CREATOR_MODES:
         errors.append("creator_vs_branded must be one of %s" % (list(CREATOR_MODES),))
     for slot in STRUCTURE_SLOTS:

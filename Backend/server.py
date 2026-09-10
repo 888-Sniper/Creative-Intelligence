@@ -116,7 +116,8 @@ def _creative_why(a, b, da, db):
                      % (winner, b if winner == a else a,
                         metric.upper(), va, vb))
     aa, ab = da.get("annotation") or {}, db.get("annotation") or {}
-    for field, label in (("hook_type", "hook"), ("creator_vs_branded", "format")):
+    for field, label in (("hook_type", "hook"), ("creator_vs_branded", "format"),
+                           ("edit_style", "style")):
         fa, fb = aa.get(field), ab.get(field)
         if fa and fb and fa != fb:
             diffs.append("%s uses %s %s while %s uses %s"
@@ -193,7 +194,8 @@ def _multi_why(keys, datas):
             ", ".join("%s %s" % (k, v) for k, v in valued if k != best[0])))
     anns = {k: (datas.get(k, {}).get("annotation") or {}) for k in keys}
     for field, label in (("hook_type", "Hook"), ("hook_modality", "Modality"),
-                         ("creator_vs_branded", "Format")):
+                         ("creator_vs_branded", "Format"),
+                         ("edit_style", "Style")):
         vals = sorted({a.get(field) for a in anns.values() if a.get(field)})
         if len(vals) > 1:
             diffs.append("%s varies: %s." % (
@@ -432,9 +434,13 @@ def apply_action(conn, action, payload, prov, media_dir=None):
             conn, source,
             lambda: sync.fetch_job(source, stored[source]))
     if action == "retention":
+        # Manual uploads are stamped source='manual' so the quartile
+        # synthesizer never overwrites them (it only rebuilds its own
+        # 'quartile_synthesized' rows).
         conn.executemany(
-            "INSERT OR REPLACE INTO retention (creative_key, t_sec, retention_pct)"
-            " VALUES (?, ?, ?)",
+            "INSERT OR REPLACE INTO retention (creative_key, t_sec,"
+            " retention_pct, source)"
+            " VALUES (?, ?, ?, 'manual')",
             [(payload["creative_key"], t, p) for t, p in payload["points"]])
         conn.commit()
         return {"ok": True}
@@ -541,9 +547,11 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError(
                         "recommendations need a campaign name")
                 rank_by = (q.get("rank_by", ["cpa"])[0] or "cpa").lower()
+                # Pass the Scope itself, not normalized(): normalized()
+                # folds project into include_projects, which a fresh
+                # Scope() would silently drop — analysing all projects.
                 send(self, 200, benchmarks.campaign_recommendations(
-                    conn, name,
-                    benchmarks.Scope.from_query(q).normalized(), rank_by))
+                    conn, name, benchmarks.Scope.from_query(q), rank_by))
             elif url.path == "/api/benchmarks":
                 send(self, 200, benchmarks.benchmark(
                     conn, q.get("group_by", ["hook_type"])[0],
@@ -670,6 +678,19 @@ class Handler(BaseHTTPRequestHandler):
             elif url.path == "/api/retention/curve":
                 key = q.get("creative_key", [""])[0]
                 send(self, 200, retention.curve(conn, key))
+            elif url.path == "/api/compare/periods":
+                from creative_intel import benchmarks as _bench6
+                # a_from/a_to/b_from/b_to name the windows; every
+                # other axis scopes both windows identically.
+                scope = _bench6.Scope.from_query(
+                    q, ignore=("a_from", "a_to", "b_from", "b_to",
+                               "label_a", "label_b"))
+                send(self, 200, _bench6.compare_periods(
+                    conn, q.get("a_from", [""])[0], q.get("a_to", [""])[0],
+                    q.get("b_from", [""])[0], q.get("b_to", [""])[0],
+                    filters=scope,
+                    label_a=q.get("label_a", ["Period A"])[0] or "Period A",
+                    label_b=q.get("label_b", ["Period B"])[0] or "Period B"))
             elif url.path == "/api/replay":
                 send(self, 200, replay.history(conn))
             elif url.path == "/api/sync/status":

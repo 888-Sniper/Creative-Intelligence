@@ -2,7 +2,8 @@
 
 import json
 
-GROUPABLE = ("platform", "campaign", "hook_type", "creator_vs_branded")
+GROUPABLE = ("platform", "campaign", "hook_type", "creator_vs_branded",
+             "edit_style")
 
 
 def _weight(rows, metric):
@@ -44,25 +45,28 @@ def summarize(rows):
 
 
 def _enrich(conn, rows):
-    """Attach hook_type / creator_vs_branded from annotations ('' if none)."""
+    """Attach hook_type / creator_vs_branded / edit_style from
+    annotations ('' if none)."""
     out = []
     for r in rows:
         got = conn.execute(
             "SELECT annotation_json FROM annotations WHERE creative_key=?",
             (r["creative_key"],)).fetchone()
-        hook, cvb = "", ""
+        hook, cvb, style = "", "", ""
         if got:
             import json
             try:
                 ann = json.loads(got[0])
                 hook = ann.get("hook_type", "") or ""
                 cvb = ann.get("creator_vs_branded", "") or ""
+                style = ann.get("edit_style", "") or ""
             except ValueError:
                 pass
         impr = r["impressions"] or 0
         d = dict(r)
         d["hook_type"] = hook
         d["creator_vs_branded"] = cvb
+        d["edit_style"] = style
         d["conv_rate"] = (r["conversions"] / impr) if impr else 0.0
         out.append(d)
     return out
@@ -97,10 +101,10 @@ Project identity is row["project"] when present, else row["campaign"].
 FILTER_KEYS = ("vertical", "platform", "funnel", "objective", "market",
                "client", "date", "campaign")
 
-KPI_KEYS = ("cpm", "vtr", "ctr", "cpa", "roas")
+KPI_KEYS = ("cpm", "vtr", "ctr", "cpc", "cpa", "roas")
 
 KPI_DIRECTIONS = {"cpm": "lower", "vtr": "higher", "ctr": "higher",
-                  "cpa": "lower", "roas": "higher"}
+                  "cpc": "lower", "cpa": "lower", "roas": "higher"}
 
 MIN_ADS = 5
 MIN_PROJECTS = 3
@@ -176,7 +180,8 @@ def normalize_filters(filters):
         return {}
     if not isinstance(filters, dict):
         raise ValueError("filters must be an object")
-    allowed = set(FILTER_KEYS) | {"include_projects", "exclude_projects"}
+    allowed = (set(FILTER_KEYS) | {"include_projects", "exclude_projects",
+                                  "date_from", "date_to"})
     unknown = sorted(set(filters) - allowed)
     if unknown:
         raise ValueError("unknown filter keys: %s" % unknown)
@@ -185,11 +190,29 @@ def normalize_filters(filters):
         vals = _as_list(filters.get(key))
         if vals:
             out[key] = sorted(set(vals))
+    for key in ("date_from", "date_to"):
+        vals = [v for v in _as_list(filters.get(key)) if v not in ("", "all")]
+        if vals:
+            out[key] = _iso_day(vals[0], key)
     for key in ("include_projects", "exclude_projects"):
         vals = _as_list(filters.get(key))
         if vals:
             out[key] = sorted(set(vals))
     return out
+
+
+def _iso_day(value, key):
+    """Strict YYYY-MM-DD day (lexicographic compare needs the shape)."""
+    import datetime
+    import re
+    text = str(value or "").strip()
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", text):
+        raise ValueError("%s must be YYYY-MM-DD, got %r" % (key, value))
+    try:
+        datetime.date.fromisoformat(text)
+    except ValueError:
+        raise ValueError("%s is not a real date: %r" % (key, value))
+    return text
 
 
 FILTER_FIELD = {"funnel": "funnel_stage"}
@@ -207,6 +230,18 @@ def match_filters(row, filters):
             wanted = [str(v).lower() for v in allowed]
             if actual not in wanted:
                 return False
+    filt = filters or {}
+    lo, hi = filt.get("date_from"), filt.get("date_to")
+    if lo or hi:
+        # ISO days compare lexicographically. Undated rows cannot be
+        # placed in a range, so they are out of scope while one is set.
+        day = str(row.get("date") or "")
+        if not day:
+            return False
+        if lo and day < lo:
+            return False
+        if hi and day > hi:
+            return False
     filt = filters or {}
     project = str(project_of(row) or "").lower()
     if filt.get("include_projects") and project not in [
@@ -241,7 +276,8 @@ class Scope:
     """
 
     AXES = ("client", "project", "campaign", "platform", "vertical",
-            "market", "funnel", "objective", "date")
+            "market", "funnel", "objective", "date", "date_from",
+            "date_to")
 
     def __init__(self, raw=None):
         self.axes = {}
@@ -291,11 +327,22 @@ class Scope:
         is "1=1" when the scope is empty. The project axis is
         skipped here (matched Python-side via project_of); callers
         doing pure-SQL aggregation must AND a project match with
-        self.match or drop the axis explicitly."""
+        self.match or drop the axis explicitly. date_from/date_to
+        become >= / <= comparisons on the ISO date column."""
         bits, params = [], []
         for key in self.AXES:
             vals = self.axes.get(key)
-            if not vals or key not in SCOPE_COLUMNS:
+            if not vals:
+                continue
+            if key == "date_from":
+                bits.append("date>=?")
+                params.append(vals[0])
+                continue
+            if key == "date_to":
+                bits.append("date<=?")
+                params.append(vals[0])
+                continue
+            if key not in SCOPE_COLUMNS:
                 continue
             col = SCOPE_COLUMNS[key]
             bits.append("(%s)" % " OR ".join(
@@ -309,8 +356,14 @@ class Scope:
         """Short human label ("Beauty, Spain, TikTok") or "All data"."""
         bits = []
         for key in self.AXES:
+            if key in ("date_from", "date_to"):
+                continue
             if self.axes.get(key):
                 bits.append(", ".join(self.axes[key]))
+        if self.axes.get("date_from") or self.axes.get("date_to"):
+            lo = (self.axes.get("date_from") or ["…"])[0]
+            hi = (self.axes.get("date_to") or ["…"])[0]
+            bits.append("%s..%s" % (lo, hi))
         return "; ".join(bits) if bits else "All data"
 
     def is_empty(self):
@@ -405,6 +458,45 @@ def _campaign_elements(conn, campaign, scope=None):
             "platforms": sorted(p for p in platforms if p),
             "n_ads": len(rows),
             "n_creatives": len({r.get("creative_key") for r in rows})}
+
+
+def compare_periods(conn, a_from, a_to, b_from, b_to, filters=None,
+                    label_a="Period A", label_b="Period B"):
+    """Period-over-period KPIs over the same scoped population.
+
+    Both windows read the identical scope plus their own date range,
+    so "August vs September for Beauty/TikTok in Spain" compares
+    like with like. delta holds B-minus-A per metric (None when
+    either side is uncomputable). Ranges are inclusive YYYY-MM-DD;
+    a start after its end raises instead of silently returning
+    empty.
+    """
+    scope = filters if isinstance(filters, Scope) else Scope(filters)
+    base = scope.normalized()
+
+    def _window(lo, hi, label):
+        filt = dict(base)
+        filt["date_from"] = _iso_day(lo, "period start")
+        filt["date_to"] = _iso_day(hi, "period end")
+        if filt["date_from"] > filt["date_to"]:
+            raise ValueError("%s starts after it ends (%s..%s)"
+                             % (label, lo, hi))
+        filt = normalize_filters(filt)
+        rows = [r for r in all_rows(conn) if match_filters(r, filt)]
+        return {"label": label, "from": filt["date_from"],
+                "to": filt["date_to"],
+                "n_ads": len(rows), "kpis": kpis_for_rows(rows)}
+
+    side_a = _window(a_from, a_to, label_a)
+    side_b = _window(b_from, b_to, label_b)
+    delta = {}
+    for metric in ("spend", "impressions", "clicks", "conversions",
+                   "cpm", "vtr", "ctr", "cpc", "cpa", "roas"):
+        va, vb = side_a["kpis"][metric], side_b["kpis"][metric]
+        delta[metric] = (round(vb - va, 4) if va is not None
+                         and vb is not None else None)
+    return {"a": side_a, "b": side_b, "delta": delta,
+            "scope": scope.describe()}
 
 
 def compare_campaigns(conn, campaigns=None, rank_by="cpa", filters=None):
@@ -561,6 +653,7 @@ def _creative_rows(conn, campaign, scope=None):
             "hook_type": ann.get("hook_type") or "unannotated",
             "hook_modality": ann.get("hook_modality") or "unknown",
             "creator_vs_branded": ann.get("creator_vs_branded") or "unannotated",
+            "edit_style": ann.get("edit_style") or "unannotated",
             "duration_s": ann.get("duration_s") or (duration[0] if duration else 0),
             "status": ann.get("status") or (status[0] if status else "auto"),
             "verified": ann.get("status") == "human_verified",
@@ -663,6 +756,140 @@ def _report_extras(conn, names, strict_human=False, scope=None,
             "unlock hook learnings." % (
                 unannotated, sum(len(per_campaign[n]["creatives"]) for n in names)),
             True))
+    # Annotation lookup for brief provenance: a brief is verified only
+    # when every creative behind its cited label is HUMAN-VERIFIED.
+    import json as _json
+    ann_by_key = {}
+    for name in names:
+        for r in per_campaign[name]["creatives"]:
+            key = r["creative_key"]
+            if key in ann_by_key:
+                continue
+            got = conn.execute("SELECT annotation_json FROM annotations"
+                               " WHERE creative_key=?", (key,)).fetchone()
+            ann = {}
+            if got:
+                try:
+                    ann = _json.loads(got[0])
+                except ValueError:
+                    ann = {}
+            ann_by_key[key] = (ann, ann.get("status") == "human_verified")
+
+    def _brief_verified(keys):
+        keys = [k for k in keys if k in ann_by_key]
+        return bool(keys) and all(ann_by_key[k][1] for k in keys)
+
+    def _label_verified(field, value):
+        return _brief_verified([k for k, (a, _v) in ann_by_key.items()
+                                if a.get(field) == value])
+
+    def _span_min(ann, field):
+        spans = (ann or {}).get(field) or []
+        starts = [s.get("start_s") for s in spans
+                  if isinstance(s, dict)
+                  and isinstance(s.get("start_s"), (int, float))
+                  and not isinstance(s.get("start_s"), bool)]
+        return min(starts) if starts else None
+
+    briefs = []
+    scoped_rows = [r for name in names
+                   for r in per_campaign[name]["creatives"]]
+    scoped_spend = sum(r["spend"] for r in scoped_rows)
+    if hook_spend:
+        top_hook = max(hook_spend, key=lambda h: hook_spend[h])
+        if top_hook != "unannotated":
+            conv = hook_conv.get(top_hook, 0)
+            briefs.append((
+                "TEST — Brief more '%s' hooks: they carry $%s of $%s "
+                "scoped spend%s." % (
+                    top_hook, f"{hook_spend[top_hook]:,.2f}",
+                    f"{scoped_spend:,.2f}",
+                    ", %s conversions" % conv if conv else ""),
+                _label_verified("hook_type", top_hook)))
+    mode_spend, mode_conv = {}, {}
+    for r in scoped_rows:
+        mode = r["creator_vs_branded"]
+        if mode == "unannotated":
+            continue
+        mode_spend[mode] = mode_spend.get(mode, 0) + r["spend"]
+        mode_conv[mode] = mode_conv.get(mode, 0) + (r["conversions"] or 0)
+    mode_cpa = {m: mode_spend[m] / mode_conv[m]
+                for m in mode_spend if mode_conv.get(m)}
+    if len(mode_cpa) >= 2:
+        winner = min(mode_cpa, key=lambda m: mode_cpa[m])
+        rest = ", ".join("%s $%.2f" % (m, mode_cpa[m])
+                         for m in sorted(mode_cpa) if m != winner)
+        briefs.append((
+            "TEST — %s formats lead on CPA ($%.2f vs %s); brief the next "
+            "concepts %s-led against the current control." % (
+                winner, mode_cpa[winner], rest, winner),
+            _label_verified("creator_vs_branded", winner)))
+    buckets = {"<=15s": [0, 0, 0], "15-30s": [0, 0, 0], ">30s": [0, 0, 0]}
+    for r in scoped_rows:
+        dur = r["duration_s"] or 0
+        bucket = "<=15s" if dur <= 15 else ("15-30s" if dur <= 30 else ">30s")
+        buckets[bucket][0] += r["spend"]
+        buckets[bucket][1] += r["conversions"] or 0
+    timed = {b: (v[0] / v[1]) for b, v in buckets.items() if v[1] > 0}
+    if len(timed) >= 2:
+        winner = min(timed, key=lambda b: timed[b])
+        briefs.append((
+            "TEST — Brief %s concepts: that length wins on CPA ($%.2f) at "
+            "$%s spend." % (winner, timed[winner],
+                             f"{buckets[winner][0]:,.2f}"),
+            _brief_verified([r["creative_key"] for r in scoped_rows
+                             if (r["duration_s"] or 0) > 0])))
+    cta_starts = []
+    for key, (a, _v) in ann_by_key.items():
+        cta = a.get("cta")
+        if not (isinstance(cta, dict) and (cta.get("end_s") or 0) > (
+                cta.get("start_s") or 0)):
+            cta = ((a.get("structure") or {}).get("cta") or {})
+        if isinstance(cta, dict) and (cta.get("end_s") or 0) > (
+                cta.get("start_s") or 0):
+            cta_starts.append((key, cta["start_s"]))
+    if cta_starts:
+        cta_starts.sort(key=lambda kv: kv[1])
+        median = cta_starts[len(cta_starts) // 2][1]
+        keys = [k for k, _t in cta_starts]
+        briefs.append((
+            "TEST — Set the CTA at ~%ss (median across %d annotated "
+            "creatives)." % (median, len(cta_starts)),
+            _brief_verified(keys)))
+    early_v, late_v, early_i, late_i = 0, 0, 0, 0
+    early_keys, late_keys = [], []
+    for r in scoped_rows:
+        start = _span_min(ann_by_key.get(r["creative_key"], ({}, False))[0],
+                          "product_seconds")
+        if start is None:
+            continue
+        if start <= 3.0:
+            early_v += r["video_views"] or 0
+            early_i += r["impressions"] or 0
+            early_keys.append(r["creative_key"])
+        else:
+            late_v += r["video_views"] or 0
+            late_i += r["impressions"] or 0
+            late_keys.append(r["creative_key"])
+    if early_i and late_i:
+        briefs.append((
+            "TEST — Show product within the first 3s: early-product VTR "
+            "is %.2f%% vs late %.2f%%." % (
+                100.0 * early_v / early_i, 100.0 * late_v / late_i),
+            _brief_verified(early_keys + late_keys)))
+    style_spend = {}
+    for r in scoped_rows:
+        style = r["edit_style"]
+        if style == "unannotated":
+            continue
+        style_spend[style] = style_spend.get(style, 0) + r["spend"]
+    if style_spend:
+        winner = max(style_spend, key=lambda s: style_spend[s])
+        briefs.append((
+            "TEST — '%s' edits carry $%s scoped spend; brief a %s variant "
+            "of the current winner." % (
+                winner, f"{style_spend[winner]:,.2f}", winner),
+            _label_verified("edit_style", winner)))
     recommendations = []
     money = rank_by in ("cpm", "cpc", "cpa")
     sym = "$" if money else ""
@@ -677,8 +904,8 @@ def _report_extras(conn, names, strict_human=False, scope=None,
         pick = (max if higher else min)
         top = pick(contenders, key=lambda kv: kv[1][rank_by])
         recommendations.append((
-            "Scale candidate (heuristic): %s — %s best-creative %s "
-            "at %s (%s)." % (
+            "SCALE — Scale candidate (heuristic): %s — %s best-creative "
+            "%s at %s (%s)." % (
                 top[0],
                 "highest" if higher else "lowest", rank_by.upper(),
                 _show_rank(top[1][rank_by]), top[1]["creative_key"]),
@@ -687,12 +914,64 @@ def _report_extras(conn, names, strict_human=False, scope=None,
             contenders, key=lambda kv: kv[1][rank_by])
         if bottom[0] != top[0]:
             recommendations.append((
-                "Watch (heuristic): %s — %s best-creative %s at %s. "
-                "Compare its hook/format against %s before adding spend."
-                % (bottom[0],
-                   "lowest" if higher else "highest", rank_by.upper(),
-                   _show_rank(bottom[1][rank_by]), top[0]),
+                "STOP — %s trails on %s (%s); fix or pause it before "
+                "adding spend — compare its hook/format against %s "
+                "(heuristic)." % (
+                    bottom[0], rank_by.upper(),
+                    _show_rank(bottom[1][rank_by]), top[0]),
                 bool(bottom[1]["verified"] and top[1]["verified"])))
+    # Territory layer: which markets lead, lag, or need more data.
+    # Rankings only admit markets past sample-size thresholds; thin
+    # markets get an explicit too-early note instead of a verdict.
+    MIN_MARKET_SPEND = 50.0
+    MIN_MARKET_CONV = 3
+    market_stats = {}
+    for r in scoped_rows:
+        m = r["market"] or "(unset)"
+        cell = market_stats.setdefault(
+            m, {"spend": 0.0, "conv": 0, "revenue": 0.0, "keys": set()})
+        cell["spend"] += r["spend"]
+        cell["conv"] += r["conversions"] or 0
+        cell["revenue"] += r["revenue"] or 0
+        cell["keys"].add(r["creative_key"])
+    markets = []
+    for m in sorted(market_stats):
+        cell = market_stats[m]
+        cpa = (cell["spend"] / cell["conv"]) if cell["conv"] else None
+        roas = (cell["revenue"] / cell["spend"]) if cell["spend"] else None
+        markets.append({
+            "market": m, "spend": round(cell["spend"], 2),
+            "conversions": cell["conv"],
+            "revenue": round(cell["revenue"], 2),
+            "cpa": round(cpa, 2) if cpa is not None else None,
+            "roas": round(roas, 4) if roas is not None else None,
+            "n_creatives": len(cell["keys"]),
+            "qualified": (cell["spend"] >= MIN_MARKET_SPEND
+                          and cell["conv"] >= MIN_MARKET_CONV)})
+    ranked_markets = [m for m in markets
+                      if m["qualified"] and m["cpa"] is not None]
+    if ranked_markets:
+        leader = min(ranked_markets, key=lambda m: m["cpa"])
+        recommendations.append((
+            "MARKET — %s leads territories on CPA ($%s at $%s spend, %d "
+            "creatives)." % (
+                leader["market"], leader["cpa"], leader["spend"],
+                leader["n_creatives"]),
+            True))
+        laggard = max(ranked_markets, key=lambda m: m["cpa"])
+        if laggard["market"] != leader["market"]:
+            recommendations.append((
+                "MARKET — %s underperforms on CPA ($%s); diagnose "
+                "hook/format fit there before scaling spend." % (
+                    laggard["market"], laggard["cpa"]),
+                True))
+    thin = [m for m in markets if not m["qualified"] and m["spend"] > 0]
+    for m in thin:
+        recommendations.append((
+            "MARKET — %s has only $%s spend: too early to judge, keep "
+            "testing." % (m["market"], m["spend"]),
+            True))
+    recommendations.extend(briefs)
     if not recommendations:
         recommendations.append((
             "No %s values to rank yet — collect delivery data before "
@@ -702,12 +981,15 @@ def _report_extras(conn, names, strict_human=False, scope=None,
             "learnings_verified": [v for _t, v in learnings],
             "recommendations": [t for t, _v in recommendations],
             "recommendations_verified": [v for _t, v in recommendations],
+            "markets": markets,
             "strict_nulled": strict_nulled}
 
 
 def _show(value):
     """Report rendering: uncomputable KPIs read n/a, never None/zero."""
     return "n/a" if value is None else value
+
+
 def _reco_fmt(rank_by, value):
     """Measured KPI values for recommendation prose: money with $,
     ROAS with x, VTR/CTR as percent — uncomputable reads n/a."""
@@ -753,10 +1035,27 @@ def campaign_recommendations(conn, campaign, scope=None, rank_by="cpa"):
     KPI with its correct direction. Every bullet is grounded in the
     campaign's scoped rows and annotations; thin evidence yields an
     explicit insufficient-data note instead of invented advice.
+    rank_by="spend" is the one deliberate fallback: spend cannot rank
+    creatives (highest spend is not "best"), so the sections are
+    CPA-ranked and the envelope says so via rank_by_requested/notice
+    instead of silently switching engines.
     """
+    requested = rank_by
+    if rank_by == "spend":
+        rank_by = "cpa"
     if rank_by not in KPI_KEYS:
         raise ValueError("rank_by must be one of %s" % sorted(KPI_KEYS))
-    scoped = scope if isinstance(scope, Scope) else Scope(scope)
+    if isinstance(scope, Scope):
+        scoped = scope
+    else:
+        # Defensive: a normalized() dict folds project into
+        # include_projects, which Scope() would silently ignore and
+        # widen to all projects. Map it back so a pre-normalized
+        # scope can never quietly analyse more than asked.
+        raw = dict(scope or {})
+        if "project" not in raw and raw.get("include_projects"):
+            raw["project"] = raw.pop("include_projects")
+        scoped = Scope(raw)
     higher = KPI_DIRECTIONS[rank_by] == "higher"
     lead_word = "highest" if higher else "lowest"
     extras = _report_extras(conn, [campaign], scope=scoped, rank_by=rank_by)
@@ -1004,11 +1303,12 @@ def campaign_recommendations(conn, campaign, scope=None, rank_by="cpa"):
     sections.append({"key": "benchmark_gap", "title": "Benchmark gap",
                      "bullets": gaps_bench})
 
+    notice = ("Spend cannot rank creatives — showing CPA-ranked "
+              "recommendations." if requested == "spend" else "")
     return {"campaign": campaign, "rank_by": rank_by,
+            "rank_by_requested": requested, "notice": notice,
             "higher_is_better": higher, "n_creatives": n,
             "sections": sections}
-
-
 
 
 def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
@@ -1142,6 +1442,16 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
                 worst["hook_type"], worst["creator_vs_branded"]))
     lines += ["", "## Creative learnings", ""]
     lines += ["- %s" % l for l in extras["learnings"]] or ["- —"]
+    if extras["markets"]:
+        lines += ["", "## Markets (scoped)", "",
+                  "Market | Spend | Conversions | CPA | ROAS | Creatives | Verdict"]
+        for m in extras["markets"]:
+            lines.append("%s | $%s | %s | %s | %s | %d | %s" % (
+                m["market"], m["spend"], m["conversions"],
+                ("$%s" % m["cpa"]) if m["cpa"] is not None else "n/a",
+                m["roas"] if m["roas"] is not None else "n/a",
+                m["n_creatives"],
+                "ranked" if m["qualified"] else "too early to judge"))
     lines += ["", "## Recommendations / next steps (heuristic)", ""]
     lines += ["- %s" % r for r in extras["recommendations"]]
     markdown = "\n".join(lines)
@@ -1231,14 +1541,15 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
                "rows": [[d] for d in comp["why"]["differences"]] or [["—"]]}
         creatives = {"name": "Creatives",
                      "header": ["campaign", "role", "creative", "spend",
-                                "ctr", "cpa", "hook", "format"],
+                                "ctr", "cpa", "hook", "format", "edit_style"],
                      "rows": [[name, role,
                                (slot or {}).get("creative_key"),
                                (slot or {}).get("spend"),
                                (slot or {}).get("ctr"),
                                (slot or {}).get("cpa"),
                                (slot or {}).get("hook_type"),
-                               (slot or {}).get("creator_vs_branded")]
+                               (slot or {}).get("creator_vs_branded"),
+                               (slot or {}).get("edit_style")]
                               for name in names
                               for role, slot in (
                                   ("best", deck["creatives"][name]["best"]),
@@ -1262,6 +1573,7 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
                       "clicks", "conversions", "video_views", "revenue",
                       "cpm", "vtr", "ctr", "cpc", "cpa", "roas",
                       "hook_type", "hook_modality", "creator_vs_branded",
+                      "edit_style",
                       "duration_s", "brand_first_visible_s",
                       "product_first_visible_s", "logo_first_visible_s",
                       "brand_audio_mention_s", "brand_audio_approx",
@@ -1278,7 +1590,8 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
                       r["conversions"], r["video_views"], r["revenue"],
                       r["cpm"], r["vtr"], r["ctr"], r["cpc"], r["cpa"],
                       r["roas"], r["hook_type"], r["hook_modality"],
-                      r["creator_vs_branded"], r["duration_s"],
+                      r["creator_vs_branded"], r["edit_style"],
+                      r["duration_s"],
                       r["brand_first_visible_s"],
                       r["product_first_visible_s"],
                       r["logo_first_visible_s"],

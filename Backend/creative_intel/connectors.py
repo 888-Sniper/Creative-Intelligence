@@ -25,6 +25,7 @@ import urllib.request
 
 MAX_FETCH_BYTES = 10 * 1024 * 1024
 FETCH_TIMEOUT_S = 30.0
+MAX_API_PAGES = 50
 
 
 class ConnectorUnavailable(ValueError):
@@ -188,12 +189,23 @@ def meta_insights_csv(ad_account_id, since, until):
     })
     url = "%s/%s/act_%s/insights?%s" % (
         base, META_VERSION, str(ad_account_id).strip(), params)
-    got = _api_json(url)
-    if isinstance(got.get("error"), dict):
-        raise ConnectorUnavailable("meta: %s" % got["error"].get("message"))
+    data_rows = []
+    seen_pages = 0
+    while url and seen_pages < MAX_API_PAGES:
+        got = _api_json(url)
+        if isinstance(got.get("error"), dict):
+            raise ConnectorUnavailable("meta: %s" % got["error"].get("message"))
+        data_rows.extend(got.get("data", []) or [])
+        # Follow Graph paging cursors so accounts with more than one
+        # results page are never silently truncated.
+        nxt = (got.get("paging") or {}).get("next")
+        if nxt and not str(nxt).startswith("http"):
+            nxt = urllib.parse.urljoin(url, str(nxt))
+        url = nxt
+        seen_pages += 1
     lines = ["Campaign,Ad Set,Ad Name,Spend,Impressions,Clicks,"
              "Conversions,Video Views"]
-    for row in got.get("data", []) or []:
+    for row in data_rows:
         conv = 0.0
         for action in row.get("actions", []) or []:
             if action.get("action_type") in ("purchase", "offsite_conversion",
@@ -244,20 +256,37 @@ def tiktok_report_csv(advertiser_id, start_date, end_date):
         raise ConnectorUnavailable("tiktok needs an advertiser id")
     base = api_base("tiktok", "https://business-api.tiktok.com").rstrip("/")
     url = base + "/open_api/v1.3/report/integrated/get/"
-    payload = {
-        "advertiser_id": str(advertiser_id).strip(),
-        "report_type": "BASIC",
-        "dimensions": ["campaign_id", "adgroup_id", "ad_id"],
-        "metrics": list(TIKTOK_FIELDS[3:]),
-        "start_date": start_date,
-        "end_date": end_date,
-        "page_size": 500,
-    }
-    got = _api_json(url, token=None, payload=payload,
-                    headers={"Access-Token": token})
-    if got.get("code", 0) != 0:
-        raise ConnectorUnavailable("tiktok: %s" % got.get("message"))
-    rows = ((got.get("data") or {}).get("list") or [])
+    rows = []
+    page = 1
+    while page <= MAX_API_PAGES:
+        payload = {
+            "advertiser_id": str(advertiser_id).strip(),
+            "report_type": "BASIC",
+            "dimensions": ["campaign_id", "adgroup_id", "ad_id"],
+            "metrics": list(TIKTOK_FIELDS[3:]),
+            "start_date": start_date,
+            "end_date": end_date,
+            "page": page,
+            "page_size": 500,
+        }
+        got = _api_json(url, token=None, payload=payload,
+                        headers={"Access-Token": token})
+        if got.get("code", 0) != 0:
+            raise ConnectorUnavailable("tiktok: %s" % got.get("message"))
+        data = got.get("data") or {}
+        chunk = data.get("list") or []
+        rows.extend(chunk)
+        # Keep requesting pages until the report is complete: stop on
+        # a short page, or once total_number is covered.
+        info = data.get("page_info") or {}
+        total = info.get("total_number")
+        size = info.get("page_size") or 500
+        if total is not None:
+            if page * size >= total:
+                break
+        elif len(chunk) < size:
+            break
+        page += 1
     lines = ["Campaign,Ad Set,Ad Name,Spend,Impressions,Clicks,"
              "Conversions,Video Views"]
     for row in rows:

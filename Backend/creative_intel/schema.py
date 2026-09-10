@@ -74,6 +74,12 @@ CREATE TABLE IF NOT EXISTS retention (
     creative_key TEXT NOT NULL,
     t_sec REAL NOT NULL,
     retention_pct REAL NOT NULL,
+    -- Curve provenance: 'manual' rows are never touched by the
+    -- quartile synthesizer; 'quartile_synthesized' rows are rebuilt
+    -- on every import. Old rows default to 'manual' (protect first:
+    -- a pre-existing synthetic curve freezes rather than risk
+    -- overwriting a hand-supplied one).
+    source TEXT NOT NULL DEFAULT 'manual',
     PRIMARY KEY (creative_key, t_sec)
 );
 CREATE TABLE IF NOT EXISTS replay_log (
@@ -137,6 +143,11 @@ def migrate(conn):
         if name not in existing:
             conn.execute("ALTER TABLE ads ADD COLUMN %s %s" % (name, ddl))
             added.append(name)
+    retention_cols = {row[1] for row in
+                      conn.execute("PRAGMA table_info(retention)")}
+    if "source" not in retention_cols:
+        conn.execute("ALTER TABLE retention ADD COLUMN"
+                     " source TEXT NOT NULL DEFAULT 'manual'")
     key_cols = ", ".join(SYNC_KEY_COLUMNS)
     conn.execute(
         "DELETE FROM ads WHERE rowid NOT IN"

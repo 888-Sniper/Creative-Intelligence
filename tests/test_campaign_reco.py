@@ -179,7 +179,41 @@ class CampaignRecoTest(unittest.TestCase):
         try:
             with self.assertRaises(ValueError):
                 benchmarks.campaign_recommendations(
-                    conn, "Alpha", rank_by="spend")
+                    conn, "Alpha", rank_by="clicks")
+        finally:
+            conn.close()
+
+    def test_cpc_ranks_lowest_click_cost(self):
+        csv = ("campaign,ad set,ad name,spend,impressions,clicks,"
+               "conversions,date\n"
+               "Gamma,Set1,cpc-a,100,1000,100,1,2026-08-01\n"
+               "Gamma,Set1,cpc-b,50,1000,10,10,2026-08-01\n")
+        conn = _conn()
+        try:
+            ingest.upsert_rows(conn, ingest.parse_csv(csv, "meta"))
+            out = benchmarks.campaign_recommendations(
+                conn, "Gamma", rank_by="cpc")
+            secs = _sections(out)
+            # CPC winner (cpc-a at $1.00) differs from the CPA winner
+            # (cpc-b at $5.00): the ranking is CPC-led, not CPA-led.
+            scale = secs["scale"]["bullets"][0]["text"]
+            self.assertIn("cpc-a", scale)
+            self.assertIn("$1.0", scale)
+        finally:
+            conn.close()
+
+    def test_spend_falls_back_to_cpa_with_notice(self):
+        conn = _conn()
+        try:
+            out = benchmarks.campaign_recommendations(
+                conn, "Alpha", rank_by="spend")
+            self.assertEqual(out["rank_by"], "cpa")
+            self.assertEqual(out["rank_by_requested"], "spend")
+            self.assertIn("CPA", out["notice"])
+            cpa = benchmarks.campaign_recommendations(
+                conn, "Alpha", rank_by="cpa")
+            self.assertEqual(
+                _sections(out)["scale"], _sections(cpa)["scale"])
         finally:
             conn.close()
 
@@ -241,8 +275,72 @@ class CampaignRecoHttpTest(unittest.TestCase):
                 body = _get("/api/campaigns/recommendations")
                 self.assertIn("campaign name", body["error"])
                 body = _get("/api/campaigns/recommendations"
-                            "?name=Alpha&rank_by=spend")
+                            "?name=Alpha&rank_by=clicks")
                 self.assertIn("rank_by", body["error"])
+                with urllib.request.urlopen(
+                        base + "/api/campaigns/recommendations"
+                        "?name=Alpha&rank_by=cpc") as resp:
+                    cpc = json.loads(resp.read())
+                self.assertEqual(cpc["rank_by"], "cpc")
+                with urllib.request.urlopen(
+                        base + "/api/campaigns/recommendations"
+                        "?name=Alpha&rank_by=spend") as resp:
+                    spend = json.loads(resp.read())
+                self.assertEqual(spend["rank_by"], "cpa")
+                self.assertEqual(spend["rank_by_requested"], "spend")
+                self.assertIn("CPA", spend["notice"])
+            finally:
+                httpd.shutdown()
+                thread.join(timeout=10)
+        finally:
+            os.unlink(db)
+
+
+    def test_http_project_filter_isolates(self):
+        # Two projects share campaign Alpha with DIFFERENT winners: a
+        # dropped project axis would analyse both and crown the wrong
+        # creative (this caught Scope-normalized() losing the axis).
+        import server as srv
+        csv = ("campaign,ad set,ad name,spend,impressions,clicks,"
+               "conversions,project,date\n"
+               "Alpha,Set1,win-p1,10,1000,20,5,Proj1,2026-08-01\n"
+               "Alpha,Set1,lose-p1,100,2000,30,2,Proj1,2026-08-01\n"
+               "Alpha,Set2,win-p2,15,1000,20,5,Proj2,2026-08-01\n"
+               "Alpha,Set2,lose-p2,200,2000,30,2,Proj2,2026-08-01\n")
+        db = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
+        try:
+            conn = sqlite3.connect(db)
+            schema.init_db(conn)
+            ingest.upsert_rows(conn, ingest.parse_csv(csv, "meta"))
+            conn.close()
+            srv.Handler.db_path = db
+            httpd = HTTPServer(("127.0.0.1", 0), srv.Handler)
+            port = httpd.server_address[1]
+            thread = threading.Thread(target=httpd.serve_forever,
+                                      daemon=True)
+            thread.start()
+            try:
+                base = "http://127.0.0.1:%d" % port
+
+                def _get_json(path):
+                    with urllib.request.urlopen(base + path) as resp:
+                        return json.loads(resp.read())
+
+                p1 = _get_json("/api/campaigns/recommendations"
+                               "?name=Alpha&rank_by=cpa&project=Proj1")
+                self.assertEqual(p1["n_creatives"], 2)
+                scale1 = [s for s in p1["sections"]
+                          if s["key"] == "scale"][0]["bullets"][0]
+                self.assertIn("win-p1", scale1["text"])
+                p2 = _get_json("/api/campaigns/recommendations"
+                               "?name=Alpha&rank_by=cpa&project=Proj2")
+                self.assertEqual(p2["n_creatives"], 2)
+                scale2 = [s for s in p2["sections"]
+                          if s["key"] == "scale"][0]["bullets"][0]
+                self.assertIn("win-p2", scale2["text"])
+                unscoped = _get_json("/api/campaigns/recommendations"
+                                     "?name=Alpha&rank_by=cpa")
+                self.assertEqual(unscoped["n_creatives"], 4)
             finally:
                 httpd.shutdown()
                 thread.join(timeout=10)

@@ -1,0 +1,25 @@
+[Unit]
+Description=Foap Creative Intelligence
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=creative-intel
+Group=creative-intel
+WorkingDirectory=/opt/creative-intelligence
+EnvironmentFile=/etc/creative-intelligence/creative-intelligence.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/creative-intelligence/.venv/bin/python /opt/creative-intelligence/Backend/ci_backend/main.py --db /var/lib/creative-intelligence/creative_intel.db --port 4321
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/lib/creative-intelligence /opt/creative-intelligence
+
+[Install]
+WantedBy=multi-user.target

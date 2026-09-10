@@ -122,8 +122,10 @@ CREATE TABLE IF NOT EXISTS sync_jobs (
 );
 CREATE INDEX IF NOT EXISTS sync_jobs_source ON sync_jobs (source);
 
-CREATE UNIQUE INDEX IF NOT EXISTS ads_sync_key ON ads
-    (source, platform, campaign, adset, ad_name, date);
+-- NOTE: ads_sync_key lives in migrate(), not here: the static script
+-- must stay runnable against pre-dimension databases, and migrate()
+-- dedupes existing rows before creating the index. A copy here would
+-- 500 every request on older files with "no such column: date".
 -- WorkOS authentication + admin-controlled employee access (auth.py).
 -- WorkOS proves identity; these tables decide access (default deny).
 CREATE TABLE IF NOT EXISTS employees (

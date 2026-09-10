@@ -68,6 +68,34 @@ def test_fresh_db_denies_anonymous(client):
     assert r.status_code == 200
 
 
+def test_pre_dimension_database_upgrades_in_place(tmp_path):
+    import sqlite3 as _sqlite3
+
+    db = str(tmp_path / "old.db")
+    conn = _sqlite3.connect(db)
+    conn.execute(
+        "CREATE TABLE ads (id INTEGER PRIMARY KEY,"
+        " platform TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'upload',"
+        " campaign TEXT NOT NULL DEFAULT '', adset TEXT NOT NULL DEFAULT '',"
+        " ad_name TEXT NOT NULL DEFAULT '',"
+        " creative_key TEXT NOT NULL DEFAULT '',"
+        " spend REAL NOT NULL DEFAULT 0, impressions INTEGER NOT NULL DEFAULT 0,"
+        " clicks INTEGER NOT NULL DEFAULT 0, conversions REAL NOT NULL DEFAULT 0,"
+        " video_views INTEGER NOT NULL DEFAULT 0, views_25 INTEGER NOT NULL DEFAULT 0,"
+        " views_50 INTEGER NOT NULL DEFAULT 0, views_75 INTEGER NOT NULL DEFAULT 0,"
+        " views_100 INTEGER NOT NULL DEFAULT 0)")
+    conn.commit()
+    conn.close()
+    settings = Settings(workos_client_id="client_test",
+                        key_workos="[REDACTED]")
+    http = TestClient(create_app(db, settings), raise_server_exceptions=False)
+    # Must upgrade, not 500: default-deny still answers 401.
+    assert http.get("/api/campaigns").status_code == 401
+    cols = {row[1] for row in
+            _sqlite3.connect(db).execute("PRAGMA table_info(ads)")}
+    assert {"date", "client", "revenue"} <= cols
+
+
 def test_oauth_start_shape(client):
     r = client.post("/api/auth/oauth/start", json={"provider": "google"})
     assert r.status_code == 200

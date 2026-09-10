@@ -10,7 +10,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from creative_intel import (benchmarks, creative, export_gate,
+from creative_intel import (auth, benchmarks, creative, export_gate,
                             ingest, media, providers, qa, replay, retention,
                             schema, sync)
 
@@ -44,6 +44,80 @@ def send(handler, code, obj):
     handler.send_header("Content-Length", str(len(body)))
     handler.end_headers()
     handler.wfile.write(body)
+
+
+def send_cookie(handler, code, obj, cookie=None):
+    """JSON response with an optional Set-Cookie (session issue/clear)."""
+    body = json.dumps(obj).encode()
+    handler.send_response(code)
+    handler.send_header("Content-Type", "application/json")
+    handler.send_header("Content-Length", str(len(body)))
+    if cookie:
+        handler.send_header("Set-Cookie", cookie)
+    handler.end_headers()
+    handler.wfile.write(body)
+
+
+def redirect_home(handler, cookie=None, error=""):
+    """OAuth landing: 302 to /, session via cookie only (never the URL)."""
+    target = "/"
+    if error:
+        target = "/?auth_error=" + urllib.parse.quote(error[:200])
+    handler.send_response(302)
+    handler.send_header("Location", target)
+    if cookie:
+        handler.send_header("Set-Cookie", cookie)
+    handler.end_headers()
+
+
+def _guard(handler, conn, admin=False):
+    """Default-deny gate. Returns (True, employee-or-None).
+
+    Sends 401 (no/expired session) or 403 (wrong status/role) and
+    returns (False, None) when denied. Setup mode (zero employee
+    records) allows data routes through; admin routes never bypass.
+    """
+    if admin:
+        return _guard_admin(handler, conn)
+    if not auth.enforced(conn):
+        return True, None
+    try:
+        emp, _gate = auth.authorize(
+            conn, auth.token_from_headers(handler.headers))
+    except auth.Denied as exc:
+        send(handler, 401 if exc.gate == "login" else 403,
+             {"error": str(exc), "gate": exc.gate})
+        return False, None
+    return True, emp
+
+
+def _login_verified(conn, identity):
+    """Email-grant login: verified WorkOS identity only, then session.
+
+    Returns (token, employee, gate) where gate mirrors /me so the
+    frontend lands on app/pending/suspended without a second call.
+    """
+    if not identity.get("workos_user_id") or not identity.get("verified"):
+        raise auth.AuthError("WorkOS did not return a verified identity.")
+    token, emp, _created = auth.login_identity(conn, identity)
+    gate = "app" if emp.get("status") == "active" else emp.get("status")
+    return token, emp, gate
+
+
+def _guard_admin(handler, conn):
+    """Admin gate: live session + active employee + admin role."""
+    try:
+        emp, _gate = auth.authorize(
+            conn, auth.token_from_headers(handler.headers))
+    except auth.Denied as exc:
+        send(handler, 401 if exc.gate == "login" else 403,
+             {"error": str(exc), "gate": exc.gate})
+        return False, None
+    if emp.get("role") != "admin":
+        send(handler, 403, {"error": "Administrator access required.",
+                            "gate": "forbidden"})
+        return False, None
+    return True, emp
 
 
 FILTER_AXES = ("platform", "vertical", "funnel", "objective",
@@ -502,6 +576,12 @@ class Handler(BaseHTTPRequestHandler):
         if url.path.startswith("/media/"):
             conn = self._conn()
             try:
+                # Media rides cookies (<video> tags can't set headers):
+                # live session for an active employee, like every API.
+                ok, _emp = _guard(self, conn)
+                if not ok:
+                    conn.close()
+                    return
                 blob, mime, filename = media.load_bytes(
                     conn, _media_dir(), url.path[len("/media/"):])
             except ValueError as e:
@@ -527,7 +607,60 @@ class Handler(BaseHTTPRequestHandler):
             return
         conn = self._conn()
         try:
+            if url.path == "/api/auth/me":
+                send(self, 200, auth.me(
+                    conn, auth.token_from_headers(self.headers)))
+                return
+            if url.path == "/api/auth/accounts":
+                token = auth.token_from_headers(self.headers)
+                if auth.valid_session(conn, token) is None:
+                    send(self, 401, {"error": "Sign in to continue.",
+                                     "gate": "login"})
+                    return
+                send(self, 200, {"accounts": auth.list_accounts(conn)})
+                return
+            if url.path == "/api/auth/callback":
+                try:
+                    identity = auth.finish_oauth(
+                        conn, q.get("code", [""])[0],
+                        q.get("state", [""])[0])
+                    token, _emp, _created = auth.login_identity(
+                        conn, identity)
+                except (auth.AuthError, auth.Denied) as e:
+                    redirect_home(self, error=str(e))
+                    return
+                redirect_home(self, auth.session_cookie(token))
+                return
+            if url.path.startswith("/api/admin/"):
+                ok, admin = _guard_admin(self, conn)
+                if not ok:
+                    return
+                if url.path == "/api/admin/employees":
+                    send(self, 200, {"employees": auth.admin_list(
+                        conn, q.get("search", [""])[0],
+                        q.get("filter", [""])[0])})
+                    return
+                if url.path == "/api/admin/audit":
+                    send(self, 200, {"events": auth.admin_audit_list(
+                        conn, q.get("limit", ["100"])[0])})
+                    return
+                parts = url.path[len("/api/admin/employees/"):].split("/")
+                if len(parts) == 1 and parts[0]:
+                    emp = auth.get_employee(conn, urllib.parse.unquote(
+                        parts[0]))
+                    if emp is None:
+                        send(self, 404, {"error": "Employee not found."})
+                    else:
+                        send(self, 200, {"employee":
+                                         auth.public_employee(emp)})
+                    return
+                send(self, 404, {"error": "not found"})
+                return
             # EXPERT 2 (COHORTS+COMPARE) hook: appended routes below; ingest/load_fixtures untouched.
+            if url.path.startswith("/api/") and url.path != "/api/health":
+                ok, _emp = _guard(self, conn)
+                if not ok:
+                    return
             if expert2_dispatch_get(self, conn, url, q):
                 return
             if url.path == "/api/health":
@@ -701,7 +834,7 @@ class Handler(BaseHTTPRequestHandler):
                 send(self, 200, qa.list_reviews(conn))
             else:
                 send(self, 404, {"error": "not found"})
-        except (ValueError, export_gate.ExportBlocked) as e:
+        except (ValueError, export_gate.ExportBlocked, auth.AuthError) as e:
             send(self, 409, {"error": str(e)})
         finally:
             conn.close()
@@ -711,6 +844,135 @@ class Handler(BaseHTTPRequestHandler):
         payload = read_json(self)
         conn = self._conn()
         try:
+            if url.path == "/api/auth/oauth/start":
+                port = self.server.server_address[1]
+                out = auth.start_oauth(
+                    conn, payload.get("provider", ""),
+                    auth.redirect_uri(port))
+                send(self, 200, out)
+                return
+            if url.path == "/api/auth/oauth/finish":
+                try:
+                    identity = auth.finish_oauth(
+                        conn, payload.get("code", ""),
+                        payload.get("state", ""))
+                    token, emp, _created = auth.login_identity(
+                        conn, identity)
+                except (auth.AuthError, auth.Denied) as e:
+                    send(self, 409, {"error": str(e)})
+                    return
+                send_cookie(self, 200,
+                            {"ok": True, "gate": "app"
+                             if emp.get("status") == "active"
+                             else emp.get("status"),
+                             "employee": auth.public_employee(emp)},
+                            auth.session_cookie(token))
+                return
+            if url.path == "/api/auth/email/signin":
+                identity = auth.public_identity(
+                    auth.authenticate_password(
+                        payload.get("email", ""), payload.get("password", "")),
+                    provider="email")
+                token, emp, gate = _login_verified(conn, identity)
+                send_cookie(self, 200, {"ok": True, "gate": gate,
+                                        "employee":
+                                        auth.public_employee(emp)},
+                            auth.session_cookie(token))
+                return
+            if url.path == "/api/auth/email/code":
+                auth.send_magic_code(payload.get("email", ""))
+                send(self, 200, {"ok": True})
+                return
+            if url.path == "/api/auth/email/code/signin":
+                identity = auth.public_identity(
+                    auth.authenticate_magic_code(
+                        payload.get("email", ""), payload.get("code", "")),
+                    provider="email")
+                token, emp, gate = _login_verified(conn, identity)
+                send_cookie(self, 200, {"ok": True, "gate": gate,
+                                        "employee":
+                                        auth.public_employee(emp)},
+                            auth.session_cookie(token))
+                return
+            if url.path == "/api/auth/email/reset":
+                auth.send_password_reset(payload.get("email", ""))
+                send(self, 200, {"ok": True})
+                return
+            if url.path == "/api/auth/password/reset":
+                auth.reset_password(payload.get("token", ""),
+                                    payload.get("password", ""))
+                send(self, 200, {"ok": True})
+                return
+            if url.path == "/api/auth/logout":
+                auth.destroy_session(
+                    conn, auth.token_from_headers(self.headers))
+                send_cookie(self, 200, {"ok": True}, auth.clear_cookie())
+                return
+            if url.path == "/api/auth/switch":
+                token = auth.token_from_headers(self.headers)
+                if auth.valid_session(conn, token) is None:
+                    send(self, 401, {"error": "Sign in to continue.",
+                                     "gate": "login"})
+                    return
+                target = auth.get_employee(conn, payload.get("employee_id",
+                                                             ""))
+                if target is None or not auth.has_live_session(
+                        conn, target["id"]):
+                    send(self, 404, {"error": "Sign in with that"
+                                     " account first."})
+                    return
+                fresh = auth.create_session(conn, target["id"],
+                                            target.get("workos_user_id")
+                                            or "")
+                send_cookie(self, 200,
+                            {"ok": True,
+                             "employee": auth.public_employee(target)},
+                            auth.session_cookie(fresh))
+                return
+            if url.path.startswith("/api/admin/"):
+                ok, admin = _guard_admin(self, conn)
+                if not ok:
+                    return
+                if url.path == "/api/admin/employees":
+                    emp = auth.admin_create(
+                        conn, admin["id"], payload.get("email", ""),
+                        payload.get("first_name", ""),
+                        payload.get("last_name", ""),
+                        payload.get("role", "employee"))
+                    send(self, 200, {"employee":
+                                     auth.public_employee(emp)})
+                    return
+                parts = url.path[len("/api/admin/employees/"):].split("/")
+                if len(parts) == 2 and parts[0]:
+                    target = urllib.parse.unquote(parts[0])
+                    verb = parts[1]
+                    if verb in ("approve", "suspend", "reactivate",
+                                "revoke"):
+                        moves = {"approve": ("active", "EMPLOYEE_APPROVED"),
+                                 "suspend": ("suspended",
+                                             "EMPLOYEE_SUSPENDED"),
+                                 "reactivate": ("active",
+                                                "EMPLOYEE_REACTIVATED"),
+                                 "revoke": ("revoked", "EMPLOYEE_REVOKED")}
+                        status, action = moves[verb]
+                        emp = auth.admin_set_status(
+                            conn, admin["id"], target, status, action)
+                        send(self, 200, {"employee":
+                                         auth.public_employee(emp)})
+                        return
+                    if verb == "role":
+                        emp = auth.admin_set_role(
+                            conn, admin["id"], target,
+                            payload.get("role", ""))
+                        send(self, 200, {"employee":
+                                         auth.public_employee(emp)})
+                        return
+                send(self, 404, {"error": "not found"})
+                return
+            if url.path.startswith("/api/"):
+                ok, _emp = _guard(self, conn)
+                if not ok:
+                    return
             # EXPERT 2 (COHORTS+COMPARE) hook: appended routes below; ingest/load_fixtures untouched.
             if expert2_dispatch_post(self, conn, url, payload):
                 return
@@ -795,7 +1057,7 @@ class Handler(BaseHTTPRequestHandler):
                 # Media bytes stay out of the replay log (size + portability).
                 replay.log(conn, action, payload)
             send(self, 200, result)
-        except (ValueError, export_gate.ExportBlocked) as e:
+        except (ValueError, export_gate.ExportBlocked, auth.AuthError) as e:
             send(self, 409, {"error": str(e)})
         finally:
             conn.close()

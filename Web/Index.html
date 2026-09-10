@@ -108,6 +108,18 @@ input[type="text"]{min-width:130px}
 .thumb{background:var(--foap-primary-soft);color:var(--foap-text);border-radius:var(--foap-radius-sm);padding:28px 12px;text-align:center;font-weight:700}
 [data-theme="dark"] .thumb{background:var(--foap-primary-soft)}
 video{max-width:100%;width:100%;border:1px solid var(--line);border-radius:var(--foap-radius);background:#000}
+#auth-screen{position:fixed;inset:0;z-index:50;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:24px;overflow:auto}
+#auth-screen[hidden]{display:none}
+.auth-card{max-width:480px;width:100%;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:32px}
+.auth-card h1{margin:0 0 8px;font-size:24px}
+.auth-btn{display:block;width:100%;margin:8px 0;padding:12px;text-align:center;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:8px;cursor:pointer;font-size:15px;font-weight:600;font-family:inherit}
+.auth-btn:hover{filter:brightness(1.1)}
+.auth-card input{width:100%;box-sizing:border-box;margin:4px 0}
+.auth-card h3{margin:20px 0 4px;font-size:15px}
+#account-menu{position:fixed;left:12px;bottom:12px;z-index:40;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;max-width:280px;font-size:13px}
+#account-menu[hidden]{display:none}
+.avatar{width:32px;height:32px;border-radius:50%;vertical-align:middle;margin-right:8px;background:var(--line);object-fit:cover}
+.link-btn{background:none;border:none;color:inherit;text-decoration:underline;cursor:pointer;font-size:13px;padding:2px 0;font-family:inherit}
 pre{white-space:pre-wrap;word-break:break-word;background:var(--foap-surface-2);border-radius:var(--foap-radius-sm);padding:12px;font-size:13px}
 ul.plain{list-style:none;padding:0;margin:0}
 ul.plain li{padding:6px 0;border-bottom:1px solid var(--line)}
@@ -138,6 +150,7 @@ ul.plain li{padding:6px 0;border-bottom:1px solid var(--line)}
 <button data-view="compare" aria-pressed="false">Compare</button>
 <button data-view="benchmark" aria-pressed="false">Benchmarks</button>
 <button data-view="report" aria-pressed="false">Reports</button>
+<button data-view="admin" aria-pressed="false" id="tab-admin" style="display:none">Admin</button>
 </nav>
 <span class="header-spacer"></span>
 <button id="theme" class="theme-btn" aria-label="Toggle light and dark mode">Light/Dark</button>
@@ -309,8 +322,28 @@ ul.plain li{padding:6px 0;border-bottom:1px solid var(--line)}
 <pre id="rep-out" class="muted"></pre>
 <span id="rep-links" class="report-outputs"></span></div>
 </section>
+<section class="view" id="v-admin">
+<div class="card"><h3>Admin — Employees</h3>
+<div class="muted" style="font-size:12px">Access is decided here, on the server. Changes take effect immediately, including on live sessions.</div>
+<div style="margin:12px 0"><input type="text" id="admin-search" placeholder="search name or email" style="width:220px">
+<select id="admin-filter"><option value="">all</option><option value="pending">pending</option><option value="active">active</option><option value="suspended">suspended</option><option value="revoked">revoked</option><option value="admin">admin</option><option value="employee">employee</option></select>
+<button class="action" id="admin-refresh">Refresh</button>
+<span id="admin-status" class="muted"></span></div>
+<div style="overflow:auto"><table id="admin-table"><tr><th>Employee</th><th>Email</th><th>Role</th><th>Status</th><th>Last login</th><th>Actions</th></tr></table></div>
+<h4>Add employee</h4>
+<div><input type="text" id="admin-add-email" placeholder="email" style="width:220px">
+<input type="text" id="admin-add-first" placeholder="first name (optional)" style="width:150px">
+<input type="text" id="admin-add-last" placeholder="last name (optional)" style="width:150px">
+<select id="admin-add-role"><option value="employee">Employee</option><option value="admin">Admin</option></select>
+<button class="action" id="admin-add">Add (active)</button></div>
+<h4>Audit trail</h4>
+<div style="overflow:auto"><table id="audit-table"><tr><th>When</th><th>Action</th><th>Target</th><th>Admin</th><th>Change</th></tr></table></div>
+</div>
+</section>
 </main>
 </div>
+<div id="auth-screen"><div class="auth-card" id="auth-card"></div></div>
+<div id="account-menu" hidden></div>
 <script>
 const $=id=>document.getElementById(id);
 const esc=v=>String(v??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
@@ -335,7 +368,121 @@ function scope_filters(){
   ["platform","vertical","market","funnel","objective","client","project","campaign","date","date_from","date_to"].forEach(k=>{const v=f[k];if(v&&v!=="all")out[k]=[v];});
   return out;
 }
-const api=async(m,p,b)=>{const r=await fetch(filtered_path(p),{method:m,headers:{"Content-Type":"application/json"},body:b?JSON.stringify(b):undefined});const j=await r.json();if(!r.ok)throw new Error(j.error||r.status);return j;};
+const api=async(m,p,b)=>{const r=await fetch(filtered_path(p),{method:m,headers:{"Content-Type":"application/json"},body:b?JSON.stringify(b):undefined});const j=await r.json();if(!r.ok){const e=new Error(j.error||r.status);e.gate=j.gate||"";if(window.__appLive&&["login","pending","suspended","revoked"].includes(e.gate))boot();throw e;}return j;};
+let auth_me=null;window.__appLive=false;
+async function boot(){
+  window.__appLive=false;
+  let me;
+  try{me=await api("GET","/api/auth/me");}
+  catch(e){me={authenticated:false,gate:"login",workos_configured:false,employee:null};}
+  auth_me=me;
+  if(me.authenticated&&me.gate==="app"){enter_app(me);return;}
+  show_auth(me);
+}
+function enter_app(me){
+  window.__appLive=true;
+  $("auth-screen").hidden=true;
+  render_account(me);
+  const admin=!!me.is_admin;
+  $("tab-admin").style.display=admin?"":"none";
+  if(admin)load_admin();
+  refresh();render_views();
+}
+function auth_head(title,sub){return `<h1>${esc(title)}</h1><p class="muted">${esc(sub)}</p>`;}
+function show_auth(me){
+  $("account-menu").hidden=true;
+  const box=$("auth-card");
+  const qerr=new URLSearchParams(location.search).get("auth_error")||"";
+  if(qerr)history.replaceState(null,"",location.pathname);
+  const err=qerr?`<p class="muted">Sign-in failed: ${esc(qerr)}</p>`:"";
+  if(!me.authenticated||me.gate==="login"){
+    box.innerHTML=auth_head("Welcome to Creative Intelligence","Sign in with your work account to continue.")+err+
+    `<button class="auth-btn" data-prov="google">Continue with Google</button>
+    <button class="auth-btn" data-prov="microsoft">Continue with Microsoft</button>
+    <button class="auth-btn" data-prov="apple">Continue with Apple</button>
+    <button class="auth-btn" data-prov="github">Continue with GitHub</button>
+    <h3>Or continue with email</h3>
+    <input type="text" id="em-email" placeholder="work email" autocomplete="email">
+    <input type="password" id="em-pass" placeholder="password" autocomplete="current-password">
+    <button class="auth-btn" id="em-signin">Sign in with email</button>
+    <button class="auth-btn" id="em-code-send">Email me a sign-in code</button>
+    <input type="text" id="em-code" placeholder="6-digit code" autocomplete="one-time-code">
+    <button class="auth-btn" id="em-code-go">Verify code &amp; sign in</button>
+    <button class="auth-btn" id="em-reset">Forgot password — send reset</button>
+    <p class="muted" id="auth-msg"></p>`+(me.workos_configured===false?`<p class="muted">WorkOS is not configured on this server yet — ask your administrator to set it up.</p>`:"");
+    box.querySelectorAll("[data-prov]").forEach(b=>b.onclick=()=>oauth_start(b.dataset.prov));
+    $("em-signin").onclick=email_signin;$("em-code-send").onclick=email_code_send;
+    $("em-code-go").onclick=email_code_go;$("em-reset").onclick=email_reset;
+  }else{
+    const em=me.employee||{};
+    const who=`${esc(em.first_name||"")} ${esc(em.last_name||"")}`.trim()||esc(em.email||"");
+    const titles={pending:"Access pending",suspended:"Access suspended",revoked:"Access revoked"};
+    const notes={pending:"Your account has been authenticated, but you don't currently have access to Creative Intelligence. An administrator needs to approve your account.",
+      suspended:"Your access to Creative Intelligence has been suspended. Contact an administrator if you believe this is incorrect.",
+      revoked:"Your access to Creative Intelligence has been revoked. Contact an administrator if you believe this is incorrect."};
+    box.innerHTML=auth_head(titles[me.gate]||"Access pending",who)+`<p>${esc(notes[me.gate]||notes.pending)}</p>
+    <button class="auth-btn" id="auth-refresh">Refresh access</button>
+    <button class="auth-btn" id="auth-other">Use another account</button>
+    <button class="auth-btn" id="auth-logout">Log out</button>`;
+    $("auth-refresh").onclick=()=>boot();
+    $("auth-other").onclick=()=>show_auth({authenticated:false,gate:"login",workos_configured:me.workos_configured,employee:null});
+    $("auth-logout").onclick=auth_logout;
+  }
+  $("auth-screen").hidden=false;
+}
+function auth_msg(t){const el=$("auth-msg");if(el)el.textContent=t;}
+async function oauth_start(provider){try{const r=await api("POST","/api/auth/oauth/start",{provider:provider});location.href=r.url;}catch(e){auth_msg(e.message);}}
+async function email_signin(){try{const r=await api("POST","/api/auth/email/signin",{email:$("em-email").value,password:$("em-pass").value});after_login(r);}catch(e){auth_msg(e.message);}}
+async function email_code_send(){try{await api("POST","/api/auth/email/code",{email:$("em-email").value});auth_msg("Code sent — check your email.");}catch(e){auth_msg(e.message);}}
+async function email_code_go(){try{const r=await api("POST","/api/auth/email/code/signin",{email:$("em-email").value,code:$("em-code").value});after_login(r);}catch(e){auth_msg(e.message);}}
+async function email_reset(){try{await api("POST","/api/auth/email/reset",{email:$("em-email").value});auth_msg("If that email exists, a reset is on its way.");}catch(e){auth_msg(e.message);}}
+function after_login(r){if(r&&r.gate&&r.gate!=="app"){boot();}else{location.reload();}}
+async function auth_logout(){try{await api("POST","/api/auth/logout",{});}catch(e){}location.reload();}
+function avatar_html(em,size){const url=(em&&(em.avatar_url||""))||"";const nm=((em&&(em.first_name||"")||" ")[0]||"?")+(((em&&(em.last_name||"")||" ")[0]||""));
+  if(url)return `<img class="avatar" src="${esc(url)}" alt="" referrerpolicy="no-referrer"${size?` style="width:${size}px;height:${size}px"`:""}>`;
+  return `<span class="avatar" style="display:inline-flex;align-items:center;justify-content:center;font-weight:700"${size?` style="width:${size}px;height:${size}px"`:""}>${esc(nm.trim()||"?")}</span>`;}
+function render_account(me){
+  const em=me.employee||{};const box=$("account-menu");
+  box.innerHTML=`<div class="acct-row">${avatar_html(em)}<div><strong>${esc(((em.first_name||"")+" "+(em.last_name||"")).trim()||em.email||"")}</strong><br><span class="muted">${esc(em.email||"")}</span></div></div>
+  <div class="acct-row"><button class="link-btn" id="acct-accounts">Accounts</button>${me.is_admin?`<button class="link-btn" id="acct-admin">Admin</button>`:""}<button class="link-btn" id="acct-add">Add account</button><button class="link-btn" id="acct-logout">Log out</button></div>
+  <div id="acct-list" class="muted"></div>`;
+  box.hidden=false;
+  if(me.is_admin)$("acct-admin").onclick=()=>{document.querySelector('#tabs button[data-view="admin"]').click();};
+  $("acct-add").onclick=()=>show_auth({authenticated:false,gate:"login",workos_configured:me.workos_configured,employee:null});
+  $("acct-logout").onclick=auth_logout;
+  $("acct-accounts").onclick=async()=>{try{const r=await api("GET","/api/auth/accounts");const cur=(auth_me.employee||{}).id;
+    $("acct-list").innerHTML=(r.accounts||[]).map(a=>`<div class="acct-row"><span>${esc((a.first_name+" "+a.last_name).trim()||a.email)} · ${esc(a.status)}</span>${a.employee_id===cur?"":` <button class="link-btn" data-sw="${esc(a.employee_id)}">Switch</button>`}</div>`).join("")||"No other accounts.";
+    box.querySelectorAll("[data-sw]").forEach(b=>b.onclick=async()=>{try{await api("POST","/api/auth/switch",{employee_id:b.dataset.sw});location.reload();}catch(e){$("acct-list").textContent=e.message;}});}catch(e){$("acct-list").textContent=e.message;}};
+}
+async function load_admin(){
+  try{
+    const q=new URLSearchParams({search:$("admin-search").value.trim(),filter:$("admin-filter").value});
+    const r=await api("GET","/api/admin/employees?"+q.toString());
+    const rows=(r.employees||[]).map(e=>{
+      const nm=esc(((e.first_name||"")+" "+(e.last_name||"")).trim()||e.email);
+      const acts=[];
+      if(e.status==="pending")acts.push(`<button class="link-btn" data-act="approve" data-id="${esc(e.id)}">Approve</button>`);
+      if(e.status==="active")acts.push(`<button class="link-btn" data-act="suspend" data-id="${esc(e.id)}">Suspend</button>`);
+      if(e.status==="suspended")acts.push(`<button class="link-btn" data-act="reactivate" data-id="${esc(e.id)}">Reactivate</button>`);
+      if(e.status!=="revoked")acts.push(`<button class="link-btn" data-act="revoke" data-id="${esc(e.id)}">Revoke</button>`);
+      acts.push(`<button class="link-btn" data-act="role" data-id="${esc(e.id)}" data-role="${e.role==="admin"?"employee":"admin"}">Make ${e.role==="admin"?"employee":"admin"}</button>`);
+      return `<tr><td>${nm}</td><td>${esc(e.email)}</td><td>${esc(e.role)}</td><td>${esc(e.status)}</td><td>${esc(e.last_login_at||"—")}</td><td>${acts.join(" ")}</td></tr>`;}).join("");
+    $("admin-table").innerHTML=`<tr><th>Employee</th><th>Email</th><th>Role</th><th>Status</th><th>Last login</th><th>Actions</th></tr>`+(rows||"<tr><td colspan=6>No employees match.</td></tr>");
+    $("admin-table").querySelectorAll("[data-act]").forEach(b=>b.onclick=()=>admin_act(b.dataset.act,b.dataset.id,b.dataset.role));
+    const a=await api("GET","/api/admin/audit?limit=20");
+    $("audit-table").innerHTML=`<tr><th>When</th><th>Action</th><th>Target</th><th>Admin</th><th>Change</th></tr>`+((a.events||[]).map(v=>`<tr><td>${esc(v.created_at)}</td><td>${esc(v.action)}</td><td>${esc(v.target_id.slice(0,8))}</td><td>${esc(v.admin_id.slice(0,8))}</td><td>${esc(v.prev_value)} → ${esc(v.new_value)}</td></tr>`).join("")||"<tr><td colspan=5>No events yet.</td></tr>");
+    $("admin-status").textContent="";
+  }catch(e){$("admin-status").textContent=e.message;}
+}
+async function admin_add(){try{await api("POST","/api/admin/employees",{email:$("admin-add-email").value.trim(),first_name:$("admin-add-first").value.trim(),last_name:$("admin-add-last").value.trim(),role:$("admin-add-role").value});$("admin-add-email").value="";$("admin-add-first").value="";$("admin-add-last").value="";$("admin-status").textContent="Employee added as active.";load_admin();}catch(e){$("admin-status").textContent=e.message;}}
+async function admin_act(act,id,role){
+  if(act==="revoke"&&!confirm("Revoke this employee's access? Their sessions stop working immediately."))return;
+  try{
+    if(act==="role"){await api("POST","/api/admin/employees/"+encodeURIComponent(id)+"/role",{role:role});}
+    else{await api("POST","/api/admin/employees/"+encodeURIComponent(id)+"/"+act,{});}
+    load_admin();
+  }catch(e){$("admin-status").textContent=e.message;}
+}
 document.querySelectorAll("#tabs button").forEach(b=>b.onclick=()=>{document.querySelectorAll("#tabs button").forEach(x=>x.setAttribute("aria-pressed","false"));b.setAttribute("aria-pressed","true");document.querySelectorAll(".view").forEach(v=>v.classList.remove("active"));document.querySelector("#v-"+b.dataset.view).classList.add("active");refresh();});
 $("theme").onclick=()=>{const h=document.documentElement;h.dataset.theme=h.dataset.theme==="dark"?"":"dark";};
 $("brand-home").onclick=ev=>{ev.preventDefault();show("main");};
@@ -916,8 +1063,11 @@ async function report_deck(){
     download_link("deck.html","text/html",deck_html);
   }catch(e){$("rep-out").textContent="BLOCKED: "+e.message;$("rep-links").innerHTML="";}
 }
-refresh();
-render_views();
+$("admin-refresh").onclick=()=>load_admin();
+$("admin-search").oninput=()=>load_admin();
+$("admin-filter").onchange=()=>load_admin();
+$("admin-add").onclick=()=>admin_add();
+boot();
 </script>
 </body>
 </html>

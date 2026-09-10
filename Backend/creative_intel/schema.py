@@ -114,6 +114,51 @@ CREATE TABLE IF NOT EXISTS sync_jobs (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ads_sync_key ON ads
     (source, platform, campaign, adset, ad_name, date);
+-- WorkOS authentication + admin-controlled employee access (auth.py).
+-- WorkOS proves identity; these tables decide access (default deny).
+CREATE TABLE IF NOT EXISTS employees (
+    id TEXT PRIMARY KEY,
+    -- NULL until first login: SQLite UNIQUE permits many NULLs, so any
+    -- number of pre-added staff can coexist before they authenticate.
+    workos_user_id TEXT DEFAULT NULL,
+    email TEXT NOT NULL DEFAULT '',
+    first_name TEXT NOT NULL DEFAULT '',
+    last_name TEXT NOT NULL DEFAULT '',
+    avatar_url TEXT NOT NULL DEFAULT '',
+    role TEXT NOT NULL DEFAULT 'employee',
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT NOT NULL DEFAULT '',
+    approved_at TEXT NOT NULL DEFAULT '',
+    approved_by TEXT NOT NULL DEFAULT '',
+    last_login_at TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT ''
+);
+CREATE UNIQUE INDEX IF NOT EXISTS employees_workos_uid
+    ON employees (workos_user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS employees_email ON employees (email);
+CREATE TABLE IF NOT EXISTS auth_sessions (
+    token_hash TEXT PRIMARY KEY,
+    employee_id TEXT NOT NULL DEFAULT '',
+    workos_user_id TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT '',
+    last_seen_at TEXT NOT NULL DEFAULT '',
+    expires_at TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS auth_pending (
+    state TEXT PRIMARY KEY,
+    provider TEXT NOT NULL DEFAULT '',
+    verifier TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS employee_audit (
+    id TEXT PRIMARY KEY,
+    target_id TEXT NOT NULL DEFAULT '',
+    admin_id TEXT NOT NULL DEFAULT '',
+    action TEXT NOT NULL DEFAULT '',
+    prev_value TEXT NOT NULL DEFAULT '',
+    new_value TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT ''
+);
 """
 
 # Natural dedup key for re-imports: the same fact from the same origin
@@ -148,6 +193,45 @@ def migrate(conn):
     if "source" not in retention_cols:
         conn.execute("ALTER TABLE retention ADD COLUMN"
                      " source TEXT NOT NULL DEFAULT 'manual'")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS employees ("
+        "id TEXT PRIMARY KEY, workos_user_id TEXT DEFAULT NULL,"
+        " email TEXT NOT NULL DEFAULT '',"
+        " first_name TEXT NOT NULL DEFAULT '',"
+        " last_name TEXT NOT NULL DEFAULT '',"
+        " avatar_url TEXT NOT NULL DEFAULT '',"
+        " role TEXT NOT NULL DEFAULT 'employee',"
+        " status TEXT NOT NULL DEFAULT 'pending',"
+        " created_at TEXT NOT NULL DEFAULT '',"
+        " approved_at TEXT NOT NULL DEFAULT '',"
+        " approved_by TEXT NOT NULL DEFAULT '',"
+        " last_login_at TEXT NOT NULL DEFAULT '',"
+        " updated_at TEXT NOT NULL DEFAULT '')")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS employees_workos_uid"
+                 " ON employees (workos_user_id)")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS employees_email"
+                 " ON employees (email)")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS auth_sessions ("
+        "token_hash TEXT PRIMARY KEY,"
+        " employee_id TEXT NOT NULL DEFAULT '',"
+        " workos_user_id TEXT NOT NULL DEFAULT '',"
+        " created_at TEXT NOT NULL DEFAULT '',"
+        " last_seen_at TEXT NOT NULL DEFAULT '',"
+        " expires_at TEXT NOT NULL DEFAULT '')")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS auth_pending ("
+        "state TEXT PRIMARY KEY, provider TEXT NOT NULL DEFAULT '',"
+        " verifier TEXT NOT NULL DEFAULT '',"
+        " created_at TEXT NOT NULL DEFAULT '')")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS employee_audit ("
+        "id TEXT PRIMARY KEY, target_id TEXT NOT NULL DEFAULT '',"
+        " admin_id TEXT NOT NULL DEFAULT '',"
+        " action TEXT NOT NULL DEFAULT '',"
+        " prev_value TEXT NOT NULL DEFAULT '',"
+        " new_value TEXT NOT NULL DEFAULT '',"
+        " created_at TEXT NOT NULL DEFAULT '')")
     key_cols = ", ".join(SYNC_KEY_COLUMNS)
     conn.execute(
         "DELETE FROM ads WHERE rowid NOT IN"

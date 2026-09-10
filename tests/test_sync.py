@@ -277,44 +277,23 @@ class ServerSyncTest(unittest.TestCase):
             conn.close()
 
     def test_http_status_and_run(self):
-        import server as srv
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from conftest import make_client, mint_admin
         db = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
         try:
-            conn = sqlite3.connect(db)
-            schema.init_db(conn)
-            conn.close()
-            srv.Handler.db_path = db
-            httpd = HTTPServer(("127.0.0.1", 0), srv.Handler)
-            port = httpd.server_address[1]
-            thread = threading.Thread(target=httpd.serve_forever,
-                                      daemon=True)
-            thread.start()
-            try:
-                base = "http://127.0.0.1:%d" % port
-                cookie = authed(db)
-                with urllib.request.urlopen(
-                        areq(base + "/api/sync/status", cookie)) as resp:
-                    st = json.loads(resp.read())
-                self.assertEqual(st["sources"], {})
-                self.assertEqual(st["recent"], [])
-                self.assertEqual(st["jobs"], [])
-                req = urllib.request.Request(
-                    base + "/api/sync/run",
-                    data=json.dumps({"source": "meta"}).encode(),
-                    headers={"Content-Type": "application/json",
-                             "Cookie": cookie})
-                try:
-                    urllib.request.urlopen(req)
-                    self.fail("expected 409")
-                except urllib.error.HTTPError as exc:
-                    self.assertEqual(exc.code, 409)
-                    body = json.loads(exc.read())
-                    self.assertIn("no saved sync job", body["error"])
-            finally:
-                httpd.shutdown()
-                thread.join(timeout=10)
+            client = make_client(db)
+            client.headers.update(mint_admin(db))
+            st = client.get("/api/sync/status")
+            self.assertEqual(st.status_code, 200)
+            self.assertEqual(st.json()["sources"], {})
+            self.assertEqual(st.json()["recent"], [])
+            self.assertEqual(st.json()["jobs"], [])
+            r = client.post("/api/sync/run", json={"source": "meta"})
+            self.assertEqual(r.status_code, 409)
+            self.assertIn("no saved sync job", r.json()["error"])
         finally:
             os.unlink(db)
+
 
 
 if __name__ == "__main__":

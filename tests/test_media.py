@@ -1,6 +1,6 @@
 """Media store tests: upload validation, linking, serving, isolation.
 
-Covers the upload pipeline end to end against a real server instance
+Covers the upload pipeline end to end through the FastAPI app
 with CREATIVE_INTEL_MEDIA_DIR pointed at a temp dir, so the repo tree
 is never touched.
 """
@@ -11,14 +11,9 @@ import os
 import sqlite3
 import sys
 import tempfile
-import threading
 import unittest
-import urllib.request
-from http.server import HTTPServer
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Backend"))
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from auth_help import authed, req as areq
 
 from creative_intel import creative, media, schema
 
@@ -108,7 +103,6 @@ class MediaUnitTest(unittest.TestCase):
 class MediaLiveTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        import server
         cls._tmp = tempfile.mkdtemp()
         os.environ["CREATIVE_INTEL_MEDIA_DIR"] = cls._tmp
         cls._db = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
@@ -118,62 +112,41 @@ class MediaLiveTest(unittest.TestCase):
                      " VALUES (?,?,?)", ("web1", "tiktok", "Web One"))
         conn.commit()
         conn.close()
-        server.Handler.db_path = cls._db
-        cls.cookie = authed(cls._db)
-        cls._srv = HTTPServer(("127.0.0.1", 0), server.Handler)
-        cls.port = cls._srv.server_address[1]
-        cls._thread = threading.Thread(target=cls._srv.serve_forever,
-                                       daemon=True)
-        cls._thread.start()
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from conftest import make_client, mint_admin
+        cls.client = make_client(cls._db)
+        cls.client.headers.update(mint_admin(cls._db))
 
     @classmethod
     def tearDownClass(cls):
-        cls._srv.shutdown()
-        cls._thread.join(timeout=10)
         os.unlink(cls._db)
         del os.environ["CREATIVE_INTEL_MEDIA_DIR"]
 
     def _post(self, path, payload):
-        req = urllib.request.Request(
-            "http://127.0.0.1:%d%s" % (self.port, path),
-            data=json.dumps(payload).encode(),
-            headers={"Content-Type": "application/json",
-                     "Cookie": self.cookie}, method="POST")
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            return resp.status, json.loads(resp.read())
+        r = self.client.post(path, json=payload)
+        return r.status_code, r.json()
 
     def test_upload_then_serve_roundtrip(self):
         status, rec = self._post("/api/media/upload", {
             "creative_key": "web1", "filename": "clip.png",
             "content_b64": B64PNG})
         self.assertEqual(status, 200)
-        with urllib.request.urlopen(
-                areq("http://127.0.0.1:%d%s" % (self.port, rec["url"]),
-                     self.cookie),
-                timeout=10) as resp:
-            self.assertEqual(resp.status, 200)
-            self.assertIn("image/png", resp.headers.get("Content-Type"))
-            self.assertEqual(resp.read(), PNG)
+        r = self.client.get(rec["url"])
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("image/png", r.headers["content-type"])
+        self.assertEqual(r.content, PNG)
 
     def test_upload_rejects_exe_live(self):
-        import urllib.error
-        with self.assertRaises(urllib.error.HTTPError) as ctx:
-            self._post("/api/media/upload", {
-                "creative_key": "web1", "filename": "evil.exe",
-                "content_b64": B64PNG})
-        self.assertEqual(ctx.exception.code, 409)
+        status, body = self._post("/api/media/upload", {
+            "creative_key": "web1", "filename": "evil.exe",
+            "content_b64": B64PNG})
+        self.assertEqual(status, 409)
+        self.assertIn("error", body)
 
     def test_media_traversal_404(self):
-        import urllib.error
         for bad in ("/media/../Index.html", "/media/abc", "/media/99999"):
-            try:
-                urllib.request.urlopen(
-                    areq("http://127.0.0.1:%d%s" % (self.port, bad),
-                         self.cookie),
-                    timeout=10)
-                self.fail("served %s" % bad)
-            except urllib.error.HTTPError as exc:
-                self.assertEqual(exc.code, 404)
+            r = self.client.get(bad)
+            self.assertEqual(r.status_code, 404, bad)
 
 
 if __name__ == "__main__":

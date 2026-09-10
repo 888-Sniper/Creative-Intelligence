@@ -236,7 +236,8 @@ class CampaignRecoTest(unittest.TestCase):
 
 class CampaignRecoHttpTest(unittest.TestCase):
     def test_http_shape_and_errors(self):
-        import server as srv
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from conftest import make_client, mint_admin
         db = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
         try:
             live = _conn()
@@ -248,53 +249,34 @@ class CampaignRecoHttpTest(unittest.TestCase):
             disk.commit()
             live.close()
             disk.close()
-            srv.Handler.db_path = db
-            httpd = HTTPServer(("127.0.0.1", 0), srv.Handler)
-            port = httpd.server_address[1]
-            thread = threading.Thread(target=httpd.serve_forever,
-                                      daemon=True)
-            thread.start()
-            try:
-                base = "http://127.0.0.1:%d" % port
-                cookie = authed(db)
-                with urllib.request.urlopen(
-                        areq(base + "/api/campaigns/recommendations"
-                             "?name=Alpha&rank_by=roas", cookie)) as resp:
-                    out = json.loads(resp.read())
-                self.assertEqual(out["rank_by"], "roas")
-                self.assertEqual(len(out["sections"]), 6)
-                scale = [s for s in out["sections"]
-                         if s["key"] == "scale"][0]["bullets"][0]
-                self.assertIn("mid-roas", scale["text"])
+            client = make_client(db)
+            client.headers.update(mint_admin(db))
+            out = client.get("/api/campaigns/recommendations"
+                             "?name=Alpha&rank_by=roas").json()
+            self.assertEqual(out["rank_by"], "roas")
+            self.assertEqual(len(out["sections"]), 6)
+            scale = [s for s in out["sections"]
+                     if s["key"] == "scale"][0]["bullets"][0]
+            self.assertIn("mid-roas", scale["text"])
 
-                def _get(path):
-                    try:
-                        urllib.request.urlopen(areq(base + path, cookie))
-                        self.fail("expected 409 for %s" % path)
-                    except urllib.error.HTTPError as exc:
-                        self.assertEqual(exc.code, 409)
-                        return json.loads(exc.read())
+            def _get(path):
+                r = client.get(path)
+                self.assertEqual(r.status_code, 409, path)
+                return r.json()
 
-                body = _get("/api/campaigns/recommendations")
-                self.assertIn("campaign name", body["error"])
-                body = _get("/api/campaigns/recommendations"
-                            "?name=Alpha&rank_by=clicks")
-                self.assertIn("rank_by", body["error"])
-                with urllib.request.urlopen(
-                        areq(base + "/api/campaigns/recommendations"
-                             "?name=Alpha&rank_by=cpc", cookie)) as resp:
-                    cpc = json.loads(resp.read())
-                self.assertEqual(cpc["rank_by"], "cpc")
-                with urllib.request.urlopen(
-                        areq(base + "/api/campaigns/recommendations"
-                             "?name=Alpha&rank_by=spend", cookie)) as resp:
-                    spend = json.loads(resp.read())
-                self.assertEqual(spend["rank_by"], "cpa")
-                self.assertEqual(spend["rank_by_requested"], "spend")
-                self.assertIn("CPA", spend["notice"])
-            finally:
-                httpd.shutdown()
-                thread.join(timeout=10)
+            body = _get("/api/campaigns/recommendations")
+            self.assertIn("campaign name", body["error"])
+            body = _get("/api/campaigns/recommendations"
+                        "?name=Alpha&rank_by=clicks")
+            self.assertIn("rank_by", body["error"])
+            cpc = client.get("/api/campaigns/recommendations"
+                             "?name=Alpha&rank_by=cpc").json()
+            self.assertEqual(cpc["rank_by"], "cpc")
+            spend = client.get("/api/campaigns/recommendations"
+                               "?name=Alpha&rank_by=spend").json()
+            self.assertEqual(spend["rank_by"], "cpa")
+            self.assertEqual(spend["rank_by_requested"], "spend")
+            self.assertIn("CPA", spend["notice"])
         finally:
             os.unlink(db)
 
@@ -303,7 +285,8 @@ class CampaignRecoHttpTest(unittest.TestCase):
         # Two projects share campaign Alpha with DIFFERENT winners: a
         # dropped project axis would analyse both and crown the wrong
         # creative (this caught Scope-normalized() losing the axis).
-        import server as srv
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from conftest import make_client, mint_admin
         csv = ("campaign,ad set,ad name,spend,impressions,clicks,"
                "conversions,project,date\n"
                "Alpha,Set1,win-p1,10,1000,20,5,Proj1,2026-08-01\n"
@@ -316,39 +299,28 @@ class CampaignRecoHttpTest(unittest.TestCase):
             schema.init_db(conn)
             ingest.upsert_rows(conn, ingest.parse_csv(csv, "meta"))
             conn.close()
-            srv.Handler.db_path = db
-            httpd = HTTPServer(("127.0.0.1", 0), srv.Handler)
-            port = httpd.server_address[1]
-            thread = threading.Thread(target=httpd.serve_forever,
-                                      daemon=True)
-            thread.start()
-            try:
-                base = "http://127.0.0.1:%d" % port
-                cookie = authed(db)
+            client = make_client(db)
+            client.headers.update(mint_admin(db))
+            def _get_json(path):
+                r = client.get(path)
+                assert r.status_code == 200, (path, r.text)
+                return r.json()
 
-                def _get_json(path):
-                    with urllib.request.urlopen(
-                            areq(base + path, cookie)) as resp:
-                        return json.loads(resp.read())
-
-                p1 = _get_json("/api/campaigns/recommendations"
-                               "?name=Alpha&rank_by=cpa&project=Proj1")
-                self.assertEqual(p1["n_creatives"], 2)
-                scale1 = [s for s in p1["sections"]
-                          if s["key"] == "scale"][0]["bullets"][0]
-                self.assertIn("win-p1", scale1["text"])
-                p2 = _get_json("/api/campaigns/recommendations"
-                               "?name=Alpha&rank_by=cpa&project=Proj2")
-                self.assertEqual(p2["n_creatives"], 2)
-                scale2 = [s for s in p2["sections"]
-                          if s["key"] == "scale"][0]["bullets"][0]
-                self.assertIn("win-p2", scale2["text"])
-                unscoped = _get_json("/api/campaigns/recommendations"
-                                     "?name=Alpha&rank_by=cpa")
-                self.assertEqual(unscoped["n_creatives"], 4)
-            finally:
-                httpd.shutdown()
-                thread.join(timeout=10)
+            p1 = _get_json("/api/campaigns/recommendations"
+                           "?name=Alpha&rank_by=cpa&project=Proj1")
+            self.assertEqual(p1["n_creatives"], 2)
+            scale1 = [s for s in p1["sections"]
+                      if s["key"] == "scale"][0]["bullets"][0]
+            self.assertIn("win-p1", scale1["text"])
+            p2 = _get_json("/api/campaigns/recommendations"
+                           "?name=Alpha&rank_by=cpa&project=Proj2")
+            self.assertEqual(p2["n_creatives"], 2)
+            scale2 = [s for s in p2["sections"]
+                      if s["key"] == "scale"][0]["bullets"][0]
+            self.assertIn("win-p2", scale2["text"])
+            unscoped = _get_json("/api/campaigns/recommendations"
+                                 "?name=Alpha&rank_by=cpa")
+            self.assertEqual(unscoped["n_creatives"], 4)
         finally:
             os.unlink(db)
 

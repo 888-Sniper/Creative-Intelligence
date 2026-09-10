@@ -69,7 +69,7 @@ class FilterParamsTest(unittest.TestCase):
         self.assertEqual(sorted(got), ["C1", "C2"])
 
     def test_query_parser_ignores_all_and_unknown(self):
-        import server
+        from ci_backend import actions as server
         self.assertEqual(server._filters_from_query(
             {"vertical": ["Beauty"], "platform": ["all", ""],
              "hack": ["x"]}), {"vertical": ["Beauty"]})
@@ -96,7 +96,7 @@ class FilterParamsTest(unittest.TestCase):
         self.assertEqual(len(got), 1)
 
     def test_project_query_param_maps_to_include(self):
-        import server
+        from ci_backend import actions as server
         self.assertEqual(server._filters_from_query({"project": ["c1"]}),
                          {"include_projects": ["c1"]})
 
@@ -270,15 +270,11 @@ class ReportTest(unittest.TestCase):
 
 class ServerRoutesTest(unittest.TestCase):
     def _serve(self, db_path):
-        import threading
-        from http.server import HTTPServer
-        import server as srv
-        srv.Handler.db_path = db_path
-        httpd = HTTPServer(("127.0.0.1", 0), srv.Handler)
-        port = httpd.server_address[1]
-        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
-        thread.start()
-        return httpd, port
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from conftest import make_client, mint_admin
+        client = make_client(db_path)
+        client.headers.update(mint_admin(db_path))
+        return client
 
     def test_http_compare_cohorts_report(self):
         import urllib.request
@@ -291,43 +287,25 @@ class ServerRoutesTest(unittest.TestCase):
             ingest.insert_rows(conn, ingest.parse_csv(META, "meta"))
             ingest.insert_rows(conn, ingest.parse_csv(TIKTOK, "tiktok"))
             conn.close()
-            httpd, port = self._serve(db)
-            try:
-                base = "http://127.0.0.1:%d" % port
-                cookie = authed(db)
-                with urllib.request.urlopen(
-                        areq(base + "/api/compare/campaigns?campaigns=Alpha,Beta"
-                             "&rank_by=cpa", cookie)) as resp:
-                    comp = json.loads(resp.read())
-                self.assertEqual(comp["ranking"][0], "Alpha")
-                self.assertTrue(comp["why"]["differences"])
-                payload = json.dumps({"name": "meta-only",
-                                      "filters": {"platform": "meta"}}).encode()
-                req = urllib.request.Request(base + "/api/cohorts", data=payload,
-                                             headers={"Content-Type": "application/json",
-                                                      "Cookie": cookie})
-                with urllib.request.urlopen(req) as resp:
-                    saved = json.loads(resp.read())
-                self.assertEqual(saved["name"], "meta-only")
-                with urllib.request.urlopen(areq(base + "/api/cohorts/build?name=meta-only", cookie)) as resp:
-                    built = json.loads(resp.read())
-                self.assertEqual(built["n_ads"], 5)
-                payload = json.dumps({"campaigns": ["Alpha", "Beta"],
-                                      "kpis": ["cpa", "ctr"],
-                                      "format": "csv"}).encode()
-                req = urllib.request.Request(base + "/api/report", data=payload,
-                                             headers={"Content-Type": "application/json",
-                                                      "Cookie": cookie})
-                with urllib.request.urlopen(req) as resp:
-                    rep = json.loads(resp.read())
-                self.assertIn("Alpha,10.0", rep["csv"])
-                # Legacy routes still serve.
-                with urllib.request.urlopen(areq(base + "/api/benchmarks?group_by=campaign", cookie)) as resp:
-                    legacy = json.loads(resp.read())
-                self.assertIn("Alpha", legacy)
-            finally:
-                httpd.shutdown()
-                httpd.server_close()
+            client = self._serve(db)
+            comp = client.get("/api/compare/campaigns?campaigns=Alpha,Beta"
+                          "&rank_by=cpa").json()
+            self.assertEqual(comp["ranking"][0], "Alpha")
+            self.assertTrue(comp["why"]["differences"])
+            saved = client.post("/api/cohorts",
+                            json={"name": "meta-only",
+                                  "filters": {"platform": "meta"}}).json()
+            self.assertEqual(saved["name"], "meta-only")
+            built = client.get("/api/cohorts/build?name=meta-only").json()
+            self.assertEqual(built["n_ads"], 5)
+            rep = client.post("/api/report",
+                          json={"campaigns": ["Alpha", "Beta"],
+                                "kpis": ["cpa", "ctr"],
+                                "format": "csv"}).json()
+            self.assertIn("Alpha,10.0", rep["csv"])
+            # Legacy routes still serve.
+            legacy = client.get("/api/benchmarks?group_by=campaign").json()
+            self.assertIn("Alpha", legacy)
         finally:
             os.unlink(db)
 
@@ -337,8 +315,8 @@ class CreativeCompareParityTest(unittest.TestCase):
     plus a data-grounded why-analysis."""
 
     def test_full_kpis_and_why(self):
-        import server
-        from http.server import HTTPServer
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from conftest import make_client, mint_admin
         db = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
         try:
             conn = sqlite3.connect(db)
@@ -355,44 +333,30 @@ class CreativeCompareParityTest(unittest.TestCase):
                 ann["creator_vs_branded"] = mode
                 creative.save_annotation(conn, key, ann)
             conn.close()
-            server.Handler.db_path = db
-            httpd = HTTPServer(("127.0.0.1", 0), server.Handler)
-            port = httpd.server_address[1]
-            thread = threading.Thread(target=httpd.serve_forever,
-                                      daemon=True)
-            thread.start()
-            try:
-                import urllib.request
-                base = "http://127.0.0.1:%d" % port
-                cookie = authed(db)
-                with urllib.request.urlopen(
-                        areq(base + "/api/compare?a=cka&b=ckb", cookie)) as resp:
-                    got = json.loads(resp.read())
-                for key in ("cka", "ckb"):
-                    for kpi in ("spend", "impressions", "clicks",
-                                "conversions", "cpm", "vtr", "ctr", "cpc",
-                                "cpa", "roas"):
-                        self.assertIn(kpi, got[key])
-                self.assertEqual(got["cka"]["cpa"], 10.0)
-                self.assertEqual(got["ckb"]["cpa"], 20.0)
-                self.assertEqual(got["why"]["top"], "cka")
-                text = " ".join(got["why"]["differences"])
-                self.assertIn("CPA", text)
-                self.assertIn("question", text)
-            finally:
-                httpd.shutdown()
-                httpd.server_close()
-                thread.join(timeout=10)
+            _client = make_client(db)
+            _client.headers.update(mint_admin(db))
+            got = _client.get("/api/compare?a=cka&b=ckb").json()
+            for key in ("cka", "ckb"):
+                for kpi in ("spend", "impressions", "clicks",
+                            "conversions", "cpm", "vtr", "ctr", "cpc",
+                            "cpa", "roas"):
+                    self.assertIn(kpi, got[key])
+            self.assertEqual(got["cka"]["cpa"], 10.0)
+            self.assertEqual(got["ckb"]["cpa"], 20.0)
+            self.assertEqual(got["why"]["top"], "cka")
+            text = " ".join(got["why"]["differences"])
+            self.assertIn("CPA", text)
+            self.assertIn("question", text)
         finally:
             os.unlink(db)
 
     def test_why_empty_selection(self):
-        import server
+        from ci_backend import actions as server
         why = server._creative_why("", "", {}, {})
         self.assertIsNone(why["top"])
 
     def test_why_contrasts_all_dimensions(self):
-        import server
+        from ci_backend import actions as server
         aa = {"hook_type": "question", "creator_vs_branded": "creator",
               "duration_s": 30.0,
               "brand_seconds": [{"start_s": 1.0, "end_s": 2.0}],
@@ -429,13 +393,11 @@ class CreativesFilterTest(unittest.TestCase):
     Creative Library can never be wrongly emptied by client text blobs."""
 
     def _serve(self, db):
-        import server
-        from http.server import HTTPServer
-        server.Handler.db_path = db
-        httpd = HTTPServer(("127.0.0.1", 0), server.Handler)
-        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
-        thread.start()
-        return httpd, thread, "http://127.0.0.1:%d" % httpd.server_address[1]
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from conftest import make_client, mint_admin
+        _client = make_client(db)
+        _client.headers.update(mint_admin(db))
+        return _client
 
     def test_vertical_filter_reaches_creatives(self):
         import urllib.request
@@ -445,34 +407,23 @@ class CreativesFilterTest(unittest.TestCase):
             schema.init_db(conn)
             ingest.insert_rows(conn, ingest.parse_csv(DIM_CSV, "meta"))
             conn.close()
-            httpd, thread, base = self._serve(db)
-            cookie = authed(db)
-            try:
-                with urllib.request.urlopen(areq(base + "/api/creatives", cookie)) as resp:
-                    all_keys = sorted(r["creative_key"]
-                                      for r in json.loads(resp.read()))
-                self.assertEqual(all_keys, ["hook-a", "hook-b"])
-                with urllib.request.urlopen(
-                        areq(base + "/api/creatives?vertical=Beauty", cookie)) as resp:
-                    got = sorted(r["creative_key"]
-                                 for r in json.loads(resp.read()))
-                self.assertEqual(got, ["hook-a"])
-                with urllib.request.urlopen(
-                        areq(base + "/api/creatives?vertical=Food", cookie)) as resp:
-                    got = sorted(r["creative_key"]
-                                 for r in json.loads(resp.read()))
-                self.assertEqual(got, ["hook-b"])
-            finally:
-                httpd.shutdown()
-                httpd.server_close()
-                thread.join(timeout=10)
+            _client = self._serve(db)
+            all_keys = sorted(r["creative_key"]
+                              for r in _client.get("/api/creatives").json())
+            self.assertEqual(all_keys, ["hook-a", "hook-b"])
+            got = sorted(r["creative_key"] for r in _client.get(
+                "/api/creatives?vertical=Beauty").json())
+            self.assertEqual(got, ["hook-a"])
+            got = sorted(r["creative_key"] for r in _client.get(
+                "/api/creatives?vertical=Food").json())
+            self.assertEqual(got, ["hook-b"])
         finally:
             os.unlink(db)
 
 
 class ReportGateTest(unittest.TestCase):
     def test_report_blocked_while_reviews_pending(self):
-        import server
+        from ci_backend import actions as server
         from creative_intel import qa
         conn = seeded_db()
         try:
@@ -489,7 +440,7 @@ class ReportGateTest(unittest.TestCase):
             conn.close()
 
     def test_report_open_with_no_pending_reviews(self):
-        import server
+        from ci_backend import actions as server
         conn = seeded_db()
         try:
             rep = server.expert2_report_route(

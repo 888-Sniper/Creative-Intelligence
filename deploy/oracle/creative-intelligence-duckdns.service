@@ -1,0 +1,9 @@
+[Unit]
+Description=Refresh DuckDNS hostname for Creative Intelligence demo
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/creative-intelligence/duckdns.env
+ExecStart=/opt/creative-intelligence/deploy/oracle/duckdns-update.sh

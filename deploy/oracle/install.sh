@@ -25,7 +25,8 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y --no-install-recommends \
   ca-certificates curl git gnupg nginx certbot python3-certbot-nginx \
-  ffmpeg build-essential software-properties-common rsync sqlite3
+  ffmpeg build-essential software-properties-common rsync sqlite3 \
+  ufw fail2ban unattended-upgrades
 
 # Creative Intelligence currently requires Python >=3.13.
 if ! command -v python3.13 >/dev/null 2>&1; then
@@ -84,6 +85,12 @@ popd >/dev/null
 cp "${APP_DIR}/deploy/oracle/creative-intelligence.service" "/etc/systemd/system/${SERVICE_NAME}.service"
 cp "${APP_DIR}/deploy/oracle/creative-intelligence-backup.service" "/etc/systemd/system/${SERVICE_NAME}-backup.service"
 cp "${APP_DIR}/deploy/oracle/creative-intelligence-backup.timer" "/etc/systemd/system/${SERVICE_NAME}-backup.timer"
+cp "${APP_DIR}/deploy/oracle/creative-intelligence-duckdns.service" "/etc/systemd/system/${SERVICE_NAME}-duckdns.service"
+cp "${APP_DIR}/deploy/oracle/creative-intelligence-duckdns.timer" "/etc/systemd/system/${SERVICE_NAME}-duckdns.timer"
+if [[ ! -f "${ENV_DIR}/duckdns.env" ]]; then
+  cp "${APP_DIR}/deploy/oracle/duckdns.env.example" "${ENV_DIR}/duckdns.env"
+  chmod 600 "${ENV_DIR}/duckdns.env"
+fi
 sed "s/__DOMAIN__/${DOMAIN}/g" "${APP_DIR}/deploy/oracle/nginx.conf.template" \
   > "/etc/nginx/sites-available/${SERVICE_NAME}"
 ln -sfn "/etc/nginx/sites-available/${SERVICE_NAME}" "/etc/nginx/sites-enabled/${SERVICE_NAME}"
@@ -97,6 +104,30 @@ systemctl daemon-reload
 systemctl enable "${SERVICE_NAME}"
 systemctl restart "${SERVICE_NAME}"
 systemctl enable --now "${SERVICE_NAME}-backup.timer"
+if grep -q "^DUCKDNS_TOKEN=.\+" "${ENV_DIR}/duckdns.env" 2>/dev/null; then
+  systemctl enable --now "${SERVICE_NAME}-duckdns.timer"
+else
+  echo "DuckDNS token not set: fill ${ENV_DIR}/duckdns.env, then run"
+  echo "  sudo systemctl enable --now ${SERVICE_NAME}-duckdns.timer"
+fi
+
+# Host firewall: SSH first (never lock out the current session), then
+# web ports. Port 4321 stays loopback-only (see nginx template).
+if command -v ufw >/dev/null 2>&1; then
+  ufw allow 22/tcp >/dev/null
+  ufw allow 80/tcp >/dev/null
+  ufw allow 443/tcp >/dev/null
+  ufw --force enable >/dev/null
+fi
+if command -v fail2ban-client >/dev/null 2>&1; then
+  systemctl enable --now fail2ban
+fi
+if [[ ! -f /etc/apt/apt.conf.d/20auto-upgrades ]]; then
+  cat > /etc/apt/apt.conf.d/20auto-upgrades <<'EOF'
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
+EOF
+fi
 systemctl enable nginx
 systemctl restart nginx
 

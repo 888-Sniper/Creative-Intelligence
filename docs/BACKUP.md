@@ -1,9 +1,36 @@
 # Backup and restore
 
+> **local backup ≠ disaster recovery.** An on-VM archive does not
+> survive a lost VM. For the public demo, configure the off-host copy
+> below; until then, treat every backup as convenience, not safety.
+
 Everything Creative Intelligence stores locally lives under one data
 directory, so a backup is a consistent copy of three paths. Stop the
 server first (or accept a SQLite-wal-tolerant copy); never back up a
 database while a migration is running.
+
+## Off-host copy (Oracle VM, free)
+
+On the VM, nightly snapshots run automatically. Point them off-host
+with one setting in `/etc/creative-intelligence/creative-intelligence.env`:
+
+```text
+BACKUP_OFFHOST_DEST=<rsync destination or mounted path>
+```
+
+Free options that need no paid infrastructure:
+
+- **OCI Object Storage (Always Free allowance):** create a private
+  bucket, mount it on the VM (e.g. via s3fs with an OCI S3-compatible
+  key), and set `BACKUP_OFFHOST_DEST` to the mount path. Bucket
+  versioning or lifecycle rules handle remote retention; the script
+  prunes local-path destinations to `BACKUP_OFFHOST_KEEP` archives.
+- **rsync/SSH to any host you control:**
+  `BACKUP_OFFHOST_DEST=backup@vault.example:/srv/creative-intelligence`
+  (key-based SSH, no passwords).
+
+Verify with `ls` at the destination after the next timer run
+(`systemctl list-timers 'creative-intelligence-*'`).
 
 ## Locations
 

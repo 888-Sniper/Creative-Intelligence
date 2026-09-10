@@ -33,6 +33,12 @@ CREATIVE_INTEL_DB_URL="sqlite:////var/lib/creative-intelligence/creative_intel.d
 popd >/dev/null
 
 chown -R creative-intel:creative-intel "${APP_DIR}"
+for unit in creative-intelligence.service creative-intelligence-backup.service \
+            creative-intelligence-backup.timer creative-intelligence-duckdns.service \
+            creative-intelligence-duckdns.timer; do
+  cp "${APP_DIR}/deploy/oracle/${unit}" "/etc/systemd/system/${unit}"
+done
+systemctl daemon-reload
 systemctl restart creative-intelligence
 sleep 2
 curl -fsS http://127.0.0.1:4321/health >/dev/null

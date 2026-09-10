@@ -1,155 +1,166 @@
-# Oracle Cloud VM deployment (Foap demo)
+# Oracle Cloud VM deployment — free Foap demo (DuckDNS + HTTPS)
 
-This deployment target runs Creative Intelligence as a single same-origin service:
+Target: a public **$0/month** demo at
 
-- Nginx on ports 80/443
-- FastAPI/Uvicorn on loopback `127.0.0.1:4321`
-- the built React/Vite frontend served by FastAPI
-- SQLite + media persisted under `/var/lib/creative-intelligence`
-- WorkOS/Google/provider secrets supplied only through `/etc/creative-intelligence/creative-intelligence.env`
-- systemd keeps the service running across VM reboots
+```text
+https://foap-creative.duckdns.org
+```
 
-The scripts are designed for an Ubuntu OCI VM, including ARM64/Ampere shapes. They do not create OCI resources themselves.
+stack:
 
-## 1. Create the OCI VM
+```text
+Oracle Cloud Always Free VM
+  -> DuckDNS free hostname (foap-creative.duckdns.org)
+  -> Let's Encrypt HTTPS (Certbot)
+  -> Nginx (public 80/443, HTTP -> HTTPS redirect)
+  -> FastAPI/Uvicorn on loopback 127.0.0.1:4321
+  -> built React/Vite frontend served by FastAPI
+```
 
-In Oracle Cloud, create an Always Free-eligible VM in your tenancy using Ubuntu. Keep the boot volume within the current Always Free allowance shown by the OCI console.
+SQLite + media persist under `/var/lib/creative-intelligence`.
+Secrets live only in `/etc/creative-intelligence/*.env` (mode `0600`,
+never in Git). systemd keeps services running across reboots.
 
-Network ingress for a public Foap test should be limited to:
+Everything deploys from **`main`**. The old `deploy/oracle-always-free`
+branch is retired; do not use it.
 
-- TCP 22 from your own administrator IP/range
-- TCP 80 from the internet (needed for initial HTTP/Let's Encrypt validation)
-- TCP 443 from the internet
+## 0. Prerequisites (your actions, not the scripts')
 
-Do not expose port 4321 publicly; FastAPI binds to loopback and Nginx is the public entry point.
+1. Create an Always Free Ubuntu VM in OCI (Ampere ARM is fine).
+2. Security list / NSG ingress:
+   - TCP 22 from your administrator IP/range only
+   - TCP 80 from the internet (Let's Encrypt validation)
+   - TCP 443 from the internet
+   - Never expose 4321.
+3. Register a free DuckDNS hostname (default `foap-creative`;
+   alternatives if taken: `foap-ci`, `creative-intelligence-foap`,
+   `foap-demo-ci`) and note its token. Nobody can do this for you:
+   the hostname is claimed in your DuckDNS account.
+4. Have ready: admin email, WorkOS client ID + API key, provider keys
+   (at least one STT, one vision, one LLM adapter), and optionally
+   Google OAuth credentials.
 
-## 2. Put the private repository on the VM
+No paid domain is required. Moving to an official domain later only
+needs: DNS, `DOMAIN`, the two redirect URIs, and a new certificate
+(see §9).
 
-Authenticate the VM to GitHub using a deploy key, GitHub SSH key, or another approved credential. Do not paste a long-lived GitHub token into shell history.
-
-Example after GitHub SSH access is configured:
+## 1. Put the repository on the VM
 
 ```bash
 git clone git@github.com:888-Sniper/Creative-Intelligence.git
 cd Creative-Intelligence
-git checkout deploy/oracle-always-free
+git checkout main
+git pull --ff-only
 ```
 
-## 3. Install
-
-If you already have a DNS name pointing to the VM:
+## 2. Configure secrets (on the VM only)
 
 ```bash
-sudo DOMAIN=creative.example.com bash deploy/oracle/install.sh
-```
-
-Without a domain yet:
-
-```bash
-sudo bash deploy/oracle/install.sh
-```
-
-The installer:
-
-1. installs Nginx, Certbot, ffmpeg, SQLite, Python 3.13 and Node 22;
-2. installs pnpm and builds the React production bundle;
-3. creates `/opt/creative-intelligence` for application code;
-4. creates persistent `/var/lib/creative-intelligence` storage;
-5. creates `/etc/creative-intelligence/creative-intelligence.env` if missing;
-6. applies the Alembic migration chain to the persistent database;
-7. installs and starts the systemd service;
-8. configures Nginx as the reverse proxy;
-9. checks `/health` and `/readiness`.
-
-## 4. Configure secrets
-
-Edit:
-
-```bash
+sudo cp deploy/oracle/demo.env.example \
+  /etc/creative-intelligence/creative-intelligence.env
+sudo chmod 600 /etc/creative-intelligence/creative-intelligence.env
 sudo nano /etc/creative-intelligence/creative-intelligence.env
 ```
 
-At minimum configure:
-
-- `CREATIVE_INTEL_ADMIN_EMAIL`
-- `CREATIVE_INTEL_WORKOS_CLIENT_ID`
-- `CREATIVE_INTEL_KEY_WORKOS`
-- `CREATIVE_INTEL_WORKOS_REDIRECT_URI`
-
-For private Google Drive/Sheets also configure the Google OAuth values in the template.
-
-The file is created mode `0600`. Do not commit it.
-
-After editing:
+Fill every empty value (admin email, WorkOS, provider keys, master
+key). Then the DuckDNS token:
 
 ```bash
-sudo systemctl restart creative-intelligence
+sudo cp deploy/oracle/duckdns.env.example \
+  /etc/creative-intelligence/duckdns.env
+sudo chmod 600 /etc/creative-intelligence/duckdns.env
+sudo nano /etc/creative-intelligence/duckdns.env
 ```
 
-## 5. HTTPS
+```text
+DUCKDNS_SUBDOMAIN=foap-creative
+DUCKDNS_TOKEN=<paste-your-duckdns-token>
+```
 
-A public WorkOS demo should use HTTPS and an exact registered callback URL. Once DNS points to the VM:
+Emergency zero-account fallback: use an sslip.io hostname instead,
+e.g. `DOMAIN=123-45-67-89.sslip.io` for public IP `123.45.67.89`.
+DuckDNS stays the preferred hostname.
+
+## 3. One-command setup
 
 ```bash
-sudo DOMAIN=creative.example.com EMAIL=you@example.com \
+sudo DOMAIN=foap-creative.duckdns.org EMAIL=admin@example.com \
+  bash deploy/oracle/setup-demo.sh
+```
+
+This validates config, updates DuckDNS, waits for DNS, installs (or
+updates) the app from `main`, configures Nginx, obtains the Let's
+Encrypt certificate with HTTP->HTTPS redirect, sets the WorkOS/Google
+callback URLs for this domain, restarts services, and runs `verify.sh`.
+It is idempotent: re-running is safe.
+
+Equivalent manual path:
+
+```bash
+sudo DOMAIN=foap-creative.duckdns.org bash deploy/oracle/install.sh
+sudo DOMAIN=foap-creative.duckdns.org EMAIL=admin@example.com \
   bash /opt/creative-intelligence/deploy/oracle/enable-https.sh
 ```
 
-This obtains a Let's Encrypt certificate with Certbot, redirects HTTP to HTTPS, enables the application's Secure cookie setting, and updates the expected callback URLs in the server environment.
+The installer also enables: UFW (22/80/443, SSH allowed first so you
+are never locked out), Fail2ban, automatic security updates, the
+nightly backup timer, and — once the DuckDNS token is set — the
+10-minute DuckDNS refresh timer.
 
-Register these exact URLs with the respective providers:
+## 4. Register callbacks (your actions)
+
+The app cannot change provider dashboards. Register these exact URLs:
 
 ```text
-https://creative.example.com/api/auth/callback
-https://creative.example.com/api/auth/google/callback
+WorkOS dashboard:  https://foap-creative.duckdns.org/api/auth/callback
+Google Cloud:      https://foap-creative.duckdns.org/api/auth/google/callback
 ```
 
-The script cannot change provider dashboards for you.
-
-## 6. Smoke test
-
-Locally on the VM:
+## 5. Verify
 
 ```bash
-sudo bash /opt/creative-intelligence/deploy/oracle/verify.sh
-```
-
-Against the public HTTPS name:
-
-```bash
-sudo BASE_URL=https://creative.example.com \
+sudo BASE_URL=https://foap-creative.duckdns.org \
+  EXPECT_LIVE=1 \
   bash /opt/creative-intelligence/deploy/oracle/verify.sh
 ```
 
-The smoke test confirms:
+This checks DNS, certificate, HTTP->HTTPS redirect, `/health`,
+`/readiness`, frontend, anonymous default-deny (401), security
+headers, cookie flags, media gating, and live provider mode.
 
-- liveness
-- readiness/database availability
-- frontend response
-- unauthenticated analytics remain default-deny (`401`)
+Provider readiness (authenticated):
 
-## 7. Updating after a GitHub change
+```bash
+curl -sS https://foap-creative.duckdns.org/api/providers/status \
+  -H "Cookie: ci_session=<session>"
+```
 
-Update your checked-out source branch first, then run:
+must show `stt`, `vision`, and `llm` as `configured` before the Foap
+demo. It never exposes key values.
+
+## 6. Updating after a GitHub change
 
 ```bash
 git pull --ff-only
 sudo SOURCE_DIR="$PWD" bash deploy/oracle/update.sh
 ```
 
-The updater takes a backup first, installs backend changes, rebuilds React, applies Alembic migrations, restarts the service and runs health/readiness checks.
+Backup first, install from `requirements.lock`, rebuild React, migrate,
+restart, health-check. Systemd units refresh automatically.
 
-## 8. Backups
-
-Manual backup:
+## 7. Backups
 
 ```bash
 sudo bash /opt/creative-intelligence/deploy/oracle/backup.sh
 ```
 
-Archives are stored under `/var/backups/creative-intelligence` by default. They contain the SQLite database plus local creative media/avatar directories.
+Nightly on-host snapshots run automatically, plus an off-host rsync
+copy once `BACKUP_OFFHOST_DEST` is set (see `deploy/oracle/env.example`
+and `docs/BACKUP.md`).
 
-Copy important backups off the VM as well. A boot volume is persistent, but it is not a substitute for an independent backup.
+> **local backup ≠ disaster recovery.** Until an off-host copy is
+> configured, a lost VM means lost data. The free path is OCI Object
+> Storage (Always Free allowance) — see `docs/BACKUP.md`.
 
 Restore:
 
@@ -158,25 +169,36 @@ sudo bash /opt/creative-intelligence/deploy/oracle/restore.sh \
   /var/backups/creative-intelligence/<timestamp>.tar.gz
 ```
 
-## 9. Useful operations
+## 8. Useful operations
 
 ```bash
 sudo systemctl status creative-intelligence
 sudo journalctl -u creative-intelligence -n 200 --no-pager
 sudo systemctl restart creative-intelligence
+sudo systemctl list-timers 'creative-intelligence-*'
 sudo nginx -t
 curl http://127.0.0.1:4321/health
 curl http://127.0.0.1:4321/readiness
 ```
 
+## 9. Moving to an official domain later
+
+Only these change (no source-code changes):
+
+1. DNS for the new name
+2. `DOMAIN`
+3. `CREATIVE_INTEL_WORKOS_REDIRECT_URI` (+ WorkOS dashboard entry)
+4. `CREATIVE_INTEL_GOOGLE_REDIRECT_URI` (+ Google console entry)
+5. New certificate via `enable-https.sh`
+
 ## 10. What remains outside these scripts
 
-The repository can prepare and run the application, but it cannot provision your Oracle account or change third-party identity-provider dashboards by itself. You still need to:
+- creating the OCI VM and its network rules;
+- claiming the DuckDNS hostname in your account;
+- registering callback URLs in WorkOS/Google;
+- supplying real secrets and provider keys;
+- opening the final URL from another network and exercising the
+  full login -> upload -> analysis -> report flow.
 
-- create the OCI VM;
-- attach the VM's public IP/network rules;
-- point a DNS name at the VM if using public OAuth;
-- register the HTTPS callback URL in WorkOS/Google;
-- supply the actual production/test secrets.
-
-For a Foap pilot, use test/demo data until the authentication, provider and privacy configuration has been live-validated on the public HTTPS deployment.
+For a Foap pilot, use test/demo data until authentication, providers,
+and privacy are live-validated on the public HTTPS deployment.

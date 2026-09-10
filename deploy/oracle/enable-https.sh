@@ -10,7 +10,7 @@ if [[ ${EUID} -ne 0 ]]; then
   exit 1
 fi
 if [[ -z "${DOMAIN}" || -z "${EMAIL}" ]]; then
-  echo "Usage: sudo DOMAIN=creative.example.com EMAIL=admin@example.com bash deploy/oracle/enable-https.sh" >&2
+  echo "Usage: sudo DOMAIN=foap-creative.duckdns.org EMAIL=admin@example.com bash deploy/oracle/enable-https.sh" >&2
   exit 1
 fi
 

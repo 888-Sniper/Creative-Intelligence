@@ -39,6 +39,9 @@ if ! command -v node >/dev/null 2>&1 || [[ "$(node -p 'Number(process.versions.n
   curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
   apt-get install -y nodejs
 fi
+if ! command -v corepack >/dev/null 2>&1; then
+  npm install --global corepack
+fi
 corepack enable
 corepack prepare "pnpm@${PNPM_VERSION}" --activate
 
@@ -54,6 +57,7 @@ rsync -a --delete \
   --exclude 'dist/' \
   --exclude 'Data/' \
   "${SOURCE_DIR}/" "${APP_DIR}/"
+chmod 750 "${APP_DIR}/deploy/oracle/"*.sh
 
 python3.13 -m venv "${APP_DIR}/.venv"
 "${APP_DIR}/.venv/bin/python" -m pip install --upgrade pip wheel

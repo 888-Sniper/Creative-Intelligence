@@ -294,7 +294,27 @@ def sweep_pending(db: Session) -> None:
 # ---------------------------------------------------------------------------
 
 
-def create_session(db: Session, employee_id: str, workos_user_id: str) -> str:
+MAX_CONTAINER_CHARS = 64
+
+
+def valid_container_id(value: object) -> str:
+    """Validate an installation container id (item 18).
+
+    "" means unbound (legacy clients). Otherwise 1-64 chars of
+    letters, digits, "-" and "_". Anything else raises StoreError so
+    login endpoints answer 409 instead of storing attacker-shaped data.
+    """
+    text = value if isinstance(value, str) else ""
+    if text == "":
+        return ""
+    if len(text) > MAX_CONTAINER_CHARS or any(
+            not (ch.isalnum() or ch in "-_") for ch in text):
+        raise StoreError("Invalid container id.")
+    return text
+
+
+def create_session(db: Session, employee_id: str, workos_user_id: str,
+                   container_id: str = "") -> str:
     """Issue a session token. Only the hash is stored; the raw token is
     shown once (Set-Cookie) and never logged."""
     token = secrets.token_urlsafe(32)
@@ -302,12 +322,47 @@ def create_session(db: Session, employee_id: str, workos_user_id: str) -> str:
     db.add(AuthSession(
         token_hash=_token_hash(token), employee_id=employee_id,
         workos_user_id=workos_user_id,
+        container_id=valid_container_id(container_id),
         created_at=now.isoformat(timespec="seconds"),
         last_seen_at=now.isoformat(timespec="seconds"),
         expires_at=(now + datetime.timedelta(
             seconds=SESSION_TTL_S)).isoformat(timespec="seconds")))
     db.commit()
     return token
+
+
+def session_container(db: Session, token: str) -> str | None:
+    """Container bound to a live session token, or None when unknown."""
+    row = _session_row(db, token)
+    if row is None or _expired(row):
+        return None
+    return row.container_id or ""
+
+
+def bind_session_container(db: Session, token: str,
+                           container_id: str) -> str:
+    """Adopt an unbound session into a container (first write wins).
+
+    Used after OAuth logins, whose server-side redirect cannot carry the
+    browser's container id. Rebinding an already-bound session is refused
+    so a session observed elsewhere cannot be pulled into a foreign
+    container. Returns the session's (possibly unchanged) container.
+    """
+    wanted = valid_container_id(container_id)
+    if not wanted:
+        raise StoreError("Invalid container id.")
+    row = _session_row(db, token)
+    if row is None or _expired(row):
+        raise Denied("login", "Sign in to continue.")
+    current = row.container_id or ""
+    if not current:
+        row.container_id = wanted
+        db.commit()
+        return wanted
+    if current != wanted:
+        raise Denied("login", "This session belongs to another "
+                              "installation. Sign in again.")
+    return current
 
 
 def destroy_session(db: Session, token: str) -> None:
@@ -385,10 +440,12 @@ def authorize(db: Session, token: str) -> tuple[Employee, str]:
     }.get(status, "Your access is pending approval."))
 
 
-def login_identity(db: Session, identity: dict, settings=None) -> tuple[str, Employee, bool]:
+def login_identity(db: Session, identity: dict, settings=None,
+                   container_id: str = "") -> tuple[str, Employee, bool]:
     """Complete a verified WorkOS login: link employee, open session."""
     emp, created = ensure_identity(db, identity, settings)
-    token = create_session(db, emp.id, emp.workos_user_id or "")
+    token = create_session(db, emp.id, emp.workos_user_id or "",
+                           valid_container_id(container_id))
     emp.last_login_at = utcnow()
     db.commit()
     return token, emp, created
@@ -426,18 +483,29 @@ def valid_session(db: Session, token: str) -> Employee | None:
     return get_employee(db, row.employee_id)
 
 
-def has_live_session(db: Session, employee_id: str) -> bool:
+def has_live_session_in(db: Session, employee_id: str,
+                        container_id: str) -> bool:
+    """Item 18: live session for employee inside one container only."""
     now = datetime.datetime.now(datetime.timezone.utc).isoformat()
     return db.scalar(select(func.count()).select_from(AuthSession).where(
         AuthSession.employee_id == employee_id,
+        AuthSession.container_id == (container_id or ""),
         AuthSession.expires_at > now)) not in (None, 0)
 
 
-def list_accounts(db: Session) -> list[dict]:
-    """Every stored account identity (for the account menu/switcher)."""
+def list_accounts(db: Session, container_id: str = "") -> list[dict]:
+    """Stored account identities visible inside one container.
+
+    Only accounts with a live session bound to the caller's container
+    are returned, so one installation can never enumerate accounts from
+    another. Unbound ("") callers see unbound sessions (legacy parity).
+    """
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
     rows = db.execute(
         select(AuthSession, Employee)
         .outerjoin(Employee, Employee.id == AuthSession.employee_id)
+        .where(AuthSession.container_id == (container_id or ""),
+               AuthSession.expires_at > now)
         .order_by(AuthSession.last_seen_at.desc())).all()
     out = []
     for sess, emp in rows:

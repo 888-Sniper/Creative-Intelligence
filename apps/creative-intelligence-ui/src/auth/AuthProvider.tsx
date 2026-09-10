@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { api, ApiError, setGateHandler } from "@/api/client";
+import { installationContainer } from "@/auth/container";
 import type { AuthStatus, MeResponse } from "@/types/auth";
 import { statusForMe } from "@/types/auth";
 
@@ -48,6 +49,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => setGateHandler(null);
   }, [refresh]);
 
+  // Adopt OAuth sessions (whose server-side redirect cannot carry the
+  // container id) into this installation on boot. First write wins
+  // server-side; a foreign container is refused with a login gate.
+  useEffect(() => {
+    if (me !== null && me.authenticated) {
+      const id = installationContainer();
+      if (id) {
+        api<{ container_id: string }>("POST", "/api/auth/container", {
+          container_id: id,
+        }).catch(() => {
+          void refresh();
+        });
+      }
+    }
+  }, [me, refresh]);
+
   const status: AuthStatus = useMemo(() => {
     if (me === null) return "INITIALISING";
     if (authenticating) return "AUTHENTICATING";
@@ -76,7 +93,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (email: string, password: string) => {
       setAuthenticating(true);
       try {
-        await afterLogin(await api<MeResponse>("POST", "/api/auth/email/signin", { email, password }));
+        await afterLogin(
+          await api<MeResponse>("POST", "/api/auth/email/signin", {
+            email,
+            password,
+            container_id: installationContainer(),
+          }),
+        );
       } finally {
         setAuthenticating(false);
       }
@@ -93,7 +116,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (email: string, code: string) => {
       setAuthenticating(true);
       try {
-        await afterLogin(await api<MeResponse>("POST", "/api/auth/email/code/signin", { email, code }));
+        await afterLogin(
+          await api<MeResponse>("POST", "/api/auth/email/code/signin", {
+            email,
+            code,
+            container_id: installationContainer(),
+          }),
+        );
       } finally {
         setAuthenticating(false);
       }

@@ -55,6 +55,12 @@ class AuthSession(Base):
     created_at: Mapped[str] = mapped_column(String, default="")
     last_seen_at: Mapped[str] = mapped_column(String, default="")
     expires_at: Mapped[str] = mapped_column(String, default="")
+    # Item 18: installation/account container binding. Sessions created
+    # by container-aware clients carry the local container id; the
+    # account switcher only ever sees same-container sessions, so one
+    # installation can never enumerate or hop into accounts from another
+    # device/database-sharer. "" means unbound (legacy clients).
+    container_id: Mapped[str] = mapped_column(String, default="")
 
 
 class AuthPending(Base):

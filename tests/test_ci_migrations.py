@@ -36,15 +36,21 @@ def _version(engine):
 def test_fresh_upgrade_downgrade_upgrade(tmp_path):
     engine = make_engine(str(tmp_path / "mig.db"))
     ensure_migrated(engine)
-    assert _version(engine) == ["0002"]
+    assert _version(engine) == ["0003"]
     with engine.connect() as conn:
         tables = set(inspect(conn).get_table_names())
     assert {"employees", "auth_sessions", "auth_pending",
             "employee_audit"} <= tables
     _downgrade(engine, "0001")
     assert _version(engine) == ["0001"]
+    with engine.connect() as conn:
+        cols = {c["name"] for c in inspect(conn).get_columns("auth_sessions")}
+    assert "container_id" not in cols
     _upgrade(engine, "head")
-    assert _version(engine) == ["0002"]
+    assert _version(engine) == ["0003"]
+    with engine.connect() as conn:
+        cols = {c["name"] for c in inspect(conn).get_columns("auth_sessions")}
+    assert "container_id" in cols
     # Full teardown to base drops identity tables, and a fresh boot
     # re-creates them at head (downgrade-base re-upgrade path).
     _downgrade(engine, "base")
@@ -54,14 +60,14 @@ def test_fresh_upgrade_downgrade_upgrade(tmp_path):
     assert not ({"employees", "auth_sessions", "auth_pending",
                  "employee_audit"} & tables)
     ensure_migrated(engine)
-    assert _version(engine) == ["0002"]
+    assert _version(engine) == ["0003"]
     with engine.connect() as conn:
         tables = set(inspect(conn).get_table_names())
     assert {"employees", "auth_sessions", "auth_pending",
             "employee_audit"} <= tables
     # App boot stays on head and is idempotent.
     ensure_migrated(engine)
-    assert _version(engine) == ["0002"]
+    assert _version(engine) == ["0003"]
 
 
 def test_legacy_create_all_db_migrates_with_data(tmp_path):
@@ -71,7 +77,7 @@ def test_legacy_create_all_db_migrates_with_data(tmp_path):
         admin = emp.admin_create(sess, "root", "ada@foap.test", role="admin")
         emp.create_session(sess, admin.id, "")
     ensure_migrated(engine)
-    assert _version(engine) == ["0002"]
+    assert _version(engine) == ["0003"]
     with engine.connect() as conn:
         assert conn.execute(text("SELECT count(*) FROM employees")
                             ).fetchone()[0] == 1

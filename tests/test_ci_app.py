@@ -755,3 +755,65 @@ def test_react_index_carries_strict_csp(client):
     # applies; the legacy fallback intentionally omits it (inline scripts).
     assert "default-src 'self'" in csp, csp
     assert "script-src" not in csp or "'unsafe-inline'" not in csp
+
+
+def _login(http, monkeypatch, email, box=""):
+    stub_exchange(monkeypatch, {
+        "id": "w-%s" % email, "email": email, "email_verified": True,
+        "first_name": email.split("@")[0], "last_name": "T",
+        "profile_picture_url": ""})
+    r = http.post("/api/auth/oauth/start", json={"provider": "google"})
+    assert r.status_code == 200, r.text
+    payload = {"code": "auth_code", "state": r.json()["state"]}
+    if box:
+        payload["container_id"] = box
+    r = http.post("/api/auth/oauth/finish", json=payload)
+    assert r.status_code == 200, r.text
+    return r
+
+
+def test_accounts_scoped_to_caller_container(client, monkeypatch):
+    # Bootstrap admin first (no container), then X on box-a, Y on box-b.
+    _login(client, monkeypatch, "root@foap.test")
+    _login(client, monkeypatch, "x@foap.test", "box-a")
+    _login(client, monkeypatch, "y@foap.test", "box-b")
+    # Fresh box-a session for X sees X but never Y.
+    _login(client, monkeypatch, "x@foap.test", "box-a")
+    emails = [a["email"] for a in
+              client.get("/api/auth/accounts").json()["accounts"]]
+    assert "x@foap.test" in emails
+    assert "y@foap.test" not in emails
+    assert "root@foap.test" not in emails
+
+
+def test_switch_refused_across_containers(client, monkeypatch):
+    _login(client, monkeypatch, "root@foap.test")
+    _login(client, monkeypatch, "x@foap.test", "box-a")
+    y = _login(client, monkeypatch, "y@foap.test", "box-b").json()["employee"]
+    # X on box-a cannot switch to Y (live session, foreign container).
+    _login(client, monkeypatch, "x@foap.test", "box-a")
+    r = client.post("/api/auth/switch", json={"employee_id": y["id"]})
+    assert r.status_code == 404
+    # Same-container switch works and inherits the container.
+    z = _login(client, monkeypatch, "zed@foap.test", "box-a").json()["employee"]
+    _login(client, monkeypatch, "x@foap.test", "box-a")
+    r = client.post("/api/auth/switch", json={"employee_id": z["id"]})
+    assert r.status_code == 200, r.text
+    assert r.json()["employee"]["id"] == z["id"]
+
+
+def test_container_bind_adopt_and_refuse(client, monkeypatch):
+    # Unbound legacy session adopts a container on first write.
+    _login(client, monkeypatch, "root@foap.test")
+    r = client.post("/api/auth/container", json={"container_id": "box-1"})
+    assert r.json() == {"ok": True, "container_id": "box-1"}
+    # Same container re-bind is idempotent.
+    r = client.post("/api/auth/container", json={"container_id": "box-1"})
+    assert r.json()["container_id"] == "box-1"
+    # A foreign container is refused with a login gate (fail closed).
+    r = client.post("/api/auth/container", json={"container_id": "box-2"})
+    assert r.status_code == 401
+    assert r.json()["gate"] == "login"
+    # Garbage container ids are rejected without touching the session.
+    r = client.post("/api/auth/container", json={"container_id": "a/b"})
+    assert r.status_code == 409

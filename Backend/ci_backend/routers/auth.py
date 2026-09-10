@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from pydantic import BaseModel, Field
 from starlette.datastructures import UploadFile
 
 from ci_backend import employees as emp
@@ -125,10 +126,42 @@ def serve_avatar(employee_id: str, request: Request, db=Depends(get_db)):
 
 @router.get("/accounts")
 def accounts(request: Request, db=Depends(get_db)):
-    if emp.valid_session(db, bearer_token(request)) is None:
+    token = bearer_token(request)
+    if emp.valid_session(db, token) is None:
         raise HTTPException(status_code=401, detail={
             "error": "Sign in to continue.", "gate": "login"})
-    return {"accounts": emp.list_accounts(db)}
+    # Item 18: the switcher only sees the caller's own container.
+    container = emp.session_container(db, token) or ""
+    return {"accounts": emp.list_accounts(db, container)}
+
+
+class ContainerBind(BaseModel):
+    container_id: str = Field(default="", max_length=64)
+
+
+@router.post("/container")
+def bind_container(body: ContainerBind, request: Request,
+                   db=Depends(get_db)):
+    """Adopt the caller's session into its installation container.
+
+    First write wins; a session already bound elsewhere is refused.
+    Container-aware clients call this on boot after OAuth logins, whose
+    server-side redirect cannot carry the container id.
+    """
+    token = bearer_token(request)
+    if emp.valid_session(db, token) is None:
+        raise HTTPException(status_code=401, detail={
+            "error": "Sign in to continue.", "gate": "login"})
+    try:
+        container = emp.bind_session_container(
+            db, token, body.container_id)
+    except emp.Denied as exc:
+        raise HTTPException(status_code=401, detail={
+            "error": str(exc), "gate": exc.gate})
+    except emp.StoreError as exc:
+        raise HTTPException(status_code=409,
+                            detail={"error": str(exc)})
+    return {"ok": True, "container_id": container}
 
 
 # CSRF threat model (documented, not assumed away).
@@ -220,7 +253,8 @@ async def oauth_finish(request: Request, db=Depends(get_db),
         identity = oauth_mod.finish_oauth(
             db, body.get("code", ""), body.get("state", ""), settings)
         token, employee, _created = emp.login_identity(
-            db, identity, settings)
+            db, identity, settings,
+            emp.valid_container_id(body.get("container_id", "")))
         security_log.event("login_success", target=employee.id,
                            detail="oauth finish")
     except (emp.StoreError, emp.Denied,
@@ -246,7 +280,8 @@ async def email_signin(request: Request, db=Depends(get_db),
             settings=settings)
         identity = workos_mod.public_identity(raw, provider="email")
         token, employee, gate = oauth_mod.login_verified(
-            db, identity, settings)
+            db, identity, settings,
+            emp.valid_container_id(body.get("container_id", "")))
     except (emp.StoreError, workos_mod.WorkOSError) as exc:
         raise HTTPException(status_code=409, detail={"error": str(exc)})
     return _issue({"ok": True, "gate": gate,
@@ -275,7 +310,8 @@ async def email_code_signin(request: Request, db=Depends(get_db),
             body.get("email", ""), body.get("code", ""), settings=settings)
         identity = workos_mod.public_identity(raw, provider="email")
         token, employee, gate = oauth_mod.login_verified(
-            db, identity, settings)
+            db, identity, settings,
+            emp.valid_container_id(body.get("container_id", "")))
     except (emp.StoreError, workos_mod.WorkOSError) as exc:
         raise HTTPException(status_code=409, detail={"error": str(exc)})
     return _issue({"ok": True, "gate": gate,
@@ -340,14 +376,21 @@ def revoke_own_sessions(request: Request, db=Depends(get_db),
 async def switch(request: Request, db=Depends(get_db),
                  settings: Settings = Depends(get_settings)):
     body = await json_payload(request)
-    if emp.valid_session(db, bearer_token(request)) is None:
+    token = bearer_token(request)
+    if emp.valid_session(db, token) is None:
         raise HTTPException(status_code=401, detail={
             "error": "Sign in to continue.", "gate": "login"})
+    # Item 18: the target needs a live session in the CALLER's container.
+    # A live session anywhere else no longer authorizes the switch, and
+    # the fresh session inherits the caller's container.
+    container = emp.session_container(db, token) or ""
     target = emp.get_employee(db, body.get("employee_id", ""))
-    if target is None or not emp.has_live_session(db, target.id):
+    if target is None or not emp.has_live_session_in(
+            db, target.id, container):
         raise HTTPException(status_code=404, detail={
             "error": "Sign in with that account first."})
-    fresh = emp.create_session(db, target.id, target.workos_user_id or "")
+    fresh = emp.create_session(db, target.id, target.workos_user_id or "",
+                               container)
     return _issue({"ok": True,
                    "employee": emp.public_employee(target).model_dump()},
                   fresh, secure=settings.cookie_secure)

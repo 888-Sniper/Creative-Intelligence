@@ -66,7 +66,8 @@ def finish_oauth(db: Session, code: str, state: str,
 
 
 def login_verified(db: Session, identity: dict[str, Any],
-                   settings=None) -> tuple[str, Any, str]:
+                   settings=None,
+                   container_id: str = "") -> tuple[str, Any, str]:
     """Email-grant login: verified WorkOS identity only, then session.
 
     Returns (token, employee, gate) where gate mirrors /me so the
@@ -74,6 +75,7 @@ def login_verified(db: Session, identity: dict[str, Any],
     """
     if not identity.get("workos_user_id") or not identity.get("verified"):
         raise emp.StoreError("WorkOS did not return a verified identity.")
-    token, employee, _created = emp.login_identity(db, identity, settings)
+    token, employee, _created = emp.login_identity(
+        db, identity, settings, emp.valid_container_id(container_id))
     gate = "app" if employee.status == "active" else employee.status
     return token, employee, gate

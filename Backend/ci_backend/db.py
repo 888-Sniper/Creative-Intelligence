@@ -33,6 +33,7 @@ class Employee(Base):
     approved_by: Mapped[str] = mapped_column(String, default="")
     last_login_at: Mapped[str] = mapped_column(String, default="")
     updated_at: Mapped[str] = mapped_column(String, default="")
+    provider: Mapped[str] = mapped_column(String, default="")
 
     __table_args__ = (
         Index("employees_workos_uid", "workos_user_id", unique=True),

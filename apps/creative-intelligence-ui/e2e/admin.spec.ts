@@ -33,6 +33,16 @@ test.describe("admin journey", () => {
     await expect(page.getByText("EMPLOYEE_CREATED").first()).toBeVisible();
   });
 
+  test("foreign installation sees no accounts to switch to", async ({ page, context }) => {
+    const seeds = readSeeds();
+    // Same admin session cookie, but a fresh foreign container: the app
+    // adopts nothing (session already bound to e2e-installation) and the
+    // gate refuses it, so no dashboard and no account list appear.
+    await loginAs(context, page, seeds.admin, "/", false);
+    await expect(page.getByRole("heading", { name: "Welcome to Creative Intelligence" })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Switch to/ })).toHaveCount(0);
+  });
+
   test("multi-account switch re-runs authorization", async ({ page, context }) => {
     const seeds = readSeeds();
     await loginAs(context, page, seeds.admin);

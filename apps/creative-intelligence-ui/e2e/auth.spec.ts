@@ -31,4 +31,18 @@ test.describe("employee journey", () => {
     await expect(page.getByRole("link", { name: "Overview" })).toHaveCount(0);
     await expect(page.getByText("Campaigns")).toHaveCount(0);
   });
+
+  test("settings shows account, provider, appearance and logout-all", async ({ page, context }) => {
+    const seeds = readSeeds();
+    // NOTE: the admin session (the employee session is destroyed by the
+    // logout step of the first journey in this file).
+    await loginAs(context, page, seeds.admin, "/settings");
+    await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+    await expect(page.getByText("boss@foap.test (verified, read-only)")).toBeVisible();
+    await expect(page.getByRole("radio", { name: /System/ })).toBeVisible();
+    page.on("dialog", (d) => void d.accept());
+    await page.getByRole("button", { name: "Log out all sessions" }).click();
+    // Revoking includes the current session, so the gate returns to login.
+    await expect(page.getByRole("heading", { name: "Welcome to Creative Intelligence" })).toBeVisible();
+  });
 });

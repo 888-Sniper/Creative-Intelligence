@@ -46,7 +46,7 @@ describe("auth state model", () => {
         ...base,
         authenticated: true,
         gate: "app",
-        employee: { id: "e1", email: "a@b.c", first_name: "A", last_name: "B", avatar_url: "", role: "employee", status: "active", created_at: "", approved_at: "", approved_by: "", last_login_at: "", updated_at: "" },
+        employee: { id: "e1", email: "a@b.c", first_name: "A", last_name: "B", avatar_url: "", provider: "google", role: "employee", status: "active", created_at: "", approved_at: "", approved_by: "", last_login_at: "", updated_at: "" },
       }),
     ).toBe("AUTHENTICATED");
   });
@@ -104,7 +104,7 @@ describe("AuthGate screens", () => {
         ...base,
         authenticated: true,
         gate: "app",
-        employee: { id: "e1", email: "ada@foap.test", first_name: "Ada", last_name: "L", avatar_url: "", role: "employee", status: "active", created_at: "", approved_at: "", approved_by: "", last_login_at: "", updated_at: "" },
+        employee: { id: "e1", email: "ada@foap.test", first_name: "Ada", last_name: "L", avatar_url: "", provider: "google", role: "employee", status: "active", created_at: "", approved_at: "", approved_by: "", last_login_at: "", updated_at: "" },
       });
     }) as unknown as typeof fetch;
     renderGate();
@@ -122,7 +122,7 @@ describe("AuthGate screens", () => {
         ...base,
         authenticated: true,
         gate: "app",
-        employee: { id: "e1", email: "e@foap.test", first_name: "E", last_name: "M", avatar_url: "", role: "employee", status: "active", created_at: "", approved_at: "", approved_by: "", last_login_at: "", updated_at: "" },
+        employee: { id: "e1", email: "e@foap.test", first_name: "E", last_name: "M", avatar_url: "", provider: "google", role: "employee", status: "active", created_at: "", approved_at: "", approved_by: "", last_login_at: "", updated_at: "" },
       });
     }) as unknown as typeof fetch;
     renderGate();

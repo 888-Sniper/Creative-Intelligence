@@ -20,6 +20,7 @@ from ci_backend.db import (ensure_migrated, make_engine,  # noqa: E402
 
 def main() -> None:
     db_path, seeds_path = sys.argv[1], sys.argv[2]
+    container = sys.argv[3] if len(sys.argv) > 3 else ""
     engine = make_engine(db_path)
     ensure_migrated(engine)
     factory = make_session_factory(engine)
@@ -36,9 +37,10 @@ def main() -> None:
             "last_name": "Pending", "avatar_url": ""})
         assert pending.status == "pending", pending.status
         seeds = {
-            "admin": emp.create_session(sess, admin.id, ""),
-            "employee": emp.create_session(sess, employee.id, ""),
-            "pending": emp.create_session(sess, pending.id, "w-pip"),
+            "admin": emp.create_session(sess, admin.id, "", container),
+            "employee": emp.create_session(sess, employee.id, "", container),
+            "pending": emp.create_session(sess, pending.id, "w-pip",
+                                           container),
         }
     with open(seeds_path, "w") as fh:
         json.dump(seeds, fh)

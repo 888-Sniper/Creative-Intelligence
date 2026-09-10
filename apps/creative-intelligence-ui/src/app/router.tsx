@@ -2,6 +2,7 @@ import { createBrowserRouter } from "react-router-dom";
 import { AppLayout } from "@/layouts/AppLayout";
 import { AuthGate } from "@/auth/AuthGate";
 import { OverviewPage } from "@/pages/OverviewPage";
+import { SettingsPage } from "@/pages/SettingsPage";
 import { CampaignsPage } from "@/pages/CampaignsPage";
 import { CreativesPage } from "@/pages/CreativesPage";
 import { ComparePage } from "@/pages/ComparePage";
@@ -35,6 +36,7 @@ export const router = createBrowserRouter([
       { path: "benchmarks", element: <BenchmarksPage /> },
       { path: "reports", element: <ReportsPage /> },
       { path: "profile", element: <ProfilePage /> },
+      { path: "settings", element: <SettingsPage /> },
       {
         path: "admin",
         element: (

@@ -1,30 +1,66 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
+export type ThemeMode = "light" | "dark" | "system";
 export type Theme = "light" | "dark";
 
-function initial(): Theme {
-  if (typeof document !== "undefined" && document.documentElement.dataset["theme"] === "dark") return "dark";
+const KEY = "ci-theme";
+
+function stored(): ThemeMode {
   try {
-    return window.localStorage.getItem("ci-theme") === "dark" ? "dark" : "light";
+    const v = window.localStorage.getItem(KEY);
+    if (v === "dark" || v === "system") return v;
   } catch {
-    return "light";
+    /* private mode: fall through to light */
   }
+  return "light";
 }
 
-/** Light/dark appearance (legacy parity: data-theme="dark" + persistence). */
-export function useTheme(): { theme: Theme; toggle: () => void; set: (t: Theme) => void } {
-  const [theme, setTheme] = useState<Theme>(initial);
+function systemDark(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-color-scheme: dark)").matches
+  );
+}
+
+function resolve(mode: ThemeMode): Theme {
+  return mode === "system" ? (systemDark() ? "dark" : "light") : mode;
+}
+
+/** Light/dark/system appearance (item 21). The resolved theme drives
+ *  data-theme="dark" (legacy parity); the explicit mode persists. */
+export function useTheme(): {
+  mode: ThemeMode;
+  theme: Theme;
+  set: (t: ThemeMode) => void;
+  toggle: () => void;
+} {
+  const [mode, setMode] = useState<ThemeMode>(stored);
+  const [theme, setTheme] = useState<Theme>(() => resolve(stored()));
+
   useEffect(() => {
-    document.documentElement.dataset["theme"] = theme === "dark" ? "dark" : "";
+    const next = resolve(mode);
+    setTheme(next);
+    document.documentElement.dataset["theme"] = next === "dark" ? "dark" : "";
     try {
-      window.localStorage.setItem("ci-theme", theme);
+      window.localStorage.setItem(KEY, mode);
     } catch {
       /* private mode: theme simply does not persist */
     }
-  }, [theme]);
-  return {
-    theme,
-    toggle: () => setTheme((t) => (t === "dark" ? "light" : "dark")),
-    set: setTheme,
-  };
+    if (mode !== "system" || typeof window.matchMedia !== "function") return;
+    const query = window.matchMedia("(prefers-color-scheme: dark)");
+    const onChange = () => {
+      const dark = query.matches;
+      setTheme(dark ? "dark" : "light");
+      document.documentElement.dataset["theme"] = dark ? "dark" : "";
+    };
+    query.addEventListener("change", onChange);
+    return () => query.removeEventListener("change", onChange);
+  }, [mode]);
+
+  const toggle = useCallback(() => {
+    setMode((m) => (resolve(m) === "dark" ? "light" : "dark"));
+  }, []);
+
+  return { mode, theme, set: setMode, toggle };
 }

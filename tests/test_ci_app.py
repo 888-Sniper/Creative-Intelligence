@@ -711,7 +711,7 @@ def test_spa_shell_serving(client):
     # Deep links serve the app shell; unknown paths still 404; liveness
     # endpoints are not shadowed by the SPA fallback.
     for path in ("/campaigns", "/creatives", "/compare", "/benchmarks",
-                 "/reports", "/profile", "/admin"):
+                 "/reports", "/profile", "/settings", "/admin"):
         r = client.get(path)
         assert r.status_code == 200, path
         assert "Foap Creative Intelligence" in r.text, path
@@ -817,3 +817,10 @@ def test_container_bind_adopt_and_refuse(client, monkeypatch):
     # Garbage container ids are rejected without touching the session.
     r = client.post("/api/auth/container", json={"container_id": "a/b"})
     assert r.status_code == 409
+
+
+def test_provider_recorded_and_exposed(client, monkeypatch):
+    _login(client, monkeypatch, "root@foap.test")
+    me = client.get("/api/auth/me").json()
+    # oauth stub default provider is google (see stub_exchange).
+    assert me["employee"]["provider"] == "google"

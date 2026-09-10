@@ -8,7 +8,7 @@ import type { MeResponse } from "@/types/auth";
 const authed: MeResponse = {
   authenticated: true,
   gate: "app",
-  employee: { id: "e1", email: "a@b.c", first_name: "A", last_name: "B", avatar_url: "", role: "employee", status: "active", created_at: "", approved_at: "", approved_by: "", last_login_at: "", updated_at: "" },
+  employee: { id: "e1", email: "a@b.c", first_name: "A", last_name: "B", avatar_url: "", provider: "google", role: "employee", status: "active", created_at: "", approved_at: "", approved_by: "", last_login_at: "", updated_at: "" },
   is_admin: false,
   message: "",
   workos_configured: true,

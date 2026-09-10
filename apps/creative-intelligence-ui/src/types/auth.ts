@@ -4,6 +4,7 @@ export interface PublicEmployee {
   first_name: string;
   last_name: string;
   avatar_url: string;
+  provider: string;
   role: string;
   status: string;
   created_at: string;

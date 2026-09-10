@@ -9,6 +9,7 @@ const employee = {
   first_name: "Ada",
   last_name: "Lovelace",
   avatar_url: "",
+  provider: "google",
   role: "employee",
   status: "active",
   created_at: "",

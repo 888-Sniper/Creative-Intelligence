@@ -121,6 +121,7 @@ class PublicEmployee(BaseModel):
     first_name: str = ""
     last_name: str = ""
     avatar_url: str = ""
+    provider: str = ""
     role: str = "employee"
     status: str = "pending"
     created_at: str = ""
@@ -162,7 +163,8 @@ def public_employee(emp: Employee | None) -> PublicEmployee | None:
         return None
     return PublicEmployee(
         id=emp.id, email=emp.email, first_name=emp.first_name,
-        last_name=emp.last_name, avatar_url=emp.avatar_url, role=emp.role,
+        last_name=emp.last_name, avatar_url=emp.avatar_url,
+        provider=emp.provider or "", role=emp.role,
         status=emp.status, created_at=emp.created_at,
         approved_at=emp.approved_at, approved_by=emp.approved_by,
         last_login_at=emp.last_login_at, updated_at=emp.updated_at,
@@ -203,6 +205,9 @@ def ensure_identity(db: Session, identity: dict, settings=None) -> tuple[Employe
     """
     email = (identity.get("email") or "").strip().lower()
     wid = identity.get("workos_user_id") or ""
+    provider = identity.get("provider") or ""
+    if provider not in ("google", "microsoft", "apple", "github", "email"):
+        provider = ""
     if not wid and not email:
         raise StoreError("WorkOS did not return a user.")
     emp = find_employee(db, wid, email if identity.get("verified") else "")
@@ -217,6 +222,7 @@ def ensure_identity(db: Session, identity: dict, settings=None) -> tuple[Employe
             first_name=identity.get("first_name") or "",
             last_name=identity.get("last_name") or "",
             avatar_url=identity.get("avatar_url") or "",
+            provider=provider,
             role="admin" if bootstrapped else "employee",
             status="active" if bootstrapped else "pending",
             created_at=now, approved_at=now if bootstrapped else "",
@@ -236,6 +242,9 @@ def ensure_identity(db: Session, identity: dict, settings=None) -> tuple[Employe
     changed = False
     if wid and not emp.workos_user_id:
         emp.workos_user_id = wid
+        changed = True
+    if provider and not emp.provider:
+        emp.provider = provider
         changed = True
     for field in ("first_name", "last_name"):
         if identity.get(field) and not getattr(emp, field):

@@ -14,6 +14,7 @@ const TABS = [
   { to: "/benchmarks", label: "Benchmarks", end: false },
   { to: "/reports", label: "Reports", end: false },
   { to: "/profile", label: "Profile", end: false },
+  { to: "/settings", label: "Settings", end: false },
 ] as const;
 
 /** Application shell: Foap branding, primary nav, theme toggle. View ports

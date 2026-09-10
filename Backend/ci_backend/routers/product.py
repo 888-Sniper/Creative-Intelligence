@@ -1158,6 +1158,15 @@ async def export(request: Request, conn=Depends(get_product_conn),
     return result
 
 
+# Replay runs in a throwaway database and must never touch live
+# provider-backed work: re-firing a logged connect/sync/pipeline entry
+# would call real APIs and spend real budget. Only pure-local actions
+# replay; the rest are counted as skipped.
+_LOCAL_REPLAY_ACTIONS = frozenset({
+    "ingest", "retention", "verify", "annotate",
+    "save-view", "delete-view"})
+
+
 @router.post("/api/replay/run")
 def replay_run(request: Request, conn=Depends(get_product_conn),
                prov=Depends(get_providers),
@@ -1165,16 +1174,20 @@ def replay_run(request: Request, conn=Depends(get_product_conn),
     hist = replay.history(conn)
     mem = sqlite3.connect(":memory:")
     schema.init_db(mem)
-    n = 0
+    n = skipped = 0
     for entry in hist:
         if entry["action"] in ("export", "report-override"):
+            continue
+        if entry["action"] not in _LOCAL_REPLAY_ACTIONS:
+            skipped += 1
             continue
         legacy.apply_action(mem, entry["action"], entry["payload"], prov)
         n += 1
     live = conn.execute("SELECT COUNT(*) FROM ads").fetchone()[0]
     replayed = mem.execute("SELECT COUNT(*) FROM ads").fetchone()[0]
     mem.close()
-    return {"replayed": n, "live_ads": live, "replayed_ads": replayed,
+    return {"replayed": n, "skipped_provider_actions": skipped,
+            "live_ads": live, "replayed_ads": replayed,
             "matches_live": live == replayed}
 
 

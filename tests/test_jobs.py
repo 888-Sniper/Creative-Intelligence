@@ -138,6 +138,31 @@ def _admin(tmp_db):
     return client
 
 
+def test_replay_skips_provider_backed_actions(tmp_path, monkeypatch):
+    from creative_intel import replay, sync
+    db = str(tmp_path / "r.db")
+    http = _admin(db)
+    seed = ("Campaign,Ad,Impressions,Clicks,Conversions\n"
+            "C,A,100,5,1\n")
+    r = http.post("/api/ingest", json={"platform": "meta", "csv": seed})
+    assert r.status_code == 200, r.text
+    conn = sqlite3.connect(db)
+    try:
+        replay.log(conn, "sync-now", {"source": "meta"})
+    finally:
+        conn.close()
+
+    def _boom(source, params):
+        raise AssertionError("replay must not call providers")
+
+    monkeypatch.setattr(sync, "fetch_job", _boom)
+    r = http.post("/api/replay/run")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["skipped_provider_actions"] == 1
+    assert body["matches_live"] is True
+
+
 def test_pipeline_run_get_cancel(tmp_db):
     client = _admin(tmp_db)
     r = client.post("/api/pipeline/run", json={"creative_key": "  "})

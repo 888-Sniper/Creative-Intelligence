@@ -477,7 +477,7 @@ class Gate8XlsxCompletenessTest(unittest.TestCase):
         for key in ("shared-creative", "spain-only", "null-cpa"):
             self.assertIn(key, joined)
         self.assertIn("demo_open", joined)
-        self.assertIn("spoken", joined)
+        self.assertIn("Spoken", joined)
         self.assertTrue(any(n.startswith("xl/worksheets/sheet")
                             for n in names))
 

@@ -389,7 +389,10 @@ class Scope:
             if key in ("date_from", "date_to"):
                 continue
             if self.axes.get(key):
-                bits.append(", ".join(self.axes[key]))
+                vals = self.axes[key]
+                if key == "platform":
+                    vals = [_display_platform(v) for v in vals]
+                bits.append(", ".join(vals))
         if self.axes.get("date_from") or self.axes.get("date_to"):
             lo = (self.axes.get("date_from") or ["…"])[0]
             hi = (self.axes.get("date_to") or ["…"])[0]
@@ -667,7 +670,7 @@ def _creative_rows(conn, campaign, scope=None):
             cta_text = str(cta or "")
         out.append({
             "creative_key": key,
-            "platform": ",".join(platforms),
+            "platform": ",".join(_display_platform(p) for p in platforms),
             "spend": round(spend, 2),
             "impressions": impr,
             "clicks": clicks,
@@ -1344,6 +1347,43 @@ def campaign_recommendations(conn, campaign, scope=None, rank_by="cpa"):
 _HEADER_ACRONYMS = frozenset({
     "cpa", "ctr", "cpc", "cpm", "cpl", "cpsv", "vtr", "roas", "cta"})
 
+_DISPLAY_PLATFORMS = {"meta": "Meta", "tiktok": "TikTok"}
+
+
+def _display_platform(value):
+    """Human platform label with brand casing (Meta, TikTok)."""
+    lowered = str(value).strip().lower()
+    return _DISPLAY_PLATFORMS.get(lowered, str(value).strip().title())
+
+
+_SLUG_FIELDS = frozenset({
+    "creative", "creative_key", "role", "hook", "hook_type",
+    "hook_modality", "format", "creator_vs_branded", "edit_style",
+    "cta", "structure", "platform", "source"})
+
+
+def _display_slug(value):
+    """Human label for slug codes (hook-a -> Hook A, demo_open -> Demo Open)."""
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if not text:
+        return value
+    if text.lower() in _DISPLAY_PLATFORMS:
+        return _DISPLAY_PLATFORMS[text.lower()]
+    words = []
+    for word in re.sub(r"[-_]+", " ", text).split():
+        core = word.strip(",;:/()")
+        if not core:
+            words.append(word)
+        elif core.lower() in _HEADER_ACRONYMS:
+            words.append(word.replace(core, core.upper()))
+        elif re.fullmatch(r"[A-Za-z][A-Za-z0-9]*", core):
+            words.append(word.replace(core, core.title()))
+        else:
+            words.append(word)
+    return " ".join(words)
+
 
 def _display_label(field):
     """Workbook column label: Title Case with metric acronyms in caps."""
@@ -1685,6 +1725,13 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
                or [[None] * len(raw_header)]}
         sheets = [sheet, why, creatives, all_creatives,
                   raw, bsheet, learn, reco]
+        for entry in (creatives, all_creatives):
+            idx = [i for i, h in enumerate(entry["header"])
+                   if h in _SLUG_FIELDS]
+            for row in entry["rows"]:
+                for i in idx:
+                    if i < len(row):
+                        row[i] = _display_slug(row[i])
         for entry in sheets:
             entry["header"] = [_display_label(h) for h in entry["header"]]
         blob = ooxml.build_xlsx(sheets)

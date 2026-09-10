@@ -102,6 +102,50 @@ def query_multidict(request: Request) -> dict[str, list[str]]:
     return out
 
 
+# In-memory per-IP sliding-window rate limits (process-local).
+#
+# This is a local-first single-process app: buckets live on app.state
+# so every test app (and every server start) gets a fresh table.
+# Limits are deliberately generous — they exist to blunt automated
+# credential-stuffing and callback-replay floods, not to punish
+# legitimate employees. A distributed deployment would replace this
+# with a shared store, but must keep the same 429 contract.
+AUTH_RATE_LIMIT = (30, 60.0)    # 30 calls / 60s per IP, auth-sensitive
+ADMIN_RATE_LIMIT = (120, 60.0)  # 120 calls / 60s per IP, admin actions
+
+
+def _buckets(request: Request) -> dict:
+    buckets = getattr(request.app.state, "ci_ratelimits", None)
+    if buckets is None:
+        buckets = {}
+        request.app.state.ci_ratelimits = buckets
+    return buckets
+
+
+def rate_limiter(calls: int, per_seconds: float, group: str):
+    """Dependency factory: 429 when an IP exceeds calls/per_seconds."""
+    import time
+
+    async def guard(request: Request):
+        ip = request.client.host if request.client else "unknown"
+        now = time.monotonic()
+        key = (group, ip)
+        buckets = _buckets(request)
+        window = [t for t in buckets.get(key, []) if now - t < per_seconds]
+        if len(window) >= calls:
+            raise HTTPException(
+                status_code=429,
+                detail={"error": "Too many requests. Try again shortly.",
+                        "gate": "rate_limited"})
+        buckets[key] = window + [now]
+
+    return guard
+
+
+auth_rate_limit = rate_limiter(*AUTH_RATE_LIMIT, "auth")
+admin_rate_limit = rate_limiter(*ADMIN_RATE_LIMIT, "admin")
+
+
 async def json_payload(request: Request) -> dict:
     """Tolerant JSON body (empty/invalid bodies become {}, like before)."""
     try:

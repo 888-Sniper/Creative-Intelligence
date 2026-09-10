@@ -281,6 +281,118 @@ def test_avatar_upload_and_serve(tmp_path, monkeypatch):
     assert r.status_code == 409
 
 
+def test_revoke_all_sessions_self_and_admin(tmp_path, monkeypatch):
+    http, db = make_client(tmp_path, admin_email="boss@foap.test")
+    boss_user = dict(IDENT, id="w-boss", email="boss@foap.test")
+    oauth_login(http, monkeypatch, boss_user)
+    # Second session for the same employee (another device).
+    http2 = TestClient(http.app, raise_server_exceptions=False)
+    stub_exchange(monkeypatch, boss_user)
+    r = http2.post("/api/auth/oauth/start", json={"provider": "google"})
+    http2.post("/api/auth/oauth/finish",
+               json={"code": "auth_code", "state": r.json()["state"]})
+    assert http2.get("/api/auth/me").json()["gate"] == "app"
+
+    r = http.post("/api/auth/sessions/revoke-all", json={})
+    assert r.status_code == 200, r.text
+    assert r.json()["revoked"] == 2
+    assert http.get("/api/auth/me").json()["gate"] == "login"
+    assert http2.get("/api/auth/me").json()["gate"] == "login"
+    audit = http.get("/api/admin/employees").status_code  # admin dead too
+    assert audit == 401
+
+    # Fresh login, then admin revokes a target employee's sessions.
+    oauth_login(http, monkeypatch, boss_user)
+    newcomer = dict(IDENT, id="w-new", email="new@foap.test")
+    stub_exchange(monkeypatch, newcomer)
+    http3 = TestClient(http.app, raise_server_exceptions=False)
+    r = http3.post("/api/auth/oauth/start", json={"provider": "google"})
+    http3.post("/api/auth/oauth/finish",
+               json={"code": "auth_code", "state": r.json()["state"]})
+    staff = http.get("/api/admin/employees").json()["employees"]
+    target = next(e for e in staff if e["email"] == "new@foap.test")
+    r = http.post("/api/admin/employees/%s/approve" % target["id"], json={})
+    assert r.status_code == 200
+    r = http.post("/api/admin/employees/%s/sessions/revoke" % target["id"],
+                  json={})
+    assert r.status_code == 200 and r.json()["revoked"] >= 1
+    assert http3.get("/api/auth/me").json()["gate"] == "login"
+    events = http.get("/api/admin/audit").json()["events"]
+    assert sum(1 for e in events
+               if e["action"] == "SESSIONS_REVOKED") >= 2
+    r = http.post("/api/admin/employees/nope/sessions/revoke", json={})
+    assert r.status_code == 404
+
+
+def test_auth_rate_limit(client):
+    statuses = set()
+    for _i in range(35):
+        r = client.post("/api/auth/oauth/start", json={"provider": "google"})
+        statuses.add(r.status_code)
+    assert 200 in statuses
+    r = client.post("/api/auth/oauth/start", json={"provider": "google"})
+    assert r.status_code == 429
+    assert r.json()["gate"] == "rate_limited"
+
+
+def test_security_headers_health_readiness(client, tmp_path):
+    r = client.get("/health")
+    assert r.status_code == 200 and r.json() == {"ok": True}
+    assert r.headers["x-content-type-options"] == "nosniff"
+    assert r.headers["referrer-policy"] == "same-origin"
+    assert r.headers["x-frame-options"] == "DENY"
+    assert "camera=()" in r.headers["permissions-policy"]
+    assert "strict-transport-security" not in r.headers
+    assert "access-control-allow-origin" not in r.headers
+    r = client.get("/readiness")
+    assert r.status_code == 200 and r.json() == {"ready": True}
+
+    from tests.conftest import make_client as _make
+    https_client = _make(tmp_path / "h.db", workos=False)
+    r = https_client.get("/health")
+    assert "strict-transport-security" not in r.headers
+
+
+def test_hsts_when_cookie_secure(tmp_path):
+    from tests.conftest import make_client as _make
+    from ci_backend.config import Settings
+    from ci_backend.app import create_app
+    from fastapi.testclient import TestClient
+    settings = Settings(workos_client_id="", key_workos="",
+                        cookie_secure=True)
+    app = create_app(str(tmp_path / "s.db"), settings)
+    client = TestClient(app, raise_server_exceptions=False)
+    r = client.get("/health")
+    assert "max-age=31536000" in r.headers["strict-transport-security"]
+
+
+def test_cookie_flags_default_and_secure(tmp_path, monkeypatch):
+    http, _db = make_client(tmp_path, admin_email="boss@foap.test")
+    r = oauth_login(http, monkeypatch,
+                    dict(IDENT, id="w-boss", email="boss@foap.test"))
+    set_cookie = r.headers.get("set-cookie", "")
+    assert "httponly" in set_cookie.lower()
+    assert "samesite=lax" in set_cookie.lower()
+    assert "secure" not in set_cookie.lower()
+
+    http_s, _db2 = make_client(tmp_path, admin_email="boss@foap.test",
+                               cookie_secure=True)
+    r = oauth_login(http_s, monkeypatch,
+                    dict(IDENT, id="w-boss", email="boss@foap.test"))
+    set_cookie = r.headers.get("set-cookie", "")
+    assert "httponly" in set_cookie.lower()
+    assert "secure" in set_cookie.lower()
+
+    assert "; Secure" in emp_store.session_cookie("t", secure=True)
+    assert "; Secure" not in emp_store.session_cookie("t")
+    assert "; Secure" in emp_store.clear_cookie(secure=True)
+
+
+def test_revoke_all_requires_login(client):
+    r = client.post("/api/auth/sessions/revoke-all", json={})
+    assert r.status_code == 401
+
+
 def test_switch_rechecks_authorization(tmp_path):
     http, db = make_client(tmp_path, admin_email="boss@foap.test")
     engine = make_engine(db)

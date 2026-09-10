@@ -35,6 +35,14 @@ class Settings(BaseSettings):
 
     admin_email: str = ""
 
+    cookie_secure: bool = False
+    """Set CREATIVE_INTEL_COOKIE_SECURE=true behind HTTPS in production.
+
+    Local development over plain HTTP keeps this false so the browser
+    still sends the session cookie; production HTTPS must set it so
+    the session cookie is never transmitted over cleartext.
+    """
+
     @property
     def database_path(self) -> Path:
         return self.data_dir / self.db_filename

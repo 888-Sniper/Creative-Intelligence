@@ -17,6 +17,7 @@ from ci_backend import oauth as oauth_mod
 from ci_backend import workos as workos_mod
 from ci_backend.config import Settings
 from ci_backend.deps import (
+    auth_rate_limit,
     bearer_token,
     get_db,
     get_settings,
@@ -26,24 +27,28 @@ from ci_backend.deps import (
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
-def _issue(body: dict, token: str = "", clear: bool = False) -> JSONResponse:
+def _issue(body: dict, token: str = "", clear: bool = False,
+           secure: bool = False) -> JSONResponse:
     response = JSONResponse(body)
     if clear:
         response.set_cookie(emp.COOKIE_NAME, "", max_age=0,
-                            path="/", httponly=True, samesite="lax")
+                            path="/", httponly=True, samesite="lax",
+                            secure=secure)
     elif token:
         response.set_cookie(emp.COOKIE_NAME, token,
                             max_age=emp.SESSION_TTL_S,
-                            path="/", httponly=True, samesite="lax")
+                            path="/", httponly=True, samesite="lax",
+                            secure=secure)
     return response
 
 
-def _apply_cookie(response, header: str) -> None:
+def _apply_cookie(response, header: str, secure: bool = False) -> None:
     value = header.split(";", 1)[0]
     name, _, val = value.partition("=")
     response.set_cookie(name.strip(), val.strip(),
                         max_age=emp.SESSION_TTL_S,
-                        path="/", httponly=True, samesite="lax")
+                        path="/", httponly=True, samesite="lax",
+                        secure=secure)
 
 
 @router.get("/me")
@@ -135,13 +140,15 @@ def callback(request: Request, db=Depends(get_db),
         return RedirectResponse("/?auth_error=" + quote(str(exc)[:200]),
                                 status_code=302)
     response = RedirectResponse("/", status_code=302)
-    _apply_cookie(response, emp.session_cookie(token))
+    _apply_cookie(response, emp.session_cookie(token),
+                  settings.cookie_secure)
     return response
 
 
 @router.post("/oauth/start")
 async def oauth_start(request: Request, db=Depends(get_db),
-                      settings: Settings = Depends(get_settings)):
+                      settings: Settings = Depends(get_settings),
+                     _rl=Depends(auth_rate_limit)):
     body = await json_payload(request)
     try:
         out = oauth_mod.start_oauth(
@@ -154,7 +161,8 @@ async def oauth_start(request: Request, db=Depends(get_db),
 
 @router.post("/oauth/finish")
 async def oauth_finish(request: Request, db=Depends(get_db),
-                       settings: Settings = Depends(get_settings)):
+                       settings: Settings = Depends(get_settings),
+                     _rl=Depends(auth_rate_limit)):
     body = await json_payload(request)
     try:
         identity = oauth_mod.finish_oauth(
@@ -167,12 +175,13 @@ async def oauth_finish(request: Request, db=Depends(get_db),
     gate = "app" if employee.status == "active" else employee.status
     return _issue({"ok": True, "gate": gate,
                    "employee": emp.public_employee(employee).model_dump()},
-                  token)
+                  token, secure=settings.cookie_secure)
 
 
 @router.post("/email/signin")
 async def email_signin(request: Request, db=Depends(get_db),
-                       settings: Settings = Depends(get_settings)):
+                       settings: Settings = Depends(get_settings),
+                     _rl=Depends(auth_rate_limit)):
     body = await json_payload(request)
     try:
         raw = workos_mod.authenticate_password(
@@ -185,11 +194,12 @@ async def email_signin(request: Request, db=Depends(get_db),
         raise HTTPException(status_code=409, detail={"error": str(exc)})
     return _issue({"ok": True, "gate": gate,
                    "employee": emp.public_employee(employee).model_dump()},
-                  token)
+                  token, secure=settings.cookie_secure)
 
 
 @router.post("/email/code")
-async def email_code(request: Request, settings: Settings = Depends(get_settings)):
+async def email_code(request: Request, settings: Settings = Depends(get_settings),
+                     _rl=Depends(auth_rate_limit)):
     body = await json_payload(request)
     try:
         workos_mod.send_magic_code(body.get("email", ""), settings=settings)
@@ -200,7 +210,8 @@ async def email_code(request: Request, settings: Settings = Depends(get_settings
 
 @router.post("/email/code/signin")
 async def email_code_signin(request: Request, db=Depends(get_db),
-                            settings: Settings = Depends(get_settings)):
+                            settings: Settings = Depends(get_settings),
+                     _rl=Depends(auth_rate_limit)):
     body = await json_payload(request)
     try:
         raw = workos_mod.authenticate_magic_code(
@@ -212,11 +223,12 @@ async def email_code_signin(request: Request, db=Depends(get_db),
         raise HTTPException(status_code=409, detail={"error": str(exc)})
     return _issue({"ok": True, "gate": gate,
                    "employee": emp.public_employee(employee).model_dump()},
-                  token)
+                  token, secure=settings.cookie_secure)
 
 
 @router.post("/email/reset")
-async def email_reset(request: Request, settings: Settings = Depends(get_settings)):
+async def email_reset(request: Request, settings: Settings = Depends(get_settings),
+                     _rl=Depends(auth_rate_limit)):
     body = await json_payload(request)
     try:
         workos_mod.send_password_reset(body.get("email", ""),
@@ -227,7 +239,8 @@ async def email_reset(request: Request, settings: Settings = Depends(get_setting
 
 
 @router.post("/password/reset")
-async def password_reset(request: Request, settings: Settings = Depends(get_settings)):
+async def password_reset(request: Request, settings: Settings = Depends(get_settings),
+                     _rl=Depends(auth_rate_limit)):
     body = await json_payload(request)
     try:
         workos_mod.reset_password(body.get("token", ""),
@@ -239,13 +252,29 @@ async def password_reset(request: Request, settings: Settings = Depends(get_sett
 
 
 @router.post("/logout")
-def logout(request: Request, db=Depends(get_db)):
+def logout(request: Request, db=Depends(get_db),
+           settings: Settings = Depends(get_settings)):
     emp.destroy_session(db, bearer_token(request))
-    return _issue({"ok": True}, clear=True)
+    return _issue({"ok": True}, clear=True,
+                  secure=settings.cookie_secure)
+
+
+@router.post("/sessions/revoke-all")
+def revoke_own_sessions(request: Request, db=Depends(get_db),
+                        settings: Settings = Depends(get_settings)):
+    """Log out everywhere: destroy all of the caller's sessions."""
+    caller = emp.valid_session(db, bearer_token(request))
+    if caller is None:
+        raise HTTPException(status_code=401, detail={
+            "error": "Sign in to continue.", "gate": "login"})
+    count = emp.revoke_all_sessions(db, caller.id, caller.id)
+    return _issue({"ok": True, "revoked": count}, clear=True,
+                  secure=settings.cookie_secure)
 
 
 @router.post("/switch")
-async def switch(request: Request, db=Depends(get_db)):
+async def switch(request: Request, db=Depends(get_db),
+                 settings: Settings = Depends(get_settings)):
     body = await json_payload(request)
     if emp.valid_session(db, bearer_token(request)) is None:
         raise HTTPException(status_code=401, detail={
@@ -257,4 +286,4 @@ async def switch(request: Request, db=Depends(get_db)):
     fresh = emp.create_session(db, target.id, target.workos_user_id or "")
     return _issue({"ok": True,
                    "employee": emp.public_employee(target).model_dump()},
-                  fresh)
+                  fresh, secure=settings.cookie_secure)

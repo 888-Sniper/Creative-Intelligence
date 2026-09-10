@@ -323,6 +323,26 @@ def destroy_employee_sessions(db: Session, employee_id: str) -> None:
     db.commit()
 
 
+def revoke_all_sessions(db: Session, actor_id: str,
+                        employee_id: str) -> int:
+    """Destroy every session of an employee; audit SESSIONS_REVOKED.
+
+    Returns the number of sessions destroyed. Used both for
+    self-service "log out everywhere" (actor == employee) and for
+    admin invalidation of another employee's sessions.
+    """
+    target = get_employee(db, employee_id)
+    if target is None:
+        raise StoreError("Employee not found.")
+    doomed = db.scalars(select(AuthSession).where(
+        AuthSession.employee_id == employee_id)).all()
+    count = len(doomed)
+    destroy_employee_sessions(db, employee_id)
+    _audit(db, employee_id, actor_id, "SESSIONS_REVOKED",
+           "%d active session(s)" % count, "0 active sessions")
+    return count
+
+
 def _session_row(db: Session, token: str) -> AuthSession | None:
     if not token:
         return None
@@ -577,13 +597,16 @@ def load_avatar(employee_id: str, store_dir: str):
     return None
 
 
-def session_cookie(token: str, max_age: int = SESSION_TTL_S) -> str:
-    return ("%s=%s; Path=/; Max-Age=%d; HttpOnly; SameSite=Lax"
-            % (COOKIE_NAME, token, max_age))
+def session_cookie(token: str, max_age: int = SESSION_TTL_S,
+                   secure: bool = False) -> str:
+    return ("%s=%s; Path=/; Max-Age=%d; HttpOnly; SameSite=Lax%s"
+            % (COOKIE_NAME, token, max_age,
+               "; Secure" if secure else ""))
 
 
-def clear_cookie() -> str:
-    return "%s=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax" % COOKIE_NAME
+def clear_cookie(secure: bool = False) -> str:
+    return ("%s=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax%s"
+            % (COOKIE_NAME, "; Secure" if secure else ""))
 
 
 def token_from_cookie_header(raw: str) -> str:

@@ -7,7 +7,12 @@ from urllib.parse import unquote
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from ci_backend import employees as emp
-from ci_backend.deps import get_current_admin, get_db, json_payload
+from ci_backend.deps import (
+    admin_rate_limit,
+    get_current_admin,
+    get_db,
+    json_payload,
+)
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -34,7 +39,8 @@ def list_employees(request: Request, db=Depends(get_db),
 
 @router.post("/employees")
 async def create_employee(request: Request, db=Depends(get_db),
-                          admin=Depends(get_current_admin)):
+                          admin=Depends(get_current_admin),
+                          _rl=Depends(admin_rate_limit)):
     body = await json_payload(request)
     try:
         employee = emp.admin_create(
@@ -44,6 +50,19 @@ async def create_employee(request: Request, db=Depends(get_db),
     except emp.StoreError as exc:
         raise HTTPException(status_code=409, detail={"error": str(exc)})
     return _employee_payload(employee)
+
+
+@router.post("/employees/{employee_id}/sessions/revoke")
+def revoke_employee_sessions(employee_id: str, request: Request,
+                             db=Depends(get_db),
+                             admin=Depends(get_current_admin),
+                             _rl=Depends(admin_rate_limit)):
+    """Admin: invalidate every session of one employee (audited)."""
+    try:
+        count = emp.revoke_all_sessions(db, admin.id, unquote(employee_id))
+    except emp.StoreError as exc:
+        raise HTTPException(status_code=404, detail={"error": str(exc)})
+    return {"ok": True, "revoked": count}
 
 
 @router.get("/audit")
@@ -66,7 +85,8 @@ def get_employee(employee_id: str, db=Depends(get_db),
 @router.post("/employees/{employee_id}/{verb}")
 async def employee_action(employee_id: str, verb: str, request: Request,
                           db=Depends(get_db),
-                          admin=Depends(get_current_admin)):
+                          admin=Depends(get_current_admin),
+                          _rl=Depends(admin_rate_limit)):
     body = await json_payload(request)
     target = unquote(employee_id)
     try:

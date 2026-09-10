@@ -38,9 +38,12 @@ test.describe("admin journey", () => {
     // Same admin session cookie, but a fresh foreign container: the app
     // adopts nothing (session already bound to e2e-installation) and the
     // gate refuses it, so no dashboard and no account list appear.
+    // Generous timeouts: CI runners boot the seeded backend slowly and the
+    // gate settles through a loading state first (same strict assertions).
     await loginAs(context, page, seeds.admin, "/", false);
-    await expect(page.getByRole("heading", { name: "Welcome to Creative Intelligence" })).toBeVisible();
-    await expect(page.getByRole("button", { name: /Switch to/ })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Welcome to Creative Intelligence" })).toBeVisible({ timeout: 20000 });
+    await expect(page.getByRole("link", { name: "Overview" })).toHaveCount(0, { timeout: 15000 });
+    await expect(page.getByRole("button", { name: /Switch to/ })).toHaveCount(0, { timeout: 15000 });
   });
 
   test("multi-account switch re-runs authorization", async ({ page, context }) => {

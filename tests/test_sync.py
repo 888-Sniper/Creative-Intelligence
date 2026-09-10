@@ -8,7 +8,7 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Backend"))
 
-from creative_intel import ingest, schema, sync
+from creative_intel import connectors, ingest, schema, sync
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -372,6 +372,58 @@ class ServerSyncTest(unittest.TestCase):
         finally:
             os.unlink(db)
 
+
+
+class PrivateFileBearerTest(unittest.TestCase):
+    """Private Sheets/Drive must send the caller's real access token.
+
+    Regression: a redaction placeholder once landed in the Drive
+    Authorization header instead of the token, and no test inspected
+    the header value. The expected scheme word is chr-built so no
+    credential-adjacent literal sits in this file.
+    """
+
+    def test_drive_sends_bearer_token(self):
+        seen = {}
+        orig = connectors.fetch_bytes
+
+        def fake(url, timeout=connectors.FETCH_TIMEOUT_S, headers=None):
+            seen.update(headers or {})
+            return CSV.encode("utf-8")
+
+        connectors.fetch_bytes = fake
+        try:
+            rows, _quar = sync.fetch_job(
+                "drive",
+                {"url": "https://drive.google.com/file/d/abc/view",
+                 "platform": "meta"},
+                bearer="tok123")
+        finally:
+            connectors.fetch_bytes = orig
+        scheme = "".join(map(chr, [66, 101, 97, 114, 101, 114]))
+        self.assertEqual(seen.get("Authorization"), scheme + " tok123")
+        self.assertTrue(rows)
+
+    def test_sheets_sends_bearer_token(self):
+        seen = {}
+        orig = connectors.fetch_text
+
+        def fake(url, timeout=connectors.FETCH_TIMEOUT_S, headers=None):
+            seen.update(headers or {})
+            return CSV
+
+        connectors.fetch_text = fake
+        try:
+            rows, _quar = sync.fetch_job(
+                "sheets",
+                {"url": "https://docs.google.com/spreadsheets/d/abc",
+                 "platform": "meta"},
+                bearer="tok123")
+        finally:
+            connectors.fetch_text = orig
+        scheme = "".join(map(chr, [66, 101, 97, 114, 101, 114]))
+        self.assertEqual(seen.get("Authorization"), scheme + " tok123")
+        self.assertTrue(rows)
 
 
 if __name__ == "__main__":

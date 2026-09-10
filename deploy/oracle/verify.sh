@@ -4,7 +4,7 @@
 #   Local (VM loopback):
 #     sudo bash /opt/creative-intelligence/deploy/oracle/verify.sh
 #   Public HTTPS:
-#     sudo BASE_URL=https://foap-creative.duckdns.org \
+#     sudo BASE_URL=https://creative-intelligence.duckdns.org \
 #       bash /opt/creative-intelligence/deploy/oracle/verify.sh
 #
 # Optional: EXPECT_LIVE=1 fails unless the app reports provider_mode=live.

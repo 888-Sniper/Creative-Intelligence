@@ -3,14 +3,14 @@
 Target: a public **$0/month** demo at
 
 ```text
-https://foap-creative.duckdns.org
+https://creative-intelligence.duckdns.org
 ```
 
 stack:
 
 ```text
 Oracle Cloud Always Free VM
-  -> DuckDNS free hostname (foap-creative.duckdns.org)
+  -> DuckDNS free hostname (creative-intelligence.duckdns.org)
   -> Let's Encrypt HTTPS (Certbot)
   -> Nginx (public 80/443, HTTP -> HTTPS redirect)
   -> FastAPI/Uvicorn on loopback 127.0.0.1:4321
@@ -32,10 +32,11 @@ branch is retired; do not use it.
    - TCP 80 from the internet (Let's Encrypt validation)
    - TCP 443 from the internet
    - Never expose 4321.
-3. Register a free DuckDNS hostname (default `foap-creative`;
-   alternatives if taken: `foap-ci`, `creative-intelligence-foap`,
-   `foap-demo-ci`) and note its token. Nobody can do this for you:
-   the hostname is claimed in your DuckDNS account.
+3. Register a free DuckDNS hostname (default `creative-intelligence`;
+   alternatives if taken: `foap-creative`, `foap-ci`,
+   `creative-intelligence-foap`, `foap-demo-ci`) and note its token.
+   Nobody can do this for you: the hostname is claimed in your
+   DuckDNS account.
 4. Have ready: admin email, WorkOS client ID + API key, provider keys
    (at least one STT, one vision, one LLM adapter), and optionally
    Google OAuth credentials.
@@ -73,7 +74,7 @@ sudo nano /etc/creative-intelligence/duckdns.env
 ```
 
 ```text
-DUCKDNS_SUBDOMAIN=foap-creative
+DUCKDNS_SUBDOMAIN=creative-intelligence
 DUCKDNS_TOKEN=<paste-your-duckdns-token>
 ```
 
@@ -84,7 +85,7 @@ DuckDNS stays the preferred hostname.
 ## 3. One-command setup
 
 ```bash
-sudo DOMAIN=foap-creative.duckdns.org EMAIL=admin@example.com \
+sudo DOMAIN=creative-intelligence.duckdns.org EMAIL=admin@example.com \
   bash deploy/oracle/setup-demo.sh
 ```
 
@@ -97,8 +98,8 @@ It is idempotent: re-running is safe.
 Equivalent manual path:
 
 ```bash
-sudo DOMAIN=foap-creative.duckdns.org bash deploy/oracle/install.sh
-sudo DOMAIN=foap-creative.duckdns.org EMAIL=admin@example.com \
+sudo DOMAIN=creative-intelligence.duckdns.org bash deploy/oracle/install.sh
+sudo DOMAIN=creative-intelligence.duckdns.org EMAIL=admin@example.com \
   bash /opt/creative-intelligence/deploy/oracle/enable-https.sh
 ```
 
@@ -112,14 +113,14 @@ nightly backup timer, and — once the DuckDNS token is set — the
 The app cannot change provider dashboards. Register these exact URLs:
 
 ```text
-WorkOS dashboard:  https://foap-creative.duckdns.org/api/auth/callback
-Google Cloud:      https://foap-creative.duckdns.org/api/auth/google/callback
+WorkOS dashboard:  https://creative-intelligence.duckdns.org/api/auth/callback
+Google Cloud:      https://creative-intelligence.duckdns.org/api/auth/google/callback
 ```
 
 ## 5. Verify
 
 ```bash
-sudo BASE_URL=https://foap-creative.duckdns.org \
+sudo BASE_URL=https://creative-intelligence.duckdns.org \
   EXPECT_LIVE=1 \
   bash /opt/creative-intelligence/deploy/oracle/verify.sh
 ```
@@ -131,7 +132,7 @@ headers, cookie flags, media gating, and live provider mode.
 Provider readiness (authenticated):
 
 ```bash
-curl -sS https://foap-creative.duckdns.org/api/providers/status \
+curl -sS https://creative-intelligence.duckdns.org/api/providers/status \
   -H "Cookie: ci_session=<session>"
 ```
 

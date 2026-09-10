@@ -2,7 +2,7 @@
 # One-command free demo setup for Oracle Always Free + DuckDNS.
 # Idempotent: safe to re-run; each step detects existing state.
 #
-#   sudo DOMAIN=foap-creative.duckdns.org EMAIL=admin@example.com \
+#   sudo DOMAIN=creative-intelligence.duckdns.org EMAIL=admin@example.com \
 #     bash deploy/oracle/setup-demo.sh
 #
 # Optional:
@@ -20,7 +20,7 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_DIR="${SOURCE_DIR:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
 APP_DIR="/opt/creative-intelligence"
-DOMAIN="${DOMAIN:-foap-creative.duckdns.org}"
+DOMAIN="${DOMAIN:-creative-intelligence.duckdns.org}"
 EMAIL="${EMAIL:-}"
 ENV_DIR="/etc/creative-intelligence"
 

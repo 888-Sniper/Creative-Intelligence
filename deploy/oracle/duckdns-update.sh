@@ -2,7 +2,7 @@
 # Update a DuckDNS hostname to this VM's public IPv4 address.
 #
 # Secrets come only from the environment or a root-only env file:
-#   DUCKDNS_SUBDOMAIN  e.g. foap-creative   (required)
+#   DUCKDNS_SUBDOMAIN  e.g. creative-intelligence   (required)
 #   DUCKDNS_TOKEN      DuckDNS account token (required, never logged)
 #   DUCKDNS_ENV_FILE   default /etc/creative-intelligence/duckdns.env
 #   PUBLIC_IP          override auto-detection (optional, for testing)

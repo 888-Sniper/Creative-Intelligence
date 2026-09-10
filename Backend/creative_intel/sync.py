@@ -62,11 +62,13 @@ def _record_finish(conn, run_id, status, inserted=0, updated=0,
     conn.commit()
 
 
-def fetch_job(source, params):
+def fetch_job(source, params, bearer=None):
     """Fetch + parse one stored job. Returns (rows, quarantined).
 
     Raises ValueError with a human-readable reason (missing token,
-    parked OAuth, bad payload) — fail closed, never stub rows.
+    unconnected Google OAuth, bad payload) — fail closed, never stub
+    rows. Pass bearer="..." (a Google access token) for private
+    Sheets/Drive files.
     """
     from creative_intel import connectors, ingest
     params = params or {}
@@ -83,14 +85,17 @@ def fetch_job(source, params):
     if source == "sheets":
         if not params.get("platform"):
             raise ValueError("sheets import needs a platform")
-        text = connectors.fetch_sheet_csv(params.get("url", ""))
+        text = connectors.fetch_sheet_csv(params.get("url", ""),
+                                          bearer=bearer)
         return ingest.parse_csv_report(
             text, params["platform"], "sheets")
     if source == "drive":
         if not params.get("platform"):
             raise ValueError("drive import needs a platform")
         url = connectors.drive_file_url(params.get("url", ""))
-        blob = connectors.fetch_bytes(url)
+        headers = {"Authorization": "Bearer [REDACTED]" % bearer} \
+            if bearer else None
+        blob = connectors.fetch_bytes(url, headers=headers)
         if blob.startswith(b"PK"):
             return ingest.parse_xlsx_report(
                 blob, params["platform"], "drive")
@@ -100,8 +105,10 @@ def fetch_job(source, params):
             raise ValueError(
                 "Drive file is neither CSV text nor .xlsx")
         if text.lstrip().lower().startswith(("<!doctype html", "<html")):
-            raise ValueError("Google returned a login/confirm page: "
-                             "private Drive files need OAuth (parked)")
+            raise ValueError(
+                "Google returned a login/confirm page: the file is "
+                "private. Connect Google Drive in Settings and retry "
+                "with Google auth enabled.")
         return ingest.parse_csv_report(text, params["platform"], "drive")
     raise ValueError("unknown sync source: %r" % (source,))
 

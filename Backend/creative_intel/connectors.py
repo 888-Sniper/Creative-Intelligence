@@ -42,9 +42,11 @@ def _https_only(url):
     return url
 
 
-def fetch_bytes(url, timeout=FETCH_TIMEOUT_S):
+def fetch_bytes(url, timeout=FETCH_TIMEOUT_S, headers=None):
     _https_only(url)
-    req = urllib.request.Request(url, headers={"User-Agent": "FoapCI/1.0"})
+    merged = {"User-Agent": "FoapCI/1.0"}
+    merged.update(headers or {})
+    req = urllib.request.Request(url, headers=merged)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             chunks, total = [], 0
@@ -65,8 +67,8 @@ def fetch_bytes(url, timeout=FETCH_TIMEOUT_S):
                                    % (_host_of(url), e))
 
 
-def fetch_text(url, timeout=FETCH_TIMEOUT_S):
-    raw = fetch_bytes(url, timeout)
+def fetch_text(url, timeout=FETCH_TIMEOUT_S, headers=None):
+    raw = fetch_bytes(url, timeout, headers)
     for encoding in ("utf-8-sig", "utf-8", "latin-1"):
         try:
             return raw.decode(encoding)
@@ -118,16 +120,26 @@ def drive_file_url(url):
     return url
 
 
-def fetch_sheet_csv(url):
-    """Fetch a Sheets/CSV URL; refuses login pages and binaries."""
-    text = fetch_text(sheets_csv_url(url))
+def fetch_sheet_csv(url, bearer=None):
+    """Fetch a Sheets/CSV URL; refuses login pages and binaries.
+
+    Pass bearer="..." for private sheets (Google OAuth, item 31).
+    Without it a private file raises ConnectorUnavailable pointing at
+    Settings > Google Drive instead of a parked-OAuth dead end.
+    """
+    text = fetch_text(sheets_csv_url(url),
+                      headers={"Authorization": "Bearer %s" % bearer}
+                      if bearer else None)
     stripped = text.lstrip()
     if stripped[:15].lower().startswith("<!doctype html") or \
             stripped[:5].lower().startswith("<html"):
+        hint = ("Connect Google Drive in Settings and retry with "
+                "Google auth enabled." if bearer is None else
+                "Revoke and reconnect Google Drive in Settings.")
         raise ConnectorUnavailable(
             "Google returned a login/confirm page: the file is private "
-            "(OAuth is parked) or needs virus-scan confirmation. Publish "
-            "the sheet (File > Share > Publish to web, CSV) and retry.")
+            "or needs virus-scan confirmation. %s Publish the sheet "
+            "(File > Share > Publish to web, CSV) also works." % hint)
     if "," not in text and "\n" not in text.strip():
         raise ConnectorUnavailable("remote file does not look like CSV")
     return text

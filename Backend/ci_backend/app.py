@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse  # noqa: E402
 
 from ci_backend.config import Settings  # noqa: E402
 from ci_backend.deps import bind_database  # noqa: E402
-from ci_backend.routers import admin, auth, product  # noqa: E402
+from ci_backend.routers import admin, auth, google, product  # noqa: E402
 
 
 async def _http_error_body(_request, exc: HTTPException) -> JSONResponse:
@@ -97,6 +97,7 @@ def create_app(db_path: str = "", settings: Settings | None = None,
 
     app.include_router(auth.router)
     app.include_router(admin.router)
+    app.include_router(google.router)
     app.include_router(product.router)
 
     return app

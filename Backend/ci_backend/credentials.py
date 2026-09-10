@@ -9,6 +9,16 @@ import os
 
 SERVICE = "CreativeIntelligence"
 WORKOS_ACCOUNT = "creative-intel-workos"
+GOOGLE_ACCOUNT = "creative-intel-google"
+
+
+def google_client_secret(settings=None) -> str:
+    """Resolve the Google OAuth client secret without ever logging it."""
+    if settings is not None and getattr(settings, "key_google", ""):
+        return settings.key_google
+    if env_value("CREATIVE_INTEL_GOOGLE_CLIENT_SECRET"):
+        return env_value("CREATIVE_INTEL_GOOGLE_CLIENT_SECRET")
+    return keyring_get(GOOGLE_ACCOUNT)
 
 
 def env_value(name: str, default: str = "") -> str:

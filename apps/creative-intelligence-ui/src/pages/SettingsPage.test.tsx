@@ -25,11 +25,14 @@ describe("SettingsPage (item 21)", () => {
     cleanup();
   });
 
-  function renderSettings() {
+  function renderSettings(googleConnected = false) {
     window.fetch = vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
       if (url === "/api/auth/accounts") return Response.json({ accounts: [] });
       if (url === "/api/auth/container") return Response.json({ container_id: "c1" });
+      if (url === "/api/auth/google/status") {
+        return Response.json({ connected: googleConnected });
+      }
       return Response.json(authed);
     }) as unknown as typeof fetch;
     return render(
@@ -91,5 +94,49 @@ describe("SettingsPage (item 21)", () => {
     });
     expect(asked.length).toBe(1);
     expect(asked[0]).toMatch(/every device/i);
+  });
+
+  it("shows Google Drive as not connected by default (item 31)", async () => {
+    renderSettings();
+    // The connect button renders (disabled) before status loads, so wait
+    // for the loaded status text rather than the button.
+    await waitFor(() => {
+      expect(screen.getByText("Not connected")).toBeDefined();
+    });
+    expect(screen.getByRole("button", { name: "Connect Google Drive" })).toBeDefined();
+  });
+
+  it("shows disconnect when Google Drive is connected (item 31)", async () => {
+    renderSettings(true);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Disconnect Google Drive" })).toBeDefined();
+    });
+    expect(screen.getByText("Connected")).toBeDefined();
+  });
+
+  it("disconnects Google Drive and updates status (item 31)", async () => {
+    const posted: string[] = [];
+    renderSettings(true);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Disconnect Google Drive" })).toBeDefined();
+    });
+    window.fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === "/api/auth/google/disconnect") {
+        posted.push(url);
+        return Response.json({ ok: true });
+      }
+      if (url === "/api/auth/accounts") return Response.json({ accounts: [] });
+      if (url === "/api/auth/container") return Response.json({ container_id: "c1" });
+      if (url === "/api/auth/google/status") return Response.json({ connected: true });
+      return Response.json(authed);
+    }) as unknown as typeof fetch;
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect Google Drive" }));
+    await waitFor(() => {
+      expect(posted).toEqual(["/api/auth/google/disconnect"]);
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Connect Google Drive" })).toBeDefined();
+    });
   });
 });

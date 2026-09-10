@@ -32,6 +32,17 @@ test.describe("employee journey", () => {
     await expect(page.getByText("Campaigns")).toHaveCount(0);
   });
 
+  test("settings shows Google Drive card unconnected (item 31)", async ({ page, context }) => {
+    const seeds = readSeeds();
+    await loginAs(context, page, seeds.admin, "/settings");
+    await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Google Drive" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Connect Google Drive" })).toBeVisible();
+    // E2E has no Google credentials: the server says so instead of bouncing.
+    await page.getByRole("button", { name: "Connect Google Drive" }).click();
+    await expect(page.getByText("Google Drive is not configured.")).toBeVisible();
+  });
+
   test("settings shows account, provider, appearance and logout-all", async ({ page, context }) => {
     const seeds = readSeeds();
     // NOTE: the admin session (the employee session is destroyed by the

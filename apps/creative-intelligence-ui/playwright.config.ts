@@ -1,5 +1,5 @@
 import { defineConfig } from "@playwright/test";
-import { E2E_DB, E2E_PORT, E2E_SEEDS } from "./e2e/paths";
+import { E2E_CONTAINER, E2E_DB, E2E_PORT, E2E_SEEDS } from "./e2e/paths";
 
 export default defineConfig({
   testDir: "./e2e",
@@ -17,7 +17,7 @@ export default defineConfig({
       // NOTE: cwd is the repo root (see below).
       command:
         `rm -f "${E2E_DB}" "${E2E_SEEDS}" && ` +
-        `python3 apps/creative-intelligence-ui/e2e/seed.py "${E2E_DB}" "${E2E_SEEDS}" && ` +
+        `python3 apps/creative-intelligence-ui/e2e/seed.py "${E2E_DB}" "${E2E_SEEDS}" "${E2E_CONTAINER}" && ` +
         `python3 Backend/ci_backend/main.py --db "${E2E_DB}" --port ${E2E_PORT}`,
       url: `http://127.0.0.1:${E2E_PORT}/api/health`,
       reuseExistingServer: false,

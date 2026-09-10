@@ -247,6 +247,12 @@ export function SyncJobs() {
           Params (JSON object; secret values are masked in the list and must be re-entered on edit)
           <textarea aria-label="New job params JSON" rows={3} value={paramsText} onChange={(e) => setParamsText(e.target.value)} style={{ width: "100%" }} />
         </label>
+        {(source === "sheets" || source === "drive") && (
+          <p className="muted">
+            Private files need your Google account: connect it in Settings, then add{" "}
+            <code>&quot;google_auth&quot;: true</code> to the params.
+          </p>
+        )}
       </div>
       <button type="button" className="action" onClick={() => void create()}>
         Create job

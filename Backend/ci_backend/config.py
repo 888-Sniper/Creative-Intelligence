@@ -33,6 +33,16 @@ class Settings(BaseSettings):
     workos_redirect_uri: str = ""
     workos_api_url: str = "https://api.workos.com"
 
+    google_client_id: str = ""
+    """Google OAuth client id (public identifier, safe for the browser).
+
+    The client SECRET stays server-side: keychain account
+    ``creative-intel-google`` or CREATIVE_INTEL_GOOGLE_CLIENT_SECRET.
+    """
+    google_redirect_uri: str = ""
+    """Exact redirect registered in Google Cloud console, e.g.
+    http://127.0.0.1:4321/api/auth/google/callback."""
+
     admin_email: str = ""
 
     max_json_bytes: int = 25 * 1024 * 1024

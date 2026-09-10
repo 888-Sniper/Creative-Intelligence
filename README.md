@@ -61,6 +61,23 @@ No secrets in the repo. Provider keys live in macOS Keychain only
 or tokens; live provider calls fail closed to mock/fixture data when no
 key is present.
 
+## Google Drive (private Sheets / Drive sync)
+
+Public links keep working with no setup. For private files:
+
+1. Create an OAuth client (Desktop type) in Google Cloud Console with the
+   redirect URI `http://127.0.0.1:4321/api/auth/google/callback`, then set
+   `CREATIVE_INTEL_GOOGLE_CLIENT_ID` / `CREATIVE_INTEL_GOOGLE_REDIRECT_URI`
+   and store the client secret in the OS keychain (`creative-intel-google`)
+   or `CREATIVE_INTEL_GOOGLE_CLIENT_SECRET` for CI/non-macOS.
+2. Open Settings → Google Drive → Connect Google Drive and approve
+   read-only access. Short-lived access tokens stay in the server database;
+   the refresh token stays in the OS keychain; the browser never sees either.
+3. Add `"google_auth": true` to a `sheets`/`drive` sync-job params object
+   (or a `/api/connect-*` payload). Without it, sync uses the public-link
+   path; without a connection it fails closed with "Connect Google Drive
+   in Settings". Disconnect anytime in Settings; the server wipes both tokens.
+
 ## Placement
 
 New product folder at the workspace root. Degree folders, the Nextly AI

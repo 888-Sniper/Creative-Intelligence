@@ -296,7 +296,8 @@ class ConnectorTest(unittest.TestCase):
                 server.apply_action(
                     conn, "connect-drive",
                     {"url": self.base + "/login", "platform": "meta"}, None)
-            self.assertIn("OAuth (parked)", str(ctx.exception))
+            self.assertIn("Connect Google Drive in Settings",
+                              str(ctx.exception))
         finally:
             conn.close()
 

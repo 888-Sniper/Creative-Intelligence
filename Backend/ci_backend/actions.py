@@ -404,8 +404,10 @@ def apply_action(conn, action, payload, prov, media_dir=None, actor=""):
             raise ValueError("sheets import needs a platform")
         params = {"url": payload.get("url", ""),
                   "platform": payload["platform"]}
+        bearer = payload.get("_google_bearer") or None
         out = sync.import_once(
-            conn, "sheets", lambda: sync.fetch_job("sheets", params))
+            conn, "sheets",
+            lambda: sync.fetch_job("sheets", params, bearer=bearer))
         sync.save_job(conn, "sheets", params, owner=actor)
         return out
     if action == "connect-drive":
@@ -413,8 +415,10 @@ def apply_action(conn, action, payload, prov, media_dir=None, actor=""):
             raise ValueError("drive import needs a platform")
         params = {"url": payload.get("url", ""),
                   "platform": payload["platform"]}
+        bearer = payload.get("_google_bearer") or None
         out = sync.import_once(
-            conn, "drive", lambda: sync.fetch_job("drive", params))
+            conn, "drive",
+            lambda: sync.fetch_job("drive", params, bearer=bearer))
         sync.save_job(conn, "drive", params, owner=actor)
         return out
     if action == "connect-meta":

@@ -73,6 +73,25 @@ class AuthPending(Base):
     created_at: Mapped[str] = mapped_column(String, default="")
 
 
+class OAuthToken(Base):
+    """Per-employee third-party OAuth tokens (item 31: Google).
+
+    The SHORT-LIVED access token lives here; the long-lived REFRESH
+    token lives in the OS keychain (never in the database, logs, or
+    the browser). Composite PK stops duplicate rows per owner.
+    """
+
+    __tablename__ = "oauth_tokens"
+
+    provider: Mapped[str] = mapped_column(String, primary_key=True)
+    owner_employee_id: Mapped[str] = mapped_column(
+        String, ForeignKey("employees.id"), primary_key=True)
+    access_token: Mapped[str] = mapped_column(String, default="")
+    expires_at: Mapped[str] = mapped_column(String, default="")
+    scope: Mapped[str] = mapped_column(String, default="")
+    updated_at: Mapped[str] = mapped_column(String, default="")
+
+
 class EmployeeAudit(Base):
     __tablename__ = "employee_audit"
 

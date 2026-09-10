@@ -274,14 +274,30 @@ def sync_job_delete(job_id: str, request: Request,
 @router.post("/api/sync/jobs/{job_id}/run")
 def sync_job_run(job_id: str, request: Request,
                  conn=Depends(get_product_conn),
-                 _emp=Depends(get_current_employee)):
+                 who=Depends(get_current_employee)):
     from urllib.parse import unquote
     job = _job_or_404(conn, unquote(job_id))
+    bearer = None
+    if job["source"] in ("sheets", "drive") \
+            and (job["params"] or {}).get("google_auth"):
+        from ci_backend import google_oauth as goog
+        try:
+            with request.app.state.ci_sessions() as session:
+                headers = goog.bearer_headers(
+                    session, who.id, request.app.state.ci_settings)
+        except (emp.StoreError, goog.GoogleError) as exc:
+            raise _conflict(exc)
+        bearer = headers["Authorization"].split(" ", 1)[1]
+    if bearer:
+        def _fetch():
+            return sync.fetch_job(job["source"], job["params"],
+                                  bearer=bearer)
+    else:
+        def _fetch():
+            return sync.fetch_job(job["source"], job["params"])
     try:
         out = sync.import_once(
-            conn, job["source"],
-            lambda: sync.fetch_job(job["source"], job["params"]),
-            job_id=job["id"])
+            conn, job["source"], _fetch, job_id=job["id"])
     except (ValueError, export_gate.ExportBlocked, emp.StoreError) as exc:
         raise _conflict(exc)
     out["job"] = sync.get_job(conn, job["id"])
@@ -479,15 +495,41 @@ async def action_dispatch(action: str, request: Request,
         raise HTTPException(status_code=404, detail={"error": "not found"})
     body = await json_payload(request)
     return _run_action(conn, prov, _ACTION_ROUTES[path], body,
-                       actor=who.id)
+                       actor=who.id, request=request)
 
 
-def _run_action(conn, prov, action: str, payload: dict, actor: str = ""):
+def _resolve_google_bearer(payload: dict, actor: str,
+                           request) -> None:
+    """Attach a short-lived Google access token for private-file imports.
+
+    Only when the caller explicitly opts in with google_auth. The token
+    lives in server memory for this call and is stripped before the
+    replay log, so it never lands in the database or logs.
+    """
+    if not isinstance(payload, dict) or not payload.get("google_auth"):
+        return
+    from ci_backend import google_oauth as goog
+    try:
+        with request.app.state.ci_sessions() as session:
+            headers = goog.bearer_headers(
+                session, actor, request.app.state.ci_settings)
+    except (emp.StoreError, goog.GoogleError) as exc:
+        raise _conflict(exc)
+    payload["_google_bearer"] = headers["Authorization"].split(" ", 1)[1]
+
+
+def _run_action(conn, prov, action: str, payload: dict, actor: str = "",
+                request=None):
+    if action in ("connect-sheets", "connect-drive") and request is not None:
+        _resolve_google_bearer(payload, actor, request)
     try:
         result = legacy.apply_action(conn, action, payload, prov,
                                      actor=actor)
     except (ValueError, export_gate.ExportBlocked, emp.StoreError) as exc:
         raise _conflict(exc)
+    finally:
+        if isinstance(payload, dict):
+            payload.pop("_google_bearer", None)
     if action != "media-upload":
         replay.log(conn, action, payload)
     return result

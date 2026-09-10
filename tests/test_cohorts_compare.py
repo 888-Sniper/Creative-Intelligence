@@ -346,6 +346,23 @@ class ReportTest(unittest.TestCase):
                                     fmt="keynote")
         conn.close()
 
+    def test_csv_quotes_campaign_names_with_commas(self):
+        import csv as csv_mod
+        import io as io_mod
+        conn = seeded_db()
+        conn.execute("UPDATE ads SET campaign=? WHERE campaign=?",
+                     ("Alpha, Q3", "Alpha"))
+        conn.commit()
+        try:
+            rep = benchmarks.build_report(conn, ["Alpha, Q3"], ["cpa"],
+                                          None, fmt="csv")
+            parsed = list(csv_mod.reader(io_mod.StringIO(rep["csv"])))
+            self.assertEqual(parsed[0], ["campaign", "cpa"])
+            self.assertEqual(parsed[1][0], "Alpha, Q3")
+            self.assertEqual(len(parsed[1]), 2)
+        finally:
+            conn.close()
+
     def test_totals_and_cpc_retained_not_dropped(self):
         conn = seeded_db()
         rep = benchmarks.build_report(conn, ["Alpha", "Beta"],

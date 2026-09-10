@@ -97,6 +97,16 @@ def _cpa(group):
     return (spend / conv) if conv else 0.0, spend, conv
 
 
+def _show_metric(metric, value):
+    if metric in ("cpa",):
+        return "$%.2f" % value
+    if metric in ("ctr", "vtr"):
+        return "%.2f%%" % (value * 100.0)
+    if metric == "roas":
+        return "%.2fx" % value
+    return str(value)
+
+
 def _fact_pack(conn, limit=8, scope=None):
     """Compact computed facts for the LLM asker. Every number below is
     derived from uploaded rows/annotations in this call. scope (the
@@ -474,13 +484,55 @@ def answer(conn, question, llm=None, scope=None):
         by_key = {}
         for r in rows:
             by_key.setdefault(r["creative_key"], []).append(r)
-        top = max(by_key.items(),
-                  key=lambda kv: sum(x["spend"] for x in kv[1]))
-        key, group = top
-        spend = sum(x["spend"] for x in group)
-        parts.append("Top creative by spend is %r at $%s."
-                     % (key, f"{spend:,.2f}"))
-        cite("Uploaded CSV")
+        # A named metric picks the ranking; bare "best/top/winner"
+        # falls back to spend, labelled as such.
+        metric = None
+        if any(w in q for w in ("cpa", "conversion", "result")):
+            metric = "cpa"
+        elif any(w in q for w in ("ctr", "click")):
+            metric = "ctr"
+        elif "roas" in q:
+            metric = "roas"
+        elif any(w in q for w in ("vtr", "view-through", "view through",
+                                  "view rate", "completion")):
+            metric = "vtr"
+
+        def _group_metric(group):
+            spend = sum(x["spend"] for x in group)
+            impr = sum(x["impressions"] for x in group)
+            clicks = sum(x["clicks"] for x in group)
+            conv = sum(x["conversions"] for x in group)
+            rev = sum(x.get("revenue") or 0 for x in group)
+            views = sum(x.get("video_views") or 0 for x in group)
+            if metric == "cpa":
+                return (spend / conv) if conv else None
+            if metric == "ctr":
+                return (clicks / impr) if impr else None
+            if metric == "roas":
+                return (rev / spend) if spend else None
+            if metric == "vtr":
+                return (views / impr) if impr else None
+            return spend
+
+        ranked = [(k, _group_metric(g)) for k, g in by_key.items()]
+        ranked = [(k, v) for k, v in ranked if v is not None]
+        if metric is not None and not ranked:
+            parts.append("No creative has a computable %s, so there is "
+                         "no %s winner to name." % (metric.upper(), metric.upper()))
+            cite("Uploaded CSV")
+        else:
+            reverse = metric not in ("cpa",)
+            key = (max if reverse else min)(ranked, key=lambda kv: kv[1])[0]
+            group = by_key[key]
+            if metric is None:
+                spend = sum(x["spend"] for x in group)
+                parts.append("Top creative by spend is %r at $%s."
+                             % (key, f"{spend:,.2f}"))
+            else:
+                parts.append("Top creative by %s is %r at %s."
+                             % (metric.upper(), key,
+                                _show_metric(metric, dict(ranked)[key])))
+            cite("Uploaded CSV")
         ann = conn.execute(
             "SELECT annotation_json FROM annotations WHERE creative_key=?",
             (key,)).fetchone()

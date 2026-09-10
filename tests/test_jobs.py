@@ -75,6 +75,31 @@ def test_run_through_inline_without_worker():
     conn.close()
 
 
+def test_run_through_retries_inline_after_transient_failure():
+    import ci_backend.worker_handlers as wh
+    from creative_intel import schema
+    calls = []
+    real_run = wh.run
+
+    def flaky(conn, kind, payload, owner, ctx, job_id):
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("transient")
+        return {"answer": "recovered"}
+
+    wh.run = flaky
+    conn = sqlite3.connect(":memory:")
+    try:
+        schema.init_db(conn)
+        result = jobs.run_through(conn, "ask", {"question": "hi"}, owner="",
+                                  timeout_s=30.0, inline_grace_s=0.0, ctx={})
+        assert result == {"answer": "recovered"}
+        assert len(calls) == 2
+    finally:
+        wh.run = real_run
+        conn.close()
+
+
 def test_worker_once_unknown_kind_fails(tmp_path):
     db = str(tmp_path / "w.db")
     conn = sqlite3.connect(db)

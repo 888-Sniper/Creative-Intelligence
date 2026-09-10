@@ -569,6 +569,16 @@ def compare_campaigns(conn, campaigns=None, rank_by="cpa", filters=None):
                "details": {}}
         return {"kpis": per, "ranking": ranking, "rank_by": rank_by,
                 "winner": None, "why": why, "scope": scope.describe()}
+    if len(per) < 2:
+        # One campaign is not a comparison: report its KPIs but crown
+        # no winner (same no-winner contract as all-None metrics).
+        why = {"metric": rank_by, "top": None, "bottom": None,
+               "differences": ["Only one campaign (%s) in scope:"
+                               " nothing to compare against."
+                               % ranking[0]],
+               "details": {}}
+        return {"kpis": per, "ranking": ranking, "rank_by": rank_by,
+                "winner": None, "why": why, "scope": scope.describe()}
     top, bottom = ranking[0], ranking[-1]
     why = {"metric": rank_by, "top": top, "bottom": bottom, "differences": [],
            "details": {}}
@@ -687,7 +697,8 @@ def _creative_rows(conn, campaign, scope=None):
             "hook_modality": ann.get("hook_modality") or "unknown",
             "creator_vs_branded": ann.get("creator_vs_branded") or "unannotated",
             "edit_style": ann.get("edit_style") or "unannotated",
-            "duration_s": ann.get("duration_s") or (duration[0] if duration else 0),
+            "duration_s": ((duration[0] if duration else 0)
+                           or ann.get("duration_s") or 0),
             "status": ann.get("status") or (status[0] if status else "auto"),
             "verified": ann.get("status") == "human_verified",
             "client": "; ".join(_distinct("client")),
@@ -860,6 +871,10 @@ def _report_extras(conn, names, strict_human=False, scope=None,
     buckets = {"<=15s": [0, 0, 0], "15-30s": [0, 0, 0], ">30s": [0, 0, 0]}
     for r in scoped_rows:
         dur = r["duration_s"] or 0
+        if dur <= 0:
+            # Unknown duration is not short-form: keep it out of
+            # <=15s rather than laundering it into that bucket.
+            continue
         bucket = "<=15s" if dur <= 15 else ("15-30s" if dur <= 30 else ">30s")
         buckets[bucket][0] += r["spend"]
         buckets[bucket][1] += r["conversions"] or 0
@@ -962,16 +977,19 @@ def _report_extras(conn, names, strict_human=False, scope=None,
     for r in scoped_rows:
         m = r["market"] or "(unset)"
         cell = market_stats.setdefault(
-            m, {"spend": 0.0, "conv": 0, "revenue": 0.0, "keys": set()})
+            m, {"spend": 0.0, "conv": 0, "revenue": 0.0,
+                "reported": False, "keys": set()})
         cell["spend"] += r["spend"]
         cell["conv"] += r["conversions"] or 0
         cell["revenue"] += r["revenue"] or 0
+        cell["reported"] = cell["reported"] or bool(
+            r.get("revenue_reported"))
         cell["keys"].add(r["creative_key"])
     markets = []
     for m in sorted(market_stats):
         cell = market_stats[m]
         cpa = (cell["spend"] / cell["conv"]) if cell["conv"] else None
-        roas = (cell["revenue"] / cell["spend"]) if cell["spend"] else None
+        roas = roas_of(cell["revenue"], cell["spend"], cell["reported"])
         markets.append({
             "market": m, "spend": round(cell["spend"], 2),
             "conversions": cell["conv"],
@@ -1021,6 +1039,15 @@ def _report_extras(conn, names, strict_human=False, scope=None,
 def _show(value):
     """Report rendering: uncomputable KPIs read n/a, never None/zero."""
     return "n/a" if value is None else value
+
+
+def _csv_cell(value):
+    """One CSV cell: quote when the text carries a comma, quote or
+    newline (RFC 4180); campaign names are user-controlled."""
+    text = "" if value is None else str(value)
+    if any(c in text for c in (",", '"', "\n")):
+        return '"%s"' % text.replace('"', '""')
+    return text
 
 
 def _reco_fmt(rank_by, value):
@@ -1551,11 +1578,12 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
     lines += ["", "## Recommendations / next steps (heuristic)", ""]
     lines += ["- %s" % r for r in extras["recommendations"]]
     markdown = "\n".join(lines)
-    csv_lines = ["campaign," + ",".join(wanted_kpis)]
+    csv_lines = [",".join([_csv_cell("campaign")] +
+                          [_csv_cell(k) for k in wanted_kpis])]
     for name in names:
-        csv_lines.append(name + "," + ",".join(
-            "" if comp["kpis"][name][k] is None
-            else str(comp["kpis"][name][k]) for k in wanted_kpis))
+        csv_lines.append(",".join([_csv_cell(name)] +
+                                  [_csv_cell(comp["kpis"][name][k])
+                                   for k in wanted_kpis]))
     csv_text = "\n".join(csv_lines) + "\n"
     deck = {"title": "Campaign Report", "scope": scope.describe(),
             "benchmark_scope": bench_label,

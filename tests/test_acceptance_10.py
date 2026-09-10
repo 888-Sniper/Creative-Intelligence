@@ -212,6 +212,15 @@ class Gate1ScopeParityTest(unittest.TestCase):
         self.assertNotIn("CampB", out["answer"])
         self.assertEqual(out["scope"], SPAIN.describe())
 
+    def test_ask_best_ranks_by_named_metric(self):
+        # spain-only has the lower CPA ($6.25 vs $10.00) despite the
+        # lower spend: "best CPA" must name it, not the top spender.
+        out = qa.answer(self.conn, "Which creative has the best CPA?")
+        self.assertIn("Top creative by CPA", out["answer"])
+        self.assertIn("spain-only", out["answer"])
+        bare = qa.answer(self.conn, "Which creative is the winner?")
+        self.assertIn("Top creative by spend", bare["answer"])
+
     def test_compare_campaigns_scoped(self):
         got = server.expert2_compare_route(
             self.conn, {"rank_by": ["cpa"], "market": ["Spain"],
@@ -314,6 +323,35 @@ class Gate4NullRanksLastTest(unittest.TestCase):
         comp = benchmarks.compare_campaigns(self.conn, ["CampC"],
                                             rank_by="cpm")
         self.assertIsNone(comp["kpis"]["CampC"]["cpm"])
+
+    def test_single_campaign_has_no_winner(self):
+        comp = benchmarks.compare_campaigns(self.conn, ["CampA"],
+                                            rank_by="cpa")
+        self.assertIn("CampA", comp["kpis"])
+        self.assertIsNone(comp["winner"])
+        self.assertIsNone(comp["why"]["top"])
+        self.assertIsNone(comp["why"]["bottom"])
+        self.assertIn("nothing to compare",
+                      comp["why"]["differences"][0])
+
+    def test_unreported_revenue_market_roas_is_none(self):
+        conn = sqlite3.connect(":memory:")
+        try:
+            schema.init_db(conn)
+            csv = ("Campaign,Ad Name,Creative Name,Amount Spent,"
+                   "Impressions,Link Clicks,Conversions,Video Views,"
+                   "Client,Project,Vertical,Market,Objective,"
+                   "Funnel Stage,Date\n"
+                   "CampX,X1,revless-creative,120,9000,90,4,3000,"
+                   "Foap,Proj1,Beauty,Nowhere,Sales,Lower,2026-08-04\n")
+            ingest.insert_rows(conn, ingest.parse_csv(csv, "meta"))
+            extras = benchmarks._report_extras(conn, ["CampX"],
+                                               rank_by="cpa")
+            by_name = {m["market"]: m for m in extras["markets"]}
+            # Revenue never reported: honest null, never 0.0.
+            self.assertIsNone(by_name["Nowhere"]["roas"])
+        finally:
+            conn.close()
 
 
 class Gate5NoWinnerTest(unittest.TestCase):
@@ -1284,6 +1322,40 @@ class QuartileSynthesisTest(unittest.TestCase):
             ingest.insert_rows(conn, ingest.parse_csv(ACC_CSV, "meta"))
             n = conn.execute("SELECT COUNT(*) FROM retention").fetchone()[0]
             self.assertEqual(n, 0)
+        finally:
+            conn.close()
+
+    def test_blank_quartile_is_a_gap_not_a_crash(self):
+        conn = self._db()
+        try:
+            blank_75 = self.Q_CSV.replace(",4000,2000,", ",,2000,", 1)
+            ingest.insert_rows(conn, ingest.parse_csv(blank_75, "meta"))
+            pts = conn.execute(
+                "SELECT t_sec, retention_pct FROM retention"
+                " WHERE creative_key=? ORDER BY t_sec",
+                ("quart-creative",)).fetchall()
+            # t=0 plus the three reported quartiles; no 0% point at
+            # 75% of duration from the blank cell.
+            self.assertEqual(len(pts), 4)
+            self.assertTrue(all(p[1] > 0 for p in pts))
+        finally:
+            conn.close()
+
+    def test_stale_synth_cleared_when_quartiles_vanish(self):
+        conn = self._db()
+        try:
+            ingest.upsert_rows(conn, ingest.parse_csv(self.Q_CSV, "meta"))
+            nqld = ("Campaign,Ad Name,Creative Name,Amount Spent,"
+                    "Impressions,Link Clicks,Conversions,Video Views,"
+                    "Revenue,Client,Project,Vertical,Market,Objective,"
+                    "Funnel Stage,Date\n"
+                    "QCamp,Q1,quart-creative,100,10000,200,10,6000,250,"
+                    "Foap,Proj1,Beauty,Spain,Sales,Lower,2026-08-01\n")
+            ingest.upsert_rows(conn, ingest.parse_csv(nqld, "meta"))
+            pts = conn.execute(
+                "SELECT t_sec FROM retention WHERE creative_key=?",
+                ("quart-creative",)).fetchall()
+            self.assertEqual(pts, [])
         finally:
             conn.close()
 

@@ -32,8 +32,10 @@ SOURCES = ("meta", "tiktok", "sheets", "drive")
 
 
 def utcnow():
+    # Microsecond precision: same-second create/update bursts must
+    # stay ordered, or jobs() cannot tell which edit came last.
     return datetime.datetime.now(
-        datetime.timezone.utc).isoformat(timespec="seconds")
+        datetime.timezone.utc).isoformat(timespec="microseconds")
 
 
 def _record_start(conn, source, job_id=""):
@@ -248,7 +250,9 @@ def jobs(conn):
     updated one wins this mapping; tick() still runs every job.
     """
     out = {}
-    for job in list_jobs(conn, include_disabled=False):
+    ordered = sorted(list_jobs(conn, include_disabled=False),
+                     key=lambda job: (job["updated_at"], job["id"]))
+    for job in ordered:
         out[job["source"]] = job["params"]
     return out
 

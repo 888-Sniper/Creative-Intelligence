@@ -222,7 +222,6 @@ def run_through(conn, kind, payload, owner="", timeout_s=180.0,
     job_id = job["id"]
     deadline = time.monotonic() + timeout_s
     inline_at = time.monotonic() + inline_grace_s
-    ran_inline = False
     while True:
         row = get(conn, job_id)
         if row is None:
@@ -232,9 +231,15 @@ def run_through(conn, kind, payload, owner="", timeout_s=180.0,
         if row["status"] in ("failed", "cancelled"):
             raise JobFailed(row["error"] or row["status"])
         now = time.monotonic()
-        if (not ran_inline and now >= inline_at
-                and row["status"] == "queued" and claim(conn, job_id)):
-            ran_inline = True
+        # Inline fallback honors the same retry budget as the worker:
+        # requeued work (attempts still within max_retries) may run
+        # inline again instead of polling to a misleading JobTimeout.
+        # fail() parks the job terminal once attempts run out, so the
+        # real error surfaces via JobFailed above.
+        budget = max(0, row.get("max_retries", 1))
+        if (now >= inline_at and row["status"] == "queued"
+                and row.get("attempts", 0) <= budget
+                and claim(conn, job_id)):
             try:
                 result = worker_handlers.run(conn, kind, payload, owner,
                                              ctx or {}, job_id)

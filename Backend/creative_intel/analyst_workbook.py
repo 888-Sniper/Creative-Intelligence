@@ -224,7 +224,8 @@ def hypothesis_formula(rule_id, row):
 BENCHMARK_METRIC_COL = {
     "hook_rate_2s_impr": "B", "hook_rate_3s_impr": "C",
     "hold_25_over_3s": "D", "quartile_25_impr": "E",
-    "quartile_50_impr": "F", "vtr": "G", None: "H",
+    "quartile_50_impr": "F", "vtr": "G",
+    "cpm": "J", "cpcv": "K", "cost_per_1000_reached": "L",
 }
 
 def _title_block(title, lines):
@@ -277,10 +278,12 @@ def _benchmarks_sheet():
     ])
     rows.append(["Metric", "Pooled", "Mean of creatives", "Median", "n"])
     for label, mid in BENCHMARK_ROWS:
-        if mid in BENCHMARK_METRIC_COL:
-            mcol = BENCHMARK_METRIC_COL[mid]
-        else:
+        if mid is None:
+            # AWT rows have no registry metric: AWT s lives in H,
+            # AWT % of duration in I (None must not alias either one).
             mcol = "H" if label == "AWT s" else "I"
+        else:
+            mcol = BENCHMARK_METRIC_COL[mid]
         pooled, mean, median, count = _benchmark_formulas(mid, mcol)
         rows.append([label, {"formula": pooled}, {"formula": mean},
                      {"formula": median}, {"formula": count}])

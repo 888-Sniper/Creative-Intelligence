@@ -49,6 +49,11 @@ GOOD = json.dumps({"answer": "Campaign B leads on spend at $300.",
 
 
 class AskLlmTest(unittest.TestCase):
+    def test_ask_prompt_covers_all_fact_sections(self):
+        missing = [key for key in qa._USED_SOURCES
+                   if '"%s"' % key not in providers.LiveLlm.ASK_PROMPT]
+        self.assertEqual(missing, [])
+
     def test_llm_answer_uses_fact_pack(self):
         conn = fresh()
         try:

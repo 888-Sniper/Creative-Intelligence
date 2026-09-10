@@ -52,14 +52,28 @@ def synthesize_from_quartiles(conn):
         key = row.get("creative_key")
         if not key or key in manual:
             continue
-        agg = by_key.setdefault(key, {"impr": 0, "q": [0, 0, 0, 0]})
+        try:
+            missing = set(json.loads(row.get("missing_json") or "[]"))
+        except ValueError:
+            missing = set()
+        agg = by_key.setdefault(
+            key, {"impr": 0, "q": [0, 0, 0, 0], "seen": [0, 0, 0, 0]})
         agg["impr"] += row.get("impressions") or 0
         for i, col in enumerate(("views_25", "views_50", "views_75",
                                  "views_100")):
-            agg["q"][i] += row.get(col) or 0
+            # A blank quartile cell is missing, never a measured zero:
+            # only rows that actually report the quartile feed its sum.
+            if col not in missing:
+                agg["q"][i] += row.get(col) or 0
+                agg["seen"][i] += 1
     done = 0
     for key, agg in sorted(by_key.items()):
-        if agg["impr"] <= 0 or not any(agg["q"]):
+        # Stale synthetic points go even when there is nothing to
+        # rebuild from: otherwise a re-import that drops all quartile
+        # data leaves a dead curve behind.
+        conn.execute("DELETE FROM retention WHERE creative_key=?"
+                     " AND source=?", (key, SYNTH_SOURCE))
+        if agg["impr"] <= 0 or not any(agg["seen"]):
             continue
         dur = conn.execute("SELECT duration_s FROM creatives WHERE creative_key=?",
                            (key,)).fetchone()
@@ -74,11 +88,14 @@ def synthesize_from_quartiles(conn):
                     duration = 0
         duration = float(duration) if duration else 30.0
         pts = [(0.0, 100.0)]
-        for frac, views in zip((0.25, 0.5, 0.75, 1.0), agg["q"]):
+        for frac, views, n in zip((0.25, 0.5, 0.75, 1.0), agg["q"],
+                                  agg["seen"]):
+            # Quartiles no row reported contribute no point: a 0%
+            # crash-and-recovery mid-curve is a data gap, not a drop.
+            if not n:
+                continue
             pts.append((round(frac * duration, 2),
                         round(min(100.0, views * 100.0 / agg["impr"]), 2)))
-        conn.execute("DELETE FROM retention WHERE creative_key=?"
-                     " AND source=?", (key, SYNTH_SOURCE))
         conn.executemany(
             "INSERT INTO retention (creative_key, t_sec, retention_pct,"
             " source) VALUES (?, ?, ?, ?)",

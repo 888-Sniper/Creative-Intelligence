@@ -275,6 +275,13 @@ class JobsTest(unittest.TestCase):
             self.assertEqual(len(sync.list_jobs(conn)), 2)
             self.assertEqual(len(
                 sync.list_jobs(conn, include_disabled=False)), 1)
+            # Compat mapping follows the most recently UPDATED job,
+            # not the most recently created one.
+            sync.set_job_enabled(conn, a["id"], True)
+            sync.update_job(conn, a["id"],
+                            params={"ad_account_id": "9"})
+            self.assertEqual(sync.jobs(conn)["meta"],
+                             {"ad_account_id": "9"})
             # Edit + delete round-trip.
             sync.update_job(conn, b["id"], name="Renamed B")
             self.assertEqual(sync.get_job(conn, b["id"])["name"],

@@ -546,8 +546,12 @@ def awt_per_view(rows, durations=None):
     if totals:
         count_field = ("video_starts" if (bases and bases[0] == "starts")
                        else "video_views")
-        _, count_rows = field_state([r for r, _ in totals], count_field)
-        num = sum(v for _, v in totals)
+        count_state, count_rows = field_state(
+            [r for r, _ in totals], count_field)
+        # Both sides over the SAME rows: a watch total whose matching
+        # count is missing contributes to neither sum (missing is
+        # never a zero), or AWT inflates.
+        num = sum(v for r, v in totals if r in count_rows)
         den = sum(_num(r, count_field) for r in count_rows)
         if den <= 0:
             none = _result("awt_per_view", None, NA,
@@ -555,9 +559,15 @@ def awt_per_view(rows, durations=None):
                                     % count_field])
             return none, _result("awt_pct_duration", None, NA,
                                  reasons=["no matching %s" % count_field])
+        reasons = []
+        if count_state == MISSING or total_state == MISSING:
+            reasons.append(
+                "pooled from %d of %d rows; rows missing watch time"
+                " or %s are excluded from both sums"
+                % (len(count_rows), len(rows), count_field))
         awt = _result("awt_per_view", num / den, MEASURED,
                       basis="total_over_%s" % count_field,
-                      numerator=num, denominator=den)
+                      numerator=num, denominator=den, reasons=reasons)
     else:
         # Weighted mean of reported per-view averages with correct
         # weights; rounded source averages make this an approximation.
@@ -645,13 +655,23 @@ def frequency(rows):
     reported = [(r, _num(r, "frequency")) for r in usable
                 if _num(r, "frequency") > 0]
     if reported:
-        weights = sum(_num(r, "impressions") for r, _ in reported)
-        if weights > 0:
-            value = sum(v * _num(r, "impressions")
-                        for r, v in reported) / weights
+        # Reach-weighting recovers the pooled ratio: sum(f*reach) /
+        # sum(reach) == sum(impressions) / sum(reach). Impression
+        # weights would over-weight high-frequency rows instead.
+        rrows = [(r, v) for r, v in reported
+                 if "reach" not in _missing_of(r)
+                 and _num(r, "reach") > 0]
+        if rrows:
+            reasons = ["reach-weighted mean of reported frequency"]
+            if len(rrows) < len(reported):
+                reasons.append(
+                    "%d of %d rows lack reach and are excluded"
+                    % (len(reported) - len(rrows), len(reported)))
+            weights = sum(_num(r, "reach") for r, _ in rrows)
+            value = sum(v * _num(r, "reach") for r, v in rrows) / weights
             return _result("frequency", value, ESTIMATED,
-                           basis="impression_weighted_reported",
-                           reasons=["weighted mean of reported frequency"])
+                           basis="reach_weighted_reported",
+                           reasons=reasons)
         value = sum(v for _, v in reported) / len(reported)
         return _result("frequency", value, ESTIMATED,
                        basis="mean_reported",
@@ -680,21 +700,28 @@ def engagement_rate(rows):
     if all(s == UNSUPPORTED for s in states):
         return _result("engagement_rate", None, UNSUPPORTED,
                        reasons=["no interaction fields supplied"])
-    usable_idx = set(range(len(rows)))
-    for field in fields:
-        _, urows = field_state(rows, field)
-        uids = {id(r) for r in urows}
-        usable_idx &= uids if uids else usable_idx
-    usable = [r for i, r in enumerate(rows) if i in usable_idx]
-    num = sum(sum(_num(r, f) for f in fields) for r in usable)
-    den = sum(_num(r, "impressions") for r in usable)
+    # Numerator rows carry at least one interaction field; denominator
+    # rows carry impressions. Partial rows are never dropped from the
+    # denominator just because one interaction field is missing.
+    have_any = [r for r in rows
+                if any(f not in _missing_of(r) for f in fields)]
+    have_impr = [r for r in rows
+                 if "impressions" not in _missing_of(r)]
+    num = sum(sum(_num(r, f) for f in fields) for r in have_any)
+    den = sum(_num(r, "impressions") for r in have_impr)
     if den <= 0:
         return _result("engagement_rate", None, NA,
                        reasons=["no impressions"])
+    reasons = []
+    if len(have_any) < len(rows) or len(have_impr) < len(rows):
+        reasons.append(
+            "pooled from %d interaction rows over %d impression rows;"
+            " rows missing every interaction field or impressions"
+            " are excluded" % (len(have_any), len(have_impr)))
     state = MEASURED if all(s == MEASURED for s in states) else ESTIMATED
     return _result("engagement_rate", num / den * 100.0, state,
                    basis="pooled_interactions", numerator=num,
-                   denominator=den)
+                   denominator=den, reasons=reasons)
 
 
 def cpcv(rows):

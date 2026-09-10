@@ -632,6 +632,22 @@ class WorkbookAgreementTest(unittest.TestCase):
         # n counts only measurable creatives (NO_2S excluded).
         self.assertEqual(ev.cell("Benchmarks", "E6"), 5)
 
+    def test_benchmark_rows_read_own_metric_column(self):
+        sheet = wb._benchmarks_sheet()["rows"]
+        data = sheet[5:]  # past the 4-row title block + header
+        by_label = {row[0]: row for row in data}
+        # Cost rows must average their own Metrics columns, never
+        # the AWT % column (I).
+        for label, col in (("CPM", "J"), ("CPCV", "K"),
+                           ("Cost per 1000 reached", "L")):
+            mean = by_label[label][2]["formula"]
+            self.assertIn("Metrics!%s" % col, mean)
+            self.assertNotIn("Metrics!I", mean)
+        # The two AWT rows share mid None but read different columns.
+        self.assertIn("Metrics!H", by_label["AWT s"][2]["formula"])
+        self.assertIn("Metrics!I",
+                      by_label["AWT % of duration"][2]["formula"])
+
     def test_hypotheses_are_labelled_candidates(self):
         ev, _rows, _blob = build_fixture()
         weak = ev.cell("Hypotheses", "B7")

@@ -99,6 +99,17 @@ class MetricAcceptanceTest(unittest.TestCase):
         self.assertEqual(out["state"], "not_applicable")
         self.assertIsNone(out["value"])
 
+    def test_awt_excludes_watch_without_matching_count(self):
+        # Row B supplies watch time but no view count: its seconds
+        # must not inflate the numerator while missing from the
+        # denominator. AWT = 100/100, not 300/100.
+        rows = [row("A", video_views=100, watch_time_total_s=100.0),
+                row("B", watch_time_total_s=200.0,
+                    missing_json=json.dumps(["video_views"]))]
+        awt, _pct = metrics.awt_per_view(rows)
+        self.assertAlmostEqual(awt["value"], 1.0)
+        self.assertTrue(awt["reasons"])
+
     def test_mixed_watch_bases_not_pooled(self):
         rows = [row("A", watch_time_total_s=100.0, video_views=100,
                     watch_time_basis="views"),
@@ -107,6 +118,36 @@ class MetricAcceptanceTest(unittest.TestCase):
         awt, _pct = metrics.awt_per_view(rows)
         self.assertIsNone(awt["value"])
         self.assertIn("bases", awt["reasons"][0])
+
+    def test_engagement_pools_partial_rows(self):
+        rows = [row("A", likes=18, comments=0, shares=0, saves=0,
+                    impressions=1000),
+                row("B", likes=0, comments=0, shares=0,
+                    impressions=1000,
+                    missing_json=json.dumps(["saves"]))]
+        out = metrics.engagement_rate(rows)
+        # 18 interactions over 2000 impressions — row B keeps its
+        # denominator even though saves is missing there.
+        self.assertAlmostEqual(out["value"], 0.9)
+        self.assertEqual(out["numerator"], 18.0)
+        self.assertEqual(out["denominator"], 2000.0)
+
+    def test_engagement_unsupported_without_interactions(self):
+        rows = [row("A", impressions=1000,
+                    missing_json=json.dumps(
+                        ["likes", "comments", "shares", "saves"]))]
+        out = metrics.engagement_rate(rows)
+        self.assertEqual(out["state"], "unsupported")
+        self.assertIsNone(out["value"])
+
+    def test_frequency_reach_weighted(self):
+        # f=impr/reach per row: pooled frequency is 3000/1500 = 2.0.
+        # Impression-weighting would give 2.5.
+        rows = [row("A", frequency=1.0, impressions=1000, reach=1000),
+                row("B", frequency=4.0, impressions=2000, reach=500)]
+        out = metrics.frequency(rows)
+        self.assertAlmostEqual(out["value"], 2.0)
+        self.assertEqual(out["basis"], "reach_weighted_reported")
 
     def test_mixed_currencies_not_combined(self):
         rows = [row("A", spend=10.0, impressions=1000, currency="PLN"),

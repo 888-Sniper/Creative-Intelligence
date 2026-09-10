@@ -647,7 +647,7 @@ class ReportExtrasTest(unittest.TestCase):
                 titles = [n for n in names if "/slides/" in n
                           and n.endswith(".xml")]
                 blob = b" ".join(zf.read(n) for n in titles)
-                for needle in (b"Benchmarks", b"Creative learnings",
+                for needle in (b"Benchmarks", b"Creative Learnings",
                                b"Recommendations", b"a1"):
                     self.assertIn(needle, blob)
             finally:
@@ -661,7 +661,7 @@ class ReportExtrasTest(unittest.TestCase):
                 self.assertGreaterEqual(len(sheets), 6)
                 wb = zf.read("xl/workbook.xml").decode()
                 for needle in ("Creatives", "All Creatives", "Benchmarks",
-                               "Learnings", "Next steps"):
+                               "Learnings", "Next Steps"):
                     self.assertIn(needle, wb)
             finally:
                 zf.close()

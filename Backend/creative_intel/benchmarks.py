@@ -1534,7 +1534,7 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
                         _show_rank(worst[comp["rank_by"]]),
                         worst["hook_type"], worst["creator_vs_branded"]))
                 slides.append({"title": name, "bullets": bullets})
-            why_title = ("Why %s leads" % comp["why"]["top"]
+            why_title = ("Why %s Leads" % comp["why"]["top"]
                          if comp["why"]["top"] is not None
                          else "No winner — insufficient data")
             slides.append({"title": why_title,
@@ -1554,9 +1554,9 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
             else:
                 bench_bullets.append("(no benchmark selected)")
             slides.append({"title": "Benchmarks", "bullets": bench_bullets})
-            slides.append({"title": "Creative learnings",
+            slides.append({"title": "Creative Learnings",
                            "bullets": deck["learnings"] or ["—"]})
-            slides.append({"title": "Recommendations / next steps",
+            slides.append({"title": "Recommendations / Next Steps",
                            "bullets": deck["recommendations"] or ["—"]})
             blob = ooxml.build_pptx("Campaign Report", slides)
             return {"format": "pptx", "filename": "campaign-report.pptx",
@@ -1566,7 +1566,7 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
                  "header": ["campaign"] + wanted_kpis,
                  "rows": [[name] + [comp["kpis"][name][k] for k in wanted_kpis]
                           for name in names]}
-        why = {"name": "Why analysis",
+        why = {"name": "Why Analysis",
                "header": ["finding"],
                "rows": [[d] for d in comp["why"]["differences"]] or [["—"]]}
         creatives = {"name": "Creatives",
@@ -1589,7 +1589,7 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
                  "header": ["finding", "human_verified"],
                  "rows": [[lbl, v] for lbl, v in zip(
                      deck["learnings"], deck["learnings_verified"])] or [["—", ""]]}
-        reco = {"name": "Next steps",
+        reco = {"name": "Next Steps",
                 "header": ["recommendation (heuristic)", "human_verified"],
                 "rows": [[r, v] for r, v in zip(
                     deck["recommendations"],

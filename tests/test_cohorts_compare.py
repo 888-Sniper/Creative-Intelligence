@@ -150,6 +150,31 @@ class FilterBuilderTest(unittest.TestCase):
         self.assertLessEqual(got["p25"], got["median"])
         self.assertLessEqual(got["median"], got["p75"])
 
+    def test_bands_skip_none_never_zero(self):
+        got = benchmarks.describe_bands([None, 2.0, None, 4.0], [10, 20, 30, 40])
+        self.assertEqual(got["n"], 2)
+        self.assertEqual(got["n_missing"], 2)
+        self.assertAlmostEqual(got["mean_weighted"], (2.0 * 20 + 4.0 * 40) / 60,
+                                   places=4)
+        self.assertEqual(benchmarks.describe_bands([], [])["n"], 0)
+        self.assertEqual(benchmarks.describe_bands([None], [5])["median"], 0.0)
+
+    def test_zero_conversion_rows_do_not_crash_benchmark(self):
+        conn = fresh_db()
+        try:
+            ingest.insert_rows(conn, ingest.parse_csv(
+                "Campaign,Ad Name,Creative Name,Amount Spent,Impressions,"
+                "Link Clicks,Conversions\n"
+                "Solo,S1,s1,100,10000,200,0\n"
+                "Solo,S2,s2,50,5000,100,0\n", "meta"))
+            got = benchmarks.benchmark_filtered(conn, {})
+            self.assertEqual(got["n_ads"], 2)
+            self.assertEqual(got["stats"]["n"], 0)
+            self.assertEqual(got["stats"]["n_missing"], 2)
+            self.assertEqual(got["status"], "insufficient")
+        finally:
+            conn.close()
+
     def test_min_n_guard(self):
         conn = fresh_db()
         ingest.insert_rows(conn, ingest.parse_csv(

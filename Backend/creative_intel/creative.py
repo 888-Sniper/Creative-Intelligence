@@ -161,10 +161,31 @@ def validate(ann):
     return errors
 
 
+def _attach_prior_media(conn, creative_key, ann):
+    """Fill source_url from the newest upload when the annotation lacks one.
+
+    Media uploaded before any annotation exists cannot link at upload
+    time; the pipeline (or a later manual annotate) creating the first
+    annotation picks that upload up here instead of leaving the
+    creative without a preview. Never overwrites an existing value.
+    """
+    if not isinstance(ann, dict) or ann.get("source_url"):
+        return
+    try:
+        row = conn.execute(
+            "SELECT id FROM media WHERE creative_key=? ORDER BY id DESC"
+            " LIMIT 1", (creative_key,)).fetchone()
+    except Exception:
+        return
+    if row:
+        ann["source_url"] = "/media/%d" % row[0]
+
+
 def save_annotation(conn, creative_key, ann):
     errors = validate(ann)
     if errors:
         raise ValueError("; ".join(errors))
+    _attach_prior_media(conn, creative_key, ann)
     conn.execute(
         "INSERT INTO annotations (creative_key, schema_version, annotation_json, updated_at)"
         " VALUES (?, ?, ?, ?) ON CONFLICT (creative_key) DO UPDATE SET"

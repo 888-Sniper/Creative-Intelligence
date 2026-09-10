@@ -172,7 +172,11 @@ def _api_json(url, token=None, payload=None, headers=None):
 
 META_VERSION = "v21.0"
 META_FIELDS = ("campaign_name,adset_name,ad_name,spend,impressions,"
-               "clicks,actions,video_play_actions")
+               "clicks,actions,action_values,video_play_actions")
+# Purchase-flavoured action types counted as conversions; the same set
+# is summed from action_values as revenue (purchase value).
+META_PURCHASE_TYPES = ("purchase", "offsite_conversion",
+                       "onsite_conversion.purchase")
 
 
 def meta_insights_csv(ad_account_id, since, until):
@@ -184,6 +188,10 @@ def meta_insights_csv(ad_account_id, since, until):
     params = urllib.parse.urlencode({
         "fields": META_FIELDS,
         "time_range": json.dumps({"since": since, "until": until}),
+        # Daily breakdown: without time_increment the API returns one
+        # aggregate row per ad with no date, which makes period analysis
+        # from direct API data impossible.
+        "time_increment": 1,
         "limit": 500,
         "access_token": token,
     })
@@ -204,20 +212,28 @@ def meta_insights_csv(ad_account_id, since, until):
         url = nxt
         seen_pages += 1
     lines = ["Campaign,Ad Set,Ad Name,Spend,Impressions,Clicks,"
-             "Conversions,Video Views"]
+             "Conversions,Video Views,Date,Revenue"]
     for row in data_rows:
         conv = 0.0
         for action in row.get("actions", []) or []:
-            if action.get("action_type") in ("purchase", "offsite_conversion",
-                                             "onsite_conversion.purchase"):
+            if action.get("action_type") in META_PURCHASE_TYPES:
                 try:
                     conv += float(action.get("value", 0))
+                except (TypeError, ValueError):
+                    continue
+        revenue = 0.0
+        for action in row.get("action_values", []) or []:
+            if action.get("action_type") in META_PURCHASE_TYPES:
+                try:
+                    revenue += float(action.get("value", 0))
                 except (TypeError, ValueError):
                     continue
         lines.append(",".join(_csv_cell(row.get(k, "")) for k in
                               ("campaign_name", "adset_name", "ad_name",
                                "spend", "impressions", "clicks")) +
-                     ",%s,%s" % (_num(conv), _num(_views(row))))
+                     ",%s,%s,%s,%s" % (_num(conv), _num(_views(row)),
+                                       _csv_cell(row.get("date_start", "")),
+                                       _num(revenue)))
     return "\n".join(lines) + "\n"
 
 
@@ -262,7 +278,11 @@ def tiktok_report_csv(advertiser_id, start_date, end_date):
         payload = {
             "advertiser_id": str(advertiser_id).strip(),
             "report_type": "BASIC",
-            "dimensions": ["campaign_id", "adgroup_id", "ad_id"],
+            # stat_time_day gives the daily breakdown backing the Date
+            # column; without it every row is range-aggregate and period
+            # analysis is impossible.
+            "dimensions": ["campaign_id", "adgroup_id", "ad_id",
+                           "stat_time_day"],
             "metrics": list(TIKTOK_FIELDS[3:]),
             "start_date": start_date,
             "end_date": end_date,
@@ -287,14 +307,22 @@ def tiktok_report_csv(advertiser_id, start_date, end_date):
         elif len(chunk) < size:
             break
         page += 1
+    # TikTok BASIC reports expose no purchase-value metric, so Revenue
+    # comes from the API only when it returns one of the recognised
+    # value keys; otherwise the cell is blank (ingest blanks become 0,
+    # the codebase-wide convention for "not reported").
     lines = ["Campaign,Ad Set,Ad Name,Spend,Impressions,Clicks,"
-             "Conversions,Video Views"]
+             "Conversions,Video Views,Date,Revenue"]
     for row in rows:
         dims = row.get("dimensions") or {}
         mets = row.get("metrics") or {}
+        value = mets.get("purchase_value", mets.get("total_purchase_value",
+                         mets.get("shop_revenue", "")))
         cells = [dims.get("campaign_id", ""), dims.get("adgroup_id", ""),
                  dims.get("ad_id", ""), _num(mets.get("spend")),
                  _num(mets.get("impressions")), _num(mets.get("clicks")),
-                 _num(mets.get("conversion")), _num(mets.get("video_views"))]
+                 _num(mets.get("conversion")), _num(mets.get("video_views")),
+                 _csv_cell(dims.get("stat_time_day", "")),
+                 _num(value) if value != "" else ""]
         lines.append(",".join(_csv_cell(c) for c in cells))
     return "\n".join(lines) + "\n"

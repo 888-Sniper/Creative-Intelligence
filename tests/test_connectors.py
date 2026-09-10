@@ -67,6 +67,9 @@ class StubHandler(BaseHTTPRequestHandler):
                     "ad_name": "meta-ad-2", "spend": "10.0",
                     "impressions": "1000", "clicks": "10",
                     "actions": [{"action_type": "purchase", "value": 1}],
+                    "action_values": [{"action_type": "purchase",
+                                       "value": 25.5}],
+                    "date_start": "2026-08-02",
                     "video_play_actions": [{"value": 100}]}]})
             else:
                 host = self.headers.get("Host", "127.0.0.1")
@@ -78,6 +81,9 @@ class StubHandler(BaseHTTPRequestHandler):
                     "ad_name": "meta-ad", "spend": "42.5",
                     "impressions": "4200", "clicks": "84",
                     "actions": [{"action_type": "purchase", "value": 7}],
+                    "action_values": [{"action_type": "purchase",
+                                       "value": 120.0}],
+                    "date_start": "2026-08-01",
                     "video_play_actions": [{"value": 900}]}],
                     "paging": {"next": "http://%s/act/insights?after=page2"
                                "&access_token=%s" % (host, tok)}})
@@ -97,13 +103,16 @@ class StubHandler(BaseHTTPRequestHandler):
         if page >= 2:
             rows = [{
                 "dimensions": {"campaign_id": "TikCamp2", "adgroup_id": "g",
-                               "ad_id": "tt-ad-2"},
+                               "ad_id": "tt-ad-2",
+                               "stat_time_day": "2026-08-02"},
                 "metrics": {"spend": 25.0, "impressions": 2500, "clicks": 50,
-                            "conversion": 5, "video_views": 600}}]
+                            "conversion": 5, "video_views": 600,
+                            "purchase_value": 40.0}}]
         else:
             rows = [{
                 "dimensions": {"campaign_id": "TikCamp", "adgroup_id": "g",
-                               "ad_id": "tt-ad"},
+                               "ad_id": "tt-ad",
+                               "stat_time_day": "2026-08-01"},
                 "metrics": {"spend": 15.0, "impressions": 1500, "clicks": 30,
                             "conversion": 3, "video_views": 400}}]
         self._send(200, {"code": 0, "data": {
@@ -175,7 +184,11 @@ class ConnectorTest(unittest.TestCase):
         self.assertEqual(rows[0]["spend"], 42.5)
         self.assertEqual(rows[0]["conversions"], 7.0)
         self.assertEqual(rows[0]["video_views"], 900)
+        self.assertEqual(rows[0]["date"], "2026-08-01")
+        self.assertEqual(rows[0]["revenue"], 120.0)
         self.assertEqual(rows[1]["spend"], 10.0)
+        self.assertEqual(rows[1]["date"], "2026-08-02")
+        self.assertEqual(rows[1]["revenue"], 25.5)
         self.assertEqual(quar, [])
 
     def test_tiktok_report_end_to_end(self):
@@ -191,6 +204,10 @@ class ConnectorTest(unittest.TestCase):
                          ["TikCamp", "TikCamp2"])
         self.assertEqual(rows[0]["conversions"], 3.0)
         self.assertEqual(rows[1]["conversions"], 5.0)
+        self.assertEqual(rows[0]["date"], "2026-08-01")
+        self.assertEqual(rows[0]["revenue"], 0.0)
+        self.assertEqual(rows[1]["date"], "2026-08-02")
+        self.assertEqual(rows[1]["revenue"], 40.0)
 
     def test_platform_needs_token(self):
         for fn, args in (

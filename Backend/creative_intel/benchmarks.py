@@ -153,12 +153,23 @@ def _percentile(sorted_vals, pct):
 
 
 def describe_bands(values, weights):
-    """Spend-weighted mean plus p25/median/p75 bands for one metric."""
-    ordered = sorted(values)
-    total = sum(weights)
-    mean = sum(v * w for v, w in zip(values, weights)) / total if total > 0 else 0.0
+    """Spend-weighted mean plus p25/median/p75 bands for one metric.
+
+    Undefined entries (None, e.g. CPA on zero-conversion rows) are
+    excluded from the bands and counted as n_missing: they must never
+    crash the sort/arithmetic and must never be silently treated
+    as zero.
+    """
+    pairs = [(v, w) for v, w in zip(values or [], weights or [])
+             if v is not None and w is not None]
+    vals = [v for v, _w in pairs]
+    wts = [w for _v, w in pairs]
+    ordered = sorted(vals)
+    total = sum(wts)
+    mean = sum(v * w for v, w in pairs) / total if total > 0 else 0.0
     return {
-        "n": len(values),
+        "n": len(vals),
+        "n_missing": len(list(values or [])) - len(vals),
         "mean_weighted": round(mean, 4),
         "p25": round(_percentile(ordered, 25), 4),
         "median": round(_percentile(ordered, 50), 4),
@@ -406,7 +417,7 @@ def benchmark_filtered(conn, filters=None, metric="cpa"):
     stats["projects"] = len(projects)
     status = ("ok" if stats["n"] >= MIN_ADS and stats["projects"] >= MIN_PROJECTS
               else "insufficient")
-    return {"filters": filt, "metric": metric, "n_ads": stats["n"],
+    return {"filters": filt, "metric": metric, "n_ads": len(rows),
             "project_list": projects, "stats": stats, "status": status,
             "fallback_used": False,
             "kpis": kpis_for_rows(rows)}

@@ -1381,6 +1381,22 @@ class EditStyleTest(unittest.TestCase):
         self.assertTrue(any("uses style ugc" in d
                             for d in why["differences"]))
 
+    def test_compare_why_missing_kpi_never_wins(self):
+        why = server._creative_why(
+            "x", "y",
+            {"conversions": 0, "cpa": None, "ctr": None,
+             "impressions": 1000, "annotation": {}},
+            {"conversions": 5, "cpa": 12.0, "ctr": 0.02,
+             "impressions": 1000, "annotation": {}})
+        joined = " ".join(why["differences"])
+        self.assertIn("CPA is not measurable for x", joined)
+        self.assertIn("CTR is not measurable for x", joined)
+        self.assertFalse(any("x leads y on CPA" in d
+                             for d in why["differences"]))
+        self.assertFalse(any("x leads y on CTR" in d
+                             for d in why["differences"]))
+        self.assertEqual(why["top"], "y")
+
 
 class BrandTimingTest(unittest.TestCase):
     BT_CSV = ("Campaign,Ad Name,Creative Name,Amount Spent,Impressions,"

@@ -80,6 +80,27 @@ class MediaUnitTest(unittest.TestCase):
                                 " WHERE creative_key=?", ("m1",)).fetchone()[0]
         self.assertEqual(json.loads(got)["source_url"], rec["url"])
 
+    def test_upload_before_annotation_links_on_annotate(self):
+        rec = media.save_media(self.conn, self.tmp, "m1", "spot.png", B64PNG)
+        ann = creative.blank_annotation()
+        self.assertFalse(ann.get("source_url"))
+        creative.save_annotation(self.conn, "m1", ann)
+        got = self.conn.execute("SELECT annotation_json FROM annotations"
+                                " WHERE creative_key=?", ("m1",)).fetchone()[0]
+        self.assertEqual(json.loads(got)["source_url"], rec["url"])
+
+    def test_existing_source_url_never_overwritten(self):
+        first = media.save_media(self.conn, self.tmp, "m1", "a.png", B64PNG)
+        ann = creative.blank_annotation()
+        creative.save_annotation(self.conn, "m1", ann)
+        second = media.save_media(
+            self.conn, self.tmp, "m1", "b.jpg",
+            base64.b64encode(JPG).decode())
+        self.assertNotEqual(first["id"], second["id"])
+        got = self.conn.execute("SELECT annotation_json FROM annotations"
+                                " WHERE creative_key=?", ("m1",)).fetchone()[0]
+        self.assertEqual(json.loads(got)["source_url"], first["url"])
+
     def test_no_annotation_no_link_no_crash(self):
         rec = media.save_media(self.conn, self.tmp, "m1", "spot.png", B64PNG)
         self.assertTrue(rec["url"].startswith("/media/"))

@@ -22,10 +22,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "..", ".."))
 
 from creative_intel import (  # noqa: E402
+    analyst,
+    analyst_chat,
+    analyst_workbook,
     benchmarks,
     cohorts,
     export_gate,
     media,
+    ooxml,
     qa,
     replay,
     retention,
@@ -39,7 +43,7 @@ from creative_intel import (
     providers as providers_mod,
 )
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import FileResponse  # noqa: E402
+from fastapi.responses import FileResponse, Response  # noqa: E402
 from pydantic import BaseModel, Field, field_validator, model_validator  # noqa: E402
 
 from ci_backend import actions as legacy  # noqa: E402
@@ -740,6 +744,232 @@ async def ask(request: Request, conn=Depends(get_product_conn),
     return out
 
 
+@router.post("/api/analyst/ask")
+async def analyst_ask(request: Request, conn=Depends(get_product_conn),
+                      who=Depends(get_current_employee),
+                      _limited=Depends(ai_rate_limit)):
+    _ = _limited
+    body = _validated(AnalystBody, await json_payload(request), "analyst")
+    settings = request.app.state.ci_settings
+    ctx = {"settings": settings, "media_dir": None}
+    try:
+        loop = asyncio.get_running_loop()
+        out = await loop.run_in_executor(
+            _WORKERS, functools.partial(
+                jobs_mod.run_through, conn, "analyst",
+                body.model_dump(), who.id, 180.0, 2.0, ctx))
+    except jobs_mod.JobTimeout as exc:
+        paudit.audit_request(request, conn, employee_id=who.id,
+                             action="analyst", result="error")
+        raise HTTPException(status_code=504, detail={"error": str(exc)})
+    except jobs_mod.JobFailed as exc:
+        paudit.audit_request(request, conn, employee_id=who.id,
+                             action="analyst", result="error")
+        raise _conflict(exc)
+    except (ValueError, export_gate.ExportBlocked, emp.StoreError) as exc:
+        paudit.audit_request(request, conn, employee_id=who.id,
+                             action="analyst", result="error")
+        raise _conflict(exc)
+    paudit.audit_request(request, conn, employee_id=who.id,
+                         action="analyst")
+    return out
+
+
+@router.get("/api/analyst/conversations")
+def analyst_conversations(conn=Depends(get_product_conn),
+                          who=Depends(get_current_employee)):
+    try:
+        return {"conversations": analyst_chat.list_conversations(
+            conn, who.id)}
+    except ValueError as exc:
+        raise _conflict(exc)
+
+
+@router.get("/api/analyst/conversations/{conv_id}")
+def analyst_conversation(conv_id: str,
+                         conn=Depends(get_product_conn),
+                         who=Depends(get_current_employee)):
+    try:
+        conv = analyst_chat.get_conversation(conn, who.id, conv_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404,
+                            detail={"error": str(exc)})
+    rows = conn.execute(
+        "SELECT role, kind, body_text, created_at FROM analyst_messages"
+        " WHERE conversation_id=? ORDER BY id", (conv_id,)).fetchall()
+    conv["messages"] = [{"role": r[0], "kind": r[1], "text": r[2],
+                         "created_at": r[3]} for r in rows]
+    return conv
+
+
+@router.get("/api/analyst/workbook")
+def analyst_workbook_download(conn=Depends(get_product_conn),
+                              who=Depends(get_current_employee)):
+    _ = (conn, who)
+    blob = analyst_workbook.build_blank_workbook()
+    return Response(
+        content=blob,
+        media_type="application/vnd.openxmlformats-officedocument"
+                   ".spreadsheetml.sheet",
+        headers={"Content-Disposition":
+                 "attachment; filename=\"foap-analyst-workbook.xlsx\""})
+
+
+@router.post("/api/analyst/report")
+async def analyst_report(request: Request,
+                         conn=Depends(get_product_conn),
+                         who=Depends(get_current_employee)):
+    body = _validated(AnalystReportBody, await json_payload(request),
+                      "analyst report")
+    payload = body.model_dump()
+    if not payload.get("override"):
+        try:
+            export_gate.check_reviews(conn)
+        except export_gate.ExportBlocked as exc:
+            paudit.audit_request(request, conn, employee_id=who.id,
+                                 action="analyst-report", result="error")
+            raise _conflict(exc)
+    try:
+        analysis = analyst.analyze_campaign(
+            conn, payload.get("scope") or {}, payload.get("objective") or
+            "reach")
+        report = analyst_chat.build_analyst_report(
+            analysis, lang=payload.get("language") or "en",
+            sections=payload.get("sections") or None,
+            rank_by=payload.get("rank_by"))
+    except ValueError as exc:
+        paudit.audit_request(request, conn, employee_id=who.id,
+                             action="analyst-report", result="error")
+        raise _conflict(exc)
+    paudit.audit_request(request, conn, employee_id=who.id,
+                         action="analyst-report")
+    if payload.get("fmt") == "xlsx":
+        blob = ooxml.build_xlsx(report["sheets"])
+        return Response(
+            content=blob,
+            media_type="application/vnd.openxmlformats-officedocument"
+                       ".spreadsheetml.sheet",
+            headers={"Content-Disposition":
+                     "attachment; filename=\"foap-analyst-report.xlsx\""})
+    return {"format": "one-pager", "markdown": report["markdown"],
+            "meta": report["meta"]}
+
+
+@router.post("/api/analyst/findings/{finding_id}")
+async def analyst_finding_status(
+        finding_id: str, request: Request,
+        conn=Depends(get_product_conn),
+        who=Depends(get_current_employee)):
+    body = _validated(FindingStatusBody, await json_payload(request),
+                      "analyst finding")
+    try:
+        out = analyst_chat.set_finding_status(conn, who.id, finding_id,
+                                              body.status)
+    except ValueError as exc:
+        raise _conflict(exc)
+    paudit.audit_request(request, conn, employee_id=who.id,
+                         action="analyst-finding")
+    return out
+
+
+class AnalystBody(BaseModel):
+    question: str = Field(min_length=1, max_length=2000)
+    conversation_id: str | None = Field(default=None, max_length=64)
+    scope: dict = Field(default_factory=dict)
+    objective: str = "reach"
+    language: str | None = None
+    rank_by: str | None = None
+
+    @field_validator("scope", mode="before")
+    @classmethod
+    def _check_scope(cls, values):
+        from creative_intel import analyst as analyst_mod
+        allowed = set(_FILTER_KEYS) | set(analyst_mod.EXTRA_SCOPE_KEYS)
+        for key in (values or {}):
+            if key not in allowed:
+                raise ValueError("analyst.filters has unknown key %r"
+                                 % (key,))
+        scope = _filter_dict(
+            {k: v for k, v in (values or {}).items()
+             if k in _FILTER_KEYS}, what="analyst")
+        # Analyst extra keys (placement, creator, message_class, ...)
+        # ride along under the same shape limits.
+        for key in analyst_mod.EXTRA_SCOPE_KEYS:
+            if key in (values or {}):
+                vals = (values[key] if isinstance(values[key], list)
+                        else [values[key]])
+                if len(vals) > 50 or any(
+                        not isinstance(v, str) or not v or len(v) > 200
+                        for v in vals):
+                    raise ValueError(
+                        "analyst.filters[%r] must be a list of at most"
+                        " 50 strings" % key)
+                scope[key] = vals
+        return scope
+
+    @field_validator("objective", mode="before")
+    @classmethod
+    def _check_objective(cls, value):
+        text = str(value or "reach").lower()
+        if text not in ("reach", "conversions"):
+            raise ValueError("objective must be reach or conversions")
+        return text
+
+    @field_validator("language", mode="before")
+    @classmethod
+    def _check_language(cls, value):
+        if value is None:
+            return None
+        text = str(value).lower()
+        if text not in ("pl", "en"):
+            raise ValueError("language must be pl or en")
+        return text
+
+    @field_validator("rank_by", mode="before")
+    @classmethod
+    def _check_rank_by(cls, value):
+        if value is None:
+            return None
+        from creative_intel import analyst_metrics as metrics_mod
+        if str(value) not in metrics_mod.METRICS:
+            raise ValueError("rank_by must be a known metric_id")
+        return str(value)
+
+
+class FindingStatusBody(BaseModel):
+    status: str = Field(min_length=1, max_length=16)
+
+
+class AnalystReportBody(BaseModel):
+    scope: dict = Field(default_factory=dict)
+    objective: str = "reach"
+    language: str = "en"
+    sections: list[str] = Field(default_factory=list)
+    fmt: str = "one-pager"
+    rank_by: str | None = None
+    override: bool = False
+
+    @field_validator("sections", mode="before")
+    @classmethod
+    def _check_sections(cls, values):
+        from creative_intel import analyst_chat as chat_mod
+        if values is None:
+            return []
+        unknown = [s for s in values
+                   if s not in chat_mod.REPORT_SECTIONS]
+        if unknown:
+            raise ValueError("unknown report sections: %s"
+                             % ", ".join(unknown))
+        return list(values)
+
+    @field_validator("fmt", mode="before")
+    @classmethod
+    def _check_fmt(cls, value):
+        if value not in ("one-pager", "xlsx"):
+            raise ValueError("fmt must be one-pager or xlsx")
+        return value
+
+
 class PipelineRunBody(BaseModel):
     creative_key: str = Field(default="", max_length=200)
     brand_terms: list[str] = Field(default_factory=list)
@@ -1249,7 +1479,7 @@ def index_alias():
 # React Router client paths: serve the app shell so deep links and
 # refreshes work (item 51). Explicit list — unknown paths still 404.
 _SPA_PATHS = ("campaigns", "creatives", "compare", "benchmarks",
-              "reports", "profile", "settings", "admin")
+              "reports", "profile", "settings", "admin", "analyst")
 
 
 @router.get("/{spa_path}")

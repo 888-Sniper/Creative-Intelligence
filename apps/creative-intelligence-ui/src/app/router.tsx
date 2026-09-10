@@ -6,6 +6,7 @@ import { SettingsPage } from "@/pages/SettingsPage";
 import { CampaignsPage } from "@/pages/CampaignsPage";
 import { CreativesPage } from "@/pages/CreativesPage";
 import { ComparePage } from "@/pages/ComparePage";
+import { AnalystPage } from "@/pages/AnalystPage";
 import { BenchmarksPage } from "@/pages/BenchmarksPage";
 import { ReportsPage } from "@/pages/ReportsPage";
 import { ProfilePage } from "@/profile/ProfilePage";
@@ -33,6 +34,7 @@ export const router = createBrowserRouter([
       { path: "campaigns", element: <CampaignsPage /> },
       { path: "creatives", element: <CreativesPage /> },
       { path: "compare", element: <ComparePage /> },
+      { path: "analyst", element: <AnalystPage /> },
       { path: "benchmarks", element: <BenchmarksPage /> },
       { path: "reports", element: <ReportsPage /> },
       { path: "profile", element: <ProfilePage /> },

@@ -14,6 +14,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from creative_intel import (  # noqa: E402
+    analyst_chat,  # noqa: E402
     benchmarks,
     qa,  # noqa: E402
 )
@@ -93,9 +94,38 @@ def run_ask(conn, payload, owner, ctx, job_id=None):
     return result
 
 
+def run_analyst(conn, payload, owner, ctx, job_id=None):
+    """One persistent Foap Analyst turn, off the event loop.
+
+    Deterministic: numbers come from the shared calculation engine,
+    never the LLM. Progress checkpoints bracket routing, analysis
+    and persistence so cancellation lands between stages.
+    """
+    _ = ctx
+    payload = dict(payload or {})
+    progress, cancelled = (None, None)
+    if job_id:
+        progress, cancelled = _control(conn, job_id)
+        progress(5, "start")
+        _raise_if_cancelled(cancelled)
+    out = analyst_chat.answer_turn(
+        conn, owner or "", payload.get("question", ""),
+        conversation_id=payload.get("conversation_id"),
+        scope=payload.get("scope") or {},
+        objective=payload.get("objective", "reach"),
+        language=payload.get("language"),
+        rank_by=payload.get("rank_by"))
+    if progress is not None:
+        progress(90, "answered")
+    if not isinstance(out, dict):
+        return {"result": out}
+    return out
+
+
 HANDLERS = {
     "pipeline": run_pipeline,
     "ask": run_ask,
+    "analyst": run_analyst,
 }
 
 

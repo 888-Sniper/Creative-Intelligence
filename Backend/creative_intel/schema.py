@@ -29,6 +29,56 @@ NEW_DIMENSIONS = (
     ("revenue_reported", "INTEGER NOT NULL DEFAULT 0"),
 )
 
+# Foap Analyst measurement families (spec section 4). Same
+# backfill-friendly contract as NEW_DIMENSIONS: every column carries
+# NOT NULL + DEFAULT so old databases upgrade with no rewrite.
+# Zero-vs-missing is NOT encoded in these columns — see missing_json
+# below: a stored 0 for a field listed in missing_json means
+# "not supplied", never a measured zero.
+NEW_MEASURES = (
+    # Stable source identity (never creative names alone).
+    ("account_id", "TEXT NOT NULL DEFAULT ''"),
+    ("campaign_id", "TEXT NOT NULL DEFAULT ''"),
+    ("ad_id", "TEXT NOT NULL DEFAULT ''"),
+    ("import_id", "TEXT NOT NULL DEFAULT ''"),
+    # Delivery.
+    ("reach", "INTEGER NOT NULL DEFAULT 0"),
+    ("frequency", "REAL NOT NULL DEFAULT 0"),
+    ("currency", "TEXT NOT NULL DEFAULT ''"),
+    # Early attention.
+    ("video_starts", "INTEGER NOT NULL DEFAULT 0"),
+    ("views_2s", "INTEGER NOT NULL DEFAULT 0"),
+    ("views_3s", "INTEGER NOT NULL DEFAULT 0"),
+    ("views_6s", "INTEGER NOT NULL DEFAULT 0"),
+    # Watch time (basis recorded per row in watch_time_basis).
+    ("watch_time_total_s", "REAL NOT NULL DEFAULT 0"),
+    ("watch_time_basis", "TEXT NOT NULL DEFAULT ''"),
+    ("avg_watch_per_view_s", "REAL NOT NULL DEFAULT 0"),
+    ("avg_watch_per_user_s", "REAL NOT NULL DEFAULT 0"),
+    # Response (link clicks kept separate from all clicks).
+    ("link_clicks", "INTEGER NOT NULL DEFAULT 0"),
+    ("conversion_event", "TEXT NOT NULL DEFAULT ''"),
+    ("attribution", "TEXT NOT NULL DEFAULT ''"),
+    # Engagement.
+    ("likes", "INTEGER NOT NULL DEFAULT 0"),
+    ("comments", "INTEGER NOT NULL DEFAULT 0"),
+    ("shares", "INTEGER NOT NULL DEFAULT 0"),
+    ("saves", "INTEGER NOT NULL DEFAULT 0"),
+    # Creative context.
+    ("creator", "TEXT NOT NULL DEFAULT ''"),
+    ("concept", "TEXT NOT NULL DEFAULT ''"),
+    ("format", "TEXT NOT NULL DEFAULT ''"),
+    ("message_class", "TEXT NOT NULL DEFAULT ''"),
+    ("promotion", "TEXT NOT NULL DEFAULT ''"),
+    # Campaign context.
+    ("placement", "TEXT NOT NULL DEFAULT ''"),
+    ("audience", "TEXT NOT NULL DEFAULT ''"),
+    # Row-level missing-data record: JSON list of canonical fields
+    # that were blank or unsupported for this row. A stored 0 for a
+    # listed field means missing, never a measured zero.
+    ("missing_json", "TEXT NOT NULL DEFAULT '[]'"),
+)
+
 DDL = """
 CREATE TABLE IF NOT EXISTS ads (
     id INTEGER PRIMARY KEY,
@@ -55,7 +105,83 @@ CREATE TABLE IF NOT EXISTS ads (
     funnel_stage TEXT NOT NULL DEFAULT '',
     date TEXT NOT NULL DEFAULT '',
     revenue REAL NOT NULL DEFAULT 0,
-    revenue_reported INTEGER NOT NULL DEFAULT 0
+    revenue_reported INTEGER NOT NULL DEFAULT 0,
+    account_id TEXT NOT NULL DEFAULT '',
+    campaign_id TEXT NOT NULL DEFAULT '',
+    ad_id TEXT NOT NULL DEFAULT '',
+    import_id TEXT NOT NULL DEFAULT '',
+    reach INTEGER NOT NULL DEFAULT 0,
+    frequency REAL NOT NULL DEFAULT 0,
+    currency TEXT NOT NULL DEFAULT '',
+    video_starts INTEGER NOT NULL DEFAULT 0,
+    views_2s INTEGER NOT NULL DEFAULT 0,
+    views_3s INTEGER NOT NULL DEFAULT 0,
+    views_6s INTEGER NOT NULL DEFAULT 0,
+    watch_time_total_s REAL NOT NULL DEFAULT 0,
+    watch_time_basis TEXT NOT NULL DEFAULT '',
+    avg_watch_per_view_s REAL NOT NULL DEFAULT 0,
+    avg_watch_per_user_s REAL NOT NULL DEFAULT 0,
+    link_clicks INTEGER NOT NULL DEFAULT 0,
+    conversion_event TEXT NOT NULL DEFAULT '',
+    attribution TEXT NOT NULL DEFAULT '',
+    likes INTEGER NOT NULL DEFAULT 0,
+    comments INTEGER NOT NULL DEFAULT 0,
+    shares INTEGER NOT NULL DEFAULT 0,
+    saves INTEGER NOT NULL DEFAULT 0,
+    creator TEXT NOT NULL DEFAULT '',
+    concept TEXT NOT NULL DEFAULT '',
+    format TEXT NOT NULL DEFAULT '',
+    message_class TEXT NOT NULL DEFAULT '',
+    promotion TEXT NOT NULL DEFAULT '',
+    placement TEXT NOT NULL DEFAULT '',
+    audience TEXT NOT NULL DEFAULT '',
+    missing_json TEXT NOT NULL DEFAULT '[]'
+);
+CREATE TABLE IF NOT EXISTS analyst_imports (
+    id TEXT PRIMARY KEY,
+    filename TEXT NOT NULL DEFAULT '',
+    platform TEXT NOT NULL DEFAULT '',
+    source TEXT NOT NULL DEFAULT 'upload',
+    locale TEXT NOT NULL DEFAULT '',
+    delimiter TEXT NOT NULL DEFAULT '',
+    mapping_json TEXT NOT NULL DEFAULT '{}',
+    unmapped_json TEXT NOT NULL DEFAULT '[]',
+    rows_imported INTEGER NOT NULL DEFAULT 0,
+    rows_quarantined INTEGER NOT NULL DEFAULT 0,
+    imported_by TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS analyst_conversations (
+    id TEXT PRIMARY KEY,
+    owner_employee_id TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL DEFAULT '',
+    scope_json TEXT NOT NULL DEFAULT '{}',
+    objective TEXT NOT NULL DEFAULT '',
+    language TEXT NOT NULL DEFAULT 'en',
+    dataset_version TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS analyst_messages (
+    id INTEGER PRIMARY KEY,
+    conversation_id TEXT NOT NULL DEFAULT '',
+    role TEXT NOT NULL DEFAULT '',
+    kind TEXT NOT NULL DEFAULT '',
+    body_text TEXT NOT NULL DEFAULT '',
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS analyst_messages_conv
+    ON analyst_messages (conversation_id);
+CREATE TABLE IF NOT EXISTS analyst_findings (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL DEFAULT '',
+    scope_json TEXT NOT NULL DEFAULT '{}',
+    dataset_version TEXT NOT NULL DEFAULT '',
+    finding_json TEXT NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL DEFAULT 'proposed',
+    created_at TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS creatives (
     creative_key TEXT PRIMARY KEY,
@@ -209,10 +335,58 @@ def migrate(conn):
     """
     existing = {row[1] for row in conn.execute("PRAGMA table_info(ads)")}
     added = []
-    for name, ddl in NEW_DIMENSIONS:
+    for name, ddl in NEW_DIMENSIONS + NEW_MEASURES:
         if name not in existing:
             conn.execute("ALTER TABLE ads ADD COLUMN %s %s" % (name, ddl))
             added.append(name)
+    # Analyst workflow tables (conversations, findings, import
+    # provenance). CREATE IF NOT EXISTS: safe on every open.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS analyst_imports ("
+        "id TEXT PRIMARY KEY,"
+        " filename TEXT NOT NULL DEFAULT '',"
+        " platform TEXT NOT NULL DEFAULT '',"
+        " source TEXT NOT NULL DEFAULT 'upload',"
+        " locale TEXT NOT NULL DEFAULT '',"
+        " delimiter TEXT NOT NULL DEFAULT '',"
+        " mapping_json TEXT NOT NULL DEFAULT '{}',"
+        " unmapped_json TEXT NOT NULL DEFAULT '[]',"
+        " rows_imported INTEGER NOT NULL DEFAULT 0,"
+        " rows_quarantined INTEGER NOT NULL DEFAULT 0,"
+        " imported_by TEXT NOT NULL DEFAULT '',"
+        " created_at TEXT NOT NULL DEFAULT '')")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS analyst_conversations ("
+        "id TEXT PRIMARY KEY,"
+        " owner_employee_id TEXT NOT NULL DEFAULT '',"
+        " title TEXT NOT NULL DEFAULT '',"
+        " scope_json TEXT NOT NULL DEFAULT '{}',"
+        " objective TEXT NOT NULL DEFAULT '',"
+        " language TEXT NOT NULL DEFAULT 'en',"
+        " dataset_version TEXT NOT NULL DEFAULT '',"
+        " created_at TEXT NOT NULL DEFAULT '',"
+        " updated_at TEXT NOT NULL DEFAULT '')")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS analyst_messages ("
+        "id INTEGER PRIMARY KEY,"
+        " conversation_id TEXT NOT NULL DEFAULT '',"
+        " role TEXT NOT NULL DEFAULT '',"
+        " kind TEXT NOT NULL DEFAULT '',"
+        " body_text TEXT NOT NULL DEFAULT '',"
+        " payload_json TEXT NOT NULL DEFAULT '{}',"
+        " created_at TEXT NOT NULL DEFAULT '')")
+    conn.execute("CREATE INDEX IF NOT EXISTS analyst_messages_conv"
+                 " ON analyst_messages (conversation_id)")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS analyst_findings ("
+        "id TEXT PRIMARY KEY,"
+        " conversation_id TEXT NOT NULL DEFAULT '',"
+        " scope_json TEXT NOT NULL DEFAULT '{}',"
+        " dataset_version TEXT NOT NULL DEFAULT '',"
+        " finding_json TEXT NOT NULL DEFAULT '{}',"
+        " status TEXT NOT NULL DEFAULT 'proposed',"
+        " created_at TEXT NOT NULL DEFAULT '',"
+        " updated_at TEXT NOT NULL DEFAULT '')")
     retention_cols = {row[1] for row in
                       conn.execute("PRAGMA table_info(retention)")}
     if "source" not in retention_cols:

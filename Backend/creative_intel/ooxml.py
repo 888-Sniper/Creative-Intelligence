@@ -351,6 +351,22 @@ def _xlsx_cell(ref, value, strings, header=False):
         style = ""
     if value is None:
         return '<c r="%s"%s/>' % (ref, style)
+    if isinstance(value, dict) and "formula" in value:
+        # Formula cell: {"formula": "A1*2", "value": cached}. The cached
+        # <v> keeps value-only readers (including our own parse_xlsx /
+        # ingest path) working; Excel recalculates <f> on open.
+        cached = value.get("value")
+        formula = escape(str(value["formula"]))
+        if cached is None:
+            return '<c r="%s"%s><f>%s</f></c>' % (ref, style, formula)
+        if isinstance(cached, bool):
+            return '<c r="%s" t="b"%s><f>%s</f><v>%d</v></c>' % (
+                ref, style, formula, int(cached))
+        if isinstance(cached, (int, float)):
+            return '<c r="%s"%s><f>%s</f><v>%s</v></c>' % (
+                ref, style, formula, repr(cached))
+        return '<c r="%s" t="s"%s><f>%s</f><v>%d</v></c>' % (
+            ref, style, formula, strings.idx(str(cached)))
     if isinstance(value, bool):
         return '<c r="%s" t="b"%s><v>%d</v></c>' % (ref, style, int(value))
     if isinstance(value, (int, float)):
@@ -364,6 +380,9 @@ def _cell_len(value):
         return 0
     if isinstance(value, bool):
         return 5
+    if isinstance(value, dict) and "formula" in value:
+        cached = value.get("value")
+        return 0 if cached is None else len(str(cached))
     return len(str(value))
 
 
@@ -387,7 +406,10 @@ def build_xlsx(sheets):
     for pos, sheet in enumerate(sheets):
         header = [str(h) for h in sheet.get("header", [])]
         rows = sheet.get("rows", [])
-        grid = [header] + [list(map(str_or_num, r_)) for r_ in rows]
+        # An empty header means the sheet carries its own title/header
+        # rows (e.g. the analyst workbook) — emit no blank first row.
+        grid = ([header] if header else []) + \
+            [list(map(str_or_num, r_)) for r_ in rows]
         width = max([len(row) for row in grid] or [0])
         cols = "".join(
             '<col min="%d" max="%d" width="%d" customWidth="1"/>' % (i + 1, i + 1, w)
@@ -500,17 +522,24 @@ def parse_xlsx(blob):
         zf.close()
     grid = {}
     for row_xml in re.findall(r"<row[^>]*>(.*?)</row>", sheet, re.S):
-        for cell in re.findall(r"<c\b(.*?)</c>|<c\b(.*?)/>", row_xml, re.S):
-            if cell[0] and ">" in cell[0]:
+        # Self-closing branch first: `<c r="B2"/>` must not match the
+        # open-cell branch with attrs swallowing `/><c r="C2" ...`.
+        for cell in re.findall(r"<c\b([^>]*)/>|<c\b(.*?)</c>",
+                               row_xml, re.S):
+            if cell[1] and ">" in cell[1]:
                 # Group spans attributes + inner XML: split at first ">".
-                attrs, inner = cell[0].split(">", 1)
+                attrs, inner = cell[1].split(">", 1)
                 inner = inner or None
             else:
-                attrs, inner = cell[0] or cell[1], None
+                attrs, inner = cell[0], None
             ref = re.search(r'r="([^"]+)"', attrs)
             typ = re.search(r't="([^"]+)"', attrs)
             if not ref:
                 continue
+            if inner is not None:
+                # Formula cells carry <f>; read the cached <v> only so a
+                # formula workbook stays importable as values.
+                inner = re.sub(r"<f>.*?</f>", "", inner, flags=re.S) or None
             col, row = _split_ref(ref.group(1))
             if col is None:
                 continue

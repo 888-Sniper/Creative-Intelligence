@@ -25,6 +25,33 @@ EDIT_STYLES = ("talking_head", "ugc", "product_demo", "montage",
                "slideshow_static", "cinematic", "testimonial",
                "screen_recording", "mixed", "other")
 
+# Foap Analyst classification dimensions (spec section 7). Optional on
+# top of the v0 schema: old annotations without them stay valid.
+OPENING_DELIVERY = ("direct_to_camera", "voiceover", "text_led",
+                    "product_first", "demonstration", "silent_aesthetic",
+                    "mixed", "unknown")
+
+NARRATIVES = ("peer_recommendation", "first_use", "educational",
+              "demonstration", "testimonial", "story", "other",
+              "unknown")
+
+MESSAGE_CLASSES = ("promotional", "neutral", "mixed", "unknown")
+
+PROMOTION_KINDS = ("discount", "price", "retail_offer", "subtle_mention",
+                   "explicit_sales", "absent", "unknown")
+
+FORMAT_KINDS = ("creator_led", "branded", "hybrid", "b_roll",
+                "graphics_remix", "dialogue", "solo_creator", "other",
+                "unknown")
+
+MEDIA_KINDS = ("video", "image", "audio", "unknown")
+
+# Dimensions a human analyst may confirm. Auto saves preserve confirmed
+# values instead of silently overwriting them.
+CONFIRMABLE_DIMS = ("opening_delivery", "hook_type", "hook_modality",
+                    "narrative", "message_class", "promotion_kind",
+                    "format_kind", "creator_vs_branded", "edit_style")
+
 MAX_BRAND_TERMS = 20
 
 
@@ -117,6 +144,29 @@ def blank_annotation():
         "duration_s": 0.0,
         "pace_cuts_per_min": 0.0,
         "status": "auto",
+        # Analyst dimensions (spec section 7). "unknown" is a real
+        # state: unclassified, never a silent default claim.
+        "opening_delivery": "unknown",
+        "narrative": "unknown",
+        "message_class": "unknown",
+        "promotion_kind": "unknown",
+        "format_kind": "unknown",
+        "media_kind": "unknown",
+        "frame_times": [],
+        "timestamp_resolution_s": 0.0,
+        "execution": {"product_first_s": None, "logo_first_s": None,
+                      "spoken_brand_s": None, "has_cta": None,
+                      "end_frame": "", "pace": ""},
+        "concept": {"creator_id": "", "angle": "", "use_case": "",
+                    "tags": []},
+        # Machine observations with supporting evidence spans.
+        "evidence": [],
+        # Human-confirmed dimensions: {dim: value}. Auto analysis
+        # preserves these on save instead of overwriting them.
+        "confirmed": {},
+        # Measured brand recall stays absent until a study or supplied
+        # measurement provides it. Early logo exposure is not recall.
+        "measured_recall": None,
     }
 
 
@@ -158,7 +208,117 @@ def validate(ann):
             errors.append("%s must be 0..1" % key)
     if ann.get("status") not in STATUSES:
         errors.append("status must be one of %s" % (list(STATUSES),))
+    # Analyst dimensions are optional (v0 annotations stay valid) but
+    # constrained when present.
+    for key, allowed in (("opening_delivery", OPENING_DELIVERY),
+                         ("narrative", NARRATIVES),
+                         ("message_class", MESSAGE_CLASSES),
+                         ("promotion_kind", PROMOTION_KINDS),
+                         ("format_kind", FORMAT_KINDS),
+                         ("media_kind", MEDIA_KINDS)):
+        if key in ann and ann.get(key) not in allowed:
+            errors.append("%s must be one of %s" % (key, list(allowed)))
+    for item in ann.get("evidence", []) or []:
+        if not isinstance(item, dict) or not item.get("dimension"):
+            errors.append("evidence entries need a dimension")
+            break
+        try:
+            float(item.get("confidence", -1))
+        except (TypeError, ValueError):
+            errors.append("evidence confidence must be numeric")
+            break
     return errors
+
+
+def _confirmed_of(ann):
+    confirmed = (ann or {}).get("confirmed")
+    return dict(confirmed) if isinstance(confirmed, dict) else {}
+
+
+def set_classification(conn, creative_key, dim, value, evidence=None,
+                       measured_recall=None):
+    """Human correction path for one classification dimension.
+
+    Validates the value, appends the supporting evidence entry and
+    locks the dimension: later auto saves preserve it instead of
+    silently overwriting the analyst's judgement. measured_recall may
+    only be set here with an explicit study reference — never inferred
+    from logo exposure or audio mentions.
+    """
+    allowed = {"opening_delivery": OPENING_DELIVERY,
+               "hook_type": HOOK_TYPES, "hook_modality": HOOK_MODALITIES,
+               "narrative": NARRATIVES, "message_class": MESSAGE_CLASSES,
+               "promotion_kind": PROMOTION_KINDS,
+               "format_kind": FORMAT_KINDS,
+               "creator_vs_branded": CREATOR_MODES,
+               "edit_style": EDIT_STYLES}.get(dim)
+    if allowed is None:
+        raise ValueError("dimension %r is not human-confirmable" % (dim,))
+    if value not in allowed:
+        raise ValueError("%s must be one of %s" % (dim, list(allowed)))
+    row = conn.execute("SELECT annotation_json FROM annotations"
+                       " WHERE creative_key=?", (creative_key,)).fetchone()
+    ann = dict(json.loads(row[0])) if row else blank_annotation()
+    ann[dim] = value
+    confirmed = _confirmed_of(ann)
+    confirmed[dim] = value
+    ann["confirmed"] = confirmed
+    if evidence is not None:
+        entry = dict(evidence)
+        entry["dimension"] = dim
+        entry["value"] = value
+        entry["by"] = "human"
+        ann.setdefault("evidence", []).append(entry)
+    if measured_recall is not None:
+        if not isinstance(measured_recall, dict) or \
+                not measured_recall.get("study"):
+            raise ValueError("measured recall needs a study reference")
+        ann["measured_recall"] = measured_recall
+    save_annotation(conn, creative_key, ann)
+    return ann
+
+
+def brand_evidence_summary(ann):
+    """Four distinct brand states; recall is never inferred.
+
+    Returns {"visible": spans, "spoken_s": t|None,
+    "opportunity": note, "recall": measured|None}. An audio mention is
+    not proof every viewer heard it; early logo exposure is not proof
+    of recall.
+    """
+    ann = ann or {}
+    visible = list(ann.get("brand_seconds") or []) + \
+        list(ann.get("logo_seconds") or [])
+    spoken = ann.get("brand_audio_mention_s")
+    opportunity = None
+    if visible or spoken is not None:
+        bits = []
+        if visible:
+            first = min(s.get("start_s", 0) for s in visible
+                        if isinstance(s, dict))
+            bits.append("brand/logo visible from ~%ss in sampled frames"
+                        % first)
+        if spoken is not None:
+            bits.append("brand spoken at ~%ss of the supplied audio"
+                        % spoken)
+        opportunity = ("opportunity to encounter the brand: %s. This is"
+                       " exposure opportunity, not measured recall."
+                       % "; ".join(bits))
+    return {"visible": visible, "spoken_s": spoken,
+            "opportunity": opportunity,
+            "recall": ann.get("measured_recall")}
+
+
+def message_class_of(ann, ads_row=None):
+    """Resolve promotional classification: explicit import value first,
+    then the annotation, else unknown. Never guessed from a name."""
+    imported = ((ads_row or {}).get("message_class") or "").strip().lower()
+    if imported in MESSAGE_CLASSES and imported != "unknown":
+        return imported
+    labelled = ((ann or {}).get("message_class") or "").strip().lower()
+    if labelled in MESSAGE_CLASSES:
+        return labelled
+    return "unknown"
 
 
 def _attach_prior_media(conn, creative_key, ann):
@@ -182,6 +342,28 @@ def _attach_prior_media(conn, creative_key, ann):
 
 
 def save_annotation(conn, creative_key, ann):
+    ann = dict(ann)
+    if ann.get("status") != "human_verified":
+        # Auto analysis never silently overwrites human-confirmed
+        # labels: restore locked dimensions from the stored revision.
+        try:
+            row = conn.execute("SELECT annotation_json FROM annotations"
+                               " WHERE creative_key=?",
+                               (creative_key,)).fetchone()
+        except Exception:
+            row = None
+        if row:
+            try:
+                prior = json.loads(row[0])
+            except (ValueError, TypeError):
+                prior = {}
+            locked = _confirmed_of(prior)
+            if locked:
+                for dim, value in locked.items():
+                    ann[dim] = value
+                merged = _confirmed_of(ann)
+                merged.update(locked)
+                ann["confirmed"] = merged
     errors = validate(ann)
     if errors:
         raise ValueError("; ".join(errors))
@@ -271,6 +453,22 @@ def run_pipeline(conn, creative_key, providers, media=None, brand_terms=None,
         frames = [{"t_sec": t} for t in times]
     else:
         frames = providers.vision.sample_frames(creative_key)
+    frame_times = sorted(float(f.get("t_sec", 0)) for f in frames
+                         if isinstance(f, dict))
+    gaps = [b - a for a, b in zip(frame_times, frame_times[1:]) if b > a]
+    # "First observed at 1.0s" means first sampled frame at 1.0s, not
+    # necessarily first appearance: resolution is the sampling step.
+    timestamp_resolution_s = round(min(gaps), 2) if gaps else 0.0
+    has_audio = audio_blob is not None
+    has_images = bool(media.get("images") or frame_times)
+    if has_audio and has_images:
+        media_kind = "video"
+    elif has_images:
+        media_kind = "image"
+    elif has_audio:
+        media_kind = "audio"
+    else:
+        media_kind = "unknown"
     stages.append({"stage": "frame-sample", "frames": len(frames),
                    "covers_s": max([f["t_sec"] for f in frames] + [0]),
                    "confidence": 1.0 if frames else 0.0})
@@ -289,6 +487,9 @@ def run_pipeline(conn, creative_key, providers, media=None, brand_terms=None,
     checkpoint(90, "llm-structure")
     ann["schema_version"] = SCHEMA_VERSION
     ann["status"] = "auto"
+    ann["media_kind"] = media_kind
+    ann["frame_times"] = frame_times
+    ann["timestamp_resolution_s"] = timestamp_resolution_s
     if timings:
         # Word-level audio timings ({w, t}) when the STT adapter
         # supplies them — basis for audible-mention analysis.

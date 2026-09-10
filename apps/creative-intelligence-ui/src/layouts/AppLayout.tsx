@@ -11,6 +11,7 @@ const TABS = [
   { to: "/campaigns", label: "Campaigns", end: false },
   { to: "/creatives", label: "Creatives", end: false },
   { to: "/compare", label: "Compare", end: false },
+  { to: "/analyst", label: "Analyst", end: false },
   { to: "/benchmarks", label: "Benchmarks", end: false },
   { to: "/reports", label: "Reports", end: false },
   { to: "/profile", label: "Profile", end: false },

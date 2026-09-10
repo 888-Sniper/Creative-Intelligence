@@ -389,21 +389,32 @@ def _jobs_with_runs(conn):
     return out
 
 
-def tick(conn):
+def tick(conn, bearer_for=None):
     """Run every enabled job once with retries. Returns {job_id: result}.
 
     Several jobs may share one source; each runs independently. A
     failing job records its error run and does not stop the others;
     its exception text is returned under that job's "error" key.
+
+    bearer_for is an optional callable taking a job dict and returning
+    a Google access token (or raising) for sheets/drive jobs whose
+    params opt in with google_auth. Without it, private-file jobs fail
+    closed on their own schedule instead of silently using public links.
     """
     results = {}
     for job in list_jobs(conn, include_disabled=False):
         source, params = job["source"], job["params"]
         try:
+            bearer = _job_bearer(job, bearer_for)
+            if bearer:
+                def _fetch(s=source, p=params,
+                           b=bearer):  # noqa: B023 - intentional capture
+                    return fetch_job(s, p, bearer=b)
+            else:
+                def _fetch(s=source, p=params):  # noqa: B023
+                    return fetch_job(s, p)
             results[job["id"]] = dict(
-                run_once(conn, source,
-                         lambda s=source, p=params: fetch_job(s, p),
-                         job_id=job["id"]))
+                run_once(conn, source, _fetch, job_id=job["id"]))
             results[job["id"]]["ok"] = True
             results[job["id"]]["source"] = source
             results[job["id"]]["name"] = job["name"]
@@ -414,11 +425,25 @@ def tick(conn):
     return results
 
 
-def daemon(db_path, interval_s, stop_event=None, sleep=time.sleep):
+def _job_bearer(job, bearer_for):
+    """Google access token for an opted-in sheets/drive job, else None."""
+    if bearer_for is None:
+        return None
+    if job["source"] not in ("sheets", "drive"):
+        return None
+    if not (job["params"] or {}).get("google_auth"):
+        return None
+    return bearer_for(job)
+
+
+def daemon(db_path, interval_s, stop_event=None, sleep=time.sleep,
+           bearer_for=None):
     """Blocking scheduler loop: tick() every interval_s seconds.
 
     Opens a fresh connection per tick (SQLite connections are not
     shared across threads). Returns when stop_event is set.
+    bearer_for is passed through to tick() so private Google jobs
+    refresh credentials on schedule, not just on manual runs.
     """
     stop = stop_event or threading.Event()
     while not stop.is_set():
@@ -428,7 +453,7 @@ def daemon(db_path, interval_s, stop_event=None, sleep=time.sleep):
         try:
             from creative_intel import schema as schema_mod
             schema_mod.init_db(conn)
-            tick(conn)
+            tick(conn, bearer_for=bearer_for)
         except Exception as exc:  # noqa: BLE001 - daemon must survive
             print("sync tick failed: %s: %s"
                   % (type(exc).__name__, exc))

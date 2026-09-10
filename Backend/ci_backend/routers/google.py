@@ -76,8 +76,9 @@ def google_status(request: Request, db: Session = Depends(get_db)):
 
 
 @router.post("/disconnect")
-def google_disconnect(request: Request, db: Session = Depends(get_db)):
+def google_disconnect(request: Request, db: Session = Depends(get_db),
+                      settings: Settings = Depends(get_settings)):
     employee = _actor(request, db)
-    goog.forget(db, employee.id)
+    goog.forget(db, employee.id, settings)
     security_log.event("google_disconnected", actor=employee.id)
     return {"ok": True}

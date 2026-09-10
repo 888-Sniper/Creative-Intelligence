@@ -426,5 +426,58 @@ class PrivateFileBearerTest(unittest.TestCase):
         self.assertTrue(rows)
 
 
+class TickBearerTest(unittest.TestCase):
+    """tick() resolves Google credentials for opted-in jobs (only)."""
+
+    def test_tick_passes_bearer_to_google_jobs(self):
+        conn = _conn()
+        seen = []
+        real = sync.fetch_job
+
+        def fake(source, params, bearer=None):
+            seen.append((params.get("url"), bearer))
+            return ([], [])
+
+        sync.fetch_job = fake
+        try:
+            priv = sync.create_job(
+                conn, "sheets", "Private",
+                {"platform": "meta", "url": "https://x",
+                 "google_auth": True}, "owner-1")
+            pub = sync.create_job(conn, "sheets", "Public",
+                                  {"platform": "meta",
+                                   "url": "https://y"}, "owner-1")
+            out = sync.tick(
+                conn,
+                bearer_for=lambda job: "tok-for-%s" % job[
+                    "owner_employee_id"])
+        finally:
+            sync.fetch_job = real
+        by_url = dict(seen)
+        self.assertEqual(by_url.get("https://x"), "tok-for-owner-1")
+        self.assertIsNone(by_url.get("https://y"))
+        self.assertTrue(out[priv["id"]]["ok"])
+        self.assertTrue(out[pub["id"]]["ok"])
+
+    def test_tick_records_resolver_failure_per_job(self):
+        conn = _conn()
+        real = sync.fetch_job
+        sync.fetch_job = lambda source, params, bearer=None: ([], [])
+        try:
+            job = sync.create_job(
+                conn, "drive", "Private",
+                {"platform": "meta", "url": "https://x",
+                 "google_auth": True}, "owner-9")
+
+            def boom(_job):
+                raise ValueError("Google Drive is not connected.")
+
+            out = sync.tick(conn, bearer_for=boom)
+        finally:
+            sync.fetch_job = real
+        self.assertFalse(out[job["id"]]["ok"])
+        self.assertIn("not connected", out[job["id"]]["error"])
+
+
 if __name__ == "__main__":
     unittest.main()

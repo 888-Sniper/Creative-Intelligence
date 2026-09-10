@@ -36,7 +36,7 @@ def _version(engine):
 def test_fresh_upgrade_downgrade_upgrade(tmp_path):
     engine = make_engine(str(tmp_path / "mig.db"))
     ensure_migrated(engine)
-    assert _version(engine) == ["0005"]
+    assert _version(engine) == ["0006"]
     with engine.connect() as conn:
         tables = set(inspect(conn).get_table_names())
     assert {"employees", "auth_sessions", "auth_pending",
@@ -47,7 +47,7 @@ def test_fresh_upgrade_downgrade_upgrade(tmp_path):
         cols = {c["name"] for c in inspect(conn).get_columns("auth_sessions")}
     assert "container_id" not in cols
     _upgrade(engine, "head")
-    assert _version(engine) == ["0005"]
+    assert _version(engine) == ["0006"]
     with engine.connect() as conn:
         cols = {c["name"] for c in inspect(conn).get_columns("auth_sessions")}
     assert "container_id" in cols
@@ -60,14 +60,29 @@ def test_fresh_upgrade_downgrade_upgrade(tmp_path):
     assert not ({"employees", "auth_sessions", "auth_pending",
                  "employee_audit"} & tables)
     ensure_migrated(engine)
-    assert _version(engine) == ["0005"]
+    assert _version(engine) == ["0006"]
     with engine.connect() as conn:
         tables = set(inspect(conn).get_table_names())
     assert {"employees", "auth_sessions", "auth_pending",
             "employee_audit"} <= tables
     # App boot stays on head and is idempotent.
     ensure_migrated(engine)
-    assert _version(engine) == ["0005"]
+    assert _version(engine) == ["0006"]
+
+
+def test_ensure_upgrades_behind_database_forward(tmp_path):
+    from ci_backend.db import script_head
+    assert script_head() == "0006"
+    engine = make_engine(str(tmp_path / "behind.db"))
+    ensure_migrated(engine)
+    _downgrade(engine, "0003")
+    assert _version(engine) == ["0003"]
+    # Boot no longer sits stale on an old revision: it upgrades.
+    ensure_migrated(engine)
+    assert _version(engine) == ["0006"]
+    with engine.connect() as conn:
+        cols = {c["name"] for c in inspect(conn).get_columns("oauth_tokens")}
+    assert "refresh_token_enc" in cols
 
 
 def test_legacy_create_all_db_migrates_with_data(tmp_path):
@@ -77,7 +92,7 @@ def test_legacy_create_all_db_migrates_with_data(tmp_path):
         admin = emp.admin_create(sess, "root", "ada@foap.test", role="admin")
         emp.create_session(sess, admin.id, "")
     ensure_migrated(engine)
-    assert _version(engine) == ["0005"]
+    assert _version(engine) == ["0006"]
     with engine.connect() as conn:
         assert conn.execute(text("SELECT count(*) FROM employees")
                             ).fetchone()[0] == 1

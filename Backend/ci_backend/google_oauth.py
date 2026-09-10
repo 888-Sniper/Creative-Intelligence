@@ -1,9 +1,11 @@
 """Google OAuth for private Drive/Sheets (item 31).
 
 Server-side flow only: the browser never sees the client secret or any
-token. Short-lived access tokens live in the oauth_tokens table;
-long-lived refresh tokens live in the OS keychain. The pending-state
-machinery (single-use, expiring) is shared with the WorkOS flow.
+token. Access tokens (short-lived) and refresh tokens (long-lived,
+encrypted under the server master key) live in the oauth_tokens table,
+so private sync survives restarts and deploys with no desktop keychain.
+The pending-state machinery (single-use, expiring) is shared with the
+WorkOS flow.
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from ci_backend import credentials as secrets_mod
 from ci_backend import employees as emp
+from ci_backend import token_crypto
 from ci_backend import workos as workos_mod
 from ci_backend.config import Settings
 from ci_backend.db import OAuthToken
@@ -25,6 +28,7 @@ from ci_backend.db import OAuthToken
 PROVIDER = "google"
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+GOOGLE_REVOKE_URL = "https://oauth2.googleapis.com/revoke"
 # Read-only: listing/downloading files the employee can already see.
 SCOPES = ("https://www.googleapis.com/auth/drive.readonly",)
 
@@ -34,6 +38,7 @@ class GoogleError(Exception):
 
 
 def keyring_account(employee_id: str) -> str:
+    """Legacy OS-keychain account (pre-encryption storage)."""
     return "%s-%s" % (secrets_mod.GOOGLE_ACCOUNT, employee_id)
 
 
@@ -107,11 +112,17 @@ def finish_google(db: Session, code: str, state: str, employee_id: str,
         "redirect_uri": settings.google_redirect_uri.strip(),
         "code_verifier": row.verifier,
     }, settings)
-    _store(db, employee_id, body)
-    return {"ok": "connected", "scope": " ".join(SCOPES)}
+    granted = body.get("scope") or ""
+    if granted and SCOPES[0] not in str(granted).split():
+        raise GoogleError(
+            "Google did not grant read-only Drive access.")
+    _store(db, employee_id, body, settings,
+           scope=str(granted) or " ".join(SCOPES))
+    return {"ok": "connected", "scope": str(granted) or " ".join(SCOPES)}
 
 
-def _store(db: Session, employee_id: str, body: dict[str, Any]) -> None:
+def _store(db: Session, employee_id: str, body: dict[str, Any],
+           settings=None, scope: str = "") -> None:
     now = datetime.datetime.now(datetime.timezone.utc)
     lifetime = body.get("expires_in")
     try:
@@ -125,39 +136,79 @@ def _store(db: Session, employee_id: str, body: dict[str, Any]) -> None:
     row.access_token = str(body.get("access_token") or "")
     row.expires_at = (now + datetime.timedelta(
         seconds=max(seconds, 60))).isoformat(timespec="seconds")
-    row.scope = " ".join(SCOPES)
+    row.scope = scope or " ".join(SCOPES)
     row.updated_at = now.isoformat(timespec="seconds")
-    db.commit()
     refresh = body.get("refresh_token")
     if refresh:
-        # Long-lived secret: OS keychain only, never the database.
-        try:
-            import keyring
-            keyring.set_password(secrets_mod.SERVICE,
-                                 keyring_account(employee_id), str(refresh))
-        except Exception:
-            pass
+        # Long-lived secret: encrypted in this row, never in logs.
+        row.refresh_token_enc = token_crypto.encrypt_secret(
+            str(refresh), settings)
+    db.commit()
 
 
-def _refresh_token_for(employee_id: str) -> str:
+def _refresh_token_for(db: Session, employee_id: str,
+                       settings=None) -> str:
+    """Decrypt the stored refresh token, upgrading legacy keychain rows."""
+    row = db.get(OAuthToken, (PROVIDER, employee_id))
+    if row is not None and getattr(row, "refresh_token_enc", ""):
+        return token_crypto.decrypt_secret(row.refresh_token_enc, settings)
+    # One-time upgrade: rows stored before encryption kept the secret
+    # in the OS keychain. Move it into the database, then drop it.
+    legacy = ""
     try:
         import keyring
-        return keyring.get_password(
+        legacy = keyring.get_password(
             secrets_mod.SERVICE, keyring_account(employee_id)) or ""
     except Exception:
-        return ""
+        legacy = ""
+    if legacy and row is not None:
+        row.refresh_token_enc = token_crypto.encrypt_secret(
+            legacy, settings)
+        db.commit()
+        try:
+            import keyring
+            keyring.delete_password(secrets_mod.SERVICE,
+                                    keyring_account(employee_id))
+        except Exception:
+            pass
+    return legacy
 
 
-def forget(db: Session, employee_id: str) -> None:
-    """Disconnect Google: drop the access row and the keychain refresh."""
+def forget(db: Session, employee_id: str, settings=None) -> None:
+    """Disconnect Google: revoke at Google, then drop the stored row."""
     row = db.get(OAuthToken, (PROVIDER, employee_id))
     if row is not None:
+        _revoke(getattr(row, "refresh_token_enc", ""), row.access_token,
+                settings)
         db.delete(row)
         db.commit()
+    _forget_legacy_keychain(employee_id)
+
+
+def _forget_legacy_keychain(employee_id: str) -> None:
     try:
         import keyring
         keyring.delete_password(secrets_mod.SERVICE,
                                 keyring_account(employee_id))
+    except Exception:
+        pass
+
+
+def _revoke(refresh_enc: str, access_token: str, settings=None) -> None:
+    """Best-effort server-side revocation; local wipe happens regardless."""
+    token = ""
+    if refresh_enc:
+        try:
+            token = token_crypto.decrypt_secret(refresh_enc, settings)
+        except token_crypto.CryptoError:
+            token = ""
+    try:
+        with httpx.Client(timeout=20) as client:
+            if token:
+                client.post(GOOGLE_REVOKE_URL, data={"token": token})
+            if access_token:
+                client.post(GOOGLE_REVOKE_URL,
+                            data={"token": access_token})
     except Exception:
         pass
 
@@ -185,13 +236,16 @@ def access_token_for(db: Session, employee_id: str,
         expired = True
     if not expired:
         return row.access_token
-    refresh = _refresh_token_for(employee_id)
+    try:
+        refresh = _refresh_token_for(db, employee_id, settings)
+    except token_crypto.CryptoError as exc:
+        raise emp.StoreError(str(exc))
     if not refresh:
         raise emp.StoreError(
             "Google session expired. Reconnect it in Settings.")
     body = _exchange({"grant_type": "refresh_token",
                       "refresh_token": refresh}, settings)
-    _store(db, employee_id, body)
+    _store(db, employee_id, body, settings, scope=row.scope)
     return str(body.get("access_token") or "")
 
 

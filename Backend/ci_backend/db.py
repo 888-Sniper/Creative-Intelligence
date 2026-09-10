@@ -76,9 +76,10 @@ class AuthPending(Base):
 class OAuthToken(Base):
     """Per-employee third-party OAuth tokens (item 31: Google).
 
-    The SHORT-LIVED access token lives here; the long-lived REFRESH
-    token lives in the OS keychain (never in the database, logs, or
-    the browser). Composite PK stops duplicate rows per owner.
+    The SHORT-LIVED access token lives here in plaintext; the
+    long-lived REFRESH token lives here too but encrypted under the
+    server master key (never in logs or the browser). Composite PK
+    stops duplicate rows per owner.
     """
 
     __tablename__ = "oauth_tokens"
@@ -90,6 +91,7 @@ class OAuthToken(Base):
     expires_at: Mapped[str] = mapped_column(String, default="")
     scope: Mapped[str] = mapped_column(String, default="")
     updated_at: Mapped[str] = mapped_column(String, default="")
+    refresh_token_enc: Mapped[str] = mapped_column(String, default="")
 
 
 class EmployeeAudit(Base):
@@ -139,12 +141,27 @@ def alembic_script_location() -> str:
     return str(_Path(__file__).resolve().parent.parent / "alembic")
 
 
+def script_head() -> str:
+    """Single expected Alembic head; fails closed on script branches."""
+    from alembic.config import Config as _Config
+    from alembic.script import ScriptDirectory as _ScriptDirectory
+    cfg = _Config()
+    cfg.set_main_option("script_location", alembic_script_location())
+    heads = _ScriptDirectory.from_config(cfg).get_heads()
+    if len(heads) != 1:
+        raise RuntimeError(
+            "migrations must have exactly one head, found %r" % (heads,))
+    return heads[0]
+
+
 def ensure_migrated(engine) -> None:
     """Bring identity tables to Alembic head (authoritative path).
 
     Fresh databases upgrade from scratch. Databases created by the
     legacy create_all path carry the 0001 shape, so they are stamped
     0001 first and then upgraded — never rebuilt, never wiped.
+    Databases on an older revision upgrade forward; multiple heads
+    or a post-upgrade mismatch fail closed instead of booting stale.
     """
     from alembic import command as _command
     from alembic.config import Config as _Config
@@ -152,11 +169,16 @@ def ensure_migrated(engine) -> None:
     from sqlalchemy import inspect as _inspect
     cfg = _Config()
     cfg.set_main_option("script_location", alembic_script_location())
+    expected = script_head()
     with engine.connect() as conn:
         ctx = _MigrationContext.configure(conn)
         heads = ctx.get_current_heads()
         legacy = _inspect(conn).has_table("employees")
-    if heads:
+    if len(heads) > 1:
+        raise RuntimeError(
+            "database has multiple migration heads %r: refusing to boot"
+            % (heads,))
+    if list(heads) == [expected]:
         return
     # Migrations run on a disposable engine: the FK enforcement
     # window in env.py must never touch pooled connections, and the
@@ -168,10 +190,17 @@ def ensure_migrated(engine) -> None:
     try:
         with migrant.connect() as conn:
             cfg.attributes["connection"] = conn
-            if legacy:
+            if legacy and not heads:
                 _command.stamp(cfg, "0001")
             _command.upgrade(cfg, "head")
             conn.commit()
+        with migrant.connect() as conn:
+            ctx = _MigrationContext.configure(conn)
+            landed = list(ctx.get_current_heads())
+        if landed != [expected]:
+            raise RuntimeError(
+                "migration landed on %r, expected head %r"
+                % (landed, expected))
     finally:
         migrant.dispose()
 

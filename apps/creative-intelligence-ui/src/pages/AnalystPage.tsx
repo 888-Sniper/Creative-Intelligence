@@ -100,6 +100,9 @@ export function AnalystPage() {
   const [input, setInput] = useState("");
   const [objective, setObjective] = useState(filters.objective || "reach");
   const [locale, setLocale] = useState("auto");
+  // Backend contract (AnalystBody.language): "pl" | "en" | omitted.
+  // "auto" means omit so the backend detects from the question text.
+  const language = locale === "auto" ? undefined : locale;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastScope, setLastScope] = useState("");
@@ -148,7 +151,7 @@ export function AnalystPage() {
         question,
         scope: scopeBody(scope),
         objective: objective || undefined,
-        locale,
+        language,
         max_points: maxPoints,
       });
       if (!activeId) setActiveId(data.conversation_id);
@@ -176,7 +179,7 @@ export function AnalystPage() {
           ? await downloadReportBlob({
               scope: scopeBody(scope),
               objective: objective || undefined,
-              locale,
+              language,
               fmt,
             })
           : new Blob(
@@ -188,7 +191,7 @@ export function AnalystPage() {
                     {
                       scope: scopeBody(scope),
                       objective: objective || undefined,
-                      locale,
+                      language,
                       fmt,
                     },
                   )

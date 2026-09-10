@@ -127,6 +127,48 @@ describe("AnalystPage", () => {
     });
   });
 
+  it("sends language only when explicitly chosen", async () => {
+    mockFetch();
+    renderPage();
+    fireEvent.change(screen.getByLabelText(/Language/), {
+      target: { value: "pl" },
+    });
+    fireEvent.change(screen.getByLabelText("Ask Foap Analyst"), {
+      target: { value: "analyse hooks" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Ask" }));
+    const fetchMock = window.fetch as unknown as ReturnType<typeof vi.fn>;
+    await waitFor(() => {
+      const ask = fetchMock.mock.calls.find((c) =>
+        String(c[0]).startsWith("/api/analyst/ask"),
+      );
+      expect(ask).toBeDefined();
+      const body = JSON.parse(String(ask?.[1]?.body));
+      // Backend contract is `language`; `locale` would be ignored.
+      expect(body).toHaveProperty("language", "pl");
+      expect(body).not.toHaveProperty("locale");
+    });
+  });
+
+  it("omits language on auto so the backend detects it", async () => {
+    mockFetch();
+    renderPage();
+    fireEvent.change(screen.getByLabelText("Ask Foap Analyst"), {
+      target: { value: "analyse hooks" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Ask" }));
+    const fetchMock = window.fetch as unknown as ReturnType<typeof vi.fn>;
+    await waitFor(() => {
+      const ask = fetchMock.mock.calls.find((c) =>
+        String(c[0]).startsWith("/api/analyst/ask"),
+      );
+      expect(ask).toBeDefined();
+      const body = JSON.parse(String(ask?.[1]?.body));
+      expect(body).not.toHaveProperty("language");
+      expect(body).not.toHaveProperty("locale");
+    });
+  });
+
   it("maps scope params to body arrays", () => {
     expect(
       scopeBody(new URLSearchParams("campaign=C&platform=tiktok")),

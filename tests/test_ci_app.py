@@ -384,6 +384,36 @@ def test_sync_job_admin_api(tmp_path, monkeypatch):
     assert [j["name"] for j in http.get("/api/sync/jobs").json()["jobs"]] == ["B"]
 
 
+def test_oauth_state_cookie_binding(tmp_path, monkeypatch):
+    http, _db = make_client(tmp_path, admin_email="boss@foap.test")
+    stub_exchange(monkeypatch, dict(IDENT, id="w-boss",
+                                    email="boss@foap.test"))
+    r = http.post("/api/auth/oauth/start", json={"provider": "google"})
+    state = r.json()["state"]
+
+    # Attacker's browser: no state cookie -> rejected, state untouched.
+    evil = TestClient(http.app, raise_server_exceptions=False)
+    r = evil.post("/api/auth/oauth/finish",
+                  json={"code": "auth_code", "state": state})
+    assert r.status_code == 409
+    r = evil.get("/api/auth/callback?code=auth_code&state=" + state,
+                 follow_redirects=False)
+    assert r.status_code == 302
+    assert "auth_error=" in r.headers["location"]
+
+    # Wrong cookie value -> rejected.
+    http.cookies.set("ci_oauth_state", "tampered")
+    r = http.post("/api/auth/oauth/finish",
+                  json={"code": "auth_code", "state": state})
+    assert r.status_code == 409
+
+    # Correct binding -> login succeeds and the binding is cleared.
+    http.cookies.set("ci_oauth_state", state)
+    r = http.post("/api/auth/oauth/finish",
+                  json={"code": "auth_code", "state": state})
+    assert r.status_code == 200, r.text
+
+
 def test_oauth_callback_replay_rejected(tmp_path, monkeypatch):
     http, _db = make_client(tmp_path, admin_email="boss@foap.test")
     stub_exchange(monkeypatch, dict(IDENT, id="w-boss",
@@ -454,8 +484,21 @@ def test_cookie_flags_default_and_secure(tmp_path, monkeypatch):
 
     http_s, _db2 = make_client(tmp_path, admin_email="boss@foap.test",
                                cookie_secure=True)
-    r = oauth_login(http_s, monkeypatch,
-                    dict(IDENT, id="w-boss", email="boss@foap.test"))
+    # Secure cookies are never sent back over plain HTTP (not even by
+    # the test client), so present the state cookie explicitly here;
+    # over real HTTPS the browser jar handles it.
+    stub_exchange(monkeypatch, dict(IDENT, id="w-boss",
+                                    email="boss@foap.test"))
+    started = http_s.post("/api/auth/oauth/start",
+                          json={"provider": "google"})
+    assert started.status_code == 200, started.text
+    state = started.json()["state"]
+    jar = {c.name: c.value for c in started.cookies.jar}
+    r = http_s.post("/api/auth/oauth/finish",
+                    json={"code": "auth_code", "state": state},
+                    headers={"Cookie": "%s=%s" % ("ci_oauth_state",
+                                                  jar["ci_oauth_state"])})
+    assert r.status_code == 200, r.text
     set_cookie = r.headers.get("set-cookie", "")
     assert "httponly" in set_cookie.lower()
     assert "secure" in set_cookie.lower()

@@ -126,22 +126,62 @@ def accounts(request: Request, db=Depends(get_db)):
     return {"accounts": emp.list_accounts(db)}
 
 
+# CSRF threat model (documented, not assumed away).
+#
+# The UI is same-origin and the session cookie is SameSite=Lax, so a
+# foreign site cannot drive authenticated cross-site POST/PATCH/DELETE
+# requests: the browser simply withholds the cookie on cross-site
+# POSTs. Two endpoints deliberately accept cross-site top-level
+# navigation and need their own protection:
+#
+# * GET /api/auth/callback is reached from WorkOS (cross-site). It
+#   consumes a single-use server-side OAuth state AND requires the
+#   browser to present the matching state cookie set by
+#   POST /api/auth/oauth/start. Without that binding, an attacker
+#   could complete their own provider flow and trick a victim's
+#   browser into finishing it (login CSRF).
+# * POST /api/auth/oauth/finish is same-origin fetch, but enforces
+#   the same binding for defence in depth.
+OAUTH_STATE_COOKIE = "ci_oauth_state"
+
+
+def _check_state_binding(request: Request, state: str) -> None:
+    if not state or request.cookies.get(OAUTH_STATE_COOKIE) != state:
+        raise HTTPException(status_code=409, detail={
+            "error": "OAuth session mismatch. Restart sign-in."})
+
+
+def _bind_state_cookie(response, state: str, secure: bool) -> None:
+    response.set_cookie(OAUTH_STATE_COOKIE, state, max_age=600,
+                        path="/", httponly=True, samesite="lax",
+                        secure=secure)
+
+
+def _clear_state_cookie(response) -> None:
+    response.delete_cookie(OAUTH_STATE_COOKIE, path="/")
+
+
 @router.get("/callback")
 def callback(request: Request, db=Depends(get_db),
              settings: Settings = Depends(get_settings)):
     code = request.query_params.get("code", "")
     state = request.query_params.get("state", "")
     try:
+        _check_state_binding(request, state)
         identity = oauth_mod.finish_oauth(db, code, state, settings)
         token, _employee, _created = emp.login_identity(
             db, identity, settings)
-    except (emp.StoreError, emp.Denied) as exc:
+    except (emp.StoreError, emp.Denied, HTTPException) as exc:
         from urllib.parse import quote
-        return RedirectResponse("/?auth_error=" + quote(str(exc)[:200]),
+        detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
+        if isinstance(detail, dict):
+            detail = detail.get("error", "Sign-in failed.")
+        return RedirectResponse("/?auth_error=" + quote(str(detail)[:200]),
                                 status_code=302)
     response = RedirectResponse("/", status_code=302)
     _apply_cookie(response, emp.session_cookie(token),
                   settings.cookie_secure)
+    _clear_state_cookie(response)
     return response
 
 
@@ -154,9 +194,11 @@ async def oauth_start(request: Request, db=Depends(get_db),
         out = oauth_mod.start_oauth(
             db, body.get("provider", ""),
             body.get("redirect_uri", ""), settings)
-        return out
     except (emp.StoreError, workos_mod.WorkOSError) as exc:
         raise HTTPException(status_code=409, detail={"error": str(exc)})
+    response = JSONResponse(out)
+    _bind_state_cookie(response, out["state"], settings.cookie_secure)
+    return response
 
 
 @router.post("/oauth/finish")
@@ -164,6 +206,7 @@ async def oauth_finish(request: Request, db=Depends(get_db),
                        settings: Settings = Depends(get_settings),
                      _rl=Depends(auth_rate_limit)):
     body = await json_payload(request)
+    _check_state_binding(request, body.get("state", ""))
     try:
         identity = oauth_mod.finish_oauth(
             db, body.get("code", ""), body.get("state", ""), settings)
@@ -173,9 +216,11 @@ async def oauth_finish(request: Request, db=Depends(get_db),
             workos_mod.WorkOSError) as exc:
         raise HTTPException(status_code=409, detail={"error": str(exc)})
     gate = "app" if employee.status == "active" else employee.status
-    return _issue({"ok": True, "gate": gate,
-                   "employee": emp.public_employee(employee).model_dump()},
-                  token, secure=settings.cookie_secure)
+    response = _issue({"ok": True, "gate": gate,
+                       "employee": emp.public_employee(employee).model_dump()},
+                      token, secure=settings.cookie_secure)
+    _clear_state_cookie(response)
+    return response
 
 
 @router.post("/email/signin")

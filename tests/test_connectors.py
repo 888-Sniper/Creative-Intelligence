@@ -175,6 +175,16 @@ class ConnectorTest(unittest.TestCase):
         with self.assertRaises(connectors.ConnectorUnavailable):
             connectors.fetch_sheet_csv(self.base + "/login")
 
+    def test_bearer_headers_https_only(self):
+        self.assertIsNone(
+            connectors.bearer_headers("https://example.com/x.csv", None))
+        headers = connectors.bearer_headers(
+            "https://docs.google.com/spreadsheets/d/X/export", "tok")
+        self.assertEqual(headers, {"Authorization": "Bearer tok"})
+        # Plaintext http must never carry the Google OAuth token.
+        with self.assertRaises(connectors.ConnectorUnavailable):
+            connectors.bearer_headers("http://example.com/x.csv", "tok")
+
     def test_nonpublic_fetch_targets_refused(self):
         for url in ("http://169.254.169.254/latest/meta-data/",
                     "http://10.0.0.1/x.csv",

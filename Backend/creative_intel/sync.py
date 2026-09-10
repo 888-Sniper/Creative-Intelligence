@@ -95,9 +95,8 @@ def fetch_job(source, params, bearer=None):
         if not params.get("platform"):
             raise ValueError("drive import needs a platform")
         url = connectors.drive_file_url(params.get("url", ""))
-        headers = {"Authorization": "Bearer %s" % bearer} \
-            if bearer else None
-        blob = connectors.fetch_bytes(url, headers=headers)
+        blob = connectors.fetch_bytes(
+            url, headers=connectors.bearer_headers(url, bearer))
         if blob.startswith(b"PK"):
             return ingest.parse_xlsx_report(
                 blob, params["platform"], "drive")

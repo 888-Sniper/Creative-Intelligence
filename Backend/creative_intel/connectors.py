@@ -166,6 +166,23 @@ def drive_file_url(url):
     return url
 
 
+def bearer_headers(url, bearer):
+    """Authorization header for private imports, https-only.
+
+    The bearer is a Google OAuth token: sending it over plaintext
+    http (an employee-supplied plain-CSV URL need not be a Google
+    host) would leak it on the network, so http + bearer is refused
+    instead of sent.
+    """
+    if bearer is None:
+        return None
+    if urllib.parse.urlparse(url).scheme.lower() != "https":
+        raise ConnectorUnavailable(
+            "Google auth needs an https URL; %s is not one"
+            % (_host_of(url),))
+    return {"Authorization": "Bearer %s" % bearer}
+
+
 def fetch_sheet_csv(url, bearer=None):
     """Fetch a Sheets/CSV URL; refuses login pages and binaries.
 
@@ -173,9 +190,8 @@ def fetch_sheet_csv(url, bearer=None):
     Without it a private file raises ConnectorUnavailable pointing at
     Settings > Google Drive instead of a parked-OAuth dead end.
     """
-    text = fetch_text(sheets_csv_url(url),
-                      headers={"Authorization": "Bearer %s" % bearer}
-                      if bearer else None)
+    final = sheets_csv_url(url)
+    text = fetch_text(final, headers=bearer_headers(final, bearer))
     stripped = text.lstrip()
     if stripped[:15].lower().startswith("<!doctype html") or \
             stripped[:5].lower().startswith("<html"):

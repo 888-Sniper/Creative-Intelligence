@@ -3,7 +3,6 @@
 import os
 import sqlite3
 import sys
-import tempfile
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Backend"))
@@ -20,10 +19,22 @@ CSV_CHANGED = ("campaign,ad set,ad name,spend,impressions,clicks,conversions,dat
                "CampA,Set1,ad-3,5,500,5,1,2026-08-01\n")
 
 
+_OPEN = []
+
+
 def _conn():
     conn = sqlite3.connect(":memory:")
     schema.init_db(conn)
+    _OPEN.append(conn)
     return conn
+
+
+def _close_all(testcase):
+    while _OPEN:
+        try:
+            _OPEN.pop().close()
+        except Exception:
+            pass
 
 
 def _count(conn):
@@ -31,6 +42,8 @@ def _count(conn):
 
 
 class UpsertTest(unittest.TestCase):
+    def tearDown(self):
+        _close_all(self)
     def test_insert_rows_appends_distinct_facts(self):
         other = ("campaign,ad set,ad name,spend,date\n"
                  "CampB,Set9,ad-9,7,2026-08-02\n"
@@ -106,6 +119,8 @@ class UpsertTest(unittest.TestCase):
 
 
 class RunHistoryTest(unittest.TestCase):
+    def tearDown(self):
+        _close_all(self)
     def test_import_once_records_ok_run(self):
         conn = _conn()
         try:
@@ -174,6 +189,8 @@ class RunHistoryTest(unittest.TestCase):
 
 
 class JobsTest(unittest.TestCase):
+    def tearDown(self):
+        _close_all(self)
     def test_save_and_tick_jobs(self):
         conn = _conn()
         import creative_intel.sync as sync_mod
@@ -309,6 +326,8 @@ class JobsTest(unittest.TestCase):
 
 
 class ServerSyncTest(unittest.TestCase):
+    def tearDown(self):
+        _close_all(self)
     def test_connect_upserts_and_saves_job(self):
         from ci_backend import actions as server
         conn = _conn()
@@ -356,8 +375,8 @@ class ServerSyncTest(unittest.TestCase):
 
     def test_http_status_and_run(self):
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        from conftest import make_client, mint_admin
-        db = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
+        from conftest import make_client, mint_admin, temp_db_path
+        db = temp_db_path()
         try:
             client = make_client(db)
             client.headers.update(mint_admin(db))
@@ -375,6 +394,8 @@ class ServerSyncTest(unittest.TestCase):
 
 
 class PrivateFileBearerTest(unittest.TestCase):
+    def tearDown(self):
+        _close_all(self)
     """Private Sheets/Drive must send the caller's real access token.
 
     Regression: a redaction placeholder once landed in the Drive
@@ -427,6 +448,8 @@ class PrivateFileBearerTest(unittest.TestCase):
 
 
 class TickBearerTest(unittest.TestCase):
+    def tearDown(self):
+        _close_all(self)
     """tick() resolves Google credentials for opted-in jobs (only)."""
 
     def test_tick_passes_bearer_to_google_jobs(self):

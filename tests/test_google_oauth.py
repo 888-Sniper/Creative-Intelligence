@@ -46,13 +46,16 @@ def app_data(tmp_path, monkeypatch):
     settings = Settings(**GSET)
     app = create_app(db_path, settings)
     engine = make_engine(db_path)
-    with make_session_factory(engine)() as sess:
-        employee = emp_store.admin_create(sess, "test-helper",
-                                          "staff@example.com", role="admin")
-        token = emp_store.create_session(sess, employee.id, "")
-    http = TestClient(app, raise_server_exceptions=False)
-    http.cookies.set("ci_session", token)
-    return http, engine, settings
+    try:
+        with make_session_factory(engine)() as sess:
+            employee = emp_store.admin_create(
+                sess, "test-helper", "staff@example.com", role="admin")
+            token = emp_store.create_session(sess, employee.id, "")
+        http = TestClient(app, raise_server_exceptions=False)
+        http.cookies.set("ci_session", token)
+        yield http, engine, settings
+    finally:
+        engine.dispose()
 
 
 @pytest.fixture()

@@ -11,14 +11,12 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Backend"))
 
 from ci_backend import employees as emp_store
-from ci_backend.db import init_db, make_engine, make_session_factory
+from conftest import employee_session
 
 
 def authed(db_path, email="staff@example.com", role="admin"):
     """Return a Cookie header value for an active employee session."""
-    engine = make_engine(db_path)
-    init_db(engine)
-    with make_session_factory(engine)() as sess:
+    with employee_session(db_path) as sess:
         try:
             employee = emp_store.admin_create(sess, "test-helper", email,
                                               role=role)

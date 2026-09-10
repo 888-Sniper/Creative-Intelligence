@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Nightly Creative Intelligence backup: consistent SQLite copy + media.
 #
-# Hardening: optional AES-256-CBC encryption (passphrase only from the
+# Hardening: AES-256-CBC encryption (passphrase only from the
 # environment, never the repo), a SHA-256 sidecar verified straight
-# after writing, and local retention pruning. Plaintext archives are
-# refused by offhost_backup.sh once a passphrase is configured, so
-# client data never leaves the VM unencrypted.
+# after writing, and local retention pruning. Encryption is MANDATORY
+# when CREATIVE_INTEL_ENVIRONMENT=production (fail closed, no plaintext
+# client data at rest); elsewhere it is strongly recommended. Plaintext
+# archives are refused by offhost_backup.sh once a passphrase is
+# configured, so client data never leaves the VM unencrypted.
 #
 #   BACKUP_ENCRYPTION_PASSPHRASE  when set, the tarball is encrypted to
 #                                 <stamp>.tar.gz.enc and the plaintext
@@ -16,6 +18,12 @@ set -Eeuo pipefail
 DATA_DIR="${CREATIVE_INTEL_DATA_DIR:-/var/lib/creative-intelligence}"
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/creative-intelligence}"
 KEEP_DAILY="${BACKUP_KEEP_DAILY:-14}"
+
+if [[ "${CREATIVE_INTEL_ENVIRONMENT:-}" == "production" && -z "${BACKUP_ENCRYPTION_PASSPHRASE:-}" ]]; then
+  echo "Refusing plaintext backup: BACKUP_ENCRYPTION_PASSPHRASE is required" >&2
+  echo "when CREATIVE_INTEL_ENVIRONMENT=production." >&2
+  exit 1
+fi
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 TARGET="${BACKUP_DIR}/${STAMP}"
 DB="${DATA_DIR}/creative_intel.db"

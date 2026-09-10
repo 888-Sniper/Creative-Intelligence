@@ -122,6 +122,8 @@ class LiveProviderTest(unittest.TestCase):
         cls._vsrv.shutdown()
         cls._thread.join(timeout=10)
         cls._vthread.join(timeout=10)
+        cls._srv.server_close()
+        cls._vsrv.server_close()
 
     def setUp(self):
         self._saved = dict(os.environ)

@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Backend"))
 from ci_backend import employees as emp_store
 from ci_backend.app import create_app
 from ci_backend.config import Settings
-from ci_backend.db import make_engine, make_session_factory
+from conftest import employee_session
 from creative_intel import ingest as ingest_mod
 
 IDENT = {"id": "w-ada", "email": "ada@foap.test", "email_verified": True,
@@ -91,8 +91,12 @@ def test_pre_dimension_database_upgrades_in_place(tmp_path):
     http = TestClient(create_app(db, settings), raise_server_exceptions=False)
     # Must upgrade, not 500: default-deny still answers 401.
     assert http.get("/api/campaigns").status_code == 401
-    cols = {row[1] for row in
-            _sqlite3.connect(db).execute("PRAGMA table_info(ads)")}
+    _probe = _sqlite3.connect(db)
+    try:
+        cols = {row[1] for row in
+                _probe.execute("PRAGMA table_info(ads)")}
+    finally:
+        _probe.close()
     assert {"date", "client", "revenue"} <= cols
 
 
@@ -620,8 +624,7 @@ def test_revoke_all_requires_login(client):
 
 def test_switch_rechecks_authorization(tmp_path):
     http, db = make_client(tmp_path, admin_email="boss@foap.test")
-    engine = make_engine(db)
-    with make_session_factory(engine)() as sess:
+    with employee_session(db) as sess:
         boss = emp_store.admin_create(sess, "root", "boss@foap.test",
                                       role="admin")
         staff = emp_store.admin_create(sess, "root", "staff@foap.test",
@@ -697,8 +700,9 @@ def test_secrets_never_leak(tmp_path, monkeypatch):
 
 
 def test_frontend_gates():
-    html = open(os.path.join(os.path.dirname(__file__), "..", "Web",
-                             "Index.html"), encoding="utf-8").read()
+    with open(os.path.join(os.path.dirname(__file__), "..", "Web",
+                           "Index.html"), encoding="utf-8") as fh:
+        html = fh.read()
     assert "Welcome to Creative Intelligence" in html
     for label in ("Continue with Google", "Continue with Microsoft",
                   "Continue with Apple", "Continue with GitHub"):
@@ -728,7 +732,8 @@ def test_no_licensing_concepts():
             if name in ("test_ci_app.py", "test_ci_auth.py"):
                 continue  # these files name the banned concepts
             path = os.path.join(dirpath, name)
-            text = open(path, encoding="utf-8", errors="replace").read()
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                text = fh.read()
             for bad in banned:
                 if bad in text.lower():
                     hits.append("%s: %s" % (path, bad))
@@ -871,7 +876,8 @@ def test_slow_action_does_not_block_health(tmp_path, monkeypatch):
     client.headers.update(mint_admin(_db))
     entered = threading.Event()
 
-    def slow(conn, payload, owner, ctx):
+    def slow(conn, payload, owner, ctx, job_id=None):
+        _ = job_id
         entered.set()
         time.sleep(4)
         return {"answer": "slow"}
@@ -904,8 +910,7 @@ def test_slow_action_does_not_block_health(tmp_path, monkeypatch):
 class TestCsrfOriginGuard:
     def _owner_client(self, tmp_path, **headers):
         http, db = make_client(tmp_path, admin_email="boss@foap.test")
-        engine = make_engine(db)
-        with make_session_factory(engine)() as sess:
+        with employee_session(db) as sess:
             boss = emp_store.admin_create(sess, "root", "boss@foap.test",
                                           role="admin")
             cookie = ("ci_session="
@@ -930,6 +935,42 @@ class TestCsrfOriginGuard:
     def test_same_origin_cookie_write_allowed(self, tmp_path):
         authed = self._owner_client(tmp_path,
                                     Origin="http://testserver")
+        resp = authed.post("/api/ask", json={"question": "hi"})
+        assert resp.status_code in (200, 429)
+
+    def test_scheme_mismatch_refused(self, tmp_path):
+        authed = self._owner_client(tmp_path,
+                                    Origin="https://testserver")
+        resp = authed.post("/api/ask", json={"question": "hi"})
+        assert resp.status_code == 403
+        assert resp.json()["gate"] == "csrf"
+
+    def test_port_mismatch_refused(self, tmp_path):
+        authed = self._owner_client(tmp_path,
+                                    Origin="http://testserver:9999")
+        resp = authed.post("/api/ask", json={"question": "hi"})
+        assert resp.status_code == 403
+
+    def test_forwarded_tls_origin_allowed(self, tmp_path):
+        authed = self._owner_client(
+            tmp_path, Origin="https://testserver",
+            **{"X-Forwarded-Proto": "https"})
+        resp = authed.post("/api/ask", json={"question": "hi"})
+        assert resp.status_code in (200, 429)
+
+    def test_configured_public_base_allowed(self, tmp_path):
+        http, _db = make_client(
+            tmp_path, admin_email="boss@foap.test",
+            workos_redirect_uri=(
+                "https://app.example/api/auth/callback"))
+        with employee_session(_db) as sess:
+            boss = emp_store.admin_create(sess, "root", "boss@foap.test",
+                                          role="admin")
+            cookie = ("ci_session="
+                      + emp_store.create_session(sess, boss.id, ""))
+        authed = TestClient(http.app, raise_server_exceptions=False)
+        authed.headers.update({"Cookie": cookie,
+                               "Origin": "https://app.example"})
         resp = authed.post("/api/ask", json={"question": "hi"})
         assert resp.status_code in (200, 429)
 

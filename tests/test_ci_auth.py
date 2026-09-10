@@ -26,6 +26,7 @@ def session(tmp_path):
     factory = db_mod.make_session_factory(engine)
     with factory() as sess:
         yield sess
+    engine.dispose()
 
 
 IDENT = {"workos_user_id": "w-ada", "email": "ada@foap.test",
@@ -308,7 +309,10 @@ def test_alembic_migration_builds_tables(tmp_path):
     db_mod.migrate(engine, "base")
     db_mod.ensure_migrated(engine)
     factory = db_mod.make_session_factory(engine)
-    with factory() as sess:
-        created = emp.admin_create(sess, "root", "mig@foap.test",
-                                   role="admin")
-        assert created.status == "active"
+    try:
+        with factory() as sess:
+            created = emp.admin_create(sess, "root", "mig@foap.test",
+                                       role="admin")
+            assert created.status == "active"
+    finally:
+        engine.dispose()

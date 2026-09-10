@@ -4,7 +4,6 @@ import json
 import os
 import sqlite3
 import sys
-import tempfile
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Backend"))
@@ -14,6 +13,7 @@ from creative_intel import benchmarks, creative, export_gate, ingest, providers,
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from auth_help import authed
+from conftest import temp_db_path  # noqa: E402
 
 META_CSV = ("Campaign,Ad Name,Creative Name,Amount Spent,Impressions,Link Clicks,"
             "Conversions\nC1,A1,hook-a,100,10000,200,10\nC1,A2,hook-b,300,30000,300,15\n")
@@ -84,10 +84,8 @@ class IngestTest(unittest.TestCase):
         conn.close()
 
     def test_load_fixtures_into_temp_db(self):
-        import tempfile
-
         from ci_backend import actions as server
-        db = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
+        db = temp_db_path()
         try:
             total = server.load_fixtures(db)
             self.assertGreater(total, 0)
@@ -241,7 +239,7 @@ class LaunchPathTest(unittest.TestCase):
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
         sock.close()
-        db = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
+        db = temp_db_path()
         proc = subprocess.Popen(
             [sys.executable, entry.__file__, "--db", db,
              "--port", str(port)],
@@ -276,6 +274,8 @@ class LaunchPathTest(unittest.TestCase):
                 proc.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 proc.kill()
+            if proc.stdout is not None:
+                proc.stdout.close()
             os.unlink(db)
 
 
@@ -294,7 +294,7 @@ class LaunchContractTest(unittest.TestCase):
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
         sock.close()
-        db = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
+        db = temp_db_path()
         proc = subprocess.Popen(
             [sys.executable, entry.__file__, "--db", db,
              "--port", str(port)],
@@ -361,6 +361,8 @@ class LaunchContractTest(unittest.TestCase):
                 proc.wait(timeout=10)
             except Exception:
                 proc.kill()
+            if proc.stdout is not None:
+                proc.stdout.close()
             os.unlink(db)
 
 

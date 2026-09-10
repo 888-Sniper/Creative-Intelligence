@@ -133,6 +133,7 @@ class ConnectorTest(unittest.TestCase):
     def tearDownClass(cls):
         cls._srv.shutdown()
         cls._thread.join(timeout=10)
+        cls._srv.server_close()
 
     def setUp(self):
         self._saved = dict(os.environ)

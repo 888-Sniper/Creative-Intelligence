@@ -3,7 +3,6 @@
 import os
 import sqlite3
 import sys
-import tempfile
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Backend"))
@@ -233,8 +232,8 @@ class CampaignRecoTest(unittest.TestCase):
 class CampaignRecoHttpTest(unittest.TestCase):
     def test_http_shape_and_errors(self):
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        from conftest import make_client, mint_admin
-        db = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
+        from conftest import make_client, mint_admin, temp_db_path
+        db = temp_db_path()
         try:
             live = _conn()
             disk = sqlite3.connect(db)
@@ -282,14 +281,14 @@ class CampaignRecoHttpTest(unittest.TestCase):
         # dropped project axis would analyse both and crown the wrong
         # creative (this caught Scope-normalized() losing the axis).
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        from conftest import make_client, mint_admin
+        from conftest import make_client, mint_admin, temp_db_path
         csv = ("campaign,ad set,ad name,spend,impressions,clicks,"
                "conversions,project,date\n"
                "Alpha,Set1,win-p1,10,1000,20,5,Proj1,2026-08-01\n"
                "Alpha,Set1,lose-p1,100,2000,30,2,Proj1,2026-08-01\n"
                "Alpha,Set2,win-p2,15,1000,20,5,Proj2,2026-08-01\n"
                "Alpha,Set2,lose-p2,200,2000,30,2,Proj2,2026-08-01\n")
-        db = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
+        db = temp_db_path()
         try:
             conn = sqlite3.connect(db)
             schema.init_db(conn)

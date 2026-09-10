@@ -194,6 +194,15 @@ class JobFailed(Exception):
     pass
 
 
+class JobCancelled(Exception):
+    """Cooperative cancellation: the owner cancelled mid-run.
+
+    Handlers raise this at stage boundaries when the job row reads
+    cancelled. It is never recorded as a failure: the job stays
+    cancelled and partially completed provider work is simply dropped.
+    """
+
+
 class JobTimeout(Exception):
     pass
 
@@ -229,6 +238,9 @@ def run_through(conn, kind, payload, owner="", timeout_s=180.0,
             try:
                 result = worker_handlers.run(conn, kind, payload, owner,
                                              ctx or {}, job_id)
+            except JobCancelled:
+                cancel(conn, job_id)
+                raise JobFailed("cancelled")
             except Exception as exc:  # noqa: BLE001 - recorded, not raised raw
                 fail(conn, job_id, exc)
                 continue

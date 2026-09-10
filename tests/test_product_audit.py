@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Backend"))
 from ci_backend import employees as emp_store  # noqa: E402
 from ci_backend.app import create_app  # noqa: E402
 from ci_backend.config import Settings  # noqa: E402
-from ci_backend.db import make_engine, make_session_factory  # noqa: E402
+from conftest import employee_session  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
@@ -27,8 +27,7 @@ def make_owner(tmp_path, **settings_kw):
     settings = Settings(workos_client_id="client_test",
                         key_workos="[REDACTED]", **settings_kw)
     app = create_app(db, settings)
-    engine = make_engine(db)
-    with make_session_factory(engine)() as sess:
+    with employee_session(db) as sess:
         boss = emp_store.admin_create(sess, "root", "boss@foap.test",
                                       role="admin")
         cookie = "ci_session=" + emp_store.create_session(
@@ -156,8 +155,7 @@ def test_admin_product_audit_lists_rows(tmp_path):
 
 def test_admin_product_audit_requires_admin(tmp_path):
     http, db, _boss = make_owner(tmp_path)
-    engine = make_engine(db)
-    with make_session_factory(engine)() as sess:
+    with employee_session(db) as sess:
         staff = emp_store.admin_create(sess, "root", "staff@foap.test",
                                        role="employee")
         cookie = "ci_session=" + emp_store.create_session(

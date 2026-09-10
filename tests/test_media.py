@@ -14,7 +14,7 @@ import tempfile
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Backend"))
-
+from conftest import temp_db_path  # noqa: E402
 from creative_intel import creative, media, schema
 
 PNG = (b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
@@ -126,7 +126,7 @@ class MediaLiveTest(unittest.TestCase):
     def setUpClass(cls):
         cls._tmp = tempfile.mkdtemp()
         os.environ["CREATIVE_INTEL_MEDIA_DIR"] = cls._tmp
-        cls._db = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
+        cls._db = temp_db_path()
         conn = sqlite3.connect(cls._db)
         schema.init_db(conn)
         conn.execute("INSERT INTO creatives (creative_key, platform, name)"
@@ -175,7 +175,7 @@ class MediaMultipartTest(unittest.TestCase):
     def setUpClass(cls):
         cls._tmp = tempfile.mkdtemp()
         os.environ["CREATIVE_INTEL_MEDIA_DIR"] = cls._tmp
-        cls._db = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
+        cls._db = temp_db_path()
         conn = sqlite3.connect(cls._db)
         schema.init_db(conn)
         conn.execute("INSERT INTO creatives (creative_key, platform, name)"

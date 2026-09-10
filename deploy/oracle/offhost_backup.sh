@@ -23,6 +23,12 @@ DEST="${BACKUP_OFFHOST_DEST:-}"
 KEEP="${BACKUP_OFFHOST_KEEP:-14}"
 TARBALL="${1:-}"
 
+if [[ "${CREATIVE_INTEL_ENVIRONMENT:-}" == "production" && -z "${BACKUP_ENCRYPTION_PASSPHRASE:-}" ]]; then
+  echo "Refusing off-host copy: BACKUP_ENCRYPTION_PASSPHRASE is required" >&2
+  echo "when CREATIVE_INTEL_ENVIRONMENT=production." >&2
+  exit 1
+fi
+
 if [[ -z "${DEST}" ]]; then
   echo "BACKUP_OFFHOST_DEST is not set; off-host copy skipped (on-host backup is unaffected)." >&2
   exit 0

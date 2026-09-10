@@ -7,10 +7,16 @@ column names) so existing databases open unchanged: ``employees``,
 
 from __future__ import annotations
 
+import atexit
+import weakref
 from pathlib import Path
 
 from sqlalchemy import CheckConstraint, ForeignKey, Index, String, Text, create_engine, event
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
+
+# Every engine ever made (weak refs): dispose_all_engines() closes the
+# pooled handles of engines tests have already dropped.
+_ENGINES: weakref.WeakSet = weakref.WeakSet()
 
 
 class Base(DeclarativeBase):
@@ -124,7 +130,37 @@ def make_engine(database_path: str | Path):
         cursor.execute("PRAGMA synchronous=NORMAL")
         cursor.close()
 
+    _ENGINES.add(engine)
     return engine
+
+
+def dispose_all_engines() -> None:
+    """Close pooled connections of every live engine.
+
+    Test hygiene only: engines dropped by tests would otherwise leave
+    pooled SQLite handles to the garbage collector (ResourceWarnings).
+    Production lifetimes are process-scoped and unaffected.
+    """
+    for engine in list(_ENGINES):
+        try:
+            engine.dispose()
+        except Exception:
+            pass
+
+
+def _dispose_at_exit() -> None:
+    """Best-effort pool close at interpreter shutdown.
+
+    Runners without the pytest teardown hook (stdlib unittest) drop
+    engines without disposing them; without this, their pooled SQLite
+    handles surface as ResourceWarnings during shutdown GC. Production
+    lifetimes are process-scoped, so closing idle handles at exit is
+    a no-op there — it only makes shutdown deterministic.
+    """
+    dispose_all_engines()
+
+
+atexit.register(_dispose_at_exit)
 
 
 def make_session_factory(engine):

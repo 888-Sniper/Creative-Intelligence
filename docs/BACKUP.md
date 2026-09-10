@@ -44,9 +44,12 @@ BACKUP_ENCRYPTION_PASSPHRASE=<secret>
 `backup.sh` then writes `<stamp>.tar.gz.enc` (AES-256-CBC, PBKDF2) and
 removes the plaintext. Once the passphrase is configured,
 `offhost_backup.sh` refuses to transfer plaintext archives, so client
-data never leaves the VM unencrypted. The passphrase itself is never
-logged and never enters the repo — it lives only in the 600-permission
-env file and the operator shell.
+data never leaves the VM unencrypted. When
+`CREATIVE_INTEL_ENVIRONMENT=production`, both scripts fail closed
+without a passphrase — no plaintext client data at rest or in
+transit. The passphrase itself is never logged and never enters the
+repo — it lives only in the 600-permission env file and the operator
+shell.
 
 ## Integrity + retention
 

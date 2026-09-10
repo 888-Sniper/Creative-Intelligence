@@ -97,13 +97,21 @@ async def upload_avatar(request: Request, db=Depends(get_db)):
     if not isinstance(upload, UploadFile):
         raise HTTPException(status_code=409,
                             detail={"error": "Attach an avatar file."})
-    content = await upload.read(emp.MAX_AVATAR_BYTES + 1)
     try:
-        updated = emp.save_avatar(db, employee.id,
-                                  upload.filename or "avatar",
-                                  content, _media_dir())
-    except emp.StoreError as exc:
-        raise HTTPException(status_code=409, detail={"error": str(exc)})
+        content = await upload.read(emp.MAX_AVATAR_BYTES + 1)
+        try:
+            updated = emp.save_avatar(db, employee.id,
+                                      upload.filename or "avatar",
+                                      content, _media_dir())
+        except emp.StoreError as exc:
+            raise HTTPException(status_code=409, detail={"error": str(exc)})
+    finally:
+        # Starlette parks the part in a SpooledTemporaryFile that
+        # nothing else closes.
+        try:
+            await upload.close()
+        except Exception:
+            pass
     return {"ok": True,
             "employee": emp.public_employee(updated).model_dump()}
 

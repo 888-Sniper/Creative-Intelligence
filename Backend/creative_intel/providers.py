@@ -337,6 +337,8 @@ def _http_json(url, payload=None, headers=None, timeout=HTTP_TIMEOUT_S):
             detail = e.read().decode("utf-8", "replace")[:500]
         except Exception:
             detail = ""
+        finally:
+            e.close()  # error response holds the socket; read() is not close()
         raise ProviderUnavailable("HTTP %s from %s: %s"
                                   % (e.code, _host_of(url), detail))
     except OSError as e:
@@ -625,6 +627,7 @@ class LiveStt:
             with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_S) as resp:
                 got = json.loads(resp.read().decode("utf-8") or "{}")
         except urllib.error.HTTPError as e:
+            e.close()
             raise ProviderUnavailable("deepgram HTTP %s" % e.code)
         except OSError as e:
             raise ProviderUnavailable("deepgram unreachable: %s" % e)
@@ -660,6 +663,7 @@ class LiveStt:
             with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_S) as resp:
                 got = json.loads(resp.read().decode("utf-8") or "{}")
         except urllib.error.HTTPError as e:
+            e.close()
             raise ProviderUnavailable("groq-whisper HTTP %s" % e.code)
         except OSError as e:
             raise ProviderUnavailable("groq-whisper unreachable: %s" % e)

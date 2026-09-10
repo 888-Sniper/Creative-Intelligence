@@ -45,18 +45,59 @@ async def _internal_error_body(_request, _exc: Exception) -> JSONResponse:
                         content={"error": "Something went wrong."})
 
 
+_DEFAULT_PORTS = {"http": 80, "https": 443, "ws": 80, "wss": 443}
+
+
+def _origin_tuple(scheme, hostname, port):
+    scheme = (scheme or "").lower()
+    hostname = (hostname or "").lower()
+    try:
+        port = int(port) if port is not None else _DEFAULT_PORTS.get(scheme)
+    except (TypeError, ValueError):
+        port = None
+    return (scheme, hostname, port)
+
+
+def _expected_origins(request: Request) -> set:
+    """Full origins a credentialed browser write may come from.
+
+    The request's own origin, the TLS-terminated variant nginx fronts
+    it with (X-Forwarded-Proto), and the configured public base from
+    the WorkOS redirect URI — all as exact (scheme, host, port)
+    triples, so https://app vs http://app vs app:8443 never conflate.
+    """
+    from urllib.parse import urlparse
+
+    seen = {_origin_tuple(request.url.scheme, request.url.hostname,
+                          request.url.port)}
+    forwarded = request.headers.get("x-forwarded-proto", "")
+    proto = forwarded.split(",")[0].strip().lower()
+    if proto in _DEFAULT_PORTS:
+        seen.add(_origin_tuple(proto, request.url.hostname,
+                               request.url.port))
+    settings = getattr(request.app.state, "ci_settings", None)
+    base = urlparse(getattr(settings, "workos_redirect_uri", "") or "")
+    if base.hostname:
+        seen.add(_origin_tuple(base.scheme, base.hostname, base.port))
+    return seen
+
+
 async def _csrf_origin_guard(request: Request, call_next):
     # Cookie-based CSRF defence: credentialed browser writes (the ones
-    # carrying the ci_session cookie) must come from our own origin.
-    # Requests without an Origin/Referer header (same-origin form
-    # posts, non-browser API clients, TestClient) still pass.
+    # carrying the ci_session cookie) must present our exact origin —
+    # scheme, host AND port. Requests without an Origin/Referer header
+    # (same-origin form posts, non-browser API clients, TestClient)
+    # still pass.
     if request.method in ("POST", "PATCH", "PUT", "DELETE"):
         if "ci_session" in request.headers.get("cookie", ""):
             presented = (request.headers.get("origin")
                          or request.headers.get("referer"))
             if presented:
                 from urllib.parse import urlparse
-                if urlparse(presented).hostname != request.url.hostname:
+                shown = urlparse(presented)
+                if _origin_tuple(shown.scheme, shown.hostname,
+                                 shown.port) not in _expected_origins(
+                                     request):
                     return JSONResponse(
                         status_code=403,
                         content={"error": "Cross-origin request refused.",

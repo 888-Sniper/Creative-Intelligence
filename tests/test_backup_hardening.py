@@ -57,8 +57,10 @@ def test_plaintext_backup_with_hash_and_manifest(tmp_path):
     assert archive.endswith(".tar.gz") and not archive.endswith(".enc")
     sidecar = archive + ".sha256"
     assert os.path.isfile(sidecar)
-    digest = hashlib.sha256(open(archive, "rb").read()).hexdigest()
-    assert digest in open(sidecar).read()
+    with open(archive, "rb") as fh:
+        digest = hashlib.sha256(fh.read()).hexdigest()
+    with open(sidecar) as fh:
+        assert digest in fh.read()
     check = subprocess.run(["sha256sum", "-c", sidecar],
                            capture_output=True, text=True)
     assert check.returncode == 0
@@ -176,3 +178,46 @@ def test_verify_restore_rejects_tampered_archive(tmp_path):
         fh.write(b"tampered")
     bad = run_script("verify-restore.sh", {"BACKUP_DIR": str(dest)})
     assert bad.returncode != 0
+
+
+def test_production_refuses_plaintext_backup(tmp_path):
+    data = tmp_path / "data"
+    dest = tmp_path / "backups"
+    dest.mkdir()
+    seed_data(str(data))
+    env = {"CREATIVE_INTEL_DATA_DIR": str(data),
+           "BACKUP_DIR": str(dest),
+           "CREATIVE_INTEL_ENVIRONMENT": "production"}
+    proc = run_script("backup.sh", env)
+    assert proc.returncode != 0
+    assert "BACKUP_ENCRYPTION_PASSPHRASE" in proc.stderr
+    assert os.listdir(str(dest)) == []
+
+
+def test_production_backup_with_passphrase(tmp_path):
+    data = tmp_path / "data"
+    dest = tmp_path / "backups"
+    dest.mkdir()
+    seed_data(str(data))
+    env = {"CREATIVE_INTEL_DATA_DIR": str(data),
+           "BACKUP_DIR": str(dest),
+           "CREATIVE_INTEL_ENVIRONMENT": "production",
+           "BACKUP_ENCRYPTION_PASSPHRASE": "prod-secret"}
+    proc = run_script("backup.sh", env)
+    assert proc.returncode == 0, proc.stderr
+    newest(str(dest), ".tar.gz.enc")
+
+
+def test_production_offhost_refuses_without_passphrase(tmp_path):
+    dest = tmp_path / "backups"
+    vault = tmp_path / "vault"
+    dest.mkdir()
+    vault.mkdir()
+    plain = dest / "20200101T000000Z.tar.gz"
+    plain.write_bytes(b"plaintext-client-data")
+    env = {"BACKUP_DIR": str(dest),
+           "BACKUP_OFFHOST_DEST": str(vault),
+           "CREATIVE_INTEL_ENVIRONMENT": "production"}
+    proc = run_script("offhost_backup.sh", env)
+    assert proc.returncode != 0
+    assert list(vault.iterdir()) == []

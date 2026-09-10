@@ -32,6 +32,7 @@ def test_enqueue_get_claim_complete():
     assert done["status"] == "completed"
     assert done["progress"] == 100
     assert done["result"] == {"answer": "y"}
+    conn.close()
 
 
 def test_fail_retries_then_terminal():
@@ -44,6 +45,7 @@ def test_fail_retries_then_terminal():
     dead = jobs.fail(conn, job["id"], "boom again")
     assert dead["status"] == "failed"
     assert dead["error"] == "boom again"
+    conn.close()
 
 
 def test_cancel_owner_scoped():
@@ -51,6 +53,7 @@ def test_cancel_owner_scoped():
     job = jobs.enqueue(conn, "ask", {}, owner="e1")
     assert jobs.cancel(conn, job["id"], owner="e2") is None
     assert jobs.cancel(conn, job["id"], owner="e1")["status"] == "cancelled"
+    conn.close()
 
 
 def test_requeue_interrupted():
@@ -59,6 +62,7 @@ def test_requeue_interrupted():
     jobs.claim(conn, job["id"])
     assert jobs.requeue_interrupted(conn) == 1
     assert jobs.get(conn, job["id"])["status"] == "queued"
+    conn.close()
 
 
 def test_run_through_inline_without_worker():
@@ -68,6 +72,7 @@ def test_run_through_inline_without_worker():
     result = jobs.run_through(conn, "ask", {"question": "hi"}, owner="",
                               timeout_s=30.0, inline_grace_s=0.0, ctx={})
     assert "answer" in result
+    conn.close()
 
 
 def test_worker_once_unknown_kind_fails(tmp_path):

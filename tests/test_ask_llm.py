@@ -147,6 +147,7 @@ class AskHttpTest(unittest.TestCase):
     def tearDownClass(cls):
         cls._srv.shutdown()
         cls._thread.join(timeout=10)
+        cls._srv.server_close()
 
     def test_live_ask_end_to_end(self):
         saved = dict(os.environ)

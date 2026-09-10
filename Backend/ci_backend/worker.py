@@ -44,6 +44,13 @@ def run_once(db_path, settings, media_dir=None):
                                          job.get("payload") or {},
                                          job.get("owner_employee_id") or "",
                                          ctx, job["id"])
+        except jobs.JobCancelled:
+            # Owner cancelled mid-run: keep the cancelled state, never a
+            # failure. In-flight provider work already stopped chaining.
+            jobs.cancel(conn, job["id"])
+            print("job %s (%s) cancelled" % (job["id"], job["kind"]),
+                  flush=True)
+            return True
         except Exception as exc:  # noqa: BLE001 - recorded on the job
             jobs.fail(conn, job["id"], exc)
             print("job %s (%s) failed: %s" % (job["id"], job["kind"], exc),

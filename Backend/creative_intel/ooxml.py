@@ -13,7 +13,11 @@ zipfile: no third-party dependency, no network, no secrets.
 import re
 import zipfile
 from io import BytesIO
-from xml.sax.saxutils import escape
+
+# escape() only: pure string substitution when BUILDING office XML.
+# Nothing here parses XML (parse_xlsx uses regexes over zip entries),
+# so there is no XXE/billion-laughs surface for defusedxml to cover.
+from xml.sax.saxutils import escape  # nosemgrep: python.lang.security.use-defused-xml.use-defused-xml
 
 NAMES = {
     "content_types": "http://schemas.openxmlformats.org/package/2006/content-types",

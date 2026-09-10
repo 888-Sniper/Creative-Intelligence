@@ -3,11 +3,10 @@
 import os
 import sqlite3
 import sys
-import tempfile
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Backend"))
-
+from conftest import temp_db_path  # noqa: E402
 from creative_intel import benchmarks, cohorts, creative, ingest, schema  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -374,7 +373,7 @@ class ServerRoutesTest(unittest.TestCase):
         return client
 
     def test_http_compare_cohorts_report(self):
-        db = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
+        db = temp_db_path()
         try:
             conn = sqlite3.connect(db)
             schema.init_db(conn)
@@ -413,7 +412,7 @@ class CreativeCompareParityTest(unittest.TestCase):
     def test_full_kpis_and_why(self):
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         from conftest import make_client, mint_admin
-        db = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
+        db = temp_db_path()
         try:
             conn = sqlite3.connect(db)
             schema.init_db(conn)
@@ -449,7 +448,7 @@ class CreativeCompareParityTest(unittest.TestCase):
     def test_rank_by_roas_crowns_single_roas_winner(self):
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         from conftest import make_client, mint_admin
-        db = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
+        db = temp_db_path()
         try:
             conn = sqlite3.connect(db)
             schema.init_db(conn)
@@ -523,7 +522,7 @@ class CreativesFilterTest(unittest.TestCase):
         return _client
 
     def test_vertical_filter_reaches_creatives(self):
-        db = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
+        db = temp_db_path()
         try:
             conn = sqlite3.connect(db)
             schema.init_db(conn)

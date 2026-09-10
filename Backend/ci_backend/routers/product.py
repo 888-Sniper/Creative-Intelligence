@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import functools
+import inspect
 import mimetypes
 import os
 import sqlite3
@@ -974,11 +975,27 @@ async def _media_upload_multipart(request: Request, conn, who):
     except Exception:
         raise HTTPException(status_code=409,
                             detail={"error": "upload needs multipart form"})
+    async def _close_parts():
+        # Starlette parks each file part in a SpooledTemporaryFile that
+        # nothing else closes: release every part on every exit path,
+        # including validation rejections before streaming starts.
+        for part in form.values():
+            close = getattr(part, "close", None)
+            if close is None:
+                continue
+            try:
+                result = close()
+                if inspect.isawaitable(result):
+                    await result
+            except Exception:
+                pass
+
     creative_key = form.get("creative_key") or ""
     upload = form.get("file")
     read = getattr(upload, "read", None)
     filename = getattr(upload, "filename", "") or ""
     if not creative_key or read is None or not filename:
+        await _close_parts()
         raise HTTPException(
             status_code=409,
             detail={"error": "upload needs creative_key and a file part"})
@@ -1018,6 +1035,7 @@ async def _media_upload_multipart(request: Request, conn, who):
     finally:
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
+        await _close_parts()
     paudit.audit_request(request, conn, employee_id=who.id,
                          action="creative_uploaded", target=target)
     return out

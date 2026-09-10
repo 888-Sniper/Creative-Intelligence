@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Backend"))
 from ci_backend import employees as emp_store  # noqa: E402
 from ci_backend.app import create_app  # noqa: E402
 from ci_backend.config import Settings  # noqa: E402
-from ci_backend.db import make_engine, make_session_factory  # noqa: E402
+from conftest import employee_session  # noqa: E402
 from creative_intel import jobs as jobs_mod  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -30,8 +30,7 @@ def make_clients(tmp_path, monkeypatch, **settings_kw):
     settings = Settings(workos_client_id="client_test",
                         key_workos="[REDACTED]", **settings_kw)
     app = create_app(db, settings)
-    engine = make_engine(db)
-    with make_session_factory(engine)() as sess:
+    with employee_session(db) as sess:
         boss = emp_store.admin_create(sess, "root", "boss@foap.test",
                                       role="admin")
         staff = emp_store.admin_create(sess, "root", "staff@foap.test",

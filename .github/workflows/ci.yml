@@ -14,6 +14,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Gitleaks scans commit history; a shallow checkout leaves
+          # the parent commits it diffs against missing, failing the
+          # step with zero history scanned.
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -39,6 +44,16 @@ jobs:
           shellcheck -S warning deploy/oracle/*.sh
       - name: Secret scanning (Gitleaks)
         uses: gitleaks/gitleaks-action@v2
+      - name: Static security scan (Semgrep OSS)
+        # Private-repo SAST: CodeQL needs GitHub Advanced Security, so
+        # Semgrep OSS (no token, registry rules) is the always-on gate.
+        # --severity ERROR keeps audit-tier notes advisory; only real
+        # findings fail the build.
+        run: |
+          python3 -m pip install semgrep
+          semgrep scan --config p/security-audit --severity ERROR --error \
+            --exclude node_modules --exclude dist \
+            Backend apps/creative-intelligence-ui/src
 
   frontend:
     runs-on: ubuntu-latest

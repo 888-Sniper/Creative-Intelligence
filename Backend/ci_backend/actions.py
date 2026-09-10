@@ -331,7 +331,10 @@ def list_views(conn):
                 " ORDER BY name").fetchall()]
 
 
-def apply_action(conn, action, payload, prov, media_dir=None, actor=""):
+def apply_action(conn, action, payload, prov, media_dir=None, actor="",
+                 progress=None, cancelled=None):
+    """progress(pct, stage)/cancelled() flow into the pipeline branch only;
+    every other action ignores them (all existing callers unaffected)."""
     if action == "ingest":
         if not payload.get("platform"):
             raise ValueError("ingest needs a platform")
@@ -381,6 +384,11 @@ def apply_action(conn, action, payload, prov, media_dir=None, actor=""):
             # ffmpeg exists so the full extraction chain is provable
             # without provider keys, and skips it otherwise (mocks
             # need no media).
+            if cancelled is not None and cancelled():
+                from creative_intel.jobs import JobCancelled
+                raise JobCancelled("job cancelled before video prepare")
+            if progress is not None:
+                progress(12, "video-prepare")
             prepared = video_mod.prepare(
                 bundle["videos"][0],
                 os.path.join(_media_dir(media_dir), "derived"))
@@ -388,12 +396,21 @@ def apply_action(conn, action, payload, prov, media_dir=None, actor=""):
                           images=prepared["images"],
                           image_times=prepared["image_times"],
                           duration_s=prepared["duration_s"])
+            if progress is not None:
+                progress(20, "video-prepare")
         terms = payload.get("brand_terms") or []
         if isinstance(terms, str):
             terms = [t.strip() for t in terms.split(",")]
         terms = [t for t in terms if isinstance(t, str) and t.strip()][:20]
+
+        def _scaled(pct, _stage):
+            if progress is not None:
+                progress(20 + pct * 0.75, _stage)
+
         return creative.run_pipeline(conn, payload["creative_key"], prov,
-                                     media=bundle, brand_terms=terms or None)
+                                     media=bundle, brand_terms=terms or None,
+                                     progress=_scaled if progress else None,
+                                     cancelled=cancelled)
     if action == "media-upload":
         if not isinstance(payload, dict) or not payload.get("creative_key"):
             raise ValueError("media upload needs creative_key")

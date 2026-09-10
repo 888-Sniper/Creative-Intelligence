@@ -7,13 +7,20 @@ asset sandbox, and escaping discipline.
 
 import os
 import sys
-import tempfile
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Backend"))
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
-HTML = open(os.path.join(ROOT, "Web", "Index.html")).read()
+
+
+def _read_html():
+    with open(os.path.join(ROOT, "Web", "Index.html"),
+              encoding="utf-8") as fh:
+        return fh.read()
+
+
+HTML = _read_html()
 
 
 class ShellStaticTest(unittest.TestCase):
@@ -64,8 +71,8 @@ class ShellLiveTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        from conftest import make_client
-        cls._db = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
+        from conftest import make_client, temp_db_path
+        cls._db = temp_db_path()
         cls.client = make_client(cls._db)
 
     @classmethod

@@ -31,8 +31,6 @@ def _version(engine):
     with engine.connect() as conn:
         return [r[0] for r in
                 conn.execute(text("SELECT version_num FROM alembic_version"))]
-
-
 def test_fresh_upgrade_downgrade_upgrade(tmp_path):
     engine = make_engine(str(tmp_path / "mig.db"))
     ensure_migrated(engine)
@@ -68,7 +66,7 @@ def test_fresh_upgrade_downgrade_upgrade(tmp_path):
     # App boot stays on head and is idempotent.
     ensure_migrated(engine)
     assert _version(engine) == ["0007"]
-
+    engine.dispose()
 
 def test_ensure_upgrades_behind_database_forward(tmp_path):
     from ci_backend.db import script_head
@@ -83,7 +81,7 @@ def test_ensure_upgrades_behind_database_forward(tmp_path):
     with engine.connect() as conn:
         cols = {c["name"] for c in inspect(conn).get_columns("oauth_tokens")}
     assert "refresh_token_enc" in cols
-
+    engine.dispose()
 
 def test_legacy_create_all_db_migrates_with_data(tmp_path):
     engine = make_engine(str(tmp_path / "legacy.db"))
@@ -98,7 +96,7 @@ def test_legacy_create_all_db_migrates_with_data(tmp_path):
                             ).fetchone()[0] == 1
         assert conn.execute(text("SELECT count(*) FROM auth_sessions")
                             ).fetchone()[0] == 1
-
+    engine.dispose()
 
 def test_constraints_enforced_live(tmp_path):
     from sqlalchemy.exc import IntegrityError
@@ -128,3 +126,4 @@ def test_constraints_enforced_live(tmp_path):
                           " admin_id, action) VALUES ('b', '%s', 'root',"
                           " 'ROLE_CHANGED')" % admin.id))
         sess.commit()
+    engine.dispose()

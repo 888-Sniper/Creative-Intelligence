@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Backend"))
 from ci_backend import employees as emp_store  # noqa: E402
 from ci_backend.app import create_app  # noqa: E402
 from ci_backend.config import Settings  # noqa: E402
-from ci_backend.db import make_engine, make_session_factory  # noqa: E402
+from conftest import employee_session  # noqa: E402
 from creative_intel import media as media_mod  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -29,8 +29,7 @@ def make_owner(tmp_path, monkeypatch):
     settings = Settings(workos_client_id="client_test",
                         key_workos="[REDACTED]")
     app = create_app(db, settings)
-    engine = make_engine(db)
-    with make_session_factory(engine)() as sess:
+    with employee_session(db) as sess:
         boss = emp_store.admin_create(sess, "root", "boss@foap.test",
                                       role="admin")
         cookie = "ci_session=" + emp_store.create_session(
@@ -56,9 +55,13 @@ def test_multichunk_upload_roundtrip(tmp_path, monkeypatch):
     assert rec["bytes"] == len(blob)
     assert rec["sha256"] == hashlib.sha256(blob).hexdigest()
     # The record URL is /media/<id>; the stored file must hold our bytes.
-    by_content = [f for f in os.listdir(str(media_dir))
-                  if not f.startswith(".") and open(
-                      str(media_dir / f), "rb").read() == blob]
+    by_content = []
+    for name in os.listdir(str(media_dir)):
+        if name.startswith("."):
+            continue
+        with open(str(media_dir / name), "rb") as fh:
+            if fh.read() == blob:
+                by_content.append(name)
     assert len(by_content) == 1
     assert leftovers(media_dir) == []
 

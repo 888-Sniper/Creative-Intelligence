@@ -211,19 +211,35 @@ def mark_verified(conn, creative_key):
     return ann
 
 
-def run_pipeline(conn, creative_key, providers, media=None, brand_terms=None):
+def run_pipeline(conn, creative_key, providers, media=None, brand_terms=None,
+                 progress=None, cancelled=None):
     """Run all five stages with the given provider bundle; returns stage report.
 
     media is optional: {"audio": (bytes, mime), "images": [jpeg bytes]}.
     Mocks ignore it; live adapters fail closed without it. brand_terms
     is an optional user lexicon for audible brand-mention timing; with
     none supplied no mention is attributed.
+
+    progress(pct, stage) reports 0-100 at stage boundaries; cancelled()
+    is polled at the same points and raises JobCancelled so a revoked
+    job stops chaining provider work. A single in-flight subprocess or
+    HTTP call still runs to its own timeout — cancellation is honored
+    between stages, which is where bills and minutes accumulate.
     """
+    from creative_intel.jobs import JobCancelled
+
+    def checkpoint(pct, stage):
+        if cancelled is not None and cancelled():
+            raise JobCancelled("job cancelled at stage %s" % stage)
+        if progress is not None:
+            progress(pct, stage)
+
     creative = conn.execute("SELECT * FROM creatives WHERE creative_key=?",
                             (creative_key,)).fetchone()
     if not creative:
         raise ValueError("unknown creative %r" % creative_key)
     stages = [{"stage": "ingest", "confidence": 1.0}]
+    checkpoint(10, "ingest")
     media = media or {}
 
     audio_blob, audio_mime = media.get("audio") or (None, None)
@@ -237,10 +253,12 @@ def run_pipeline(conn, creative_key, providers, media=None, brand_terms=None):
         stages.append({"stage": "transcribe", "confidence": conf,
                        "skipped": "silent: no audio track"})
     else:
+        checkpoint(20, "transcribe")
         transcript, conf = providers.stt.transcribe(
             creative_key, audio_bytes=audio_blob, mime=audio_mime,
             timings_out=timings)
         stages.append({"stage": "transcribe", "confidence": conf})
+        checkpoint(40, "transcribe")
     conn.execute("UPDATE creatives SET transcript=? WHERE creative_key=?",
                  (transcript, creative_key))
 
@@ -257,6 +275,7 @@ def run_pipeline(conn, creative_key, providers, media=None, brand_terms=None):
                    "covers_s": max([f["t_sec"] for f in frames] + [0]),
                    "confidence": 1.0 if frames else 0.0})
 
+    checkpoint(55, "frame-sample")
     labels = providers.vision.annotate(frames, images=media.get("images"))
     if media.get("duration_s"):
         conn.execute("UPDATE creatives SET duration_s=? WHERE creative_key=?",
@@ -265,7 +284,9 @@ def run_pipeline(conn, creative_key, providers, media=None, brand_terms=None):
                    "confidence": sum(lbl.get("confidence", 0) for lbl in labels)
                    / len(labels) if labels else 0.0})
 
+    checkpoint(75, "vision-annotate")
     ann = providers.llm.structure(transcript, labels)
+    checkpoint(90, "llm-structure")
     ann["schema_version"] = SCHEMA_VERSION
     ann["status"] = "auto"
     if timings:

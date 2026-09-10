@@ -649,12 +649,10 @@ def _test_port():
     """
     if "client" not in _SRV:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        import tempfile
 
-        from conftest import make_client, mint_admin
+        from conftest import make_client, mint_admin, temp_db_path
         live = fresh_acc_db()
-        path = tempfile.NamedTemporaryFile(suffix=".db",
-                                           delete=False).name
+        path = temp_db_path()
         disk = sqlite3.connect(path)
         schema.init_db(disk)
         for sql in live.iterdump():

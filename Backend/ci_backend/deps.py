@@ -147,9 +147,25 @@ admin_rate_limit = rate_limiter(*ADMIN_RATE_LIMIT, "admin")
 
 
 async def json_payload(request: Request) -> dict:
-    """Tolerant JSON body (empty/invalid bodies become {}, like before)."""
+    """Tolerant JSON body (empty/invalid bodies become {}, like before).
+
+    The body is size-capped (413 beyond Settings.max_json_bytes) so
+    base64 ingest payloads cannot exhaust server memory.
+    """
+    import json as _json
+    settings = getattr(request.app.state, "ci_settings", None)
+    limit = getattr(settings, "max_json_bytes", 25 * 1024 * 1024)
     try:
-        data = await request.json()
+        raw = await request.body()
+    except Exception:
+        return {}
+    if not raw:
+        return {}
+    if len(raw) > limit:
+        raise HTTPException(status_code=413, detail={
+            "error": "Request body too large."})
+    try:
+        data = _json.loads(raw.decode("utf-8"))
     except Exception:
         return {}
     return data if isinstance(data, dict) else {}

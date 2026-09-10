@@ -17,6 +17,7 @@ from ci_backend import employees as emp_store
 from ci_backend.app import create_app
 from ci_backend.config import Settings
 from ci_backend.db import make_engine, make_session_factory
+from creative_intel import ingest as ingest_mod
 
 IDENT = {"id": "w-ada", "email": "ada@foap.test", "email_verified": True,
          "first_name": "Ada", "last_name": "L", "profile_picture_url": ""}
@@ -382,6 +383,37 @@ def test_sync_job_admin_api(tmp_path, monkeypatch):
     r = http.delete("/api/sync/jobs/%s" % job_a["id"])
     assert r.status_code == 404
     assert [j["name"] for j in http.get("/api/sync/jobs").json()["jobs"]] == ["B"]
+
+
+def test_oversize_body_rejected(tmp_path, monkeypatch):
+    from ci_backend.config import Settings
+    from ci_backend.app import create_app
+    settings = Settings(workos_client_id="client_test",
+                        key_workos="[REDACTED]", max_json_bytes=64)
+    app = create_app(str(tmp_path / "tiny.db"), settings)
+    tiny = TestClient(app, raise_server_exceptions=False)
+    r = tiny.post("/api/auth/oauth/start",
+                  json={"provider": "google", "pad": "x" * 128})
+    assert r.status_code == 413
+    assert r.json()["error"] == "Request body too large."
+
+
+def test_xlsx_gate(tmp_path, monkeypatch):
+    http, _db = make_client(tmp_path, admin_email="boss@foap.test")
+    oauth_login(http, monkeypatch, dict(IDENT, id="w-boss",
+                                        email="boss@foap.test"))
+    import base64
+    bad = base64.b64encode(b"not a workbook").decode()
+    r = http.post("/api/ingest",
+                  json={"platform": "meta", "xlsx_b64": bad})
+    assert r.status_code == 409
+    assert "xlsx" in r.json()["error"].lower()
+
+    assert ingest_mod.check_xlsx_blob(b"PK\x03\x04rest")[:4] == b"PK\x03\x04"
+    with pytest.raises(ValueError):
+        ingest_mod.check_xlsx_blob(b"nope")
+    with pytest.raises(ValueError):
+        ingest_mod.check_xlsx_blob(b"")
 
 
 def test_request_models_reject_garbage(tmp_path, monkeypatch):

@@ -35,6 +35,13 @@ class Settings(BaseSettings):
 
     admin_email: str = ""
 
+    max_json_bytes: int = 25 * 1024 * 1024
+    """Largest accepted JSON body (ingest payloads ride inside JSON).
+
+    Creative media uploads travel multipart (their own 100MB cap);
+    this caps csv/xlsx-in-JSON imports against memory exhaustion.
+    """
+
     cookie_secure: bool = False
     """Set CREATIVE_INTEL_COOKIE_SECURE=true behind HTTPS in production.
 

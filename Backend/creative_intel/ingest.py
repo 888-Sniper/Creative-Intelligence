@@ -136,8 +136,28 @@ def parse_csv_report(csv_text, platform, source="upload"):
     return _rows_from_dicts(reader.fieldnames, list(reader), platform, source)
 
 
+#: Largest accepted .xlsx payload (decoded bytes).
+MAX_XLSX_BYTES = 20 * 1024 * 1024
+
+#: An .xlsx file is a ZIP archive: reject anything else up front.
+XLSX_MAGIC = b"PK\x03\x04"
+
+
+def check_xlsx_blob(blob):
+    """Fail-closed gate for uploaded workbooks (size + ZIP magic)."""
+    if not isinstance(blob, (bytes, bytearray)) or not blob:
+        raise ValueError("empty workbook upload")
+    if len(blob) > MAX_XLSX_BYTES:
+        raise ValueError("workbook exceeds %d MB"
+                         % (MAX_XLSX_BYTES // (1024 * 1024)))
+    if not bytes(blob).startswith(XLSX_MAGIC):
+        raise ValueError("upload is not an .xlsx workbook")
+    return bytes(blob)
+
+
 def parse_xlsx_report(blob, platform, source="upload"):
     """Same contract as parse_csv_report for true .xlsx bytes (stdlib)."""
+    blob = check_xlsx_blob(blob)
     from creative_intel import ooxml
     dicts = ooxml.parse_xlsx(blob)
     if not dicts:

@@ -32,6 +32,19 @@ def _google_bearer_resolver(db_path, settings):
     return resolve
 
 
+def resolve_sync_every(args, settings) -> int:
+    """Scheduler cadence: explicit --sync-every wins, else the
+    CREATIVE_INTEL_SYNC_EVERY environment setting (0 disables). This
+    is how the Oracle systemd service (which passes no CLI flags)
+    consumes the configured cadence."""
+    if args.sync_every and args.sync_every > 0:
+        return args.sync_every
+    try:
+        return max(0, int(settings.sync_every))
+    except (TypeError, ValueError):
+        return 0
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--db", default="")
@@ -39,7 +52,8 @@ def main() -> None:
     ap.add_argument("--load-fixture", action="store_true")
     ap.add_argument("--sync-every", type=int, default=0,
                     help="re-run saved connector sync jobs every N seconds"
-                    " (0 disables the scheduler)")
+                    " (0 disables the scheduler; otherwise"
+                    " CREATIVE_INTEL_SYNC_EVERY applies)")
     args = ap.parse_args()
 
     settings = Settings()
@@ -52,17 +66,18 @@ def main() -> None:
         return
 
     app = create_app(db_path, settings)
-    if args.sync_every > 0:
+    sync_every = resolve_sync_every(args, settings)
+    if sync_every > 0:
         import threading
 
         from creative_intel import sync
         stop = threading.Event()
         thread = threading.Thread(
             target=sync.daemon,
-            args=(db_path, args.sync_every, stop, None,
+            args=(db_path, sync_every, stop, None,
                   _google_bearer_resolver(db_path, settings)), daemon=True)
         thread.start()
-        print("sync scheduler: every %d seconds" % args.sync_every)
+        print("sync scheduler: every %d seconds" % sync_every)
 
     import uvicorn
     print("Creative Intelligence on http://127.0.0.1:%d" % args.port)

@@ -2,12 +2,14 @@
 
 import os
 import sys
+import types
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Backend"))
 
 from ci_backend.app import create_app
 from ci_backend.config import ConfigError, Settings
+from ci_backend.main import resolve_sync_every
 
 
 def demo_settings(**over):
@@ -48,6 +50,28 @@ class DemoSafetyTest(unittest.TestCase):
         with self.assertRaises(ConfigError):
             create_app("/tmp/ci-demo-refused.db",
                        demo_settings(provider_mode="mock"))
+
+
+class ResolveSyncEveryTest(unittest.TestCase):
+    def test_explicit_flag_wins_over_env(self):
+        args = types.SimpleNamespace(sync_every=60)
+        self.assertEqual(resolve_sync_every(args, Settings(sync_every=3600)),
+                         60)
+
+    def test_env_setting_applies_without_flag(self):
+        args = types.SimpleNamespace(sync_every=0)
+        self.assertEqual(resolve_sync_every(args, Settings(sync_every=3600)),
+                         3600)
+
+    def test_zero_disables(self):
+        args = types.SimpleNamespace(sync_every=0)
+        self.assertEqual(resolve_sync_every(args, Settings()), 0)
+
+    def test_bad_env_value_disables(self):
+        args = types.SimpleNamespace(sync_every=0)
+        settings = Settings()
+        settings.sync_every = "hourly"
+        self.assertEqual(resolve_sync_every(args, settings), 0)
 
 
 if __name__ == "__main__":

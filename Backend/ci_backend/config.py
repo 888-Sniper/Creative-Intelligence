@@ -73,6 +73,13 @@ class Settings(BaseSettings):
     provider_mode: str = "mock"
     """AI provider mode: mock or live (CREATIVE_INTEL_PROVIDER_MODE)."""
 
+    sync_every: int = 0
+    """Re-run saved connector sync jobs every N seconds (0 disables).
+
+    The Oracle systemd service passes no CLI flags, so this setting is
+    the production scheduler switch (e.g. 3600 for hourly).
+    """
+
     @property
     def database_path(self) -> Path:
         return self.data_dir / self.db_filename

@@ -307,3 +307,47 @@ def test_no_secret_in_status_or_logs(app_data, fake_keyring, monkeypatch,
     blob = (http.get("/api/auth/google/status").text + caplog.text)
     assert "ya-access" not in blob and "ya-refresh" not in blob
     assert "g-secret" not in blob
+
+
+def _suspended_client(app_data):
+    """Second employee, approved then suspended, with their own cookie."""
+    from fastapi.testclient import TestClient
+
+    http, engine, settings = app_data
+    with make_session_factory(engine)() as sess:
+        admin_id = _emp_id(engine)
+        staff = emp_store.admin_create(sess, "test-suspended",
+                                       "suspended@example.com",
+                                       role="employee")
+        emp_store.admin_set_status(sess, admin_id, staff.id, "suspended",
+                                   "EMPLOYEE_SUSPENDED")
+        token = emp_store.create_session(sess, staff.id, "")
+    client = TestClient(http.app, raise_server_exceptions=False)
+    client.cookies.set("ci_session", token)
+    return client
+
+
+def test_suspended_employee_blocked_from_google(app_data):
+    client = _suspended_client(app_data)
+    r = client.post("/api/auth/google/start")
+    assert r.status_code == 403, r.text
+    assert r.json()["gate"] == "suspended"
+    r = client.get("/api/auth/google/status")
+    assert r.status_code == 403, r.text
+    r = client.post("/api/auth/google/disconnect")
+    assert r.status_code == 403, r.text
+
+
+def test_suspended_employee_callback_redirects_expired(app_data, monkeypatch):
+    http, engine, _settings = app_data
+    calls = []
+    fake_google(monkeypatch, calls)
+    http.post("/api/auth/google/start")
+    state = http.cookies.get("ci_google_state")
+    assert state
+    client = _suspended_client(app_data)
+    client.cookies.set("ci_google_state", state)
+    r = client.get("/api/auth/google/callback?code=c&state=%s" % state,
+                   follow_redirects=False)
+    assert r.status_code == 302
+    assert r.headers["location"].endswith("google=expired")

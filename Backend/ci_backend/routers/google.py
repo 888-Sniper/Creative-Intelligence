@@ -23,10 +23,14 @@ GOOGLE_STATE_COOKIE = "ci_google_state"
 
 
 def _actor(request: Request, db: Session) -> emp.Employee:
-    employee = emp.valid_session(db, bearer_token(request))
-    if employee is None:
-        raise HTTPException(status_code=401, detail={
-            "error": "Sign in to continue.", "gate": "login"})
+    """Active-employee gate: suspended/revoked staff cannot operate
+    Google integrations even with a live session token."""
+    try:
+        employee, _gate = emp.authorize(db, bearer_token(request))
+    except emp.Denied as exc:
+        raise HTTPException(
+            status_code=401 if exc.gate == "login" else 403,
+            detail={"error": str(exc), "gate": exc.gate})
     return employee
 
 
@@ -53,7 +57,11 @@ def google_callback(request: Request, db: Session = Depends(get_db),
     # Top-level navigation from Google sends the session cookie
     # (SameSite=Lax), identifying the employee who started the flow.
     # The pending state row + state cookie still bind and expire it.
-    employee = emp.valid_session(db, bearer_token(request))
+    # Status is rechecked: staff suspended mid-flow land on expired.
+    try:
+        employee, _gate = emp.authorize(db, bearer_token(request))
+    except emp.Denied:
+        employee = None
     state = request.query_params.get("state", "")
     if employee is None or not state \
             or request.cookies.get(GOOGLE_STATE_COOKIE) != state:

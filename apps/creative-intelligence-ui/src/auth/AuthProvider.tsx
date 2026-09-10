@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { api, ApiError, setGateHandler } from "@/api/client";
 import { installationContainer } from "@/auth/container";
@@ -29,10 +29,21 @@ async function fetchMe(): Promise<MeResponse> {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [me, setMe] = useState<MeResponse | null>(null);
   const [authenticating, setAuthenticating] = useState(false);
+  // Employee id the container bind was last attempted for (item 18).
+  const bindTriedFor = useRef<string | null>(null);
+  // Set when the container bind is refused: this browser is foreign to the
+  // session, so late refresh resolutions must not resurrect the dashboard.
+  // Cleared only by a fresh explicit login (afterLogin).
+  const bindRefused = useRef(false);
 
   const refresh = useCallback(async () => {
     try {
-      setMe(await fetchMe());
+      const res = await fetchMe();
+      if (bindRefused.current && res.authenticated) {
+        setMe({ authenticated: false, gate: "login", employee: null, is_admin: false, message: "", workos_configured: res.workos_configured });
+      } else {
+        setMe(res);
+      }
     } catch {
       setMe({ authenticated: false, gate: "login", employee: null, is_admin: false, message: "", workos_configured: false });
     }
@@ -52,18 +63,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Adopt OAuth sessions (whose server-side redirect cannot carry the
   // container id) into this installation on boot. First write wins
   // server-side; a foreign container is refused with a login gate.
+  // The attempt happens ONCE per signed-in employee: /api/auth/me is
+  // container-blind, so a refused session still reads authenticated and
+  // refreshing on refusal loops bind/refuse forever (request storm, gate
+  // never settles). A fresh explicit login resets the guard below.
   useEffect(() => {
-    if (me !== null && me.authenticated) {
-      const id = installationContainer();
-      if (id) {
-        api<{ container_id: string }>("POST", "/api/auth/container", {
-          container_id: id,
-        }).catch(() => {
-          void refresh();
-        });
-      }
-    }
-  }, [me, refresh]);
+    const empId = me?.employee?.id ?? null;
+    if (me === null || !me.authenticated || empId === null) return;
+    if (bindTriedFor.current === empId) return;
+    bindTriedFor.current = empId;
+    const id = installationContainer();
+    if (!id) return;
+    api<{ container_id: string }>("POST", "/api/auth/container", {
+      container_id: id,
+    }).catch(() => {
+      // Refused: this session belongs to another installation. Sign out
+      // locally instead of refreshing back into the loop.
+      bindRefused.current = true;
+      setMe({
+        authenticated: false, gate: "login", employee: null,
+        is_admin: false, message: "", workos_configured: me.workos_configured,
+      });
+    });
+  }, [me]);
 
   const status: AuthStatus = useMemo(() => {
     if (me === null) return "INITIALISING";
@@ -83,6 +105,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const afterLogin = useCallback(
     async (res: MeResponse) => {
+      // New session: clear the refusal pin and allow one container-bind
+      // attempt for it, even when the same employee signs in again.
+      bindRefused.current = false;
+      bindTriedFor.current = null;
       setMe(res);
       await refresh();
     },

@@ -4,11 +4,17 @@ Every connector import (manual or scheduled) funnels through
 import_once(): fetch + parse, store via ingest.upsert_rows() so
 re-imports update matching facts instead of duplicating them, and
 record the outcome in sync_runs. Successful manual imports also save
-their parameters as sync_jobs, which the scheduler re-runs; run_once()
+their parameters as sync jobs, which the scheduler re-runs; run_once()
 adds bounded retries with backoff for the unattended path.
 
+Jobs are organisation assets with their own ids: several jobs may
+share one source (Meta Account A, Meta Account B, ...). Only enabled
+jobs run on tick(). The scheduler keeps running a job even if its
+establishing employee is later suspended or revoked; ownership is
+audit info, not an access switch.
+
 All history is local SQLite; tokens stay in Keychain/env via
-connectors. No threads are started here — server.py owns the daemon
+connectors. No threads are started here — the server owns the daemon
 thread, and daemon()/tick() below are plain blocking calls.
 """
 
@@ -17,6 +23,7 @@ import json
 import sqlite3
 import threading
 import time
+import uuid
 
 MAX_ATTEMPTS = 3
 RETRY_DELAYS_S = (2.0, 8.0)
@@ -29,10 +36,17 @@ def utcnow():
         datetime.timezone.utc).isoformat(timespec="seconds")
 
 
-def _record_start(conn, source):
-    cur = conn.execute(
-        "INSERT INTO sync_runs (source, started_at, status, attempts)"
-        " VALUES (?, ?, 'running', 0)", (source, utcnow()))
+def _record_start(conn, source, job_id=""):
+    try:
+        cur = conn.execute(
+            "INSERT INTO sync_runs (source, job_id, started_at, status,"
+            " attempts) VALUES (?, ?, ?, 'running', 0)",
+            (source, job_id or "", utcnow()))
+    except Exception:
+        # Pre-migration databases without the job_id column.
+        cur = conn.execute(
+            "INSERT INTO sync_runs (source, started_at, status, attempts)"
+            " VALUES (?, ?, 'running', 0)", (source, utcnow()))
     conn.commit()
     return cur.lastrowid
 
@@ -92,39 +106,147 @@ def fetch_job(source, params):
     raise ValueError("unknown sync source: %r" % (source,))
 
 
-def save_job(conn, source, params, owner=""):
-    """Remember a successful import's parameters for scheduled re-runs.
+MAX_JOB_NAME = 120
 
-    owner is the establishing employee's id (audit info). Sync jobs are
-    organisation assets: the scheduler keeps running them even if the
-    establishing employee is later suspended or revoked.
-    """
+
+def _check_source(source):
     if source not in SOURCES:
-        raise ValueError("unknown sync source: %r" % (source,))
+        raise ValueError("unknown sync source: %r (try %s)"
+                         % (source, ", ".join(SOURCES)))
+
+
+def _check_name(name):
+    text = (name or "").strip()
+    if not text:
+        raise ValueError("job needs a name")
+    if len(text) > MAX_JOB_NAME:
+        raise ValueError("job name must be %d characters or fewer"
+                         % MAX_JOB_NAME)
+    return text
+
+
+def _job_dict(row):
+    job_id, source, name, params_json, owner, enabled, created, updated = row
+    try:
+        params = json.loads(params_json or "{}")
+    except ValueError:
+        params = {}
+    if not isinstance(params, dict):
+        params = {}
+    return {"id": job_id, "source": source, "name": name, "params": params,
+            "owner_employee_id": owner or "", "enabled": bool(enabled),
+            "created_at": created or "", "updated_at": updated or ""}
+
+
+def create_job(conn, source, name, params, owner=""):
+    """Create a scheduled sync job; returns its dict (with id)."""
+    _check_source(source)
+    name = _check_name(name)
+    if not isinstance(params, dict):
+        raise ValueError("job params must be an object")
+    job_id = uuid.uuid4().hex
+    now = utcnow()
     conn.execute(
-        "INSERT INTO sync_jobs (source, params_json, updated_at,"
-        " owner_employee_id)"
-        " VALUES (?, ?, ?, ?)"
-        " ON CONFLICT(source) DO UPDATE SET params_json=excluded.params_json,"
-        " updated_at=excluded.updated_at,"
-        " owner_employee_id=excluded.owner_employee_id",
-        (source, json.dumps(params or {}), utcnow(), owner or ""))
+        "INSERT INTO sync_jobs (id, source, name, params_json,"
+        " owner_employee_id, enabled, created_at, updated_at)"
+        " VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
+        (job_id, source, name, json.dumps(params or {}), owner or "",
+         now, now))
+    conn.commit()
+    return get_job(conn, job_id)
+
+
+def get_job(conn, job_id):
+    """One job dict by id, or None."""
+    row = conn.execute(
+        "SELECT id, source, name, params_json, owner_employee_id,"
+        " enabled, created_at, updated_at FROM sync_jobs WHERE id=?",
+        (job_id,)).fetchone()
+    return _job_dict(row) if row else None
+
+
+def list_jobs(conn, include_disabled=True):
+    """Every sync job, oldest first."""
+    rows = conn.execute(
+        "SELECT id, source, name, params_json, owner_employee_id,"
+        " enabled, created_at, updated_at FROM sync_jobs"
+        " ORDER BY created_at, rowid").fetchall()
+    jobs = [_job_dict(r) for r in rows]
+    if not include_disabled:
+        jobs = [j for j in jobs if j["enabled"]]
+    return jobs
+
+
+def update_job(conn, job_id, name=None, params=None):
+    """Rename / re-parameterise a job; returns the updated dict."""
+    job = get_job(conn, job_id)
+    if job is None:
+        raise ValueError("unknown sync job")
+    if name is not None:
+        job["name"] = _check_name(name)
+    if params is not None:
+        if not isinstance(params, dict):
+            raise ValueError("job params must be an object")
+        job["params"] = params
+    conn.execute("UPDATE sync_jobs SET name=?, params_json=?, updated_at=?"
+                 " WHERE id=?",
+                 (job["name"], json.dumps(job["params"]), utcnow(), job_id))
+    conn.commit()
+    return get_job(conn, job_id)
+
+
+def set_job_enabled(conn, job_id, enabled):
+    """Enable/disable a job; disabled jobs are skipped by tick()."""
+    if get_job(conn, job_id) is None:
+        raise ValueError("unknown sync job")
+    conn.execute("UPDATE sync_jobs SET enabled=?, updated_at=? WHERE id=?",
+                 (1 if enabled else 0, utcnow(), job_id))
+    conn.commit()
+    return get_job(conn, job_id)
+
+
+def delete_job(conn, job_id):
+    """Delete a job. Run history in sync_runs is kept."""
+    if get_job(conn, job_id) is None:
+        raise ValueError("unknown sync job")
+    conn.execute("DELETE FROM sync_jobs WHERE id=?", (job_id,))
     conn.commit()
 
 
+def save_job(conn, source, params, owner=""):
+    """Legacy single-job compat: remember an import's parameters.
+
+    Upserts the default job (name == source) so the established
+    connect flows keep working; jobs created explicitly via
+    create_job keep their own rows and are never clobbered.
+    """
+    _check_source(source)
+    row = conn.execute(
+        "SELECT id FROM sync_jobs WHERE source=? AND name=?",
+        (source, source)).fetchone()
+    if row:
+        update_job(conn, row[0], params=params)
+        if owner:
+            conn.execute("UPDATE sync_jobs SET owner_employee_id=?"
+                         " WHERE id=?", (owner, row[0]))
+            conn.commit()
+        return get_job(conn, row[0])
+    return create_job(conn, source, source, params or {}, owner)
+
+
 def jobs(conn):
-    """Return {source: params} for every stored sync job."""
+    """Legacy compat: {source: params} over enabled jobs.
+
+    When several enabled jobs share a source, the most recently
+    updated one wins this mapping; tick() still runs every job.
+    """
     out = {}
-    for source, params_json in conn.execute(
-            "SELECT source, params_json FROM sync_jobs"):
-        try:
-            out[source] = json.loads(params_json or "{}")
-        except ValueError:
-            out[source] = {}
+    for job in list_jobs(conn, include_disabled=False):
+        out[job["source"]] = job["params"]
     return out
 
 
-def import_once(conn, source, fetch):
+def import_once(conn, source, fetch, job_id=""):
     """Run one import attempt: fetch, upsert, record the run.
 
     fetch is a zero-arg callable returning (rows, quarantined).
@@ -132,7 +254,7 @@ def import_once(conn, source, fetch):
     Failures record an error run and re-raise the original exception.
     """
     from creative_intel import ingest
-    run_id = _record_start(conn, source)
+    run_id = _record_start(conn, source, job_id)
     try:
         rows, quarantined = fetch()
         counts = ingest.upsert_rows(conn, rows)
@@ -149,7 +271,7 @@ def import_once(conn, source, fetch):
 
 
 def run_once(conn, source, fetch, max_attempts=MAX_ATTEMPTS,
-             sleep=time.sleep):
+             sleep=time.sleep, job_id=""):
     """Run an import with bounded retries for the unattended path.
 
     One sync_runs row records the whole invocation: attempts counts
@@ -157,7 +279,7 @@ def run_once(conn, source, fetch, max_attempts=MAX_ATTEMPTS,
     sleep RETRY_DELAYS_S between tries (inject sleep in tests).
     """
     from creative_intel import ingest
-    run_id = _record_start(conn, source)
+    run_id = _record_start(conn, source, job_id)
     attempts = 0
     while True:
         attempts += 1
@@ -212,35 +334,75 @@ def status(conn, recent_limit=10):
             " updated, quarantined, attempts, error FROM sync_runs"
             " ORDER BY id DESC LIMIT ?", (recent_limit,))]
     return {"sources": sources, "recent": recent,
-            "jobs": sorted(jobs(conn)), "owners": job_owners(conn)}
+            "jobs": sorted(jobs(conn)), "owners": job_owners(conn),
+            "job_list": _jobs_with_runs(conn)}
 
 
 def job_owners(conn):
-    """Establishing employee per source ({source: employee_id})."""
+    """Establishing employee per source ({source: employee_id}).
+
+    Legacy compat: prefers the default (name == source) job, else the
+    first job for that source.
+    """
     try:
         rows = conn.execute(
-            "SELECT source, owner_employee_id FROM sync_jobs").fetchall()
+            "SELECT source, name, owner_employee_id FROM sync_jobs").fetchall()
     except Exception:
         return {}
-    return {source: owner or "" for source, owner in rows}
+    out = {}
+    for source, name, owner in rows:
+        if source not in out or name == source:
+            out[source] = owner or ""
+    return out
+
+
+def _job_last_run(conn, job_id):
+    """Latest run summary for one job id, or None."""
+    try:
+        row = conn.execute(
+            "SELECT started_at, finished_at, status, inserted, updated,"
+            " quarantined, attempts, error FROM sync_runs WHERE job_id=?"
+            " ORDER BY id DESC LIMIT 1", (job_id,)).fetchone()
+    except Exception:
+        return None
+    if not row:
+        return None
+    return {"last_run_at": row[0], "last_finished_at": row[1],
+            "last_status": row[2], "last_inserted": row[3],
+            "last_updated": row[4], "last_quarantined": row[5],
+            "last_attempts": row[6], "last_error": row[7]}
+
+
+def _jobs_with_runs(conn):
+    out = []
+    for job in list_jobs(conn):
+        info = dict(job)
+        info["last_run"] = _job_last_run(conn, job["id"])
+        out.append(info)
+    return out
 
 
 def tick(conn):
-    """Run every stored job once with retries. Returns {source: result}.
+    """Run every enabled job once with retries. Returns {job_id: result}.
 
-    A failing job records its error run and does not stop the others;
-    its exception text is returned under that source's "error" key.
+    Several jobs may share one source; each runs independently. A
+    failing job records its error run and does not stop the others;
+    its exception text is returned under that job's "error" key.
     """
     results = {}
-    for source, params in sorted(jobs(conn).items()):
+    for job in list_jobs(conn, include_disabled=False):
+        source, params = job["source"], job["params"]
         try:
-            results[source] = dict(
+            results[job["id"]] = dict(
                 run_once(conn, source,
-                         lambda s=source, p=params: fetch_job(s, p)))
-            results[source]["ok"] = True
+                         lambda s=source, p=params: fetch_job(s, p),
+                         job_id=job["id"]))
+            results[job["id"]]["ok"] = True
+            results[job["id"]]["source"] = source
+            results[job["id"]]["name"] = job["name"]
         except Exception as exc:  # noqa: BLE001 - per-job isolation
-            results[source] = {
-                "ok": False,
+            results[job["id"]] = {
+                "ok": False, "source": source, "name": job["name"],
                 "error": "%s: %s" % (type(exc).__name__, exc)}
     return results
 

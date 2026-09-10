@@ -189,10 +189,14 @@ class JobsTest(unittest.TestCase):
             sync_mod.fetch_job = lambda source, params: (
                 ingest.parse_csv(CSV, "meta"), [])
             first = sync.tick(conn)
-            self.assertTrue(first["meta"]["ok"])
-            self.assertEqual(first["meta"]["inserted"], 2)
+            self.assertEqual(len(first), 1)
+            res = next(iter(first.values()))
+            self.assertEqual(res["source"], "meta")
+            self.assertTrue(res["ok"])
+            self.assertEqual(res["inserted"], 2)
             second = sync.tick(conn)
-            self.assertEqual(second["meta"]["updated"], 2)
+            res2 = next(iter(second.values()))
+            self.assertEqual(res2["updated"], 2)
             self.assertEqual(_count(conn), 2)
         finally:
             sync_mod.fetch_job = orig
@@ -213,9 +217,10 @@ class JobsTest(unittest.TestCase):
                 sync.save_job(conn, "meta", {})
                 sync.save_job(conn, "tiktok", {})
                 out = sync.tick(conn)
-                self.assertFalse(out["meta"]["ok"])
-                self.assertIn("bad token", out["meta"]["error"])
-                self.assertTrue(out["tiktok"]["ok"])
+                by_source = {r["source"]: r for r in out.values()}
+                self.assertFalse(by_source["meta"]["ok"])
+                self.assertIn("bad token", by_source["meta"]["error"])
+                self.assertTrue(by_source["tiktok"]["ok"])
                 st = sync.status(conn)
                 self.assertEqual(st["sources"]["meta"]["last_status"],
                                  "error")
@@ -224,6 +229,55 @@ class JobsTest(unittest.TestCase):
             finally:
                 sync_mod.fetch_job = orig
         finally:
+            conn.close()
+
+    def test_multiple_jobs_per_source_run_independently(self):
+        conn = _conn()
+        import creative_intel.sync as sync_mod
+        orig = sync_mod.fetch_job
+        try:
+            a = sync.create_job(conn, "meta", "Meta Account A",
+                                {"ad_account_id": "1"}, owner="emp-1")
+            b = sync.create_job(conn, "meta", "Meta Account B",
+                                {"ad_account_id": "2"}, owner="emp-2")
+            self.assertNotEqual(a["id"], b["id"])
+            self.assertEqual(
+                sorted(j["name"] for j in sync.list_jobs(conn)),
+                ["Meta Account A", "Meta Account B"])
+            sync_mod.fetch_job = lambda source, params: (
+                ingest.parse_csv(CSV, "meta"), [])
+            out = sync.tick(conn)
+            self.assertEqual(len(out), 2)
+            self.assertTrue(all(r["ok"] for r in out.values()))
+            st = sync.status(conn)
+            self.assertEqual(len(st["job_list"]), 2)
+            for info in st["job_list"]:
+                self.assertEqual(info["last_run"]["last_status"], "ok")
+                self.assertIn(info["owner_employee_id"], ("emp-1", "emp-2"))
+            # Disabling one job removes it from tick but keeps the row.
+            sync.set_job_enabled(conn, a["id"], False)
+            out = sync.tick(conn)
+            self.assertEqual(list(out), [b["id"]])
+            self.assertEqual(len(sync.list_jobs(conn)), 2)
+            self.assertEqual(len(
+                sync.list_jobs(conn, include_disabled=False)), 1)
+            # Edit + delete round-trip.
+            sync.update_job(conn, b["id"], name="Renamed B")
+            self.assertEqual(sync.get_job(conn, b["id"])["name"],
+                             "Renamed B")
+            sync.delete_job(conn, a["id"])
+            sync.delete_job(conn, b["id"])
+            self.assertEqual(sync.list_jobs(conn), [])
+            for bad in (lambda: sync.create_job(conn, "nope", "x", {}),
+                        lambda: sync.create_job(conn, "meta", "", {}),
+                        lambda: sync.create_job(conn, "meta", "x", []),
+                        lambda: sync.update_job(conn, "missing", name="y"),
+                        lambda: sync.set_job_enabled(conn, "missing", True),
+                        lambda: sync.delete_job(conn, "missing")):
+                with self.assertRaises(ValueError):
+                    bad()
+        finally:
+            sync_mod.fetch_job = orig
             conn.close()
 
     def test_save_job_records_owner_and_status_reports_it(self):

@@ -17,7 +17,8 @@ from urllib.parse import unquote
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "..", ".."))
 
-from fastapi import APIRouter, Depends, HTTPException, Request  # noqa: E402
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, Field  # noqa: E402
 from fastapi.responses import FileResponse, Response  # noqa: E402
 
 from ci_backend import actions as legacy  # noqa: E402
@@ -189,6 +190,100 @@ def replay_history(request: Request, conn=Depends(get_product_conn),
 def sync_status(request: Request, conn=Depends(get_product_conn),
                 _emp=Depends(get_current_employee)):
     return sync.status(conn)
+
+
+class SyncJobCreate(BaseModel):
+    source: str = Field(pattern="^(meta|tiktok|sheets|drive)$")
+    name: str = Field(min_length=1, max_length=120)
+    params: dict = Field(default_factory=dict)
+    enabled: bool = True
+
+
+class SyncJobUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    params: dict | None = None
+    enabled: bool | None = None
+
+
+def _job_or_404(conn, job_id: str) -> dict:
+    job = sync.get_job(conn, job_id)
+    if job is None:
+        raise HTTPException(status_code=404,
+                            detail={"error": "Unknown sync job."})
+    return job
+
+
+@router.get("/api/sync/jobs")
+def sync_jobs_list(request: Request, conn=Depends(get_product_conn),
+                   _emp=Depends(get_current_employee)):
+    return {"jobs": sync._jobs_with_runs(conn)}
+
+
+@router.post("/api/sync/jobs")
+async def sync_job_create(request: Request, conn=Depends(get_product_conn),
+                          who=Depends(get_current_employee)):
+    try:
+        body = SyncJobCreate.model_validate(await json_payload(request))
+    except Exception as exc:
+        raise HTTPException(status_code=409,
+                            detail={"error": "Invalid sync job: %s" % exc})
+    try:
+        job = sync.create_job(conn, body.source, body.name, body.params,
+                              owner=who.id)
+    except ValueError as exc:
+        raise _conflict(exc)
+    if not body.enabled:
+        job = sync.set_job_enabled(conn, job["id"], False)
+    return {"job": job}
+
+
+@router.patch("/api/sync/jobs/{job_id}")
+async def sync_job_update(job_id: str, request: Request,
+                          conn=Depends(get_product_conn),
+                          _emp=Depends(get_current_employee)):
+    from urllib.parse import unquote
+    _job_or_404(conn, unquote(job_id))
+    try:
+        body = SyncJobUpdate.model_validate(await json_payload(request))
+    except Exception as exc:
+        raise HTTPException(status_code=409,
+                            detail={"error": "Invalid sync job: %s" % exc})
+    try:
+        if body.name is not None or body.params is not None:
+            sync.update_job(conn, unquote(job_id), name=body.name,
+                            params=body.params)
+        if body.enabled is not None:
+            sync.set_job_enabled(conn, unquote(job_id), body.enabled)
+    except ValueError as exc:
+        raise _conflict(exc)
+    return {"job": sync.get_job(conn, unquote(job_id))}
+
+
+@router.delete("/api/sync/jobs/{job_id}")
+def sync_job_delete(job_id: str, request: Request,
+                    conn=Depends(get_product_conn),
+                    _emp=Depends(get_current_employee)):
+    from urllib.parse import unquote
+    _job_or_404(conn, unquote(job_id))
+    sync.delete_job(conn, unquote(job_id))
+    return {"ok": True}
+
+
+@router.post("/api/sync/jobs/{job_id}/run")
+def sync_job_run(job_id: str, request: Request,
+                 conn=Depends(get_product_conn),
+                 _emp=Depends(get_current_employee)):
+    from urllib.parse import unquote
+    job = _job_or_404(conn, unquote(job_id))
+    try:
+        out = sync.import_once(
+            conn, job["source"],
+            lambda: sync.fetch_job(job["source"], job["params"]),
+            job_id=job["id"])
+    except (ValueError, export_gate.ExportBlocked, emp.StoreError) as exc:
+        raise _conflict(exc)
+    out["job"] = sync.get_job(conn, job["id"])
+    return out
 
 
 @router.get("/api/views")

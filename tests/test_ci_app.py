@@ -324,6 +324,66 @@ def test_revoke_all_sessions_self_and_admin(tmp_path, monkeypatch):
     assert r.status_code == 404
 
 
+def test_sync_job_admin_api(tmp_path, monkeypatch):
+    http, _db = make_client(tmp_path, admin_email="boss@foap.test")
+    oauth_login(http, monkeypatch, dict(IDENT, id="w-boss",
+                                        email="boss@foap.test"))
+    me = http.get("/api/auth/me").json()["employee"]
+
+    anon = TestClient(http.app, raise_server_exceptions=False)
+    assert anon.get("/api/sync/jobs").status_code == 401
+
+    r = http.post("/api/sync/jobs", json={"source": "meta", "name": "A",
+                                          "params": {"ad_account_id": "1"}})
+    assert r.status_code == 200, r.text
+    job_a = r.json()["job"]
+    assert job_a["owner_employee_id"] == me["id"]
+    assert job_a["enabled"] is True
+    r = http.post("/api/sync/jobs", json={"source": "meta", "name": "B",
+                                          "params": {"ad_account_id": "2"}})
+    job_b = r.json()["job"]
+    assert job_b["id"] != job_a["id"]
+
+    r = http.post("/api/sync/jobs", json={"source": "nope", "name": "x",
+                                          "params": {}})
+    assert r.status_code == 409
+    r = http.post("/api/sync/jobs", json={"source": "meta", "name": "",
+                                          "params": {}})
+    assert r.status_code == 409
+
+    r = http.get("/api/sync/jobs")
+    assert sorted(j["name"] for j in r.json()["jobs"]) == ["A", "B"]
+
+    r = http.patch("/api/sync/jobs/%s" % job_a["id"],
+                   json={"enabled": False})
+    assert r.json()["job"]["enabled"] is False
+    r = http.patch("/api/sync/jobs/%s" % job_a["id"],
+                   json={"name": "A2", "params": {"ad_account_id": "9"}})
+    assert r.json()["job"]["name"] == "A2"
+    r = http.patch("/api/sync/jobs/nope", json={"enabled": True})
+    assert r.status_code == 404
+
+    # Run-now records the run against the job (stubbed fetch).
+    import creative_intel.sync as sync_mod
+    orig = sync_mod.fetch_job
+    sync_mod.fetch_job = lambda source, params: ([], [])
+    try:
+        r = http.post("/api/sync/jobs/%s/run" % job_b["id"], json={})
+        assert r.status_code == 200, r.text
+        assert r.json()["inserted"] == 0
+    finally:
+        sync_mod.fetch_job = orig
+    st = http.get("/api/sync/status").json()
+    info = next(j for j in st["job_list"] if j["id"] == job_b["id"])
+    assert info["last_run"]["last_status"] == "ok"
+
+    r = http.delete("/api/sync/jobs/%s" % job_a["id"])
+    assert r.status_code == 200
+    r = http.delete("/api/sync/jobs/%s" % job_a["id"])
+    assert r.status_code == 404
+    assert [j["name"] for j in http.get("/api/sync/jobs").json()["jobs"]] == ["B"]
+
+
 def test_oauth_callback_replay_rejected(tmp_path, monkeypatch):
     http, _db = make_client(tmp_path, admin_email="boss@foap.test")
     stub_exchange(monkeypatch, dict(IDENT, id="w-boss",

@@ -105,14 +105,21 @@ CREATE TABLE IF NOT EXISTS sync_runs (
     updated INTEGER NOT NULL DEFAULT 0,
     quarantined INTEGER NOT NULL DEFAULT 0,
     attempts INTEGER NOT NULL DEFAULT 0,
-    error TEXT NOT NULL DEFAULT ''
+    error TEXT NOT NULL DEFAULT '',
+    job_id TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS sync_jobs (
-    source TEXT PRIMARY KEY,
+    id TEXT PRIMARY KEY,
+    source TEXT NOT NULL DEFAULT '',
+    name TEXT NOT NULL DEFAULT '',
     params_json TEXT NOT NULL DEFAULT '{}',
-    updated_at TEXT NOT NULL DEFAULT '',
-    owner_employee_id TEXT NOT NULL DEFAULT ''
+    owner_employee_id TEXT NOT NULL DEFAULT '',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT ''
 );
+CREATE INDEX IF NOT EXISTS sync_jobs_source ON sync_jobs (source);
+
 CREATE UNIQUE INDEX IF NOT EXISTS ads_sync_key ON ads
     (source, platform, campaign, adset, ad_name, date);
 -- WorkOS authentication + admin-controlled employee access (auth.py).
@@ -250,15 +257,50 @@ def migrate(conn):
         " updated INTEGER NOT NULL DEFAULT 0,"
         " quarantined INTEGER NOT NULL DEFAULT 0,"
         " attempts INTEGER NOT NULL DEFAULT 0,"
-        " error TEXT NOT NULL DEFAULT '')")
+        " error TEXT NOT NULL DEFAULT '',"
+        " job_id TEXT NOT NULL DEFAULT '')")
+    run_cols = {row[1] for row in
+                conn.execute("PRAGMA table_info(sync_runs)")}
+    if "job_id" not in run_cols:
+        conn.execute("ALTER TABLE sync_runs ADD COLUMN"
+                     " job_id TEXT NOT NULL DEFAULT ''")
     conn.execute(
         "CREATE TABLE IF NOT EXISTS sync_jobs ("
-        "source TEXT PRIMARY KEY, params_json TEXT NOT NULL DEFAULT '{}',"
-        " updated_at TEXT NOT NULL DEFAULT '',"
-        " owner_employee_id TEXT NOT NULL DEFAULT '')")
+        "id TEXT PRIMARY KEY, source TEXT NOT NULL DEFAULT '',"
+        " name TEXT NOT NULL DEFAULT '',"
+        " params_json TEXT NOT NULL DEFAULT '{}',"
+        " owner_employee_id TEXT NOT NULL DEFAULT '',"
+        " enabled INTEGER NOT NULL DEFAULT 1,"
+        " created_at TEXT NOT NULL DEFAULT '',"
+        " updated_at TEXT NOT NULL DEFAULT '')")
+    conn.execute("CREATE INDEX IF NOT EXISTS sync_jobs_source"
+                 " ON sync_jobs (source)")
     job_cols = {row[1] for row in
                 conn.execute("PRAGMA table_info(sync_jobs)")}
-    if "owner_employee_id" not in job_cols:
+    if "id" not in job_cols:
+        # Legacy single-job-per-source shape (source PRIMARY KEY):
+        # rebuild with one job per source, preserving params/owner.
+        has_owner = "owner_employee_id" in job_cols
+        conn.execute(
+            "CREATE TABLE sync_jobs_new ("
+            "id TEXT PRIMARY KEY, source TEXT NOT NULL DEFAULT '',"
+            " name TEXT NOT NULL DEFAULT '',"
+            " params_json TEXT NOT NULL DEFAULT '{}',"
+            " owner_employee_id TEXT NOT NULL DEFAULT '',"
+            " enabled INTEGER NOT NULL DEFAULT 1,"
+            " created_at TEXT NOT NULL DEFAULT '',"
+            " updated_at TEXT NOT NULL DEFAULT '')")
+        conn.execute(
+            "INSERT INTO sync_jobs_new (id, source, name, params_json,"
+            " owner_employee_id, enabled, created_at, updated_at)"
+            " SELECT hex(randomblob(16)), source, source, params_json,"
+            " %s, 1, updated_at, updated_at FROM sync_jobs"
+            % ("owner_employee_id" if has_owner else "''"))
+        conn.execute("DROP TABLE sync_jobs")
+        conn.execute("ALTER TABLE sync_jobs_new RENAME TO sync_jobs")
+        conn.execute("CREATE INDEX IF NOT EXISTS sync_jobs_source"
+                     " ON sync_jobs (source)")
+    elif "owner_employee_id" not in job_cols:
         conn.execute("ALTER TABLE sync_jobs ADD COLUMN"
                      " owner_employee_id TEXT NOT NULL DEFAULT ''")
     conn.commit()

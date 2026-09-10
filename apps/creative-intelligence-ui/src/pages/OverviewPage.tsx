@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { ChangeEvent, ReactNode } from "react";
 import { api, scopedPath } from "@/api/client";
 import { useFilters } from "@/state/FilterContext";
+import { SyncJobs } from "@/components/SyncJobs";
 
 interface CampaignAggregate {
   n_ads?: number;
@@ -311,6 +312,7 @@ export function OverviewPage() {
             {syncOut}
           </div>
         </div>
+        <SyncJobs />
         <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
           {provStatus}
         </div>

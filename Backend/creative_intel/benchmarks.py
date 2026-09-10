@@ -383,7 +383,7 @@ class Scope:
         return " AND ".join(bits), params
 
     def describe(self):
-        """Short human label ("Beauty, Spain, TikTok") or "All data"."""
+        """Short human label ("Beauty, Spain, TikTok") or "All Data"."""
         bits = []
         for key in self.AXES:
             if key in ("date_from", "date_to"):
@@ -394,7 +394,7 @@ class Scope:
             lo = (self.axes.get("date_from") or ["…"])[0]
             hi = (self.axes.get("date_to") or ["…"])[0]
             bits.append("%s..%s" % (lo, hi))
-        return "; ".join(bits) if bits else "All data"
+        return "; ".join(bits) if bits else "All Data"
 
     def is_empty(self):
         return not self.axes

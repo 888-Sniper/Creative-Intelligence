@@ -175,7 +175,7 @@ class ScopeObjectTest(unittest.TestCase):
             conn.close()
 
     def test_describe(self):
-        self.assertEqual(Scope().describe(), "All data")
+        self.assertEqual(Scope().describe(), "All Data")
         self.assertIn("Spain", SPAIN.describe())
 
 
@@ -1547,7 +1547,7 @@ class DateRangeTest(unittest.TestCase):
                      "&a_to=2026-08-03&b_from=2026-08-04&b_to=2026-08-07")
         self.assertEqual(got["a"]["kpis"]["spend"], 350.0)
         self.assertEqual(got["delta"]["spend"], -140.0)
-        self.assertEqual(got["scope"], "All data")
+        self.assertEqual(got["scope"], "All Data")
 
     def test_periods_route_rejects_reversed(self):
         r = _test_port().get(

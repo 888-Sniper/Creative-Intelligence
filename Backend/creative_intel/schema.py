@@ -110,7 +110,8 @@ CREATE TABLE IF NOT EXISTS sync_runs (
 CREATE TABLE IF NOT EXISTS sync_jobs (
     source TEXT PRIMARY KEY,
     params_json TEXT NOT NULL DEFAULT '{}',
-    updated_at TEXT NOT NULL DEFAULT ''
+    updated_at TEXT NOT NULL DEFAULT '',
+    owner_employee_id TEXT NOT NULL DEFAULT ''
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ads_sync_key ON ads
     (source, platform, campaign, adset, ad_name, date);
@@ -253,7 +254,13 @@ def migrate(conn):
     conn.execute(
         "CREATE TABLE IF NOT EXISTS sync_jobs ("
         "source TEXT PRIMARY KEY, params_json TEXT NOT NULL DEFAULT '{}',"
-        " updated_at TEXT NOT NULL DEFAULT '')")
+        " updated_at TEXT NOT NULL DEFAULT '',"
+        " owner_employee_id TEXT NOT NULL DEFAULT '')")
+    job_cols = {row[1] for row in
+                conn.execute("PRAGMA table_info(sync_jobs)")}
+    if "owner_employee_id" not in job_cols:
+        conn.execute("ALTER TABLE sync_jobs ADD COLUMN"
+                     " owner_employee_id TEXT NOT NULL DEFAULT ''")
     conn.commit()
     return added
 

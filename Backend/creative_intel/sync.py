@@ -92,16 +92,23 @@ def fetch_job(source, params):
     raise ValueError("unknown sync source: %r" % (source,))
 
 
-def save_job(conn, source, params):
-    """Remember a successful import's parameters for scheduled re-runs."""
+def save_job(conn, source, params, owner=""):
+    """Remember a successful import's parameters for scheduled re-runs.
+
+    owner is the establishing employee's id (audit info). Sync jobs are
+    organisation assets: the scheduler keeps running them even if the
+    establishing employee is later suspended or revoked.
+    """
     if source not in SOURCES:
         raise ValueError("unknown sync source: %r" % (source,))
     conn.execute(
-        "INSERT INTO sync_jobs (source, params_json, updated_at)"
-        " VALUES (?, ?, ?)"
+        "INSERT INTO sync_jobs (source, params_json, updated_at,"
+        " owner_employee_id)"
+        " VALUES (?, ?, ?, ?)"
         " ON CONFLICT(source) DO UPDATE SET params_json=excluded.params_json,"
-        " updated_at=excluded.updated_at",
-        (source, json.dumps(params or {}), utcnow()))
+        " updated_at=excluded.updated_at,"
+        " owner_employee_id=excluded.owner_employee_id",
+        (source, json.dumps(params or {}), utcnow(), owner or ""))
     conn.commit()
 
 
@@ -205,7 +212,17 @@ def status(conn, recent_limit=10):
             " updated, quarantined, attempts, error FROM sync_runs"
             " ORDER BY id DESC LIMIT ?", (recent_limit,))]
     return {"sources": sources, "recent": recent,
-            "jobs": sorted(jobs(conn))}
+            "jobs": sorted(jobs(conn)), "owners": job_owners(conn)}
+
+
+def job_owners(conn):
+    """Establishing employee per source ({source: employee_id})."""
+    try:
+        rows = conn.execute(
+            "SELECT source, owner_employee_id FROM sync_jobs").fetchall()
+    except Exception:
+        return {}
+    return {source: owner or "" for source, owner in rows}
 
 
 def tick(conn):

@@ -226,6 +226,28 @@ class JobsTest(unittest.TestCase):
         finally:
             conn.close()
 
+    def test_save_job_records_owner_and_status_reports_it(self):
+        conn = _conn()
+        try:
+            sync.save_job(conn, "meta", {"ad_account_id": "1"},
+                          owner="emp-123")
+            self.assertEqual(sync.job_owners(conn), {"meta": "emp-123"})
+            st = sync.status(conn)
+            self.assertEqual(st["owners"], {"meta": "emp-123"})
+            self.assertEqual(st["jobs"], ["meta"])
+        finally:
+            conn.close()
+
+    def test_save_job_owner_defaults_empty_and_survives_migrate(self):
+        conn = _conn()
+        try:
+            sync.save_job(conn, "tiktok", {})
+            self.assertEqual(sync.job_owners(conn), {"tiktok": ""})
+            schema.migrate(conn)
+            self.assertEqual(sync.job_owners(conn), {"tiktok": ""})
+        finally:
+            conn.close()
+
     def test_save_job_rejects_unknown_source(self):
         conn = _conn()
         try:
@@ -260,6 +282,12 @@ class ServerSyncTest(unittest.TestCase):
                 self.assertEqual(_count(conn), 2)
                 self.assertEqual(
                     sync.jobs(conn)["meta"]["ad_account_id"], "1")
+                self.assertEqual(sync.job_owners(conn), {"meta": ""})
+                server.apply_action(
+                    conn, "connect-meta",
+                    {"ad_account_id": "1", "since": "2026-08-01",
+                     "until": "2026-08-31"}, None, actor="emp-9")
+                self.assertEqual(sync.job_owners(conn), {"meta": "emp-9"})
             finally:
                 sync_mod.fetch_job = orig
         finally:

@@ -104,7 +104,16 @@ def _creative_why(a, b, da, db):
     diffs = []
     for metric, higher_wins in (("cpa", False), ("ctr", True), ("vtr", True),
                                 ("cpc", False), ("cpm", False), ("roas", True)):
-        va, vb = da.get(metric, 0) or 0, db.get(metric, 0) or 0
+        # Missing is missing: a None KPI (e.g. CPA with no conversions)
+        # must never coerce to 0, which would make an unmeasured
+        # lower-is-better metric look unbeatable.
+        va, vb = da.get(metric), db.get(metric)
+        if va is None or vb is None:
+            if (va is None) != (vb is None):
+                diffs.append(
+                    "%s is not measurable for %s (insufficient data)"
+                    % (metric.upper(), a if va is None else b))
+            continue
         if va == vb:
             continue
         winner = a if (va > vb) == higher_wins else b
@@ -160,7 +169,9 @@ def _creative_why(a, b, da, db):
             diffs.append("Structure: %s." % "; ".join(bits))
     top = None
     if (da.get("conversions") or 0) > 0 and (db.get("conversions") or 0) > 0:
-        top = a if da.get("cpa", 0) <= db.get("cpa", 0) else b
+        cpa_a, cpa_b = da.get("cpa"), db.get("cpa")
+        if cpa_a is not None and cpa_b is not None:
+            top = a if cpa_a <= cpa_b else b
     elif (da.get("impressions") or 0) > 0 or (db.get("impressions") or 0) > 0:
         top = a if (da.get("ctr", 0) or 0) >= (db.get("ctr", 0) or 0) else b
     if top is None:
@@ -297,7 +308,7 @@ def list_views(conn):
                 " ORDER BY name").fetchall()]
 
 
-def apply_action(conn, action, payload, prov, media_dir=None):
+def apply_action(conn, action, payload, prov, media_dir=None, actor=""):
     if action == "ingest":
         if not payload.get("platform"):
             raise ValueError("ingest needs a platform")
@@ -372,7 +383,7 @@ def apply_action(conn, action, payload, prov, media_dir=None):
                   "platform": payload["platform"]}
         out = sync.import_once(
             conn, "sheets", lambda: sync.fetch_job("sheets", params))
-        sync.save_job(conn, "sheets", params)
+        sync.save_job(conn, "sheets", params, owner=actor)
         return out
     if action == "connect-drive":
         if not payload.get("platform"):
@@ -381,7 +392,7 @@ def apply_action(conn, action, payload, prov, media_dir=None):
                   "platform": payload["platform"]}
         out = sync.import_once(
             conn, "drive", lambda: sync.fetch_job("drive", params))
-        sync.save_job(conn, "drive", params)
+        sync.save_job(conn, "drive", params, owner=actor)
         return out
     if action == "connect-meta":
         params = {"ad_account_id": payload.get("ad_account_id", ""),
@@ -389,7 +400,7 @@ def apply_action(conn, action, payload, prov, media_dir=None):
                   "until": payload.get("until", "")}
         out = sync.import_once(
             conn, "meta", lambda: sync.fetch_job("meta", params))
-        sync.save_job(conn, "meta", params)
+        sync.save_job(conn, "meta", params, owner=actor)
         return out
     if action == "connect-tiktok":
         params = {"advertiser_id": payload.get("advertiser_id", ""),
@@ -397,7 +408,7 @@ def apply_action(conn, action, payload, prov, media_dir=None):
                   "end_date": payload.get("end_date", "")}
         out = sync.import_once(
             conn, "tiktok", lambda: sync.fetch_job("tiktok", params))
-        sync.save_job(conn, "tiktok", params)
+        sync.save_job(conn, "tiktok", params, owner=actor)
         return out
     if action == "sync-now":
         source = payload.get("source", "")

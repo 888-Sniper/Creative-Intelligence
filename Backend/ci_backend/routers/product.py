@@ -355,36 +355,40 @@ async def report(request: Request, conn=Depends(get_product_conn),
 async def creative_verify(key: str, request: Request,
                           conn=Depends(get_product_conn),
                           prov=Depends(get_providers),
-                          _emp=Depends(get_current_employee)):
-    return _run_action(conn, prov, "verify", {"creative_key": unquote(key)})
+                          who=Depends(get_current_employee)):
+    return _run_action(conn, prov, "verify", {"creative_key": unquote(key)},
+                       actor=who.id)
 
 
 @router.post("/api/creatives/{key}/annotate")
 async def creative_annotate(key: str, request: Request,
                             conn=Depends(get_product_conn),
                             prov=Depends(get_providers),
-                            _emp=Depends(get_current_employee)):
+                            who=Depends(get_current_employee)):
     body = await json_payload(request)
     return _run_action(conn, prov, "annotate",
                        {"creative_key": unquote(key),
-                        "annotation": body.get("annotation", {})})
+                        "annotation": body.get("annotation", {})},
+                       actor=who.id)
 
 
 @router.post("/api/{action:path}")
 async def action_dispatch(action: str, request: Request,
                           conn=Depends(get_product_conn),
                           prov=Depends(get_providers),
-                          _emp=Depends(get_current_employee)):
+                          who=Depends(get_current_employee)):
     path = "/api/" + action
     if path not in _ACTION_ROUTES:
         raise HTTPException(status_code=404, detail={"error": "not found"})
     body = await json_payload(request)
-    return _run_action(conn, prov, _ACTION_ROUTES[path], body)
+    return _run_action(conn, prov, _ACTION_ROUTES[path], body,
+                       actor=who.id)
 
 
-def _run_action(conn, prov, action: str, payload: dict):
+def _run_action(conn, prov, action: str, payload: dict, actor: str = ""):
     try:
-        result = legacy.apply_action(conn, action, payload, prov)
+        result = legacy.apply_action(conn, action, payload, prov,
+                                     actor=actor)
     except (ValueError, export_gate.ExportBlocked, emp.StoreError) as exc:
         raise _conflict(exc)
     if action != "media-upload":

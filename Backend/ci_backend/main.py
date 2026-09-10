@@ -12,6 +12,26 @@ from ci_backend.app import create_app  # noqa: E402
 from ci_backend.config import Settings  # noqa: E402
 
 
+def _google_bearer_resolver(db_path, settings):
+    """Per-job Google access tokens for the scheduler thread.
+
+    Opens employee sessions against the same database file, so
+    private sheets/drive jobs transparently refresh expired access
+    tokens on schedule. Resolution failures propagate to tick(),
+    which records them against the job instead of stopping others.
+    """
+    from ci_backend import google_oauth as goog
+    from ci_backend.db import make_engine, make_session_factory
+    sessions = make_session_factory(make_engine(db_path))
+
+    def resolve(job):
+        owner = (job or {}).get("owner_employee_id", "")
+        with sessions() as sess:
+            return goog.access_token_for(sess, owner, settings)
+
+    return resolve
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--db", default="")
@@ -39,7 +59,8 @@ def main() -> None:
         stop = threading.Event()
         thread = threading.Thread(
             target=sync.daemon,
-            args=(db_path, args.sync_every, stop), daemon=True)
+            args=(db_path, args.sync_every, stop, None,
+                  _google_bearer_resolver(db_path, settings)), daemon=True)
         thread.start()
         print("sync scheduler: every %d seconds" % args.sync_every)
 

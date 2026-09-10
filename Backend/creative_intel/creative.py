@@ -228,10 +228,19 @@ def run_pipeline(conn, creative_key, providers, media=None, brand_terms=None):
 
     audio_blob, audio_mime = media.get("audio") or (None, None)
     timings = []
-    transcript, conf = providers.stt.transcribe(
-        creative_key, audio_bytes=audio_blob, mime=audio_mime,
-        timings_out=timings)
-    stages.append({"stage": "transcribe", "confidence": conf})
+    if audio_blob is None and (media.get("images") or
+                               media.get("image_times")):
+        # Silent clip (or image-only upload): no audio track to
+        # transcribe. Skip STT with an explicit stage note and continue
+        # through vision instead of failing the whole pipeline.
+        transcript, conf = "", 0.0
+        stages.append({"stage": "transcribe", "confidence": conf,
+                       "skipped": "silent: no audio track"})
+    else:
+        transcript, conf = providers.stt.transcribe(
+            creative_key, audio_bytes=audio_blob, mime=audio_mime,
+            timings_out=timings)
+        stages.append({"stage": "transcribe", "confidence": conf})
     conn.execute("UPDATE creatives SET transcript=? WHERE creative_key=?",
                  (transcript, creative_key))
 

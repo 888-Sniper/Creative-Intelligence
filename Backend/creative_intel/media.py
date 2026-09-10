@@ -15,6 +15,7 @@ import os
 import re
 
 MAX_BYTES = 100 * 1024 * 1024
+CHUNK_BYTES = 1024 * 1024
 KEY_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}")
 
 # extension -> (mime, magic-prefix check or None)
@@ -79,19 +80,27 @@ def media_dir(base_dir):
 
 
 def save_media(conn, store, creative_key, filename, content_b64, mime=None):
-    """Persist an upload; returns the metadata record (no bytes).
+    """Persist a base64 upload (legacy JSON transport); returns metadata."""
+    try:
+        content = base64.b64decode(content_b64 or "", validate=True)
+    except Exception:
+        raise ValueError("content_b64 is not valid base64")
+    return save_media_bytes(conn, store, creative_key, filename,
+                            bytes(content), mime)
 
-    content_b64 is base64 text (JSON-safe transport). On success the
+
+def save_media_bytes(conn, store, creative_key, filename, content, mime=None):
+    """Persist raw upload bytes; returns the metadata record (no bytes).
+
+    The multipart path: bytes ride outside JSON so the real 100 MB
+    limit applies instead of the JSON body cap. On success the
     creative's annotation gains source_url=/media/<id> so grid/detail
     previews and live providers pick it up; annotation-less creatives
     keep no source_url until annotated (nothing invented).
     """
     os.makedirs(store, exist_ok=True)
     check_key(creative_key)
-    try:
-        content = base64.b64decode(content_b64, validate=True)
-    except Exception:
-        raise ValueError("content_b64 is not valid base64")
+    content = bytes(content or b"")
     ext, sniffed = check_upload(filename, content)
     if mime and mime != sniffed:
         raise ValueError("mime %r does not match %s content" % (mime, ext))
@@ -145,8 +154,8 @@ def _link_source_url(conn, creative_key, rid):
     creative_mod.save_annotation(conn, creative_key, ann)
 
 
-def load_bytes(conn, store, rid):
-    """(content, mime, filename) for GET /media/<id>; 404-style ValueError."""
+def _locate(conn, store, rid):
+    """(path, mime, filename) for GET /media/<id>; 404-style ValueError."""
     try:
         rid = int(rid)
     except (TypeError, ValueError):
@@ -162,8 +171,29 @@ def load_bytes(conn, store, rid):
     path = os.path.join(store, stored)
     if not os.path.isfile(path):
         raise ValueError("media file missing for id %r" % (rid,))
+    return path, mime, filename
+
+
+def load_bytes(conn, store, rid):
+    """(content, mime, filename) for GET /media/<id>; 404-style ValueError."""
+    path, mime, filename = _locate(conn, store, rid)
     with open(path, "rb") as fh:
         return fh.read(), mime, filename
+
+
+def file_path(conn, store, rid):
+    """On-disk path for GET /media/<id> (range-capable serving)."""
+    path, _mime, _filename = _locate(conn, store, rid)
+    return path
+
+
+def describe(conn, store, rid):
+    """{mime, filename, bytes} headers for GET /media/<id>."""
+    _path, mime, filename = _locate(conn, store, rid)
+    row = conn.execute("SELECT bytes FROM media WHERE id=?",
+                       (int(rid),)).fetchone()
+    return {"mime": mime, "filename": filename,
+            "bytes": row[0] if row else 0}
 
 
 def list_for_creative(conn, creative_key):

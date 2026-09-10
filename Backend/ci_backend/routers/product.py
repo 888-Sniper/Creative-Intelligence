@@ -8,6 +8,8 @@ so both shells run identical logic during the transition.
 
 from __future__ import annotations
 
+import asyncio
+import functools
 import mimetypes
 import os
 import sqlite3
@@ -32,7 +34,7 @@ from creative_intel import (
     providers as providers_mod,
 )
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import FileResponse, Response  # noqa: E402
+from fastapi.responses import FileResponse  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
 
 from ci_backend import actions as legacy  # noqa: E402
@@ -469,8 +471,8 @@ async def creative_verify(key: str, request: Request,
                           conn=Depends(get_product_conn),
                           prov=Depends(get_providers),
                           who=Depends(get_current_employee)):
-    return _run_action(conn, prov, "verify", {"creative_key": unquote(key)},
-                       actor=who.id)
+    return await _run_action(conn, prov, "verify", {"creative_key": unquote(key)},
+                             actor=who.id)
 
 
 @router.post("/api/creatives/{key}/annotate")
@@ -479,10 +481,10 @@ async def creative_annotate(key: str, request: Request,
                             prov=Depends(get_providers),
                             who=Depends(get_current_employee)):
     body = await json_payload(request)
-    return _run_action(conn, prov, "annotate",
-                       {"creative_key": unquote(key),
-                        "annotation": body.get("annotation", {})},
-                       actor=who.id)
+    return await _run_action(conn, prov, "annotate",
+                             {"creative_key": unquote(key),
+                              "annotation": body.get("annotation", {})},
+                             actor=who.id)
 
 
 @router.post("/api/{action:path}")
@@ -493,9 +495,52 @@ async def action_dispatch(action: str, request: Request,
     path = "/api/" + action
     if path not in _ACTION_ROUTES:
         raise HTTPException(status_code=404, detail={"error": "not found"})
+    if path == "/api/media/upload" and request.headers.get(
+            "content-type", "").split(";")[0].strip() == "multipart/form-data":
+        return await _media_upload_multipart(request, conn)
     body = await json_payload(request)
-    return _run_action(conn, prov, _ACTION_ROUTES[path], body,
-                       actor=who.id, request=request)
+    return await _run_action(conn, prov, _ACTION_ROUTES[path], body,
+                             actor=who.id, request=request)
+
+
+async def _media_upload_multipart(request: Request, conn):
+    """Multipart creative upload: bytes ride outside JSON.
+
+    The file streams in chunks so the real media.MAX_BYTES (100 MB)
+    limit is enforced by counting, not by the JSON body cap.
+    """
+    try:
+        form = await request.form()
+    except Exception:
+        raise HTTPException(status_code=409,
+                            detail={"error": "upload needs multipart form"})
+    creative_key = form.get("creative_key") or ""
+    upload = form.get("file")
+    read = getattr(upload, "read", None)
+    filename = getattr(upload, "filename", "") or ""
+    if not creative_key or read is None or not filename:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "upload needs creative_key and a file part"})
+    chunks, total = [], 0
+    while True:
+        piece = await read(media.CHUNK_BYTES)
+        if not piece:
+            break
+        total += len(piece)
+        if total > media.MAX_BYTES:
+            raise HTTPException(
+                status_code=409,
+                detail={"error": "upload exceeds %d MB"
+                        % (media.MAX_BYTES // (1024 * 1024))})
+        chunks.append(piece)
+    content = b"".join(chunks)
+    try:
+        return media.save_media_bytes(
+            conn, legacy._media_dir(), creative_key, filename, content,
+            getattr(upload, "content_type", None) or None)
+    except ValueError as exc:
+        raise _conflict(exc)
 
 
 def _resolve_google_bearer(payload: dict, actor: str,
@@ -518,13 +563,22 @@ def _resolve_google_bearer(payload: dict, actor: str,
     payload["_google_bearer"] = headers["Authorization"].split(" ", 1)[1]
 
 
-def _run_action(conn, prov, action: str, payload: dict, actor: str = "",
-                request=None):
+async def _run_action(conn, prov, action: str, payload: dict, actor: str = "",
+                      request=None):
+    """Run one product action without blocking the event loop.
+
+    Video/AI work (pipeline, imports, media) is synchronous blocking
+    code by design, so it hops to a worker thread; the loop stays free
+    for health, auth, and other requests. The product SQLite handle
+    is single-owner per request (check_same_thread=False) and the
+    replay log stays on the loop thread after the hop.
+    """
     if action in ("connect-sheets", "connect-drive") and request is not None:
         _resolve_google_bearer(payload, actor, request)
     try:
-        result = legacy.apply_action(conn, action, payload, prov,
-                                     actor=actor)
+        result = await asyncio.get_running_loop().run_in_executor(
+            None, functools.partial(legacy.apply_action, conn, action,
+                                    payload, prov, actor=actor))
     except (ValueError, export_gate.ExportBlocked, emp.StoreError) as exc:
         raise _conflict(exc)
     finally:
@@ -540,17 +594,33 @@ def _run_action(conn, prov, action: str, payload: dict, actor: str = "",
 # ---------------------------------------------------------------------------
 
 
+@router.get("/media/by-creative/{key}")
+def media_by_creative(key: str, request: Request,
+                      conn=Depends(get_product_conn),
+                      _emp=Depends(get_current_employee)):
+    from urllib.parse import unquote
+    try:
+        items = media.list_for_creative(conn, unquote(key))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail={"error": str(exc)})
+    return {"media": items}
+
+
 @router.get("/media/{media_id}")
 def serve_media(media_id: str, request: Request,
                 conn=Depends(get_product_conn),
                 _emp=Depends(get_current_employee)):
+    # Authenticated employees only, private cache: media rows are
+    # account data, never shared-cacheable. FileResponse serves byte
+    # ranges so video/audio seek instead of downloading whole files.
     try:
-        blob, mime, _filename = media.load_bytes(
-            conn, legacy._media_dir(), media_id)
+        info = media.describe(conn, legacy._media_dir(), media_id)
+        path = media.file_path(conn, legacy._media_dir(), media_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail={"error": str(exc)})
-    return Response(content=blob, media_type=mime,
-                    headers={"Cache-Control": "public, max-age=86400"})
+    return FileResponse(path, media_type=info["mime"],
+                        filename=info["filename"],
+                        headers={"Cache-Control": "private, max-age=86400"})
 
 
 _ALLOWED_ASSET_EXTS = (".png", ".svg", ".ico", ".webp")

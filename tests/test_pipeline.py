@@ -168,6 +168,32 @@ class CreativeTest(unittest.TestCase):
             creative.mark_verified(conn, "x")
         conn.close()
 
+    def test_silent_video_skips_stt_continues_vision(self):
+        import types
+
+        class BoomStt:
+            def transcribe(self, *a, **k):
+                raise AssertionError("STT must not run for silent clips")
+
+        conn = fresh_db()
+        prov = providers.Providers()
+        ingest.insert_rows(conn, ingest.parse_csv(META_CSV, "meta"))
+        silent = types.SimpleNamespace(stt=BoomStt(), vision=prov.vision,
+                                       llm=prov.llm)
+        report = creative.run_pipeline(
+            conn, "hook-a", silent,
+            media={"images": [b"\xff\xd8\xff-fake"], "image_times": [0.0]})
+        stages = {s["stage"]: s for s in report["stages"]}
+        self.assertEqual(stages["transcribe"].get("skipped"),
+                         "silent: no audio track")
+        self.assertEqual(stages["transcribe"]["confidence"], 0.0)
+        self.assertIn("vision-annotate", stages)
+        self.assertEqual(report["annotation"]["status"], "auto")
+        row = conn.execute("SELECT transcript FROM creatives WHERE"
+                           " creative_key='hook-a'").fetchone()
+        self.assertEqual(row[0], "")
+        conn.close()
+
 
 class RetentionTest(unittest.TestCase):
     def test_join_segments(self):

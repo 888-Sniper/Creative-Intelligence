@@ -170,5 +170,81 @@ class MediaLiveTest(unittest.TestCase):
             self.assertEqual(r.status_code, 404, bad)
 
 
+class MediaMultipartTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = tempfile.mkdtemp()
+        os.environ["CREATIVE_INTEL_MEDIA_DIR"] = cls._tmp
+        cls._db = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
+        conn = sqlite3.connect(cls._db)
+        schema.init_db(conn)
+        conn.execute("INSERT INTO creatives (creative_key, platform, name)"
+                     " VALUES (?,?,?)", ("mp1", "meta", "MP One"))
+        conn.commit()
+        conn.close()
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from conftest import make_client, mint_admin
+        cls.client = make_client(cls._db)
+        cls.client.headers.update(mint_admin(cls._db))
+
+    @classmethod
+    def tearDownClass(cls):
+        os.unlink(cls._db)
+        del os.environ["CREATIVE_INTEL_MEDIA_DIR"]
+
+    def test_multipart_upload_serve_private(self):
+        r = self.client.post(
+            "/api/media/upload",
+            data={"creative_key": "mp1"},
+            files={"file": ("spot.png", PNG, "image/png")})
+        self.assertEqual(r.status_code, 200, r.text)
+        rec = r.json()
+        self.assertEqual(rec["mime"], "image/png")
+        self.assertEqual(rec["bytes"], len(PNG))
+        r = self.client.get(rec["url"])
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.content, PNG)
+        self.assertIn("private", r.headers.get("cache-control", ""))
+        self.assertNotIn("public", r.headers.get("cache-control", ""))
+
+    def test_multipart_serves_ranges(self):
+        r = self.client.post(
+            "/api/media/upload",
+            data={"creative_key": "mp1"},
+            files={"file": ("range.png", PNG, "image/png")})
+        url = r.json()["url"]
+        r = self.client.get(url, headers={"Range": "bytes=0-9"})
+        self.assertEqual(r.status_code, 206)
+        self.assertEqual(r.content, PNG[:10])
+        self.assertIn("bytes", r.headers.get("content-range", ""))
+
+    def test_multipart_enforces_limit_by_counting(self):
+        from unittest import mock
+        big = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
+        with mock.patch.object(media, "MAX_BYTES", 16):
+            r = self.client.post(
+                "/api/media/upload",
+                data={"creative_key": "mp1"},
+                files={"file": ("big.png", big, "image/png")})
+        self.assertEqual(r.status_code, 409)
+        self.assertIn("exceeds", r.json()["error"])
+
+    def test_multipart_needs_parts(self):
+        r = self.client.post("/api/media/upload", data={})
+        self.assertEqual(r.status_code, 409)
+
+    def test_by_creative_lists_mime(self):
+        self.client.post(
+            "/api/media/upload",
+            data={"creative_key": "mp1"},
+            files={"file": ("list.png", PNG, "image/png")})
+        r = self.client.get("/media/by-creative/mp1")
+        self.assertEqual(r.status_code, 200)
+        items = r.json()["media"]
+        self.assertTrue(items)
+        self.assertEqual(items[0]["mime"], "image/png")
+        self.assertTrue(items[0]["url"].startswith("/media/"))
+
+
 if __name__ == "__main__":
     unittest.main()

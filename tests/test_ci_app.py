@@ -830,3 +830,45 @@ def test_provider_recorded_and_exposed(client, monkeypatch):
     me = client.get("/api/auth/me").json()
     # oauth stub default provider is google (see stub_exchange).
     assert me["employee"]["provider"] == "google"
+
+
+def test_slow_action_does_not_block_health(tmp_path, monkeypatch):
+    import threading
+    import time
+
+    import ci_backend.actions as legacy
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from conftest import mint_admin
+    client, _db = make_client(tmp_path)
+    client.headers.update(mint_admin(_db))
+    entered = threading.Event()
+
+    def slow(conn, action, payload, prov, actor=""):
+        entered.set()
+        time.sleep(4)
+        return {"ok": True}
+
+    monkeypatch.setattr(legacy, "apply_action", slow)
+    slow_done = []
+    slow_errors = []
+
+    def run_slow():
+        try:
+            r = client.post("/api/pipeline/run",
+                            json={"creative_key": "x"})
+            slow_done.append(r.status_code)
+        except Exception as exc:  # noqa: BLE001 - surfaced below
+            slow_errors.append(repr(exc))
+
+    worker = threading.Thread(target=run_slow)
+    worker.start()
+    assert entered.wait(timeout=15), slow_errors
+    start = time.time()
+    r = client.get("/api/health")
+    elapsed = time.time() - start
+    worker.join(timeout=15)
+    assert r.status_code == 200
+    assert slow_done == [200]
+    # The loop stayed free while the worker slept: generous margin
+    # (4s sleep vs 3s budget) so loaded CI cannot flake this.
+    assert elapsed < 3.0, elapsed

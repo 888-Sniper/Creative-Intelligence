@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, scopedPath } from "@/api/client";
+import { MediaPreview } from "@/components/MediaPreview";
 import { useFilters } from "@/state/FilterContext";
 
 /** Creatives library + review workspace (port of legacy Web/Index.html v-creative). */
@@ -165,15 +166,6 @@ function brandAudioTxt(a: Annotation): string {
   if (!approx) return `${a.brand_audio_mention_s}s (word-level)`;
   const end = m?.end ?? "?";
   return `within ${a.brand_audio_mention_s}–${end}s segment (segment-level timing, not an exact word time)`;
-}
-
-function readFileB64(file: File): Promise<string> {
-  return new Promise((res, rej) => {
-    const fr = new FileReader();
-    fr.onload = () => res(String(fr.result).split(",", 2)[1] ?? "");
-    fr.onerror = () => rej(new Error("could not read file"));
-    fr.readAsDataURL(file);
-  });
 }
 
 function storyboardSvg(a: Annotation): { slots: string[]; dur: number } {
@@ -660,13 +652,20 @@ export function CreativesPage() {
       return;
     }
     try {
-      const b64 = await readFileB64(f);
-      const r = await api<{ filename: string; bytes: number; url: string }>(
-        "POST",
-        "/api/media/upload",
-        { creative_key: selected, filename: f.name, content_b64: b64, mime: f.type || undefined },
-      );
-      setMediaStatus(`Stored ${r.filename} (${r.bytes} bytes) → ${r.url}.`);
+      // Multipart: bytes ride outside JSON so the real 100 MB server
+      // limit applies instead of the JSON body cap.
+      const form = new FormData();
+      form.append("creative_key", selected);
+      form.append("file", f, f.name);
+      const up = await fetch("/api/media/upload", { method: "POST", body: form });
+      const uj = (await up.json().catch(() => ({}))) as {
+        error?: string;
+        filename?: string;
+        bytes?: number;
+        url?: string;
+      };
+      if (!up.ok) throw new Error(uj.error || String(up.status));
+      setMediaStatus(`Stored ${uj.filename} (${uj.bytes} bytes) → ${uj.url}.`);
       await refresh();
     } catch (e) {
       setMediaStatus(e instanceof Error ? e.message : String(e));
@@ -746,16 +745,12 @@ export function CreativesPage() {
             <div>
               {src ? (
                 <>
-                  <video
-                    id="creative-video"
-                    data-testid="creative-video"
-                    ref={videoRef}
-                    controls
-                    preload="metadata"
-                    style={{ maxWidth: "100%" }}
-                  >
-                    <source src={src} />
-                  </video>
+                  <MediaPreview
+                    src={src}
+                    creativeKey={found.creative_key}
+                    videoRef={videoRef}
+                    testId="creative-video"
+                  />
                   <div className="muted" style={{ fontSize: 12 }}>
                     Playing annotated source URL.
                   </div>
@@ -968,17 +963,10 @@ export function CreativesPage() {
                 >
                   <div className="media">
                     {prev ? (
-                      <video
-                        muted
-                        playsInline
-                        preload="metadata"
+                      <MediaPreview
                         src={prev}
-                        title="Preview — click to play/pause"
-                        onClick={(e) => {
-                          const v = e.currentTarget;
-                          if (v.paused) void v.play().catch(() => undefined);
-                          else v.pause();
-                        }}
+                        creativeKey={r.creative_key}
+                        mutedPreview
                       />
                     ) : (
                       `${a.hook_type ?? "untagged hook"} · ${String(a.duration_s ?? r.duration_s ?? "—")}s`

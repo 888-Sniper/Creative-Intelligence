@@ -26,6 +26,21 @@ BASE = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                      "..", ".."))
 WEB_INDEX = os.path.normpath(os.path.join(BASE, "Web", "Index.html"))
 ASSETS_DIR = os.path.normpath(os.path.join(BASE, "Web", "assets"))
+# React production build (item 51: `pnpm build` in
+# apps/creative-intelligence-ui). Served at / when present; the legacy
+# static shell above remains the fallback so fresh checkouts and
+# build-less environments keep working unchanged.
+REACT_DIST_DIR = os.path.normpath(
+    os.path.join(BASE, "apps", "creative-intelligence-ui", "dist"))
+REACT_INDEX = os.path.join(REACT_DIST_DIR, "index.html")
+REACT_ASSETS_DIR = os.path.join(REACT_DIST_DIR, "assets")
+
+
+def react_index() -> str:
+    """Production frontend entry: React build when built, else legacy."""
+    if os.path.isfile(REACT_INDEX):
+        return REACT_INDEX
+    return WEB_INDEX
 
 
 def _fixture_dir():

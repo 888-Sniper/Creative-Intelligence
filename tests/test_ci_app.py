@@ -705,3 +705,44 @@ def test_no_licensing_concepts():
                 if bad in text.lower():
                     hits.append("%s: %s" % (path, bad))
     assert hits == []
+
+
+def test_spa_shell_serving(client):
+    # Deep links serve the app shell; unknown paths still 404; liveness
+    # endpoints are not shadowed by the SPA fallback.
+    for path in ("/campaigns", "/creatives", "/compare", "/benchmarks",
+                 "/reports", "/profile", "/admin"):
+        r = client.get(path)
+        assert r.status_code == 200, path
+        assert "Foap Creative Intelligence" in r.text, path
+    assert client.get("/no-such-view").status_code == 404
+    assert client.get("/health").json() == {"ok": True}
+    assert client.get("/readiness").json() == {"ready": True}
+    assert client.get("/assets/../Index.html").status_code == 404
+    assert client.get("/assets/app.js").status_code == 404
+
+
+def test_react_build_served_when_present(client, tmp_path, monkeypatch):
+    import ci_backend.actions as actions_mod
+    dist = tmp_path / "dist"
+    assets = dist / "assets"
+    assets.mkdir(parents=True)
+    (dist / "index.html").write_text(
+        "<html><head><title>Foap Creative Intelligence</title></head></html>")
+    (assets / "app-abc123.js").write_text("console.log(1)")
+    monkeypatch.setattr(actions_mod, "REACT_INDEX", str(dist / "index.html"))
+    monkeypatch.setattr(actions_mod, "REACT_ASSETS_DIR", str(assets))
+    orig = actions_mod.react_index
+    monkeypatch.setattr(actions_mod, "react_index",
+                        lambda: str(dist / "index.html")
+                        if os.path.isfile(str(dist / "index.html"))
+                        else orig())
+    r = client.get("/")
+    assert r.status_code == 200
+    assert "Foap Creative Intelligence" in r.text
+    r = client.get("/campaigns")
+    assert r.status_code == 200
+    r = client.get("/assets/app-abc123.js")
+    assert r.status_code == 200
+    assert "immutable" in r.headers.get("cache-control", "")
+    assert client.get("/foap-logo.png").status_code == 200

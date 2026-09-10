@@ -68,10 +68,9 @@ def create_app(db_path: str = "", settings: Settings | None = None,
     if providers is not None:
         app.state.ci_providers = providers
 
-    app.include_router(auth.router)
-    app.include_router(admin.router)
-    app.include_router(product.router)
-
+    # Liveness/readiness register BEFORE the product router: its
+    # explicit SPA fallback (/{spa_path}) matches single-segment paths
+    # in registration order and must never shadow these endpoints.
     @app.get("/health")
     def health():
         """Liveness only: the process is alive. No secrets, no checks."""
@@ -95,5 +94,9 @@ def create_app(db_path: str = "", settings: Settings | None = None,
             return JSONResponse(status_code=503,
                                 content={"ready": False,
                                          "error": "database unavailable"})
+
+    app.include_router(auth.router)
+    app.include_router(admin.router)
+    app.include_router(product.router)
 
     return app

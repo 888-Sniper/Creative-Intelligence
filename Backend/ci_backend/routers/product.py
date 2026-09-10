@@ -512,13 +512,31 @@ def serve_media(media_id: str, request: Request,
 
 
 _ALLOWED_ASSET_EXTS = (".png", ".svg", ".ico", ".webp")
+# Hashed Vite build assets: safe to cache immutably, served from the
+# React dist directory only (never from the legacy tree).
+_ALLOWED_DIST_EXTS = (".js", ".css", ".woff2")
+
+
+def _index_response():
+    return FileResponse(legacy.react_index(),
+                        media_type="text/html; charset=utf-8")
 
 
 @router.get("/assets/{name}")
 def serve_asset(name: str):
     if "/" in name or "\\" in name or name.startswith("."):
         raise HTTPException(status_code=404, detail={"error": "not found"})
-    if os.path.splitext(name)[1].lower() not in _ALLOWED_ASSET_EXTS:
+    ext = os.path.splitext(name)[1].lower()
+    if ext in _ALLOWED_DIST_EXTS:
+        path = os.path.join(legacy.REACT_ASSETS_DIR, name)
+        if not os.path.isfile(path):
+            raise HTTPException(status_code=404,
+                                detail={"error": "not found"})
+        ctype, _ = mimetypes.guess_type(path)
+        return FileResponse(
+            path, media_type=ctype or "application/octet-stream",
+            headers={"Cache-Control": "public, max-age=31536000, immutable"})
+    if ext not in _ALLOWED_ASSET_EXTS:
         raise HTTPException(status_code=404, detail={"error": "not found"})
     path = os.path.join(legacy.ASSETS_DIR, name)
     if not os.path.isfile(path):
@@ -528,13 +546,48 @@ def serve_asset(name: str):
                         headers={"Cache-Control": "public, max-age=86400"})
 
 
+# Brand files referenced by the React shell (single source in Web/assets;
+# no duplication into the frontend tree).
+_BRAND_FILES = {"foap-logo.png": "image/png",
+                "favicon.png": "image/png"}
+
+
+@router.get("/foap-logo.png")
+def serve_logo():
+    return _brand_file("foap-logo.png")
+
+
+@router.get("/favicon.png")
+def serve_favicon():
+    return _brand_file("favicon.png")
+
+
+def _brand_file(name: str):
+    path = os.path.join(legacy.ASSETS_DIR, name)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail={"error": "not found"})
+    return FileResponse(path, media_type=_BRAND_FILES[name],
+                        headers={"Cache-Control": "public, max-age=86400"})
+
+
 @router.get("/")
 def index():
-    return FileResponse(legacy.WEB_INDEX,
-                        media_type="text/html; charset=utf-8")
+    return _index_response()
 
 
 @router.get("/index.html")
 def index_alias():
-    return FileResponse(legacy.WEB_INDEX,
-                        media_type="text/html; charset=utf-8")
+    return _index_response()
+
+
+# React Router client paths: serve the app shell so deep links and
+# refreshes work (item 51). Explicit list — unknown paths still 404.
+_SPA_PATHS = ("campaigns", "creatives", "compare", "benchmarks",
+              "reports", "profile", "admin")
+
+
+@router.get("/{spa_path}")
+def spa_fallback(spa_path: str):
+    if spa_path not in _SPA_PATHS:
+        raise HTTPException(status_code=404, detail={"error": "not found"})
+    return _index_response()

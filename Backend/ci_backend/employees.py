@@ -16,7 +16,7 @@ import hashlib
 import secrets
 import uuid
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -580,6 +580,7 @@ def save_avatar(db: Session, employee_id: str, filename: str,
 def load_avatar(employee_id: str, store_dir: str):
     """(path, mime) for an employee's uploaded avatar, or None."""
     import os
+
     from creative_intel import media as media_mod
     if not isinstance(employee_id, str) or not employee_id \
             or "/" in employee_id or "\\\\" in employee_id:

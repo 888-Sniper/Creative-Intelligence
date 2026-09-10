@@ -266,7 +266,7 @@ def patterns(conn, scope=None, min_drop_pts=DROP_PTS_MIN):
     events, agg = [], {}
     for key in keys:
         try:
-            ann = _structure(conn, key)
+            _structure(conn, key)
             evs = drop_events(conn, key, min_drop_pts)
         except ValueError:
             continue

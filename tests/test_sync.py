@@ -1,18 +1,15 @@
 """Scheduled sync tests: upsert dedup, run history, retries, HTTP surface."""
 
-import json
 import os
 import sqlite3
 import sys
 import tempfile
-import threading
 import unittest
-import urllib.request
-from http.server import HTTPServer
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Backend"))
 
 from creative_intel import ingest, schema, sync
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 CSV = ("campaign,ad set,ad name,spend,impressions,clicks,conversions,date\n"

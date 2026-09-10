@@ -1,16 +1,15 @@
 """EXPERT 2 (COHORTS+COMPARE) tests: cohorts, compare, report (stdlib unittest)."""
 
-import json
 import os
 import sqlite3
 import sys
 import tempfile
-import threading
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Backend"))
 
 from creative_intel import benchmarks, cohorts, creative, ingest, schema  # noqa: E402
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 META = ("Campaign,Ad Name,Creative Name,Amount Spent,Impressions,"
@@ -375,7 +374,6 @@ class ServerRoutesTest(unittest.TestCase):
         return client
 
     def test_http_compare_cohorts_report(self):
-        import urllib.request
         db = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
         try:
             conn = sqlite3.connect(db)
@@ -498,7 +496,6 @@ class CreativesFilterTest(unittest.TestCase):
         return _client
 
     def test_vertical_filter_reaches_creatives(self):
-        import urllib.request
         db = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
         try:
             conn = sqlite3.connect(db)

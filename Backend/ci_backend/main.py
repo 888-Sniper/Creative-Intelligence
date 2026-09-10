@@ -34,6 +34,7 @@ def main() -> None:
     app = create_app(db_path, settings)
     if args.sync_every > 0:
         import threading
+
         from creative_intel import sync
         stop = threading.Event()
         thread = threading.Thread(

@@ -58,7 +58,8 @@ def _rels(*targets):
 
 def _core_props(title):
     return ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            '<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" '
+            '<cp:coreProperties'
+            ' xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" '
             'xmlns:dc="http://purl.org/dc/elements/1.1/">'
             "<dc:title>%s</dc:title>"
             "<dc:creator>Foap Creative Intelligence</dc:creator>"
@@ -79,12 +80,18 @@ _PPTX_TYPES = (
     '<Types xmlns="%s">'
     '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
     '<Default Extension="xml" ContentType="application/xml"/>'
-    '<Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>'
-    '<Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/>'
-    '<Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/>'
-    '<Override PartName="/ppt/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>'
-    '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>'
-    '<Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>'
+    '<Override PartName="/ppt/presentation.xml"'
+    ' ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>'
+    '<Override PartName="/ppt/slideMasters/slideMaster1.xml"'
+    ' ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/>'
+    '<Override PartName="/ppt/slideLayouts/slideLayout1.xml"'
+    ' ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/>'
+    '<Override PartName="/ppt/theme/theme1.xml"'
+    ' ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>'
+    '<Override PartName="/docProps/core.xml"'
+    ' ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>'
+    '<Override PartName="/docProps/app.xml"'
+    ' ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>'
     "%s</Types>")
 
 _PPTX_THEME = (
@@ -132,11 +139,14 @@ _PPTX_MASTER = (
     '<p:sldMaster xmlns:a="%s" xmlns:p="%s" xmlns:r="%s">'
     "<p:cSld><p:bg><p:bgPr><a:solidFill><a:srgbClr val=\"FFFFFF\"/></a:solidFill></p:bgPr></p:bg>"
     "<p:spTree><p:nvGrpSpPr><p:cNvPr id=\"1\" name=\"\"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>"
-    "<p:grpSpPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/><a:chOff x=\"0\" y=\"0\"/><a:chExt cx=\"0\" cy=\"0\"/></a:xfrm></p:grpSpPr>"
+    "<p:grpSpPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/><a:chOff"
+    " x=\"0\" y=\"0\"/><a:chExt cx=\"0\" cy=\"0\"/></a:xfrm></p:grpSpPr>"
     "</p:spTree></p:cSld>"
-    '<p:clrMap bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2" accent1="accent1" accent2="accent2" accent3="accent3" accent4="accent4" accent5="accent5" accent6="accent6" hlink="hlink" folHlink="folHlink"/>'
+    '<p:clrMap bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2" accent1="accent1" accent2="accent2" accent3="accent3"'
+    ' accent4="accent4" accent5="accent5" accent6="accent6" hlink="hlink" folHlink="folHlink"/>'
     '<p:sldLayoutIdLst><p:sldLayoutId id="2147483649" r:id="rId1"/></p:sldLayoutIdLst>'
-    "<p:txStyles><p:titleStyle><a:lvl1pPr><a:defRPr sz=\"4400\" b=\"1\"><a:solidFill><a:srgbClr val=\"17211F\"/></a:solidFill></a:defRPr></a:lvl1pPr></p:titleStyle>"
+    "<p:txStyles><p:titleStyle><a:lvl1pPr><a:defRPr sz=\"4400\" b=\"1\"><a:solidFill><a:srgbClr"
+    " val=\"17211F\"/></a:solidFill></a:defRPr></a:lvl1pPr></p:titleStyle>"
     "<p:bodyStyle><a:lvl1pPr><a:defRPr sz=\"1800\"/></a:lvl1pPr></p:bodyStyle>"
     "<p:otherStyle><a:lvl1pPr><a:defRPr sz=\"1800\"/></a:lvl1pPr></p:otherStyle></p:txStyles>"
     "</p:sldMaster>" % (DRAWING, PRESENTATION, NAMES["rels"].replace(
@@ -148,9 +158,13 @@ _PPTX_LAYOUT = (
     '<p:sldLayout xmlns:a="%s" xmlns:p="%s" xmlns:r="%s" type="titleAndContent" preserve="1">'
     "<p:cSld name=\"Title and Content\"><p:spTree>"
     '<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>'
-    "<p:grpSpPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/><a:chOff x=\"0\" y=\"0\"/><a:chExt cx=\"0\" cy=\"0\"/></a:xfrm></p:grpSpPr>"
+    "<p:grpSpPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/><a:chOff"
+    " x=\"0\" y=\"0\"/><a:chExt cx=\"0\" cy=\"0\"/></a:xfrm></p:grpSpPr>"
     "</p:spTree></p:cSld>"
-    '<p:clrMapOvr><a:overrideClrMapping bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2" accent1="accent1" accent2="accent2" accent3="accent3" accent4="accent4" accent5="accent5" accent6="accent6" hlink="hlink" folHlink="folHlink"/></p:clrMapOvr>'
+    '<p:clrMapOvr><a:overrideClrMapping bg1="lt1" tx1="dk1" bg2="lt2"'
+    ' tx2="dk2" accent1="accent1" accent2="accent2" accent3="accent3"'
+    ' accent4="accent4" accent5="accent5" accent6="accent6" hlink="hlink"'
+    ' folHlink="folHlink"/></p:clrMapOvr>'
     "</p:sldLayout>" % (DRAWING, PRESENTATION, NAMES["rels"].replace(
         "/package/2006/relationships",
         "/officeDocument/2006/relationships")))
@@ -206,7 +220,9 @@ def build_pptx(title, slides):
         raise ValueError("pptx needs at least one slide")
     files = []
     slide_overrides = "".join(
-        '<Override PartName="/ppt/slides/slide%d.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>' % (i + 1)
+        '<Override PartName="/ppt/slides/slide%d.xml" ContentType="application/'
+        'vnd.openxmlformats-officedocument.presentationml.slide+xml"/>'
+        % (i + 1)
         for i in range(len(slides)))
     files.append(("[Content_Types].xml", _PPTX_TYPES % (NAMES["content_types"],
                                                        slide_overrides)))
@@ -263,7 +279,8 @@ _XLSX_STYLES = (
     '<fills count="3">'
     '<fill><patternFill patternType="none"/></fill>'
     '<fill><patternFill patternType="gray125"/></fill>'
-    '<fill><patternFill patternType="solid"><fgColor rgb="FF00C7B2"/><bgColor indexed="64"/></patternFill></fill>'
+    '<fill><patternFill patternType="solid"><fgColor'
+    ' rgb="FF00C7B2"/><bgColor indexed="64"/></patternFill></fill>'
     "</fills>"
     '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'
     '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
@@ -364,7 +381,9 @@ def build_xlsx(sheets):
     wb_rels += [(NAMES["styles"], "styles.xml"),
                 (NAMES["strings"], "sharedStrings.xml")]
     sheet_types = "".join(
-        '<Override PartName="/xl/worksheets/sheet%d.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' % (i + 1)
+        '<Override PartName="/xl/worksheets/sheet%d.xml" ContentType="application/'
+        'vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+        % (i + 1)
         for i in range(len(sheets)))
     files = [
         ("[Content_Types].xml",
@@ -372,12 +391,17 @@ def build_xlsx(sheets):
          '<Types xmlns="%s">'
          '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
          '<Default Extension="xml" ContentType="application/xml"/>'
-         '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+         '<Override PartName="/xl/workbook.xml"'
+         ' ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
          "%s"
-         '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
-         '<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>'
-         '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>'
-         '<Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>'
+         '<Override PartName="/xl/styles.xml"'
+         ' ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
+         '<Override PartName="/xl/sharedStrings.xml"'
+         ' ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>'
+         '<Override PartName="/docProps/core.xml"'
+         ' ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>'
+         '<Override PartName="/docProps/app.xml"'
+         ' ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>'
          "</Types>" % (NAMES["content_types"], sheet_types)),
         ("_rels/.rels", _rels(
             (NAMES["office_doc"], "xl/workbook.xml"),

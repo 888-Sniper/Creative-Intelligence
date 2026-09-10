@@ -12,9 +12,9 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Backend"))
 
+from ci_backend import credentials as secrets_mod
 from ci_backend import db as db_mod
 from ci_backend import employees as emp
-from ci_backend import credentials as secrets_mod
 from ci_backend import workos as workos_mod
 from ci_backend.config import Settings
 

@@ -1,17 +1,15 @@
 """Campaign Detail recommendations: grounded, KPI-aware, report-parity."""
 
-import json
 import os
 import sqlite3
 import sys
 import tempfile
-import threading
 import unittest
-import urllib.request
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Backend"))
 
 from creative_intel import benchmarks, creative, ingest, schema
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 CSV = ("campaign,ad set,ad name,spend,impressions,clicks,conversions,"

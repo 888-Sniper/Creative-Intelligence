@@ -253,7 +253,7 @@ def run_pipeline(conn, creative_key, providers, media=None, brand_terms=None):
         conn.execute("UPDATE creatives SET duration_s=? WHERE creative_key=?",
                      (media["duration_s"], creative_key))
     stages.append({"stage": "vision-annotate", "labels": len(labels),
-                   "confidence": sum(l.get("confidence", 0) for l in labels)
+                   "confidence": sum(lbl.get("confidence", 0) for lbl in labels)
                    / len(labels) if labels else 0.0})
 
     ann = providers.llm.structure(transcript, labels)

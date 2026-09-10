@@ -86,7 +86,6 @@ def save_media(conn, store, creative_key, filename, content_b64, mime=None):
     previews and live providers pick it up; annotation-less creatives
     keep no source_url until annotated (nothing invented).
     """
-    from . import creative as creative_mod
     os.makedirs(store, exist_ok=True)
     check_key(creative_key)
     try:
@@ -129,8 +128,9 @@ def _record(creative_key, filename, row):
 
 
 def _link_source_url(conn, creative_key, rid):
-    from . import creative as creative_mod
     import json
+
+    from . import creative as creative_mod
     got = conn.execute("SELECT annotation_json FROM annotations WHERE creative_key=?",
                        (creative_key,)).fetchone()
     if not got:

@@ -12,15 +12,14 @@ so no Keychain and no network are needed. Verifies:
 - secret material never appears in errors or returned structures
 """
 
-import base64
 import json
 import os
 import sqlite3
+import sys
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Backend"))
 
 from creative_intel import creative, providers, schema
@@ -221,7 +220,7 @@ class LiveProviderTest(unittest.TestCase):
                 " VALUES (?,?,?)", ("live-k", "meta", "Live Spot"))
             conn.commit()
             os.environ["CREATIVE_INTEL_KEY_GROQ-STT".replace("-", "_")] = "x"
-            prov = providers.Providers()
+            providers.Providers()
             media = {"audio": (b"RIFF....", "audio/wav"),
                      "images": [TINY_JPEG]}
             # Vision roster needs a configured vision key for the bundle;

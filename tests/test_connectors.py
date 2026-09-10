@@ -214,7 +214,7 @@ class ConnectorTest(unittest.TestCase):
     def test_tiktok_roas_metric_requested_with_fallback(self):
         os.environ["CREATIVE_INTEL_KEY_TIKTOK"] = "dummy-tt-token"
         os.environ["CREATIVE_INTEL_API_TIKTOK"] = self.base
-        text = connectors.tiktok_report_csv("456", "2026-08-01",
+        connectors.tiktok_report_csv("456", "2026-08-01",
                                             "2026-08-31")
         body = json.loads(StubHandler.seen["body"].decode("utf-8"))
         self.assertIn("roas", body["metrics"])

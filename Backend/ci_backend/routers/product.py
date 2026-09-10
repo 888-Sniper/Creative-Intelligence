@@ -17,9 +17,23 @@ from urllib.parse import unquote
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "..", ".."))
 
+from creative_intel import (  # noqa: E402
+    benchmarks,
+    cohorts,
+    export_gate,
+    media,
+    qa,
+    replay,
+    retention,
+    schema,
+    sync,
+)
+from creative_intel import (
+    providers as providers_mod,
+)
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field  # noqa: E402
 from fastapi.responses import FileResponse, Response  # noqa: E402
+from pydantic import BaseModel, Field  # noqa: E402
 
 from ci_backend import actions as legacy  # noqa: E402
 from ci_backend import employees as emp  # noqa: E402
@@ -29,18 +43,6 @@ from ci_backend.deps import (  # noqa: E402
     get_providers,
     json_payload,
     query_multidict,
-)
-from creative_intel import (  # noqa: E402
-    benchmarks,
-    cohorts,
-    export_gate,
-    media,
-    providers as providers_mod,
-    qa,
-    replay,
-    retention,
-    schema,
-    sync,
 )
 
 router = APIRouter(tags=["product"])

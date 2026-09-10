@@ -12,10 +12,10 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from starlette.datastructures import UploadFile
 
 from ci_backend import employees as emp
-from ci_backend import security_log
-from ci_backend.actions import _media_dir
 from ci_backend import oauth as oauth_mod
+from ci_backend import security_log
 from ci_backend import workos as workos_mod
+from ci_backend.actions import _media_dir
 from ci_backend.config import Settings
 from ci_backend.deps import (
     auth_rate_limit,

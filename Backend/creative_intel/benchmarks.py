@@ -1470,7 +1470,7 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
                 _show_rank(worst[comp["rank_by"]]),
                 worst["hook_type"], worst["creator_vs_branded"]))
     lines += ["", "## Creative learnings", ""]
-    lines += ["- %s" % l for l in extras["learnings"]] or ["- —"]
+    lines += ["- %s" % line for line in extras["learnings"]] or ["- —"]
     if extras["markets"]:
         lines += ["", "## Markets (scoped)", "",
                   "Market | Spend | Conversions | CPA | ROAS | Creatives | Verdict"]
@@ -1511,6 +1511,7 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
         return {"format": "deck", "deck": deck, "markdown": markdown, "csv": csv_text}
     if fmt in ("pptx", "xlsx"):
         import base64
+
         from creative_intel import ooxml
         if fmt == "pptx":
             slides = [{"title": "Campaign Report — %s" % comp["rank_by"].upper(),
@@ -1586,7 +1587,7 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
                               if slot]}
         learn = {"name": "Learnings",
                  "header": ["finding", "human_verified"],
-                 "rows": [[l, v] for l, v in zip(
+                 "rows": [[lbl, v] for lbl, v in zip(
                      deck["learnings"], deck["learnings_verified"])] or [["—", ""]]}
         reco = {"name": "Next steps",
                 "header": ["recommendation (heuristic)", "human_verified"],

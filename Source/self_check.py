@@ -7,19 +7,26 @@ import csv
 import json
 import os
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from benchmarks import cohort_benchmark, derived, rank_creatives
-from creative import (best_by_element, early_vs_late, join_metrics,
-                      load_annotations, needs_review, recommend, verified)
-from reports import dataset_hash, export_csv, filter_cohort, one_pager
 from ask import answer
+from benchmarks import cohort_benchmark, derived, rank_creatives
+from creative import (
+    best_by_element,
+    early_vs_late,
+    join_metrics,
+    load_annotations,
+    needs_review,
+    recommend,
+    verified,
+)
 from dashboard import render
-from providers import CATALOG, PROVIDER_MODE, cue_cap, race, status
 from deck import render_deck, slides
-from normalise import (detect_source, ingest_file, map_headers,
-                        normalise_row)
+from normalise import detect_source, ingest_file, map_headers, normalise_row, validate_row
+from providers import CATALOG, PROVIDER_MODE, cue_cap, race, status
+from reports import dataset_hash, export_csv, filter_cohort, one_pager
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PASS = []
@@ -128,7 +135,7 @@ check("one-pager carries dataset hash", digest in page)
 check("one-pager carries cohort + formulas",
       "funnel_stage" in page and "benchmarks-v0" in page)
 check("one-pager has learnings section", "## Key learnings" in page)
-import tempfile
+
 tmp = tempfile.NamedTemporaryFile(suffix=".csv", delete=False).name
 export_csv(rows, tmp)
 with open(tmp) as fh:
@@ -233,8 +240,7 @@ check("deck is light-only", "prefers-color-scheme" not in deck_html
       and "data-theme" not in deck_html)
 
 # 14. End-to-end ingest of the grafted per-source fixtures.
-import os as _os
-meta = ingest_file(_os.path.join(BASE, "fixtures", "Meta Export Sample.csv"))
+meta = ingest_file(os.path.join(BASE, "fixtures", "Meta Export Sample.csv"))
 check("meta file detected, 5 accepted + 1 quarantined",
       meta["source"] == "meta" and len(meta["rows"]) == 5
       and len(meta["quarantined"]) == 1
@@ -249,7 +255,7 @@ check("meta date + revenue mapped",
       and meta["rows"][0]["revenue"] == 640.0)
 check("meta extras quarantined, not dropped",
       "Currency" in meta["unmapped"] and "Ad Set Name" in meta["unmapped"])
-tik = ingest_file(_os.path.join(BASE, "fixtures", "TikTok Export Sample.csv"))
+tik = ingest_file(os.path.join(BASE, "fixtures", "TikTok Export Sample.csv"))
 check("tiktok file detected, 5 accepted + 1 quarantined",
       tik["source"] == "tiktok" and len(tik["rows"]) == 5
       and len(tik["quarantined"]) == 1
@@ -257,7 +263,7 @@ check("tiktok file detected, 5 accepted + 1 quarantined",
 check("tiktok creative + spend mapped",
       tik["rows"][0]["creative_id"] == "Hook A"
       and tik["rows"][0]["spend"] == 88.3)
-xls = ingest_file(_os.path.join(BASE, "fixtures", "Excel Sample.csv"))
+xls = ingest_file(os.path.join(BASE, "fixtures", "Excel Sample.csv"))
 check("agency excel via generic adapter",
       xls["source"] == "generic" and len(xls["rows"]) == 4
       and xls["rows"][0]["creative_id"] == "Hero Banner")
@@ -272,8 +278,7 @@ check("only the two planted dirty rows quarantined",
       and xls["quarantined"] == [])
 
 # 15. Validation quarantines bad rows with reasons, keeps the good one.
-from normalise import validate_row
-bad_csv = _os.path.join(tempfile.gettempdir(), "cp-quarantine-probe.csv")
+bad_csv = os.path.join(tempfile.gettempdir(), "cp-quarantine-probe.csv")
 with open(bad_csv, "w") as fh:
     fh.write("campaign,creative,date,spend,impressions,clicks,"
              "conversions,revenue,video views\n"
@@ -330,7 +335,7 @@ agg_row = next(r for r in agg if r["creative_id"] == "GL-001-A")
 check("multi-day creative aggregates from totals",
       agg_row["spend"] == 180.0
       and abs(agg_row["cpa"] - 180.0 / 80.0) < 1e-9)
-empty_csv = _os.path.join(tempfile.gettempdir(), "cp-empty-probe.csv")
+empty_csv = os.path.join(tempfile.gettempdir(), "cp-empty-probe.csv")
 with open(empty_csv, "w") as fh:
     fh.write("")
 try:
@@ -339,7 +344,7 @@ try:
 except ValueError as exc:
     empty_ok = "no header row" in str(exc)
 check("empty file raises, not StopIteration", empty_ok)
-head_csv = _os.path.join(tempfile.gettempdir(), "cp-header-probe.csv")
+head_csv = os.path.join(tempfile.gettempdir(), "cp-header-probe.csv")
 with open(head_csv, "w") as fh:
     fh.write("campaign,creative,date,spend\n")
 head_only = ingest_file(head_csv)

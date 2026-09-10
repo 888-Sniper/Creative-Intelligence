@@ -10,9 +10,17 @@ import json
 import os
 import sqlite3
 
-from creative_intel import (benchmarks, creative, export_gate,
-                            ingest, media, providers, qa, replay, retention,
-                            schema, sync)
+from creative_intel import (
+    benchmarks,
+    creative,
+    export_gate,
+    ingest,
+    media,
+    providers,
+    replay,
+    schema,
+    sync,
+)
 
 BASE = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                      "..", ".."))

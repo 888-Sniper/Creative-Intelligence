@@ -20,7 +20,6 @@ Gates (from the closure audit):
 
 import base64
 import io
-import json
 import os
 import shutil
 import sqlite3
@@ -31,10 +30,10 @@ import zipfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Backend"))
 
-from creative_intel import (benchmarks, creative, ingest, providers, qa,  # noqa: E402
-                            retention, schema)
-from creative_intel.benchmarks import Scope  # noqa: E402
 from ci_backend import actions as server  # noqa: E402  (shared builders)
+from creative_intel import benchmarks, creative, ingest, providers, qa, retention, schema  # noqa: E402
+from creative_intel.benchmarks import Scope  # noqa: E402
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 ACC_CSV = ("Campaign,Ad Name,Creative Name,Amount Spent,Impressions,"
@@ -650,8 +649,9 @@ def _test_port():
     """
     if "client" not in _SRV:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        from conftest import make_client, mint_admin
         import tempfile
+
+        from conftest import make_client, mint_admin
         live = fresh_acc_db()
         path = tempfile.NamedTemporaryFile(suffix=".db",
                                            delete=False).name
@@ -840,7 +840,7 @@ class VisionBatchingTest(unittest.TestCase):
         frames = [{"t_sec": float(t)} for t in range(13)]
         labels = vision.annotate(frames, images=["img%d" % i for i in range(13)])
         self.assertEqual([n for n, _ts in seen], [6, 6, 1])
-        self.assertEqual([l["t_sec"] for l in labels],
+        self.assertEqual([lbl["t_sec"] for lbl in labels],
                          [float(t) for t in range(13)])
 
     def test_empty_images_still_fail_closed(self):
@@ -883,6 +883,7 @@ class LateEventCoverageTest(unittest.TestCase):
 
     def test_late_product_and_cta_survive(self):
         import types
+
         from creative_intel import video as video_mod
         prepared = video_mod.prepare(
             self.clip, os.path.join(self.tmp, "derived"))
@@ -1207,16 +1208,16 @@ class ReportKpiAwarenessTest(unittest.TestCase):
                    "kpis": ["spend", "impressions", "roas"],
                    "format": "one-pager", "rank_by": "roas"}
         rep = server.expert2_report_route(self.conn, payload)
-        best = [l for l in rep["markdown"].splitlines()
-                if l.startswith("- CampX best:")]
+        best = [line for line in rep["markdown"].splitlines()
+                if line.startswith("- CampX best:")]
         self.assertEqual(len(best), 1)
         self.assertIn("roas-champ", best[0])
         self.assertIn("(ROAS 5.0,", best[0])
         self.assertNotIn("CPA $", best[0])
         payload["rank_by"] = "cpa"
         rep = server.expert2_report_route(self.conn, payload)
-        best = [l for l in rep["markdown"].splitlines()
-                if l.startswith("- CampX best:")]
+        best = [line for line in rep["markdown"].splitlines()
+                if line.startswith("- CampX best:")]
         self.assertEqual(len(best), 1)
         self.assertIn("cpa-champ", best[0])
         self.assertIn("(CPA $10.0,", best[0])

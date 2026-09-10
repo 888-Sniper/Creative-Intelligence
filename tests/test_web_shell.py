@@ -194,6 +194,7 @@ class ShellLiveTest(unittest.TestCase):
 
     def test_report_office_formats_end_to_end(self):
         import base64
+
         from conftest import mint_admin
         self.client.headers.update(mint_admin(self._db))
         csv_payload = ("Campaign,Spend,Impressions,Clicks,Conversions\n"

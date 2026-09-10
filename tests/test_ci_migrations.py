@@ -14,8 +14,7 @@ from sqlalchemy import inspect, text
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Backend"))
 
 from ci_backend import employees as emp
-from ci_backend.db import (alembic_script_location, ensure_migrated, init_db,
-                           make_engine, make_session_factory)
+from ci_backend.db import ensure_migrated, init_db, make_engine, make_session_factory
 
 
 def _upgrade(engine, revision):

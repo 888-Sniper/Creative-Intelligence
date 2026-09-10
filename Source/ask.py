@@ -7,7 +7,6 @@ with an insufficient-data message instead of generic marketing advice.
 
 import math
 
-from benchmarks import spend_weighted_mean
 from creative import best_by_element, weighted_cpa
 
 SHORT_S = 15

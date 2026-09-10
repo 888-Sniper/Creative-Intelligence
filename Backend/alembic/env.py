@@ -7,10 +7,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from alembic import context
-from sqlalchemy import create_engine
-
 from ci_backend.config import Settings
 from ci_backend.db import Base
+from sqlalchemy import create_engine
 
 config = context.config
 

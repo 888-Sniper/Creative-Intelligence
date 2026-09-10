@@ -415,8 +415,8 @@ def test_security_log_emits_no_secrets(tmp_path, monkeypatch, caplog):
 
 
 def test_oversize_body_rejected(tmp_path, monkeypatch):
-    from ci_backend.config import Settings
     from ci_backend.app import create_app
+    from ci_backend.config import Settings
     settings = Settings(workos_client_id="client_test",
                         key_workos="[REDACTED]", max_json_bytes=64)
     app = create_app(str(tmp_path / "tiny.db"), settings)
@@ -539,9 +539,8 @@ def test_security_headers_health_readiness(client, tmp_path):
 
 
 def test_hsts_when_cookie_secure(tmp_path):
-    from tests.conftest import make_client as _make
-    from ci_backend.config import Settings
     from ci_backend.app import create_app
+    from ci_backend.config import Settings
     from fastapi.testclient import TestClient
     settings = Settings(workos_client_id="", key_workos="",
                         cookie_secure=True)

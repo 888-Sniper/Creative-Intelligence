@@ -10,8 +10,8 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Backend"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Source"))
 
-from creative_intel import (benchmarks, creative, export_gate, ingest,
-                            providers, retention, schema)
+from creative_intel import benchmarks, creative, export_gate, ingest, providers, retention, schema
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from auth_help import authed
 
@@ -84,8 +84,9 @@ class IngestTest(unittest.TestCase):
         conn.close()
 
     def test_load_fixtures_into_temp_db(self):
-        from ci_backend import actions as server
         import tempfile
+
+        from ci_backend import actions as server
         db = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
         try:
             total = server.load_fixtures(db)
@@ -204,11 +205,12 @@ class LaunchPathTest(unittest.TestCase):
         """Reproduces `python3 Backend/ci_backend/main.py`: the FastAPI
         app must boot and lock a fresh database from the first launch."""
         import os.path
-        from ci_backend import main as entry
         import socket
         import subprocess
         import time
         import urllib.request
+
+        from ci_backend import main as entry
         sock = socket.socket()
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
@@ -255,12 +257,13 @@ class LaunchContractTest(unittest.TestCase):
     """UI contract endpoints, exercised over the real launch path."""
 
     def _launched(self):
-        from ci_backend import main as entry
         import socket
         import subprocess
         import time
         import urllib.error
         import urllib.request
+
+        from ci_backend import main as entry
         sock = socket.socket()
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]

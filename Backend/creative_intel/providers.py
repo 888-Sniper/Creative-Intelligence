@@ -250,24 +250,24 @@ class MockLlm:
         ann["edit_style"] = ("product_demo" if ann.get("product_seconds")
                              else "talking_head")
         ann["edit_confidence"] = 0.5
-        brand = [l["t_sec"] for l in labels if l.get("brand_visible")]
+        brand = [lbl["t_sec"] for lbl in labels if lbl.get("brand_visible")]
         if brand:
             ann["brand_seconds"] = [{"start_s": min(brand), "end_s": max(brand),
                                      "modality": "V"}]
-        product = [l["t_sec"] for l in labels if l.get("product_visible")]
+        product = [lbl["t_sec"] for lbl in labels if lbl.get("product_visible")]
         if product:
             ann["product_seconds"] = [{"start_s": min(product),
                                        "end_s": max(product),
                                        "modality": "V"}]
-        logo = [l["t_sec"] for l in labels if l.get("logo_visible")]
+        logo = [lbl["t_sec"] for lbl in labels if lbl.get("logo_visible")]
         if logo:
             ann["logo_seconds"] = [{"start_s": min(logo),
                                     "end_s": max(logo), "modality": "V"}]
-        cta = [l["t_sec"] for l in labels if l.get("cta_visible")]
+        cta = [lbl["t_sec"] for lbl in labels if lbl.get("cta_visible")]
         if cta:
             ann["structure"]["cta"] = {"start_s": min(cta),
                                        "end_s": max(cta), "confidence": 0.5}
-        ends = [l["t_sec"] for l in labels if l.get("end_frame")]
+        ends = [lbl["t_sec"] for lbl in labels if lbl.get("end_frame")]
         if ends:
             ann["structure"]["endframe"] = {"start_s": min(ends),
                                             "end_s": max(ends),

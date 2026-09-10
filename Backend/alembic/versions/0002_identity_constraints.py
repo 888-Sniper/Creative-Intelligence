@@ -15,8 +15,8 @@ depends_on = None
 
 
 def _orphans(table: str, column: str) -> int:
-    from alembic import op
     import sqlalchemy as sa
+    from alembic import op
     return op.get_bind().execute(sa.text(
         "SELECT COUNT(*) FROM %s LEFT JOIN employees"
         " ON employees.id = %s.%s WHERE employees.id IS NULL"

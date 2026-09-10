@@ -9,8 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from sqlalchemy import (CheckConstraint, ForeignKey, Index, String, Text,
-                     create_engine, event)
+from sqlalchemy import CheckConstraint, ForeignKey, Index, String, Text, create_engine, event
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 
@@ -121,10 +120,10 @@ def ensure_migrated(engine) -> None:
     legacy create_all path carry the 0001 shape, so they are stamped
     0001 first and then upgraded — never rebuilt, never wiped.
     """
-    from sqlalchemy import inspect as _inspect
-    from alembic.config import Config as _Config
     from alembic import command as _command
+    from alembic.config import Config as _Config
     from alembic.migration import MigrationContext as _MigrationContext
+    from sqlalchemy import inspect as _inspect
     cfg = _Config()
     cfg.set_main_option("script_location", alembic_script_location())
     with engine.connect() as conn:
@@ -156,9 +155,9 @@ def migrate(engine, revision: str) -> None:
 
     Same disposable-connection discipline as ensure_migrated.
     """
-    from sqlalchemy import create_engine as _create_engine
-    from alembic.config import Config as _Config
     from alembic import command as _command
+    from alembic.config import Config as _Config
+    from sqlalchemy import create_engine as _create_engine
     cfg = _Config()
     cfg.set_main_option("script_location", alembic_script_location())
     migrant = _create_engine("sqlite:///%s" % engine.url.database,
@@ -180,9 +179,9 @@ def migrate(engine, revision: str) -> None:
 
 
 def _is_downgrade(engine, revision: str) -> bool:
-    from alembic.script import ScriptDirectory as _ScriptDirectory
     from alembic.config import Config as _Config
     from alembic.migration import MigrationContext as _MigrationContext
+    from alembic.script import ScriptDirectory as _ScriptDirectory
     cfg = _Config()
     cfg.set_main_option("script_location", alembic_script_location())
     script = _ScriptDirectory.from_config(cfg)

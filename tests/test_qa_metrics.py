@@ -21,10 +21,10 @@ ROOT = os.path.join(os.path.dirname(__file__), "..")
 sys.path.insert(0, os.path.join(ROOT, "Backend"))
 sys.path.insert(0, os.path.join(ROOT, "Source"))
 
-from creative_intel import ingest, qa, schema  # noqa: E402
+from ask import answer  # noqa: E402
 from benchmarks import derived  # noqa: E402
 from creative import join_metrics, load_annotations, verified  # noqa: E402
-from ask import answer  # noqa: E402
+from creative_intel import ingest, qa, schema  # noqa: E402
 
 FIXTURES = os.path.join(ROOT, "fixtures")
 TIKTOK_IDS = {"GL-002-A", "GL-002-B", "HY-002-A"}

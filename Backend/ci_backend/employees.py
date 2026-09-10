@@ -155,7 +155,12 @@ def utcnow() -> str:
 
 
 def _token_hash(token: str) -> str:
-    return hashlib.sha256(token.encode("ascii")).hexdigest()
+    try:
+        return hashlib.sha256(token.encode("ascii")).hexdigest()
+    except (UnicodeEncodeError, AttributeError):
+        # Server-issued tokens are ASCII urlsafe; anything else can
+        # never match a stored hash, so fail closed to "unknown".
+        return ""
 
 
 def public_employee(emp: Employee | None) -> PublicEmployee | None:

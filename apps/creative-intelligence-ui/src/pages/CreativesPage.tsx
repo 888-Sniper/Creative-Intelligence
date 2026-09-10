@@ -114,6 +114,34 @@ interface RetentionSeg {
   n_points?: number;
 }
 
+interface AnalystLayer {
+  layer?: string;
+  question?: string;
+  status?: string;
+}
+
+interface AnalystFinding {
+  primary_signal?: string;
+  diagnosis?: string;
+  recommended_iteration?: string;
+  priority?: string;
+  confidence_level?: string;
+  element_to_preserve?: string;
+  element_to_change?: string;
+  limitations?: string[];
+}
+
+interface AnalystCreative {
+  creative_key: string;
+  message_class?: string;
+  format_kind?: string;
+  opening_delivery?: string;
+  annotation_status?: string;
+  layers?: AnalystLayer[];
+  metrics?: Record<string, { value?: number | null; state?: string }>;
+  finding?: AnalystFinding | null;
+}
+
 function rankVal(v: number | string | null | undefined, lower: boolean): number {
   if (v === null || v === undefined || v === "") return lower ? Infinity : -Infinity;
   const n = Number(v);
@@ -528,6 +556,7 @@ export function CreativesPage() {
   const [actionStatus, setActionStatus] = useState("");
   const [mediaStatus, setMediaStatus] = useState("");
   const [benchOut, setBenchOut] = useState("");
+  const [diag, setDiag] = useState<Record<string, AnalystCreative> | null>(null);
   const [edits, setEdits] = useState<Record<string, { hook: string; format: string }>>({});
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const mediaFileRef = useRef<HTMLInputElement | null>(null);
@@ -544,6 +573,30 @@ export function CreativesPage() {
         if (live) setRows(data);
       } catch (e) {
         if (live) setError(e instanceof Error ? e.message : String(e));
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [scopeKey]);
+
+  useEffect(() => {
+    let live = true;
+    setDiag(null);
+    (async () => {
+      try {
+        const params = new URLSearchParams(scopeKey);
+        const data = await api<{ creatives?: AnalystCreative[] }>(
+          "GET",
+          scopedPath("/api/analyst/creatives", params),
+        );
+        if (live) {
+          const byKey: Record<string, AnalystCreative> = {};
+          for (const c of data.creatives ?? []) byKey[c.creative_key] = c;
+          setDiag(byKey);
+        }
+      } catch {
+        if (live) setDiag(null);
       }
     })();
     return () => {
@@ -732,6 +785,7 @@ export function CreativesPage() {
     const found = selectedRow;
     const a = found.annotation ?? {};
     const m = found.metrics ?? {};
+    const diagCard = diag?.[found.creative_key] ?? null;
     const src = pickSource(a);
     const hookT = segStart(a, "hook");
     const ctaT = segStart(a, "cta");
@@ -895,6 +949,44 @@ export function CreativesPage() {
                   : "—",
               )}
             </div>
+            {diagCard ? (
+              <div className="card" style={{ margin: 0 }}>
+                <h4 style={{ marginTop: 0 }}>Analyst diagnostics</h4>
+                {(diagCard.layers ?? []).map((l) => (
+                  <div
+                    key={l.layer ?? ""}
+                    style={{ display: "flex", justifyContent: "space-between", fontSize: 14, padding: "3px 0" }}
+                  >
+                    <span className="muted" title={l.question ?? ""}>
+                      {l.layer ?? "—"}
+                    </span>
+                    <strong>{l.status ?? "unknown"}</strong>
+                  </div>
+                ))}
+                {diagCard.finding ? (
+                  <>
+                    {intelRow("Signal", diagCard.finding.primary_signal ?? "—")}
+                    {intelRow("Diagnosis", diagCard.finding.diagnosis ?? "—")}
+                    {intelRow(
+                      "Iteration",
+                      diagCard.finding.recommended_iteration ?? "—",
+                    )}
+                    {intelRow(
+                      "Preserve / change",
+                      `${diagCard.finding.element_to_preserve ?? "—"} / ${diagCard.finding.element_to_change ?? "—"}`,
+                    )}
+                    {intelRow(
+                      "Confidence",
+                      `${diagCard.finding.confidence_level ?? "—"} (priority ${diagCard.finding.priority ?? "—"})`,
+                    )}
+                  </>
+                ) : (
+                  <div className="muted" style={{ fontSize: 13 }}>
+                    No finding in this scope — insufficient evidence, not a verdict.
+                  </div>
+                )}
+              </div>
+            ) : null}
           </div>
         </div>
       </div>

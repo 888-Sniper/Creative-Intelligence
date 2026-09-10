@@ -802,10 +802,83 @@ def analyst_conversation(conv_id: str,
     return conv
 
 
+@router.get("/api/analyst/creatives")
+def analyst_creatives(request: Request,
+                      conn=Depends(get_product_conn),
+                      who=Depends(get_current_employee),
+                      _limited=Depends(ai_rate_limit)):
+    """Per-creative diagnostics cards for the current scope.
+
+    Read-only projection of one deterministic analysis: five-layer
+    status, metric values + states, top finding with preserve/change
+    and confidence, brand evidence and annotation status. Same scope
+    semantics as ask/report via the shared Scope axes.
+    """
+    _ = (who, _limited)
+    from creative_intel import benchmarks as benchmarks_mod
+    query = query_multidict(request)
+    scope = benchmarks_mod.Scope.from_query(query).normalized()
+    objective = (query.get("objective") or ["reach"])[0]
+    if objective not in analyst.OBJECTIVES:
+        raise _conflict(ValueError(
+            "objective must be one of %s" % (list(analyst.OBJECTIVES),)))
+
+    # Sync route: FastAPI already runs this off the event loop.
+    try:
+        analysis = analyst.analyze_campaign(conn, scope, objective)
+    except ValueError as exc:
+        raise _conflict(exc)
+    cards = []
+    for creative in analysis.get("creatives", []):
+        findings = creative.get("findings", []) or []
+        top = findings[0] if findings else {}
+        metrics = {}
+        for mid, res in (creative.get("metrics") or {}).items():
+            if mid == "exposure":
+                continue
+            metrics[mid] = {"value": (res or {}).get("value"),
+                            "state": (res or {}).get("state", ""),
+                            "metric_id": (res or {}).get("metric_id",
+                                                         mid)}
+        cards.append({
+            "creative_key": creative.get("creative_key", ""),
+            "name": creative.get("name", ""),
+            "platform": creative.get("platform", ""),
+            "campaign": creative.get("campaign", ""),
+            "duration_s": creative.get("duration_s", 0),
+            "message_class": creative.get("message_class", "unknown"),
+            "format_kind": creative.get("format_kind", "unknown"),
+            "opening_delivery": creative.get("opening_delivery",
+                                             "unknown"),
+            "annotation_status": creative.get("annotation_status",
+                                              "unknown"),
+            "layers": creative.get("layers", []),
+            "metrics": metrics,
+            "finding": {
+                "primary_signal": top.get("primary_signal", ""),
+                "diagnosis": top.get("diagnosis", ""),
+                "recommended_iteration": top.get(
+                    "recommended_iteration", ""),
+                "priority": top.get("priority", ""),
+                "confidence_level": top.get("confidence_level", ""),
+                "element_to_preserve": top.get("element_to_preserve",
+                                               ""),
+                "element_to_change": top.get("element_to_change", ""),
+                "limitations": top.get("limitations", []) or [],
+            } if top else None,
+            "brand": creative.get("brand", {}),
+        })
+    return {"creatives": cards,
+            "scope": analysis.get("scope"),
+            "dataset_version": analysis.get("dataset_version"),
+            "objective": analysis.get("objective")}
+
+
 @router.get("/api/analyst/workbook")
 def analyst_workbook_download(conn=Depends(get_product_conn),
-                              who=Depends(get_current_employee)):
-    _ = (conn, who)
+                              who=Depends(get_current_employee),
+                              _limited=Depends(ai_rate_limit)):
+    _ = (conn, who, _limited)
     blob = analyst_workbook.build_blank_workbook()
     return Response(
         content=blob,
@@ -818,7 +891,9 @@ def analyst_workbook_download(conn=Depends(get_product_conn),
 @router.post("/api/analyst/report")
 async def analyst_report(request: Request,
                          conn=Depends(get_product_conn),
-                         who=Depends(get_current_employee)):
+                         who=Depends(get_current_employee),
+                         _limited=Depends(ai_rate_limit)):
+    _ = _limited
     body = _validated(AnalystReportBody, await json_payload(request),
                       "analyst report")
     payload = body.model_dump()
@@ -829,14 +904,17 @@ async def analyst_report(request: Request,
             paudit.audit_request(request, conn, employee_id=who.id,
                                  action="analyst-report", result="error")
             raise _conflict(exc)
-    try:
+    def _compute():
         analysis = analyst.analyze_campaign(
             conn, payload.get("scope") or {}, payload.get("objective") or
             "reach")
-        report = analyst_chat.build_analyst_report(
+        return analyst_chat.build_analyst_report(
             analysis, lang=payload.get("language") or "en",
             sections=payload.get("sections") or None,
             rank_by=payload.get("rank_by"))
+    try:
+        loop = asyncio.get_running_loop()
+        report = await loop.run_in_executor(_WORKERS, _compute)
     except ValueError as exc:
         paudit.audit_request(request, conn, employee_id=who.id,
                              action="analyst-report", result="error")
@@ -879,6 +957,7 @@ class AnalystBody(BaseModel):
     objective: str = "reach"
     language: str | None = None
     rank_by: str | None = None
+    max_points: int | None = Field(default=None, ge=1, le=10)
 
     @field_validator("scope", mode="before")
     @classmethod

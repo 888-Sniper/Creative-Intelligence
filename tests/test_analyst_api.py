@@ -114,6 +114,25 @@ class AnalystApiTest(unittest.TestCase):
             self.assertEqual(body["task"], "condense")
             self.assertEqual(body["payload"]["condensed_to"], 3)
 
+    def test_max_points_caps_rendering(self):
+        with tmp_root() as root:
+            http = self._owner(root)
+            self._seed(http)
+            r = http.post("/api/analyst/ask", json={
+                "question": "Napisz rekomendacje do kolejnej kampanii.",
+                "scope": {"campaign": ["C"]},
+                "max_points": 1})
+            self.assertEqual(r.status_code, 200, r.text)
+            body = r.json()
+            self.assertEqual(body["task"], "recommendations")
+            self.assertEqual(len(body["payload"]["recommendations"]), 1)
+            self.assertEqual(body["payload"]["condensed_to"], 1)
+            r = http.post("/api/analyst/ask", json={
+                "question": "Napisz rekomendacje do kolejnej kampanii.",
+                "scope": {"campaign": ["C"]},
+                "max_points": 99})
+            self.assertEqual(r.status_code, 409)
+
     def test_finding_status_and_isolation(self):
         with tmp_root() as root:
             http = self._owner(root, email="boss@foap.test")
@@ -189,6 +208,24 @@ class AnalystApiTest(unittest.TestCase):
             http = self._owner(root)
             r = http.post("/api/analyst/report",
                           json={"sections": ["vibes"]})
+            self.assertEqual(r.status_code, 409)
+
+    def test_creatives_cards(self):
+        with tmp_root() as root:
+            http = self._owner(root)
+            self._seed(http)
+            r = http.get("/api/analyst/creatives?campaign=C")
+            self.assertEqual(r.status_code, 200, r.text)
+            body = r.json()
+            self.assertEqual(len(body["creatives"]), 3)
+            card = body["creatives"][0]
+            self.assertEqual(
+                [layer["layer"] for layer in card["layers"]],
+                ["stop", "hold", "depth", "brand", "efficiency"])
+            self.assertIn("hook_rate_2s_impr", card["metrics"])
+            self.assertTrue(card["finding"]["primary_signal"])
+            self.assertEqual(body["objective"], "reach")
+            r = http.get("/api/analyst/creatives?objective=virality")
             self.assertEqual(r.status_code, 409)
 
     def test_report_unauthenticated_refused(self):

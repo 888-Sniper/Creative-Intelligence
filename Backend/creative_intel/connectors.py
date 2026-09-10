@@ -17,15 +17,60 @@ ConnectorUnavailable subclasses ValueError so the HTTP layer maps it
 to a 409 product message, matching every other failed action.
 """
 
+import ipaddress
 import json
 import os
 import re
+import socket
 import urllib.parse
 import urllib.request
 
 MAX_FETCH_BYTES = 10 * 1024 * 1024
 FETCH_TIMEOUT_S = 30.0
 MAX_API_PAGES = 50
+
+# Tests exercise fetch_bytes against a loopback stub; production must
+# never be steered at one. The flag is test-only and unset in every
+# deployment path.
+ALLOW_LOOPBACK_FETCH_ENV = "CREATIVE_INTEL_ALLOW_LOOPBACK_FETCH"
+
+
+def _refuse_nonpublic_url(url):
+    """SSRF guard for employee-supplied fetch URLs (Sheets/Drive).
+
+    Resolves the host and requires every address to be globally
+    routable: loopback, private, link-local (incl. cloud metadata
+    169.254.169.254), reserved and multicast targets are refused, as
+    are names that do not resolve. DNS-rebinding races are out of
+    scope for this local-first app and noted here, not silently
+    accepted as safe.
+    """
+    try:
+        host = urllib.parse.urlparse(url).hostname or ""
+    except Exception:
+        raise ConnectorUnavailable("cannot fetch that URL")
+    if not host:
+        raise ConnectorUnavailable("cannot fetch that URL")
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except OSError:
+        raise ConnectorUnavailable(
+            "cannot resolve %s" % (host or "remote host"))
+    allow_loopback = os.environ.get(ALLOW_LOOPBACK_FETCH_ENV) == "1"
+    for info in infos:
+        try:
+            addr = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            raise ConnectorUnavailable("cannot fetch that URL")
+        if addr.is_loopback:
+            if allow_loopback:
+                continue
+            raise ConnectorUnavailable(
+                "refusing non-public fetch target")
+        if not addr.is_global:
+            raise ConnectorUnavailable(
+                "refusing non-public fetch target")
+    return url
 
 
 class ConnectorUnavailable(ValueError):
@@ -44,6 +89,7 @@ def _https_only(url):
 
 def fetch_bytes(url, timeout=FETCH_TIMEOUT_S, headers=None):
     _https_only(url)
+    _refuse_nonpublic_url(url)
     merged = {"User-Agent": "FoapCI/1.0"}
     merged.update(headers or {})
     req = urllib.request.Request(url, headers=merged)

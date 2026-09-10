@@ -54,6 +54,34 @@ interface ChatMessage {
 
 const OBJECTIVES = ["reach", "video_views", "traffic", "conversions", ""] as const;
 
+/** Filter-bar scope as a body dict (multi-values become arrays).
+ *  The analyst POST routes read scope from the JSON body, not the
+ *  query string, so this must travel in the body or filters silently
+ *  analyse the whole dataset. */
+export function scopeBody(scope: URLSearchParams): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const key of new Set(scope.keys())) {
+    const vals = scope.getAll(key);
+    if (vals.length > 0) out[key] = vals;
+  }
+  return out;
+}
+
+async function downloadReportBlob(body: unknown): Promise<Blob> {
+  const res = await fetch("/api/analyst/report", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const detail = (await res.json().catch(() => null)) as {
+      detail?: { error?: string };
+    } | null;
+    throw new Error(detail?.detail?.error ?? `Report export failed (${res.status})`);
+  }
+  return res.blob();
+}
+
 function fmtScope(scope?: Record<string, unknown>): string {
   if (!scope) return "";
   const parts: string[] = [];
@@ -115,19 +143,14 @@ export function AnalystPage() {
     setMessages((prev) => [...prev, { role: "user", text: question }]);
     setInput("");
     try {
-      const params = new URLSearchParams(scope);
-      const qs = params.toString();
-      const data = await api<AskResponse>(
-        "POST",
-        qs ? `/api/analyst/ask?${params}` : "/api/analyst/ask",
-        {
-          conversation_id: activeId,
-          question,
-          objective: objective || undefined,
-          locale,
-          max_points: maxPoints,
-        },
-      );
+      const data = await api<AskResponse>("POST", "/api/analyst/ask", {
+        conversation_id: activeId,
+        question,
+        scope: scopeBody(scope),
+        objective: objective || undefined,
+        locale,
+        max_points: maxPoints,
+      });
       if (!activeId) setActiveId(data.conversation_id);
       setLastScope(fmtScope(data.scope_snapshot));
       setDatasetVersion(data.dataset_version ?? null);
@@ -146,25 +169,33 @@ export function AnalystPage() {
   async function downloadReport(fmt: "one-pager" | "xlsx") {
     setError(null);
     try {
-      const params = new URLSearchParams(scope);
-      const qs = params.toString();
-      const path = qs ? `/api/analyst/report?${params}` : "/api/analyst/report";
-      const res = await fetch(path, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          objective: objective || undefined,
-          locale,
-          fmt,
-        }),
-      });
-      if (!res.ok) throw new Error(`Report export failed (${res.status})`);
+      // One-pager goes through the shared client so session expiry
+      // re-gates the app; xlsx needs a raw blob fetch with parsed errors.
       const blob =
         fmt === "xlsx"
-          ? await res.blob()
-          : new Blob([(await res.json()).markdown ?? ""], {
-              type: "text/markdown",
-            });
+          ? await downloadReportBlob({
+              scope: scopeBody(scope),
+              objective: objective || undefined,
+              locale,
+              fmt,
+            })
+          : new Blob(
+              [
+                (
+                  await api<{ markdown?: string }>(
+                    "POST",
+                    "/api/analyst/report",
+                    {
+                      scope: scopeBody(scope),
+                      objective: objective || undefined,
+                      locale,
+                      fmt,
+                    },
+                  )
+                ).markdown ?? "",
+              ],
+              { type: "text/markdown" },
+            );
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;

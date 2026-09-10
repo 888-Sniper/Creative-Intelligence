@@ -137,6 +137,9 @@ class ConnectorTest(unittest.TestCase):
 
     def setUp(self):
         self._saved = dict(os.environ)
+        # Loopback stub fetches stay allowed here; production never
+        # sets this flag (see connectors.ALLOW_LOOPBACK_FETCH_ENV).
+        os.environ[connectors.ALLOW_LOOPBACK_FETCH_ENV] = "1"
         StubHandler.seen = {}
 
     def tearDown(self):
@@ -171,6 +174,25 @@ class ConnectorTest(unittest.TestCase):
     def test_login_page_refused(self):
         with self.assertRaises(connectors.ConnectorUnavailable):
             connectors.fetch_sheet_csv(self.base + "/login")
+
+    def test_nonpublic_fetch_targets_refused(self):
+        for url in ("http://169.254.169.254/latest/meta-data/",
+                    "http://10.0.0.1/x.csv",
+                    "http://192.168.1.1/x.csv",
+                    "http://[::1]/x.csv"):
+            with self.assertRaises(connectors.ConnectorUnavailable,
+                                   msg=url):
+                connectors.fetch_bytes(url)
+
+    def test_loopback_refused_without_test_flag(self):
+        saved = os.environ.pop(connectors.ALLOW_LOOPBACK_FETCH_ENV,
+                               None)
+        try:
+            with self.assertRaises(connectors.ConnectorUnavailable):
+                connectors.fetch_bytes(self.base + "/sheet.csv")
+        finally:
+            if saved is not None:
+                os.environ[connectors.ALLOW_LOOPBACK_FETCH_ENV] = saved
 
     def test_meta_insights_end_to_end(self):
         os.environ["CREATIVE_INTEL_KEY_META"] = "dummy-meta-token"

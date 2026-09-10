@@ -61,6 +61,7 @@ export function scopedPath(path: string, scope: URLSearchParams): string {
     path === "/api/creatives" ||
     path.startsWith("/api/compare") ||
     path.startsWith("/api/retention/patterns") ||
+    path.startsWith("/api/analyst/creatives") ||
     path.startsWith("/api/campaigns/recommendations");
   if (!isScoped) return path;
   const [base, query] = path.split("?", 2);

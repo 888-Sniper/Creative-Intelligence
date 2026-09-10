@@ -316,3 +316,11 @@ def test_alembic_migration_builds_tables(tmp_path):
             assert created.status == "active"
     finally:
         engine.dispose()
+
+
+def test_non_ascii_cookie_token_fails_closed(session):
+    """A crafted non-ASCII session cookie denies (401 path), never 500s."""
+    assert emp._token_hash("sésame-…-tokén") == ""
+    with pytest.raises(emp.Denied):
+        emp.authorize(session, "sésame-…-tokén")
+    emp.destroy_session(session, "sésame-…-tokén")  # must not raise

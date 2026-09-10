@@ -114,7 +114,8 @@ def run_analyst(conn, payload, owner, ctx, job_id=None):
         scope=payload.get("scope") or {},
         objective=payload.get("objective", "reach"),
         language=payload.get("language"),
-        rank_by=payload.get("rank_by"))
+        rank_by=payload.get("rank_by"),
+        max_points=payload.get("max_points"))
     if progress is not None:
         progress(90, "answered")
     if not isinstance(out, dict):

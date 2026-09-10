@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { FilterProvider } from "@/state/FilterContext";
-import { AnalystPage } from "@/pages/AnalystPage";
+import { AnalystPage, scopeBody } from "@/pages/AnalystPage";
 
 afterEach(() => {
   cleanup();
@@ -105,6 +105,33 @@ describe("AnalystPage", () => {
       "href",
       expect.stringContaining("/api/analyst/workbook"),
     );
+  });
+
+  it("sends the filter scope in the ask body", async () => {
+    mockFetch();
+    renderPage();
+    fireEvent.change(screen.getByLabelText("Ask Foap Analyst"), {
+      target: { value: "analyse hooks" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Ask" }));
+    const fetchMock = window.fetch as unknown as ReturnType<typeof vi.fn>;
+    await waitFor(() => {
+      const ask = fetchMock.mock.calls.find((c) =>
+        String(c[0]).startsWith("/api/analyst/ask"),
+      );
+      expect(ask).toBeDefined();
+      // No query string: scope travels in the JSON body or the
+      // backend analyses the whole dataset.
+      expect(String(ask?.[0])).not.toContain("?");
+      expect(JSON.parse(String(ask?.[1]?.body))).toHaveProperty("scope");
+    });
+  });
+
+  it("maps scope params to body arrays", () => {
+    expect(
+      scopeBody(new URLSearchParams("campaign=C&platform=tiktok")),
+    ).toEqual({ campaign: ["C"], platform: ["tiktok"] });
+    expect(scopeBody(new URLSearchParams())).toEqual({});
   });
 
   it("accepts a finding via the decision endpoint", async () => {

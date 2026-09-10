@@ -667,14 +667,22 @@ def _scope_changed_note(old_scope, new_scope, old_dv, new_dv, lang):
 
 def answer_turn(conn, owner_id, question, conversation_id=None,
                 scope=None, objective="reach", language=None,
-                rank_by=None):
+                rank_by=None, max_points=None):
     """One persistent analyst turn: route, compute, render, store.
 
     Scope/objective changes recompute visibly; the new scope and
     dataset version persist on the conversation. Findings persist as
     proposed with scope + version. Never fabricates: with no matching
-    rows the turn explains what is missing instead.
+    rows the turn explains what is missing instead. max_points caps
+    recommendation/test rendering (UI "N points" button); numerical
+    facts and qualifications are preserved, never reworded away.
     """
+    try:
+        max_points = int(max_points)
+    except (TypeError, ValueError):
+        max_points = None
+    if max_points is not None and not 1 <= max_points <= 10:
+        max_points = None
     objective = objective if objective in analyst.OBJECTIVES else "reach"
     lang = detect_language(question, language)
     scope = dict(scope or {})
@@ -740,7 +748,8 @@ def answer_turn(conn, owner_id, question, conversation_id=None,
     elif task == "recommendations":
         recs = analyst.recommendations_from_findings(analysis)
         analyst_notes = args.get("analyst_notes")
-        text, items = render_recommendations(recs, lang)
+        text, items = render_recommendations(recs, lang,
+                                             limit=max_points)
         if analyst_notes:
             prefix = "Twoje wnioski traktuję jako notatki analityka " \
                 "(nie jako zweryfikowane fakty). " if lang == "pl" \
@@ -750,6 +759,8 @@ def answer_turn(conn, owner_id, question, conversation_id=None,
         text += note
         payload.update({"recommendations": items,
                         "analyst_notes": bool(analyst_notes)})
+        if max_points is not None:
+            payload["condensed_to"] = len(items)
     elif task == "tests":
         recs = analyst.recommendations_from_findings(analysis)
         plans = [analyst.test_plan_for_finding(
@@ -762,12 +773,14 @@ def answer_turn(conn, owner_id, question, conversation_id=None,
              "metric_definition_ids": [],
              "limitations": r["evidence"].get("limitations", [])},
             analysis) for r in recs]
-        text, items = render_tests(plans, lang)
+        text, items = render_tests(plans, lang, limit=max_points)
         text += note
         payload.update({"tests": items})
+        if max_points is not None:
+            payload["condensed_to"] = len(items)
     elif task == "condense":
         target, limit = args.get("target", "recommendations"), \
-            args.get("limit", 3) or 3
+            max_points or args.get("limit", 3) or 3
         recs = analyst.recommendations_from_findings(analysis)
         if target == "tests":
             plans = [analyst.test_plan_for_finding(

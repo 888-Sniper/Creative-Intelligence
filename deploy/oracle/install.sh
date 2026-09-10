@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+APP_USER="creative-intel"
+APP_GROUP="creative-intel"
+APP_DIR="/opt/creative-intelligence"
+DATA_DIR="/var/lib/creative-intelligence"
+ENV_DIR="/etc/creative-intelligence"
+SERVICE_NAME="creative-intelligence"
+SOURCE_DIR="${SOURCE_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+DOMAIN="${DOMAIN:-_}"
+PNPM_VERSION="${PNPM_VERSION:-10.14.0}"
+
+if [[ ${EUID} -ne 0 ]]; then
+  echo "Run with sudo: sudo DOMAIN=your.domain bash deploy/oracle/install.sh" >&2
+  exit 1
+fi
+
+if [[ ! -f "${SOURCE_DIR}/pyproject.toml" ]]; then
+  echo "SOURCE_DIR does not look like the Creative Intelligence repository: ${SOURCE_DIR}" >&2
+  exit 1
+fi
+
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get install -y --no-install-recommends \
+  ca-certificates curl git gnupg nginx certbot python3-certbot-nginx \
+  ffmpeg build-essential software-properties-common rsync sqlite3
+
+# Creative Intelligence currently requires Python >=3.13.
+if ! command -v python3.13 >/dev/null 2>&1; then
+  add-apt-repository -y ppa:deadsnakes/ppa
+  apt-get update
+  apt-get install -y --no-install-recommends python3.13 python3.13-venv python3.13-dev
+fi
+
+# Node 22 LTS is used to build the Vite/React frontend on ARM64 as well as x86_64.
+if ! command -v node >/dev/null 2>&1 || [[ "$(node -p 'Number(process.versions.node.split(".")[0])' 2>/dev/null || echo 0)" -lt 22 ]]; then
+  curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+  apt-get install -y nodejs
+fi
+corepack enable
+corepack prepare "pnpm@${PNPM_VERSION}" --activate
+
+if ! id "${APP_USER}" >/dev/null 2>&1; then
+  useradd --system --home "${APP_DIR}" --shell /usr/sbin/nologin "${APP_USER}"
+fi
+
+mkdir -p "${APP_DIR}" "${DATA_DIR}/media" "${ENV_DIR}"
+rsync -a --delete \
+  --exclude '.git/' \
+  --exclude '.venv/' \
+  --exclude 'node_modules/' \
+  --exclude 'dist/' \
+  --exclude 'Data/' \
+  "${SOURCE_DIR}/" "${APP_DIR}/"
+
+python3.13 -m venv "${APP_DIR}/.venv"
+"${APP_DIR}/.venv/bin/python" -m pip install --upgrade pip wheel
+"${APP_DIR}/.venv/bin/pip" install "${APP_DIR}"
+
+pushd "${APP_DIR}/apps/creative-intelligence-ui" >/dev/null
+pnpm install --frozen-lockfile
+pnpm build
+popd >/dev/null
+
+if [[ ! -f "${ENV_DIR}/creative-intelligence.env" ]]; then
+  cp "${APP_DIR}/deploy/oracle/env.example" "${ENV_DIR}/creative-intelligence.env"
+  chmod 600 "${ENV_DIR}/creative-intelligence.env"
+  echo "Created ${ENV_DIR}/creative-intelligence.env — add real WorkOS/admin values before external login testing."
+fi
+
+# Apply the production migration chain to the persistent database before first boot.
+pushd "${APP_DIR}" >/dev/null
+CREATIVE_INTEL_DB_URL="sqlite:////var/lib/creative-intelligence/creative_intel.db" \
+  "${APP_DIR}/.venv/bin/alembic" -c Backend/alembic.ini upgrade head
+popd >/dev/null
+
+cp "${APP_DIR}/deploy/oracle/creative-intelligence.service" "/etc/systemd/system/${SERVICE_NAME}.service"
+sed "s/__DOMAIN__/${DOMAIN}/g" "${APP_DIR}/deploy/oracle/nginx.conf.template" \
+  > "/etc/nginx/sites-available/${SERVICE_NAME}"
+ln -sfn "/etc/nginx/sites-available/${SERVICE_NAME}" "/etc/nginx/sites-enabled/${SERVICE_NAME}"
+rm -f /etc/nginx/sites-enabled/default
+
+chown -R "${APP_USER}:${APP_GROUP}" "${APP_DIR}" "${DATA_DIR}"
+chmod 750 "${DATA_DIR}" "${DATA_DIR}/media"
+
+nginx -t
+systemctl daemon-reload
+systemctl enable "${SERVICE_NAME}"
+systemctl restart "${SERVICE_NAME}"
+systemctl enable nginx
+systemctl restart nginx
+
+sleep 2
+if ! curl -fsS http://127.0.0.1:4321/health >/dev/null; then
+  echo "Application health check failed. Inspect: journalctl -u ${SERVICE_NAME} -n 100 --no-pager" >&2
+  exit 1
+fi
+if ! curl -fsS http://127.0.0.1:4321/readiness >/dev/null; then
+  echo "Application readiness check failed. Inspect: journalctl -u ${SERVICE_NAME} -n 100 --no-pager" >&2
+  exit 1
+fi
+
+echo
+if [[ "${DOMAIN}" == "_" ]]; then
+  echo "Installed successfully. Open http://<OCI_PUBLIC_IP>/ for the initial network check."
+  echo "Before testing WorkOS externally, point a domain at this VM, rerun with DOMAIN=host, then run enable-https.sh."
+else
+  echo "Installed successfully for http://${DOMAIN}."
+  echo "Next: sudo EMAIL=you@example.com DOMAIN=${DOMAIN} bash ${APP_DIR}/deploy/oracle/enable-https.sh"
+fi

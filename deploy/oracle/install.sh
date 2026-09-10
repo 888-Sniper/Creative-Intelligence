@@ -61,7 +61,8 @@ chmod 750 "${APP_DIR}/deploy/oracle/"*.sh
 
 python3.13 -m venv "${APP_DIR}/.venv"
 "${APP_DIR}/.venv/bin/python" -m pip install --upgrade pip wheel
-"${APP_DIR}/.venv/bin/pip" install "${APP_DIR}"
+"${APP_DIR}/.venv/bin/pip" install -r "${APP_DIR}/requirements.lock"
+"${APP_DIR}/.venv/bin/pip" install --no-deps "${APP_DIR}"
 
 pushd "${APP_DIR}/apps/creative-intelligence-ui" >/dev/null
 pnpm install --frozen-lockfile
@@ -81,6 +82,8 @@ CREATIVE_INTEL_DB_URL="sqlite:////var/lib/creative-intelligence/creative_intel.d
 popd >/dev/null
 
 cp "${APP_DIR}/deploy/oracle/creative-intelligence.service" "/etc/systemd/system/${SERVICE_NAME}.service"
+cp "${APP_DIR}/deploy/oracle/creative-intelligence-backup.service" "/etc/systemd/system/${SERVICE_NAME}-backup.service"
+cp "${APP_DIR}/deploy/oracle/creative-intelligence-backup.timer" "/etc/systemd/system/${SERVICE_NAME}-backup.timer"
 sed "s/__DOMAIN__/${DOMAIN}/g" "${APP_DIR}/deploy/oracle/nginx.conf.template" \
   > "/etc/nginx/sites-available/${SERVICE_NAME}"
 ln -sfn "/etc/nginx/sites-available/${SERVICE_NAME}" "/etc/nginx/sites-enabled/${SERVICE_NAME}"
@@ -93,6 +96,7 @@ nginx -t
 systemctl daemon-reload
 systemctl enable "${SERVICE_NAME}"
 systemctl restart "${SERVICE_NAME}"
+systemctl enable --now "${SERVICE_NAME}-backup.timer"
 systemctl enable nginx
 systemctl restart nginx
 

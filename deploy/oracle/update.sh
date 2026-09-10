@@ -19,7 +19,8 @@ rsync -a --delete \
   --exclude 'Data/' \
   "${SOURCE_DIR}/" "${APP_DIR}/"
 
-"${APP_DIR}/.venv/bin/pip" install --upgrade --force-reinstall "${APP_DIR}"
+"${APP_DIR}/.venv/bin/pip" install -r "${APP_DIR}/requirements.lock"
+"${APP_DIR}/.venv/bin/pip" install --upgrade --force-reinstall --no-deps "${APP_DIR}"
 pushd "${APP_DIR}/apps/creative-intelligence-ui" >/dev/null
 corepack enable
 pnpm install --frozen-lockfile

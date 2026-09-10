@@ -1,0 +1,12 @@
+[Unit]
+Description=Creative Intelligence nightly backup (on-host + off-host)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=creative-intel
+Group=creative-intel
+EnvironmentFile=-/etc/creative-intelligence/creative-intelligence.env
+ExecStart=/opt/creative-intelligence/deploy/oracle/backup.sh
+ExecStart=/opt/creative-intelligence/deploy/oracle/offhost_backup.sh

@@ -116,6 +116,9 @@ WorkOS dashboard:  https://creative-intelligence.duckdns.org/api/auth/callback
 Google Cloud:      https://creative-intelligence.duckdns.org/api/auth/google/callback
 ```
 
+Use the WorkOS credentials for organization
+`org_01M255P1S4R6R5AH20AYNPM134` (the Foap demo org).
+
 ## 5. Verify
 
 ```bash

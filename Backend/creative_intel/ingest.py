@@ -111,6 +111,10 @@ def _rows_from_dicts(fieldnames, dicts, platform, source):
                 except _BadValue as exc:
                     bad = "%s %s" % (field, exc)
                     break
+                if field == "revenue":
+                    row["revenue_reported"] = bool(
+                        field in col_map and
+                        str(raw_val).strip() not in ("", "-", "n/a"))
             else:
                 row[field] = str(raw_val or "").strip()
         if bad is not None:
@@ -175,7 +179,7 @@ def parse_workbook(path, platform, source="upload"):
 def _normalise(rows):
     defaults = {"client": "", "project": "", "vertical": "", "market": "",
                 "objective": "", "funnel_stage": "", "date": "",
-                "revenue": 0.0}
+                "revenue": 0.0, "revenue_reported": False}
     return [dict(defaults, **row) for row in rows]
 
 
@@ -197,12 +201,12 @@ def insert_rows(conn, rows):
         " spend, impressions, clicks, conversions, video_views,"
         " views_25, views_50, views_75, views_100,"
         " client, project, vertical, market, objective, funnel_stage,"
-        " date, revenue)"
+        " date, revenue, revenue_reported)"
         " VALUES (:platform, :source, :campaign, :adset, :ad_name, :creative_key,"
         " :spend, :impressions, :clicks, :conversions, :video_views,"
         " :views_25, :views_50, :views_75, :views_100,"
         " :client, :project, :vertical, :market, :objective, :funnel_stage,"
-        " :date, :revenue)", normalised)
+        " :date, :revenue, :revenue_reported)", normalised)
     _store_tail(conn, normalised)
     return len(normalised)
 
@@ -214,7 +218,7 @@ UPSERT_VALUE_COLUMNS = (
     "creative_key", "spend", "impressions", "clicks", "conversions",
     "video_views", "views_25", "views_50", "views_75", "views_100",
     "client", "project", "vertical", "market", "objective",
-    "funnel_stage", "revenue")
+    "funnel_stage", "revenue", "revenue_reported")
 
 
 def upsert_rows(conn, rows):
@@ -238,12 +242,12 @@ def upsert_rows(conn, rows):
         " spend, impressions, clicks, conversions, video_views,"
         " views_25, views_50, views_75, views_100,"
         " client, project, vertical, market, objective, funnel_stage,"
-        " date, revenue)"
+        " date, revenue, revenue_reported)"
         " VALUES (:platform, :source, :campaign, :adset, :ad_name, :creative_key,"
         " :spend, :impressions, :clicks, :conversions, :video_views,"
         " :views_25, :views_50, :views_75, :views_100,"
         " :client, :project, :vertical, :market, :objective, :funnel_stage,"
-        " :date, :revenue)")
+        " :date, :revenue, :revenue_reported)")
     inserted = updated = 0
     normalised = _normalise(rows)
     for row in normalised:

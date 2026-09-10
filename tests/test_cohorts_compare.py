@@ -36,6 +36,49 @@ def fresh_db():
     return conn
 
 
+class RevenueProvenanceTest(unittest.TestCase):
+    REV = ("Campaign,Ad Name,Creative Name,Amount Spent,Impressions,"
+           "Link Clicks,Conversions,Revenue\n"
+           "C1,A1,a1,100,10000,200,10,250\n"
+           "C1,A2,a2,100,10000,200,10,0\n")
+    NOREV = ("Campaign,Ad Name,Creative Name,Amount Spent,Impressions,"
+             "Link Clicks,Conversions\n"
+             "C1,A1,a1,100,10000,200,10\n")
+
+    def test_reported_flag_at_parse(self):
+        rows, _q = ingest.parse_csv_report(self.REV, "meta", "upload")
+        self.assertEqual(
+            [r["revenue_reported"] for r in rows], [True, True])
+        self.assertEqual([r["revenue"] for r in rows], [250.0, 0.0])
+        rows, _q = ingest.parse_csv_report(self.NOREV, "meta", "upload")
+        self.assertEqual([r["revenue_reported"] for r in rows], [False])
+
+    def test_roas_none_when_unavailable_zero_when_reported(self):
+        conn = fresh_db()
+        try:
+            ingest.insert_rows(
+                conn, ingest.parse_csv(self.NOREV, "meta", "upload"))
+            kpis = benchmarks.kpis_for_rows(
+                benchmarks.all_rows(conn))
+            self.assertIsNone(kpis["roas"])
+            conn2 = fresh_db()
+            ingest.insert_rows(
+                conn2, ingest.parse_csv(self.REV, "meta", "upload"))
+            kpis2 = benchmarks.kpis_for_rows(
+                benchmarks.all_rows(conn2))
+            # (250 + 0) / (100 + 100) = 1.25, reported zero counts.
+            self.assertEqual(kpis2["roas"], 1.25)
+            conn2.close()
+        finally:
+            conn.close()
+
+    def test_roas_of_unit(self):
+        self.assertIsNone(benchmarks.roas_of(0.0, 100.0, False))
+        self.assertEqual(benchmarks.roas_of(0.0, 100.0, True), 0.0)
+        self.assertEqual(benchmarks.roas_of(50.0, 100.0, False), 0.5)
+        self.assertIsNone(benchmarks.roas_of(50.0, 0.0, True))
+
+
 class FilterParamsTest(unittest.TestCase):
     def setUp(self):
         self.conn = fresh_db()

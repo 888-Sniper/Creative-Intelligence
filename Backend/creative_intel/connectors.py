@@ -221,19 +221,25 @@ def meta_insights_csv(ad_account_id, since, until):
                     conv += float(action.get("value", 0))
                 except (TypeError, ValueError):
                     continue
-        revenue = 0.0
-        for action in row.get("action_values", []) or []:
-            if action.get("action_type") in META_PURCHASE_TYPES:
-                try:
-                    revenue += float(action.get("value", 0))
-                except (TypeError, ValueError):
-                    continue
+        # Revenue only when the API actually returned action_values;
+        # otherwise the cell stays blank (unavailable, never invented).
+        if "action_values" in row:
+            revenue = 0.0
+            for action in row.get("action_values", []) or []:
+                if action.get("action_type") in META_PURCHASE_TYPES:
+                    try:
+                        revenue += float(action.get("value", 0))
+                    except (TypeError, ValueError):
+                        continue
+            revenue_cell = _num(revenue)
+        else:
+            revenue_cell = ""
         lines.append(",".join(_csv_cell(row.get(k, "")) for k in
                               ("campaign_name", "adset_name", "ad_name",
                                "spend", "impressions", "clicks")) +
                      ",%s,%s,%s,%s" % (_num(conv), _num(_views(row)),
                                        _csv_cell(row.get("date_start", "")),
-                                       _num(revenue)))
+                                       revenue_cell))
     return "\n".join(lines) + "\n"
 
 
@@ -263,6 +269,10 @@ def _csv_cell(value):
 
 TIKTOK_FIELDS = ("campaign_id", "adgroup_id", "ad_id", "spend",
                  "impressions", "clicks", "conversion", "video_views")
+# Value metric requested alongside the base set so Revenue is genuine
+# API data, not an assumption. If the API ever rejects it, the fetch
+# retries once with the base metrics and revenue stays unavailable.
+TIKTOK_VALUE_METRICS = ("roas",)
 
 
 def tiktok_report_csv(advertiser_id, start_date, end_date):
@@ -272,6 +282,46 @@ def tiktok_report_csv(advertiser_id, start_date, end_date):
         raise ConnectorUnavailable("tiktok needs an advertiser id")
     base = api_base("tiktok", "https://business-api.tiktok.com").rstrip("/")
     url = base + "/open_api/v1.3/report/integrated/get/"
+    dims = ["campaign_id", "adgroup_id", "ad_id", "stat_time_day"]
+    metrics = list(TIKTOK_FIELDS[3:]) + list(TIKTOK_VALUE_METRICS)
+    try:
+        rows = _tiktok_pages(url, token, advertiser_id, start_date,
+                             end_date, dims, metrics)
+    except _MetricRejected:
+        # The value metric is not accepted by this API version:
+        # fall back to base metrics; revenue stays unavailable.
+        rows = _tiktok_pages(url, token, advertiser_id, start_date,
+                             end_date, dims, list(TIKTOK_FIELDS[3:]))
+    # Revenue is genuine API data only: an explicit purchase-value
+    # metric when the API returns one, else roas x spend (both TikTok
+    # figures, so the implied revenue matches TikTok's own ROAS).
+    # Otherwise the cell stays blank, which ingest records as
+    # revenue_reported=False (unavailable, never invented).
+    lines = ["Campaign,Ad Set,Ad Name,Spend,Impressions,Clicks,"
+             "Conversions,Video Views,Date,Revenue"]
+    for row in rows:
+        dims = row.get("dimensions") or {}
+        mets = row.get("metrics") or {}
+        value = mets.get("purchase_value", mets.get("total_purchase_value",
+                         mets.get("shop_revenue", "")))
+        if value == "":
+            value = _roas_revenue(mets)
+        cells = [dims.get("campaign_id", ""), dims.get("adgroup_id", ""),
+                 dims.get("ad_id", ""), _num(mets.get("spend")),
+                 _num(mets.get("impressions")), _num(mets.get("clicks")),
+                 _num(mets.get("conversion")), _num(mets.get("video_views")),
+                 _csv_cell(dims.get("stat_time_day", "")),
+                 _num(value) if value != "" else ""]
+        lines.append(",".join(_csv_cell(c) for c in cells))
+    return "\n".join(lines) + "\n"
+
+
+class _MetricRejected(Exception):
+    """The API refused the requested value metric (retry with base)."""
+
+
+def _tiktok_pages(url, token, advertiser_id, start_date, end_date,
+                  dimensions, metrics):
     rows = []
     page = 1
     while page <= MAX_API_PAGES:
@@ -281,9 +331,8 @@ def tiktok_report_csv(advertiser_id, start_date, end_date):
             # stat_time_day gives the daily breakdown backing the Date
             # column; without it every row is range-aggregate and period
             # analysis is impossible.
-            "dimensions": ["campaign_id", "adgroup_id", "ad_id",
-                           "stat_time_day"],
-            "metrics": list(TIKTOK_FIELDS[3:]),
+            "dimensions": dimensions,
+            "metrics": metrics,
             "start_date": start_date,
             "end_date": end_date,
             "page": page,
@@ -292,6 +341,11 @@ def tiktok_report_csv(advertiser_id, start_date, end_date):
         got = _api_json(url, token=None, payload=payload,
                         headers={"Access-Token": token})
         if got.get("code", 0) != 0:
+            message = str(got.get("message") or "")
+            lowered = message.lower()
+            if ("metric" in lowered or "field" in lowered
+                    or "invalid" in lowered or "param" in lowered):
+                raise _MetricRejected(message)
             raise ConnectorUnavailable("tiktok: %s" % got.get("message"))
         data = got.get("data") or {}
         chunk = data.get("list") or []
@@ -307,22 +361,16 @@ def tiktok_report_csv(advertiser_id, start_date, end_date):
         elif len(chunk) < size:
             break
         page += 1
-    # TikTok BASIC reports expose no purchase-value metric, so Revenue
-    # comes from the API only when it returns one of the recognised
-    # value keys; otherwise the cell is blank (ingest blanks become 0,
-    # the codebase-wide convention for "not reported").
-    lines = ["Campaign,Ad Set,Ad Name,Spend,Impressions,Clicks,"
-             "Conversions,Video Views,Date,Revenue"]
-    for row in rows:
-        dims = row.get("dimensions") or {}
-        mets = row.get("metrics") or {}
-        value = mets.get("purchase_value", mets.get("total_purchase_value",
-                         mets.get("shop_revenue", "")))
-        cells = [dims.get("campaign_id", ""), dims.get("adgroup_id", ""),
-                 dims.get("ad_id", ""), _num(mets.get("spend")),
-                 _num(mets.get("impressions")), _num(mets.get("clicks")),
-                 _num(mets.get("conversion")), _num(mets.get("video_views")),
-                 _csv_cell(dims.get("stat_time_day", "")),
-                 _num(value) if value != "" else ""]
-        lines.append(",".join(_csv_cell(c) for c in cells))
-    return "\n".join(lines) + "\n"
+    return rows
+
+
+def _roas_revenue(mets):
+    """Implied revenue from the API's own roas x spend, or ''."""
+    try:
+        roas = float(mets.get("roas", ""))
+        spend = float(mets.get("spend", ""))
+    except (TypeError, ValueError):
+        return ""
+    if spend > 0 and roas >= 0:
+        return repr(round(roas * spend, 2))
+    return ""

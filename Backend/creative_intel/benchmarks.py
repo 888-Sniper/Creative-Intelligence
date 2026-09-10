@@ -40,7 +40,7 @@ def summarize(rows):
         "vtr": round(views / impr, 4) if impr else None,
         "conv_rate_weighted": round(_weight(rows, "conv_rate"), 4),
         "cpa": round(spend / conv, 2) if conv else None,
-        "roas": round(revenue / spend, 4) if spend else None,
+        "roas": roas_of(revenue, spend, _population_reported(rows)),
     }
 
 
@@ -106,6 +106,24 @@ KPI_KEYS = ("cpm", "vtr", "ctr", "cpc", "cpa", "roas")
 KPI_DIRECTIONS = {"cpm": "lower", "vtr": "higher", "ctr": "higher",
                   "cpc": "lower", "cpa": "lower", "roas": "higher"}
 
+def roas_of(revenue, spend, revenue_reported=False):
+    """ROAS with honest null semantics.
+
+    Unreported revenue (no Revenue cell anywhere in the population)
+    yields None — never 0.0. Only genuinely reported zero revenue
+    (or any positive revenue) over positive spend yields a number.
+    """
+    if not spend:
+        return None
+    if not (revenue or revenue_reported):
+        return None
+    return round(revenue / spend, 4)
+
+
+def _population_reported(rows):
+    return any(r.get("revenue_reported") for r in rows)
+
+
 MIN_ADS = 5
 MIN_PROJECTS = 3
 MIN_CREATIVES = MIN_ADS  # alias: one creative per ad row at minimum grain
@@ -136,7 +154,7 @@ def kpis_for_rows(rows):
         "ctr": round(clicks / impr, 4) if impr else None,
         "cpc": round(spend / clicks, 2) if clicks else None,
         "cpa": round(spend / conv, 2) if conv else None,
-        "roas": round(revenue / spend, 4) if spend else None,
+        "roas": roas_of(revenue, spend, _population_reported(rows)),
     }
 
 
@@ -600,9 +618,9 @@ def _creative_rows(conn, campaign, scope=None):
     """
     scope = scope if isinstance(scope, Scope) else Scope(scope)
     cols = ["spend", "impressions", "clicks", "conversions",
-            "video_views", "revenue", "platform", "client", "project",
-            "campaign", "vertical", "market", "objective",
-            "funnel_stage", "date"]
+            "video_views", "revenue", "revenue_reported", "platform",
+            "client", "project", "campaign", "vertical", "market",
+            "objective", "funnel_stage", "date"]
     out = []
     for (key,) in conn.execute(
             "SELECT DISTINCT creative_key FROM ads WHERE campaign=?",
@@ -660,7 +678,7 @@ def _creative_rows(conn, campaign, scope=None):
             "ctr": round(clicks / impr, 4) if impr else None,
             "cpc": round(spend / clicks, 2) if clicks else None,
             "cpa": round(spend / conv, 2) if conv else None,
-            "roas": round(revenue / spend, 4) if spend else None,
+            "roas": roas_of(revenue, spend, _population_reported(rows)),
             "hook_type": ann.get("hook_type") or "unannotated",
             "hook_modality": ann.get("hook_modality") or "unknown",
             "creator_vs_branded": ann.get("creator_vs_branded") or "unannotated",

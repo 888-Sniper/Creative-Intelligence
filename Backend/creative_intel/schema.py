@@ -26,6 +26,7 @@ NEW_DIMENSIONS = (
     ("funnel_stage", "TEXT NOT NULL DEFAULT ''"),
     ("date", "TEXT NOT NULL DEFAULT ''"),
     ("revenue", "REAL NOT NULL DEFAULT 0"),
+    ("revenue_reported", "INTEGER NOT NULL DEFAULT 0"),
 )
 
 DDL = """
@@ -53,7 +54,8 @@ CREATE TABLE IF NOT EXISTS ads (
     objective TEXT NOT NULL DEFAULT '',
     funnel_stage TEXT NOT NULL DEFAULT '',
     date TEXT NOT NULL DEFAULT '',
-    revenue REAL NOT NULL DEFAULT 0
+    revenue REAL NOT NULL DEFAULT 0,
+    revenue_reported INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS creatives (
     creative_key TEXT PRIMARY KEY,

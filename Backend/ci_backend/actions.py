@@ -550,7 +550,9 @@ def build_compare(conn, q):
                     "ctr": round(clicks / impr, 4) if impr else None,
                     "cpc": round(spend / clicks, 2) if clicks else None,
                     "cpa": round(spend / conv, 2) if conv else None,
-                    "roas": round(revenue / spend, 4) if spend else None,
+                    "roas": benchmarks.roas_of(
+                        revenue, spend,
+                        any(r.get("revenue_reported") for r in rows)),
                     "scope": scope.describe(),
                     "annotation": json.loads(ann[0]) if ann else None}
     if len(keys) == 2:

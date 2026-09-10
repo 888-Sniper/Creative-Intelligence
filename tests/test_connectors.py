@@ -67,8 +67,6 @@ class StubHandler(BaseHTTPRequestHandler):
                     "ad_name": "meta-ad-2", "spend": "10.0",
                     "impressions": "1000", "clicks": "10",
                     "actions": [{"action_type": "purchase", "value": 1}],
-                    "action_values": [{"action_type": "purchase",
-                                       "value": 25.5}],
                     "date_start": "2026-08-02",
                     "video_play_actions": [{"value": 100}]}]})
             else:
@@ -114,7 +112,8 @@ class StubHandler(BaseHTTPRequestHandler):
                                "ad_id": "tt-ad",
                                "stat_time_day": "2026-08-01"},
                 "metrics": {"spend": 15.0, "impressions": 1500, "clicks": 30,
-                            "conversion": 3, "video_views": 400}}]
+                            "conversion": 3, "video_views": 400,
+                            "roas": 2.0}}]
         self._send(200, {"code": 0, "data": {
             "list": rows,
             "page_info": {"page": page, "page_size": 1,
@@ -188,7 +187,9 @@ class ConnectorTest(unittest.TestCase):
         self.assertEqual(rows[0]["revenue"], 120.0)
         self.assertEqual(rows[1]["spend"], 10.0)
         self.assertEqual(rows[1]["date"], "2026-08-02")
-        self.assertEqual(rows[1]["revenue"], 25.5)
+        self.assertEqual(rows[1]["revenue"], 0.0)
+        self.assertFalse(rows[1]["revenue_reported"])
+        self.assertTrue(rows[0]["revenue_reported"])
         self.assertEqual(quar, [])
 
     def test_tiktok_report_end_to_end(self):
@@ -205,9 +206,51 @@ class ConnectorTest(unittest.TestCase):
         self.assertEqual(rows[0]["conversions"], 3.0)
         self.assertEqual(rows[1]["conversions"], 5.0)
         self.assertEqual(rows[0]["date"], "2026-08-01")
-        self.assertEqual(rows[0]["revenue"], 0.0)
+        self.assertEqual(rows[0]["revenue"], 30.0)
+        self.assertTrue(rows[0]["revenue_reported"])
         self.assertEqual(rows[1]["date"], "2026-08-02")
         self.assertEqual(rows[1]["revenue"], 40.0)
+
+    def test_tiktok_roas_metric_requested_with_fallback(self):
+        os.environ["CREATIVE_INTEL_KEY_TIKTOK"] = "dummy-tt-token"
+        os.environ["CREATIVE_INTEL_API_TIKTOK"] = self.base
+        text = connectors.tiktok_report_csv("456", "2026-08-01",
+                                            "2026-08-31")
+        body = json.loads(StubHandler.seen["body"].decode("utf-8"))
+        self.assertIn("roas", body["metrics"])
+        self.assertIn("stat_time_day", body["dimensions"])
+
+    def test_tiktok_metric_rejection_falls_back(self):
+        import creative_intel.connectors as conn_mod
+        calls = []
+        orig = conn_mod._api_json
+
+        def fake(url, token=None, payload=None, headers=None):
+            calls.append((payload or {}).get("metrics", []))
+            if "roas" in calls[-1]:
+                return {"code": 40001, "message": "invalid metric: roas"}
+            return {"code": 0, "data": {"list": [], "page_info": {}}}
+
+        conn_mod._api_json = fake
+        try:
+            os.environ["CREATIVE_INTEL_KEY_TIKTOK"] = "dummy-tt-token"
+            text = connectors.tiktok_report_csv("456", "2026-08-01",
+                                                "2026-08-31")
+        finally:
+            conn_mod._api_json = orig
+        self.assertEqual(len(calls), 2)
+        self.assertNotIn("roas", calls[1])
+        rows, _q = ingest.parse_csv_report(text, "tiktok", "tiktok-api")
+        self.assertEqual(rows, [])
+
+    def test_roas_revenue_unit(self):
+        self.assertEqual(
+            connectors._roas_revenue({"roas": 2.0, "spend": 15.0}), "30.0")
+        self.assertEqual(connectors._roas_revenue({"spend": 15.0}), "")
+        self.assertEqual(
+            connectors._roas_revenue({"roas": "x", "spend": 15.0}), "")
+        self.assertEqual(
+            connectors._roas_revenue({"roas": 2.0, "spend": 0}), "")
 
     def test_platform_needs_token(self):
         for fn, args in (

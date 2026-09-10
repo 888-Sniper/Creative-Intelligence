@@ -28,3 +28,7 @@ node_modules/
 
 # Frontend build output (rebuilt by pnpm build; served from disk)
 apps/*/dist/
+
+# Playwright run output
+apps/*/test-results/
+apps/*/playwright-report/

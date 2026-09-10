@@ -7,6 +7,11 @@ STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 TARGET="${BACKUP_DIR}/${STAMP}"
 DB="${DATA_DIR}/creative_intel.db"
 
+if [[ -e "${BACKUP_DIR}" && ! -w "${BACKUP_DIR}" ]]; then
+  echo "Backup directory ${BACKUP_DIR} is not writable by $(whoami)." >&2
+  echo "On Oracle VMs the installer creates it with creative-intel ownership." >&2
+  exit 1
+fi
 mkdir -p "${TARGET}"
 chmod 700 "${BACKUP_DIR}" "${TARGET}"
 

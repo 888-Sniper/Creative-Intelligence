@@ -37,6 +37,43 @@ if [[ ! -f "${SOURCE_DIR}/pyproject.toml" ]]; then
   exit 1
 fi
 
+echo "== 1b/7 demo fail-safe preflight =="
+ENV_FILE="${ENV_DIR}/creative-intelligence.env"
+if [[ ! -f "${ENV_FILE}" ]]; then
+  echo "Missing ${ENV_FILE}: copy deploy/oracle/demo.env.example there and fill it." >&2
+  exit 1
+fi
+DOMAIN="${DOMAIN}" ENV_FILE="${ENV_FILE}" python3 - <<'PY'
+import os
+vals = {}
+with open(os.environ["ENV_FILE"]) as fh:
+    for line in fh:
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, _, value = line.partition("=")
+            vals[key.strip()] = value.strip()
+domain = os.environ["DOMAIN"]
+problems = []
+mode = vals.get("CREATIVE_INTEL_PROVIDER_MODE", "")
+if mode != "live":
+    problems.append("CREATIVE_INTEL_PROVIDER_MODE must be 'live' (found %r)." % mode)
+if vals.get("CREATIVE_INTEL_COOKIE_SECURE", "") != "true":
+    problems.append("CREATIVE_INTEL_COOKIE_SECURE must be 'true'.")
+env_name = vals.get("CREATIVE_INTEL_ENVIRONMENT", "")
+if env_name not in ("demo", "production"):
+    problems.append("CREATIVE_INTEL_ENVIRONMENT must be 'demo' or 'production'.")
+for label in ("CREATIVE_INTEL_ADMIN_EMAIL", "CREATIVE_INTEL_WORKOS_CLIENT_ID",
+              "CREATIVE_INTEL_KEY_WORKOS", "CREATIVE_INTEL_WORKOS_REDIRECT_URI"):
+    if not vals.get(label, ""):
+        problems.append("%s is not configured." % label)
+want = "https://%s/api/auth/callback" % domain
+if vals.get("CREATIVE_INTEL_WORKOS_REDIRECT_URI", "") != want:
+    problems.append("CREATIVE_INTEL_WORKOS_REDIRECT_URI must be exactly %s." % want)
+if problems:
+    raise SystemExit("demo preflight failed:\n  - " + "\n  - ".join(problems))
+print("demo preflight passed: live AI, secure cookies, WorkOS identity, demo environment.")
+PY
+
 echo "== 2/7 DuckDNS update =="
 DUCKDNS_SCRIPT="${SOURCE_DIR}/deploy/oracle/duckdns-update.sh"
 if [[ "${DOMAIN}" == *.sslip.io ]]; then
@@ -86,7 +123,7 @@ fi
 echo "== 6/7 restart and smoke checks =="
 systemctl restart creative-intelligence
 sleep 2
-BASE_URL="${BASE}" bash "${APP_DIR}/deploy/oracle/verify.sh"
+BASE_URL="${BASE}" EXPECT_LIVE=1 bash "${APP_DIR}/deploy/oracle/verify.sh"
 
 echo "== 7/7 callbacks to register =="
 echo "Register these exact URLs (the app cannot do this for you):"

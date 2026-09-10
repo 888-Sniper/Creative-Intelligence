@@ -111,6 +111,15 @@ else
   echo "  sudo systemctl enable --now ${SERVICE_NAME}-duckdns.timer"
 fi
 
+# Backup landing zone: the timer runs as creative-intel, so the
+# directory must exist with service-account ownership BEFORE the
+# timer is enabled (backup.sh cannot create it under /var/backups
+# as an unprivileged user).
+BACKUP_DIR="${BACKUP_DIR:-/var/backups/creative-intelligence}"
+mkdir -p "${BACKUP_DIR}"
+chown creative-intel:creative-intel "${BACKUP_DIR}"
+chmod 700 "${BACKUP_DIR}"
+
 # Host firewall: SSH first (never lock out the current session), then
 # web ports. Port 4321 stays loopback-only (see nginx template).
 if command -v ufw >/dev/null 2>&1; then

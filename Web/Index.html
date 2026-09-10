@@ -150,6 +150,7 @@ ul.plain li{padding:6px 0;border-bottom:1px solid var(--line)}
 <button data-view="compare" aria-pressed="false">Compare</button>
 <button data-view="benchmark" aria-pressed="false">Benchmarks</button>
 <button data-view="report" aria-pressed="false">Reports</button>
+<button data-view="profile" aria-pressed="false">Profile</button>
 <button data-view="admin" aria-pressed="false" id="tab-admin" style="display:none">Admin</button>
 </nav>
 <span class="header-spacer"></span>
@@ -322,6 +323,24 @@ ul.plain li{padding:6px 0;border-bottom:1px solid var(--line)}
 <pre id="rep-out" class="muted"></pre>
 <span id="rep-links" class="report-outputs"></span></div>
 </section>
+<section class="view" id="v-profile"><h1 class="page-title">Profile</h1><p class="page-sub">Your employee profile. Changes are saved to your account immediately.</p>
+<div class="card"><h3>Profile</h3>
+<div class="acct-row"><span id="profile-avatar"></span><div><strong id="profile-name">—</strong><br><span class="muted" id="profile-email">—</span><br><span class="muted" id="profile-role">—</span></div></div>
+<div style="margin:12px 0"><label>First name<input type="text" id="profile-first" style="width:200px"></label>
+<label>Last name<input type="text" id="profile-last" style="width:200px"></label></div>
+<div style="margin:12px 0"><label>Avatar URL (optional)<input type="text" id="profile-avatar-url" placeholder="avatar image link or blank" style="width:320px"></label>
+<span class="muted" style="font-size:12px">…or upload an image (JPEG/PNG/WebP, up to 2 MB):</span>
+<input type="file" id="profile-avatar-file" accept=".jpg,.jpeg,.png,.webp"></div>
+<div><button class="action" id="profile-save">Save profile</button>
+<button class="action" id="profile-avatar-clear">Remove avatar</button>
+<span id="profile-status" class="muted"></span></div>
+</div>
+<div class="card"><h3>Preferences</h3>
+<div><button class="action" id="pref-light">Light theme</button>
+<button class="action" id="pref-dark">Dark theme</button>
+<span class="muted" style="font-size:12px">Theme applies to this browser immediately.</span></div>
+</div>
+</section>
 <section class="view" id="v-admin">
 <div class="card"><h3>Admin — Employees</h3>
 <div class="muted" style="font-size:12px">Access is decided here, on the server. Changes take effect immediately, including on live sessions.</div>
@@ -444,9 +463,10 @@ function avatar_html(em,size){const url=(em&&(em.avatar_url||""))||"";const nm=(
 function render_account(me){
   const em=me.employee||{};const box=$("account-menu");
   box.innerHTML=`<div class="acct-row">${avatar_html(em)}<div><strong>${esc(((em.first_name||"")+" "+(em.last_name||"")).trim()||em.email||"")}</strong><br><span class="muted">${esc(em.email||"")}</span></div></div>
-  <div class="acct-row"><button class="link-btn" id="acct-accounts">Accounts</button>${me.is_admin?`<button class="link-btn" id="acct-admin">Admin</button>`:""}<button class="link-btn" id="acct-add">Add account</button><button class="link-btn" id="acct-logout">Log out</button></div>
+  <div class="acct-row"><button class="link-btn" id="acct-profile">Profile</button><button class="link-btn" id="acct-accounts">Accounts</button>${me.is_admin?`<button class="link-btn" id="acct-admin">Admin</button>`:""}<button class="link-btn" id="acct-add">Add account</button><button class="link-btn" id="acct-logout">Log out</button></div>
   <div id="acct-list" class="muted"></div>`;
   box.hidden=false;
+  $("acct-profile").onclick=()=>{document.querySelector('#tabs button[data-view="profile"]').click();load_profile();};
   if(me.is_admin)$("acct-admin").onclick=()=>{document.querySelector('#tabs button[data-view="admin"]').click();};
   $("acct-add").onclick=()=>show_auth({authenticated:false,gate:"login",workos_configured:me.workos_configured,employee:null});
   $("acct-logout").onclick=auth_logout;
@@ -485,6 +505,48 @@ async function admin_act(act,id,role){
 }
 document.querySelectorAll("#tabs button").forEach(b=>b.onclick=()=>{document.querySelectorAll("#tabs button").forEach(x=>x.setAttribute("aria-pressed","false"));b.setAttribute("aria-pressed","true");document.querySelectorAll(".view").forEach(v=>v.classList.remove("active"));document.querySelector("#v-"+b.dataset.view).classList.add("active");refresh();});
 $("theme").onclick=()=>{const h=document.documentElement;h.dataset.theme=h.dataset.theme==="dark"?"":"dark";};
+$("profile-save").onclick=save_profile;
+$("profile-avatar-clear").onclick=clear_avatar;
+$("pref-light").onclick=()=>set_theme("light");
+$("pref-dark").onclick=()=>set_theme("dark");
+function set_theme(mode){document.documentElement.dataset.theme=mode==="dark"?"dark":"";}
+function load_profile(){
+  const em=(auth_me&&auth_me.employee)||{};
+  $("profile-avatar").innerHTML=avatar_html(em,64);
+  $("profile-name").textContent=((em.first_name||"")+" "+(em.last_name||"")).trim()||em.email||"—";
+  $("profile-email").textContent=em.email||"";
+  $("profile-role").textContent=(em.role||"")+" · "+(em.status||"");
+  $("profile-first").value=em.first_name||"";
+  $("profile-last").value=em.last_name||"";
+  const url=em.avatar_url||"";
+  $("profile-avatar-url").value=(url.indexOf("/api/auth/avatar/")===0)?"":url;
+  $("profile-status").textContent="";
+}
+async function save_profile(){
+  const payload={first_name:$("profile-first").value,last_name:$("profile-last").value};
+  const typed=$("profile-avatar-url").value.trim();
+  const current=((auth_me&&auth_me.employee)||{}).avatar_url||"";
+  if(typed||current.indexOf("/api/auth/avatar/")!==0)payload.avatar_url=typed;
+  try{
+    const file=$("profile-avatar-file").files[0];
+    if(file){
+      const form=new FormData();form.append("avatar",file);
+      const up=await fetch(filtered_path("/api/auth/me/avatar"),{method:"POST",body:form});
+      const uj=await up.json();
+      if(!up.ok)throw new Error(uj.error||up.status);
+      auth_me.employee=uj.employee;
+    }
+    const r=await api("PATCH","/api/auth/me",payload);
+    auth_me.employee=r.employee;
+    $("profile-avatar-file").value="";
+    load_profile();render_account(auth_me);
+    $("profile-status").textContent="Saved.";
+  }catch(e){$("profile-status").textContent=e.message;}
+}
+async function clear_avatar(){
+  try{const r=await api("PATCH","/api/auth/me",{avatar_url:""});auth_me.employee=r.employee;load_profile();render_account(auth_me);$("profile-status").textContent="Avatar removed.";}
+  catch(e){$("profile-status").textContent=e.message;}
+}
 $("brand-home").onclick=ev=>{ev.preventDefault();show("main");};
 let selected=null;
 function active_filters(){return{

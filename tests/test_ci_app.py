@@ -206,6 +206,81 @@ def test_product_parity_ingest_then_campaigns(tmp_path, monkeypatch):
     assert r.json()[0]["metrics"]["cpa"] == 10.0
 
 
+PNG = bytes((0x89,)) + b"PNG\r\n\x1a\n" + b"\x00" * 64
+
+
+def test_profile_edit_flow(tmp_path, monkeypatch):
+    monkeypatch.setenv("CREATIVE_INTEL_MEDIA_DIR", str(tmp_path / "media"))
+    http, _db = make_client(tmp_path, admin_email="boss@foap.test")
+    boss_user = dict(IDENT, id="w-boss", email="boss@foap.test")
+    oauth_login(http, monkeypatch, boss_user)
+
+    r = http.patch("/api/auth/me",
+                   json={"first_name": "  Ada  ", "last_name": "L"})
+    assert r.status_code == 200, r.text
+    assert r.json()["employee"]["first_name"] == "Ada"
+
+    r = http.patch("/api/auth/me", json={"first_name": "X" * 121})
+    assert r.status_code == 409
+    r = http.patch("/api/auth/me", json={"avatar_url": "ftp://x/y.png"})
+    assert r.status_code == 409
+    r = http.patch("/api/auth/me",
+                   json={"avatar_url": "https://cdn.test/a.png"})
+    assert r.status_code == 200
+    assert r.json()["employee"]["avatar_url"] == "https://cdn.test/a.png"
+    r = http.patch("/api/auth/me", json={"avatar_url": ""})
+    assert r.json()["employee"]["avatar_url"] == ""
+
+    audit = http.get("/api/admin/audit").json()["events"]
+    assert any(e["action"] == "PROFILE_UPDATED" for e in audit)
+
+
+def test_profile_requires_active_login(tmp_path, monkeypatch, client):
+    r = client.patch("/api/auth/me", json={"first_name": "No"})
+    assert r.status_code == 401
+    http, _db = make_client(tmp_path, admin_email="boss@foap.test")
+    newcomer = dict(IDENT, id="w-new", email="new@foap.test")
+    stub_exchange(monkeypatch, newcomer)
+    http2 = TestClient(http.app, raise_server_exceptions=False)
+    r = http2.post("/api/auth/oauth/start", json={"provider": "google"})
+    state = r.json()["state"]
+    http2.post("/api/auth/oauth/finish",
+               json={"code": "auth_code", "state": state})
+    r = http2.patch("/api/auth/me", json={"first_name": "No"})
+    assert r.status_code == 403
+
+
+def test_avatar_upload_and_serve(tmp_path, monkeypatch):
+    monkeypatch.setenv("CREATIVE_INTEL_MEDIA_DIR", str(tmp_path / "media"))
+    http, _db = make_client(tmp_path, admin_email="boss@foap.test")
+    boss_user = dict(IDENT, id="w-boss", email="boss@foap.test")
+    oauth_login(http, monkeypatch, boss_user)
+    me = http.get("/api/auth/me").json()["employee"]
+
+    r = http.post("/api/auth/me/avatar",
+                  files={"avatar": ("me.png", PNG, "image/png")})
+    assert r.status_code == 200, r.text
+    assert r.json()["employee"]["avatar_url"] == \
+        "/api/auth/avatar/" + me["id"]
+
+    r = http.get("/api/auth/avatar/" + me["id"])
+    assert r.status_code == 200
+    assert r.content == PNG
+    assert r.headers["content-type"] == "image/png"
+
+    anon = TestClient(http.app, raise_server_exceptions=False)
+    assert anon.get("/api/auth/avatar/" + me["id"]).status_code == 401
+    assert anon.get("/api/auth/avatar/nonexistent").status_code == 401
+
+    r = http.post("/api/auth/me/avatar",
+                  files={"avatar": ("me.txt", b"hello", "text/plain")})
+    assert r.status_code == 409
+    r = http.post("/api/auth/me/avatar",
+                  files={"avatar": ("big.png", b"\\x00" * (2 * 1024 * 1024 + 1),
+                                      "image/png")})
+    assert r.status_code == 409
+
+
 def test_switch_rechecks_authorization(tmp_path):
     http, db = make_client(tmp_path, admin_email="boss@foap.test")
     engine = make_engine(db)
@@ -293,6 +368,8 @@ def test_frontend_gates():
         assert label in html
     assert "Access pending" in html
     assert "Admin" in html and "Employees" in html
+    assert "Profile" in html and "profile-save" in html
+    assert "/api/auth/me/avatar" in html and "pref-dark" in html
     for secret in ("CREATIVE_INTEL_KEY_WORKOS", "sk-live", "sk_test"):
         assert secret not in html
     assert "localStorage" not in html

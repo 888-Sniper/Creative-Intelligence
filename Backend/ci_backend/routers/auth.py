@@ -8,9 +8,11 @@ finish/callback path answer 409 (retryable) and never leak secrets.
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from starlette.datastructures import UploadFile
 
 from ci_backend import employees as emp
+from ci_backend.actions import _media_dir
 from ci_backend import oauth as oauth_mod
 from ci_backend import workos as workos_mod
 from ci_backend.config import Settings
@@ -49,6 +51,66 @@ def me(request: Request, db=Depends(get_db),
        settings: Settings = Depends(get_settings)):
     envelope = emp.me(db, bearer_token(request), settings)
     return envelope.model_dump(exclude_none=False)
+
+
+@router.patch("/me")
+async def update_me(request: Request, db=Depends(get_db)):
+    try:
+        employee, _gate = emp.authorize(db, bearer_token(request))
+    except emp.Denied as exc:
+        raise HTTPException(
+            status_code=401 if exc.gate == "login" else 403,
+            detail={"error": str(exc), "gate": exc.gate})
+    body = await json_payload(request)
+    try:
+        updated = emp.update_profile(
+            db, employee.id, first_name=body.get("first_name"),
+            last_name=body.get("last_name"),
+            avatar_url=body.get("avatar_url"))
+    except emp.StoreError as exc:
+        raise HTTPException(status_code=409, detail={"error": str(exc)})
+    return {"ok": True,
+            "employee": emp.public_employee(updated).model_dump()}
+
+
+@router.post("/me/avatar")
+async def upload_avatar(request: Request, db=Depends(get_db)):
+    try:
+        employee, _gate = emp.authorize(db, bearer_token(request))
+    except emp.Denied as exc:
+        raise HTTPException(
+            status_code=401 if exc.gate == "login" else 403,
+            detail={"error": str(exc), "gate": exc.gate})
+    form = await request.form()
+    upload = form.get("avatar")
+    if not isinstance(upload, UploadFile):
+        raise HTTPException(status_code=409,
+                            detail={"error": "Attach an avatar file."})
+    content = await upload.read(emp.MAX_AVATAR_BYTES + 1)
+    try:
+        updated = emp.save_avatar(db, employee.id,
+                                  upload.filename or "avatar",
+                                  content, _media_dir())
+    except emp.StoreError as exc:
+        raise HTTPException(status_code=409, detail={"error": str(exc)})
+    return {"ok": True,
+            "employee": emp.public_employee(updated).model_dump()}
+
+
+@router.get("/avatar/{employee_id}")
+def serve_avatar(employee_id: str, request: Request, db=Depends(get_db)):
+    from urllib.parse import unquote
+    if emp.valid_session(db, bearer_token(request)) is None:
+        raise HTTPException(status_code=401, detail={
+            "error": "Sign in to continue.", "gate": "login"})
+    target = unquote(employee_id)
+    found = emp.load_avatar(target, _media_dir())
+    if found is None:
+        raise HTTPException(status_code=404,
+                            detail={"error": "No avatar."})
+    path, mime = found
+    return FileResponse(path, media_type=mime,
+                        headers={"Cache-Control": "private, max-age=3600"})
 
 
 @router.get("/accounts")

@@ -109,6 +109,12 @@ class SwitchRequest(BaseModel):
     employee_id: str = ""
 
 
+class ProfileUpdate(BaseModel):
+    first_name: str | None = None
+    last_name: str | None = None
+    avatar_url: str | None = None
+
+
 class PublicEmployee(BaseModel):
     id: str = ""
     email: str = ""
@@ -426,6 +432,149 @@ def list_accounts(db: Session) -> list[dict]:
             "status": (emp.status if emp else "") or "",
         })
     return out
+
+
+MAX_NAME_CHARS = 120
+MAX_AVATAR_URL_CHARS = 2048
+MAX_AVATAR_BYTES = 2 * 1024 * 1024
+AVATAR_TYPES = {".jpg", ".jpeg", ".png", ".webp"}
+
+
+def _clean_name(value, field: str) -> str:
+    text = (value or "").strip()
+    if len(text) > MAX_NAME_CHARS:
+        raise StoreError("%s must be %d characters or fewer."
+                         % (field, MAX_NAME_CHARS))
+    return text
+
+
+def _clean_avatar_url(value) -> str:
+    text = (value or "").strip()
+    if not text:
+        return ""
+    if len(text) > MAX_AVATAR_URL_CHARS:
+        raise StoreError("Avatar URL is too long.")
+    lowered = text.lower()
+    if lowered.startswith(("http://", "https://")):
+        return text
+    if text.startswith("/api/auth/avatar/"):
+        return text
+    raise StoreError("Avatar must be an http(s) URL or an uploaded avatar."
+                     )
+
+
+def update_profile(db: Session, employee_id: str, first_name=None,
+                   last_name=None, avatar_url=None) -> Employee:
+    """Self-service profile edit for an active employee.
+
+    None means "leave unchanged"; empty avatar_url clears the avatar.
+    Every change is audit-logged as PROFILE_UPDATED (admin_id=self).
+    """
+    emp = get_employee(db, employee_id)
+    if emp is None:
+        raise StoreError("Employee not found.")
+    if (emp.status or "") != "active":
+        raise StoreError("Only active employees can edit their profile.")
+    changes = []
+    if first_name is not None:
+        cleaned = _clean_name(first_name, "First name")
+        if cleaned != (emp.first_name or ""):
+            changes.append(("first_name", emp.first_name or "", cleaned))
+            emp.first_name = cleaned
+    if last_name is not None:
+        cleaned = _clean_name(last_name, "Last name")
+        if cleaned != (emp.last_name or ""):
+            changes.append(("last_name", emp.last_name or "", cleaned))
+            emp.last_name = cleaned
+    if avatar_url is not None:
+        cleaned = _clean_avatar_url(avatar_url)
+        if cleaned != (emp.avatar_url or ""):
+            changes.append(("avatar_url", emp.avatar_url or "", cleaned))
+            emp.avatar_url = cleaned
+    if changes:
+        emp.updated_at = utcnow()
+        db.commit()
+        _audit(db, emp.id, emp.id, "PROFILE_UPDATED",
+               "; ".join("%s: %s" % (field, prev)
+                           for field, prev, _new in changes),
+               "; ".join("%s: %s" % (field, new)
+                           for field, _prev, new in changes))
+    return emp
+
+
+def _avatar_dir(store_dir: str) -> str:
+    import os
+    path = os.path.join(store_dir, "avatars")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def save_avatar(db: Session, employee_id: str, filename: str,
+                content: bytes, store_dir: str) -> Employee:
+    """Store a manually uploaded avatar image for an active employee.
+
+    Validates type (jpeg/png/webp) and size (<=2MB) before writing;
+    replaces any previous upload and points avatar_url at the
+    authenticated avatar route. Raises StoreError on any rejection.
+    """
+    import os
+    emp = get_employee(db, employee_id)
+    if emp is None:
+        raise StoreError("Employee not found.")
+    if (emp.status or "") != "active":
+        raise StoreError("Only active employees can edit their profile.")
+    if not isinstance(content, (bytes, bytearray)) or not content:
+        raise StoreError("Empty avatar upload.")
+    if len(content) > MAX_AVATAR_BYTES:
+        raise StoreError("Avatar exceeds 2 MB.")
+    from creative_intel import media as media_mod
+    try:
+        ext, mime = media_mod.check_upload(filename, bytes(content))
+    except ValueError as exc:
+        raise StoreError(str(exc))
+    if ext not in AVATAR_TYPES:
+        raise StoreError("Avatar must be a JPEG, PNG or WebP image.")
+    if ext == ".jpeg":
+        ext = ".jpg"
+    directory = _avatar_dir(store_dir)
+    dest = os.path.join(directory, employee_id + ext)
+    if os.path.basename(dest) != employee_id + ext:
+        raise StoreError("Invalid avatar filename.")
+    for old in os.listdir(directory):
+        if old.startswith(employee_id + ".") and old != employee_id + ext:
+            try:
+                os.remove(os.path.join(directory, old))
+            except OSError:
+                pass
+    with open(dest, "wb") as fh:
+        fh.write(bytes(content))
+    prev = emp.avatar_url or ""
+    emp.avatar_url = "/api/auth/avatar/" + employee_id
+    emp.updated_at = utcnow()
+    db.commit()
+    _audit(db, emp.id, emp.id, "PROFILE_UPDATED",
+           "avatar_url: %s" % prev, "avatar_url: %s" % emp.avatar_url)
+    return emp
+
+
+def load_avatar(employee_id: str, store_dir: str):
+    """(path, mime) for an employee's uploaded avatar, or None."""
+    import os
+    from creative_intel import media as media_mod
+    if not isinstance(employee_id, str) or not employee_id \
+            or "/" in employee_id or "\\\\" in employee_id:
+        return None
+    try:
+        names = os.listdir(os.path.join(store_dir, "avatars"))
+    except OSError:
+        return None
+    for name in sorted(names):
+        if name.startswith(employee_id + "."):
+            ext = name[name.rfind("."):].lower()
+            if ext in AVATAR_TYPES and media_mod.TYPES.get(ext):
+                return (os.path.join(store_dir, "avatars", name),
+                        media_mod.TYPES[ext][0])
+    return None
 
 
 def session_cookie(token: str, max_age: int = SESSION_TTL_S) -> str:

@@ -163,7 +163,12 @@ def creative_metrics(rows, duration_s=0):
     if out["roas"]["state"] in (metrics.MEASURED, metrics.ESTIMATED):
         reported = any(bool(r.get("revenue_reported")) for r in rows)
         if not reported:
-            out["roas"]["state"] = metrics.ESTIMATED
+            # Honest null beats a flagged-zero: unreported revenue must
+            # never render as ROAS 0.0, estimated or otherwise.
+            out["roas"]["value"] = None
+            out["roas"]["state"] = metrics.UNSUPPORTED
+            out["roas"]["numerator"] = 0.0
+            out["roas"]["denominator"] = 0.0
             out["roas"]["reasons"] = \
                 list(out["roas"]["reasons"]) + \
                 ["revenue not flagged reported in this scope"]

@@ -155,7 +155,7 @@ describe("OverviewPage", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Upload CSV" }));
     await waitFor(() => {
-      expect(screen.getByText("Inserted 3 rows.")).toBeDefined();
+      expect(screen.getByText("Inserted 3 rows, 0 updated (0 quarantined).")).toBeDefined();
     });
     const ingest = seen.find((c) => c.url === "/api/ingest");
     expect(ingest?.method).toBe("POST");
@@ -180,9 +180,9 @@ describe("OverviewPage", () => {
   it("shows the server fixture command instead of inventing rows", async () => {
     mockDefault();
     renderPage();
-    fireEvent.click(screen.getByRole("button", { name: "Load Fixture (server --load-fixture)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Load Fixture (main.py --load-fixture)" }));
     expect(
-      screen.getByText("Run: python3 Backend/server.py --load-fixture --db Data/local.db"),
+      screen.getByText("Run: python3 Backend/ci_backend/main.py --load-fixture --db Data/local.db"),
     ).toBeDefined();
     expect(seen.some((c) => c.url === "/api/ingest")).toBe(false);
   });

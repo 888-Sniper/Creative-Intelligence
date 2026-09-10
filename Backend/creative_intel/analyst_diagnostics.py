@@ -68,7 +68,10 @@ def classify(value, cohort_values, margin=MARGIN, higher_is_better=True):
                       else "average"))
         info["difference_pp"] = median - value
     info["band"] = band
-    info["difference_rel"] = ((value - median) / median) if median else None
+    # Same sign convention as difference_pp: positive means better,
+    # whichever direction the metric runs.
+    gap = (median - value) if not higher_is_better else (value - median)
+    info["difference_rel"] = (gap / median) if median else None
     return info
 
 
@@ -710,9 +713,15 @@ def rule_fatigue(ctx):
         return None
     if first["vtr"] is None or last["vtr"] is None:
         return None
-    freq_up = last["frequency"] >= first["frequency"] * (1 + MARGIN)
-    vtr_down = last["vtr"] <= first["vtr"] * (1 - MARGIN)
-    vtr_stable = abs(last["vtr"] - first["vtr"]) <= first["vtr"] * MARGIN
+    # Zero baselines carry no relative information (0 * margin is 0,
+    # so any non-negative endpoint would read as a move): no verdict.
+    freq_up = (first["frequency"] > 0
+               and last["frequency"] >= first["frequency"] * (1 + MARGIN))
+    vtr_down = (first["vtr"] > 0
+                and last["vtr"] <= first["vtr"] * (1 - MARGIN))
+    vtr_stable = (first["vtr"] > 0
+                  and abs(last["vtr"] - first["vtr"])
+                  <= first["vtr"] * MARGIN)
     if freq_up and vtr_down:
         signal = ("frequency %.1f → %.1f with VTR %.1f%% → %.1f%% over"
                   " %d dated points" % (
@@ -778,8 +787,10 @@ def rule_scale_deterioration(ctx):
     first, last = pts[0], pts[-1]
     spend_up = last["spend"] >= max(first["spend"], 1) * (1 + MARGIN)
     cpa_worse = (first["cpa"] is not None and last["cpa"] is not None
+                 and first["cpa"] > 0
                  and last["cpa"] >= first["cpa"] * (1 + MARGIN))
     vtr_down = (first["vtr"] is not None and last["vtr"] is not None
+                and first["vtr"] > 0
                 and last["vtr"] <= first["vtr"] * (1 - MARGIN))
     if not spend_up or (not cpa_worse and not vtr_down):
         return None

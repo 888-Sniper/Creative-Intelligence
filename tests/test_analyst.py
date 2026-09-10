@@ -149,6 +149,16 @@ class MetricAcceptanceTest(unittest.TestCase):
         self.assertAlmostEqual(out["value"], 2.0)
         self.assertEqual(out["basis"], "reach_weighted_reported")
 
+    def test_unflagged_revenue_roas_is_null_not_zero(self):
+        rows = [row("A", revenue=0.0, spend=100.0, conversions=5)]
+        out = analyst.creative_metrics(rows)
+        self.assertIsNone(out["roas"]["value"])
+        self.assertEqual(out["roas"]["state"], "unsupported")
+        flagged = [row("A", revenue=0.0, spend=100.0, conversions=5,
+                       revenue_reported=True)]
+        out = analyst.creative_metrics(flagged)
+        self.assertEqual(out["roas"]["value"], 0.0)
+
     def test_mixed_currencies_not_combined(self):
         rows = [row("A", spend=10.0, impressions=1000, currency="PLN"),
                 row("B", spend=10.0, impressions=1000, currency="EUR")]
@@ -244,6 +254,21 @@ class RankingTest(unittest.TestCase):
         self.assertEqual(hook(first), 90.0)
         self.assertEqual(hook(second), 10.0)
         conn.close()
+
+
+class ClassifyTest(unittest.TestCase):
+    def test_relative_gap_sign_follows_better(self):
+        cohort = [8.0, 10.0, 12.0]
+        hi = diagnostics.classify(12.0, cohort, higher_is_better=True)
+        self.assertEqual(hi["band"], "high")
+        self.assertGreater(hi["difference_rel"], 0)
+        lo = diagnostics.classify(8.0, cohort, higher_is_better=False)
+        self.assertEqual(lo["band"], "high")
+        # Lower-is-better: beating the median reads positive too.
+        self.assertGreater(lo["difference_rel"], 0)
+        bad = diagnostics.classify(12.0, cohort, higher_is_better=False)
+        self.assertEqual(bad["band"], "low")
+        self.assertLess(bad["difference_rel"], 0)
 
 
 class DiagnosticsTest(unittest.TestCase):
@@ -350,6 +375,29 @@ class DiagnosticsTest(unittest.TestCase):
         finding = diagnostics.rule_fatigue(ctx)
         self.assertIsNotNone(finding)
         self.assertEqual(finding["finding_id"], "fatigue")
+
+    def test_zero_baselines_give_no_series_verdict(self):
+        def _series(freq0, vtr0, cpa0=None):
+            return [{"date": "2025-01-0%d" % d,
+                     "frequency": res(freq0),
+                     "vtr": res(vtr0),
+                     "spend": 10 + 10 * d,
+                     # Measured zero CPA: exercises the guard, not the
+                     # unmeasured path.
+                     "cpa": res(cpa0)}
+                    for d in range(1, 5)]
+        ctx = ctx_for("A", {"frequency": 5.0, "vtr": 2.0},
+                      {"frequency": [2.0] * 4, "vtr": [4.0] * 4},
+                      cohort_n=4)
+        # Zero starting frequency: nothing can read as "rising".
+        ctx["series"] = _series(0.0, 4.0)
+        self.assertIsNone(diagnostics.rule_fatigue(ctx))
+        # Zero starting VTR: neither falling nor stable means anything.
+        ctx["series"] = _series(2.0, 0.0)
+        self.assertIsNone(diagnostics.rule_fatigue(ctx))
+        # Zero starting CPA with rising spend: not deterioration.
+        ctx["series"] = _series(2.0, 4.0, cpa0=0.0)
+        self.assertIsNone(diagnostics.rule_scale_deterioration(ctx))
 
     def test_brand_recall_silent_without_study(self):
         ann = creative_mod.blank_annotation()

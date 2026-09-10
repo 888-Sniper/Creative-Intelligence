@@ -198,7 +198,9 @@ export function OverviewPage() {
   const uploadCsv = async () => {
     try {
       const r = await api<IngestResponse>("POST", "/api/ingest", { platform, csv });
-      setUpStatus("Inserted " + r.inserted + " rows.");
+      setUpStatus(
+        "Inserted " + r.inserted + " rows, " + r.updated + " updated (" + r.quarantined_count + " quarantined).",
+      );
       refreshViews();
     } catch (e) {
       setUpStatus(errorMessage(e));
@@ -222,7 +224,7 @@ export function OverviewPage() {
   };
 
   const loadFixtureHint = () => {
-    setUpStatus("Run: python3 Backend/server.py --load-fixture --db Data/local.db");
+    setUpStatus("Run: python3 Backend/ci_backend/main.py --load-fixture --db Data/local.db");
   };
 
   const syncNow = async (source: string) => {
@@ -290,7 +292,7 @@ export function OverviewPage() {
           />
         </label>
         <button type="button" className="action" onClick={loadFixtureHint}>
-          Load Fixture (server --load-fixture)
+          Load Fixture (main.py --load-fixture)
         </button>
         <span className="muted">{upStatus}</span>
         <div style={{ marginTop: 12 }}>

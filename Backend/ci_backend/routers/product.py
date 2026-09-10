@@ -518,8 +518,17 @@ _ALLOWED_DIST_EXTS = (".js", ".css", ".woff2")
 
 
 def _index_response():
-    return FileResponse(legacy.react_index(),
-                        media_type="text/html; charset=utf-8")
+    entry = legacy.react_index()
+    headers = None
+    if os.path.normpath(entry) != os.path.normpath(legacy.WEB_INDEX):
+        # React build ships zero inline scripts, so a strict policy is
+        # safe here. The legacy fallback still uses inline scripts and
+        # keeps relying on the other headers (see _security_headers).
+        headers = {"Content-Security-Policy": "default-src 'self'; "
+                   "img-src 'self' data: https:; "
+                   "style-src 'self' 'unsafe-inline'"}
+    return FileResponse(entry, media_type="text/html; charset=utf-8",
+                        headers=headers)
 
 
 @router.get("/assets/{name}")

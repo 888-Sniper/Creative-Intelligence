@@ -746,3 +746,12 @@ def test_react_build_served_when_present(client, tmp_path, monkeypatch):
     assert r.status_code == 200
     assert "immutable" in r.headers.get("cache-control", "")
     assert client.get("/foap-logo.png").status_code == 200
+
+
+def test_react_index_carries_strict_csp(client):
+    r = client.get("/")
+    csp = r.headers.get("content-security-policy", "")
+    # This dev tree has a built React frontend, so the strict policy
+    # applies; the legacy fallback intentionally omits it (inline scripts).
+    assert "default-src 'self'" in csp, csp
+    assert "script-src" not in csp or "'unsafe-inline'" not in csp

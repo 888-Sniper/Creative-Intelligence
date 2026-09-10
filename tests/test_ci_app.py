@@ -864,26 +864,25 @@ def test_slow_action_does_not_block_health(tmp_path, monkeypatch):
     import threading
     import time
 
-    import ci_backend.actions as legacy
+    import ci_backend.worker_handlers as handlers
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from conftest import mint_admin
     client, _db = make_client(tmp_path)
     client.headers.update(mint_admin(_db))
     entered = threading.Event()
 
-    def slow(conn, action, payload, prov, actor=""):
+    def slow(conn, payload, owner, ctx):
         entered.set()
         time.sleep(4)
-        return {"ok": True}
+        return {"answer": "slow"}
 
-    monkeypatch.setattr(legacy, "apply_action", slow)
+    monkeypatch.setitem(handlers.HANDLERS, "ask", slow)
     slow_done = []
     slow_errors = []
 
     def run_slow():
         try:
-            r = client.post("/api/pipeline/run",
-                            json={"creative_key": "x"})
+            r = client.post("/api/ask", json={"question": "slow?"})
             slow_done.append(r.status_code)
         except Exception as exc:  # noqa: BLE001 - surfaced below
             slow_errors.append(repr(exc))

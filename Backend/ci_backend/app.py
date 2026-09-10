@@ -15,6 +15,19 @@ from ci_backend.deps import bind_database  # noqa: E402
 from ci_backend.routers import admin, auth, google, product  # noqa: E402
 
 
+def _requeue_interrupted_jobs(db_path: str) -> None:
+    """Boot recovery: work left running by a dead process waits again."""
+    import sqlite3
+
+    from creative_intel import jobs as jobs_mod
+
+    conn = sqlite3.connect(db_path, timeout=30.0)
+    try:
+        jobs_mod.requeue_interrupted(conn)
+    finally:
+        conn.close()
+
+
 async def _http_error_body(_request, exc: HTTPException) -> JSONResponse:
     # Legacy wire contract: error objects sit at the top level, not
     # under FastAPI's {"detail"} envelope.
@@ -69,6 +82,7 @@ def create_app(db_path: str = "", settings: Settings | None = None,
     bind_database(app, db_path)
     if providers is not None:
         app.state.ci_providers = providers
+    _requeue_interrupted_jobs(db_path)
 
     # Liveness/readiness register BEFORE the product router: its
     # explicit SPA fallback (/{spa_path}) matches single-segment paths

@@ -32,6 +32,9 @@ from creative_intel import (  # noqa: E402
     sync,
 )
 from creative_intel import (
+    jobs as jobs_mod,
+)
+from creative_intel import (
     providers as providers_mod,
 )
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -41,6 +44,10 @@ from pydantic import BaseModel, Field  # noqa: E402
 from ci_backend import actions as legacy  # noqa: E402
 from ci_backend import employees as emp  # noqa: E402
 from ci_backend.deps import (  # noqa: E402
+    SYNC_RATE_LIMIT,
+    UPLOAD_RATE_LIMIT,
+    ai_rate_limit,
+    check_user_limit,
     get_current_employee,
     get_product_conn,
     get_providers,
@@ -384,7 +391,6 @@ _ACTION_ROUTES = {
     "/api/connect/meta": "connect-meta",
     "/api/connect/tiktok": "connect-tiktok",
     "/api/sync/run": "sync-now",
-    "/api/pipeline/run": "pipeline",
     "/api/retention": "retention",
     "/api/views": "save-view",
     "/api/views/delete": "delete-view",
@@ -393,15 +399,84 @@ _ACTION_ROUTES = {
 
 @router.post("/api/ask")
 async def ask(request: Request, conn=Depends(get_product_conn),
-              prov=Depends(get_providers),
-              _emp=Depends(get_current_employee)):
+              who=Depends(get_current_employee),
+              _limited=Depends(ai_rate_limit)):
+    _ = _limited
     body = await json_payload(request)
-    live = (prov.llm if getattr(prov, "mode", "mock") == "live" else None)
+    settings = request.app.state.ci_settings
+    ctx = {"settings": settings, "media_dir": None}
     try:
-        return qa.answer(conn, body.get("question", ""), llm=live,
-                         scope=benchmarks.Scope.from_payload(body))
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            _WORKERS, functools.partial(
+                jobs_mod.run_through, conn, "ask", dict(body),
+                who.id, 180.0, 2.0, ctx))
+    except jobs_mod.JobTimeout as exc:
+        raise HTTPException(status_code=504, detail={"error": str(exc)})
+    except jobs_mod.JobFailed as exc:
+        raise _conflict(exc)
     except (ValueError, export_gate.ExportBlocked, emp.StoreError) as exc:
         raise _conflict(exc)
+
+
+class PipelineRunBody(BaseModel):
+    creative_key: str = Field(default="", max_length=200)
+    brand_terms: list[str] = Field(default_factory=list)
+
+
+@router.post("/api/pipeline/run")
+def pipeline_run(body: PipelineRunBody, request: Request,
+                 conn=Depends(get_product_conn),
+                 who=Depends(get_current_employee),
+                 _limited=Depends(ai_rate_limit)):
+    _ = (_limited, request)
+    if not body.creative_key.strip():
+        raise _conflict(ValueError("pipeline needs creative_key"))
+    job = jobs_mod.enqueue(
+        conn, "pipeline",
+        {"creative_key": body.creative_key.strip(),
+         "brand_terms": [t for t in body.brand_terms
+                         if isinstance(t, str)][:20]},
+        owner=who.id)
+    return {"job_id": job["id"], "status": job["status"]}
+
+
+def _visible_job(conn, job_id, who):
+    job = jobs_mod.get(conn, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail={"error": "no such job"})
+    if who.role != "admin" and job["owner_employee_id"] != who.id:
+        raise HTTPException(status_code=403, detail={
+            "error": "Not your job.", "gate": "app"})
+    return job
+
+
+@router.get("/api/pipeline/jobs/{job_id}")
+def pipeline_job(job_id: str, request: Request,
+                 conn=Depends(get_product_conn),
+                 who=Depends(get_current_employee)):
+    _ = request
+    job = _visible_job(conn, job_id, who)
+    return {"job_id": job["id"], "kind": job["kind"],
+            "status": job["status"], "progress": job["progress"],
+            "result": job["result"], "error": job["error"],
+            "attempts": job["attempts"],
+            "created_at": job["created_at"],
+            "started_at": job["started_at"],
+            "finished_at": job["finished_at"]}
+
+
+@router.post("/api/pipeline/jobs/{job_id}/cancel")
+def pipeline_cancel(job_id: str, request: Request,
+                    conn=Depends(get_product_conn),
+                    who=Depends(get_current_employee)):
+    _ = request
+    owner = "" if who.role == "admin" else who.id
+    job = jobs_mod.cancel(conn, job_id, owner=owner)
+    if job is None:
+        raise HTTPException(status_code=404, detail={
+            "error": "no such job or not yours"})
+    return {"job_id": job["id"], "status": job["status"]}
 
 
 @router.post("/api/reviews/mark")
@@ -522,18 +597,19 @@ async def action_dispatch(action: str, request: Request,
         raise HTTPException(status_code=404, detail={"error": "not found"})
     if path == "/api/media/upload" and request.headers.get(
             "content-type", "").split(";")[0].strip() == "multipart/form-data":
-        return await _media_upload_multipart(request, conn)
+        return await _media_upload_multipart(request, conn, who)
     body = await json_payload(request)
     return await _run_action(conn, prov, _ACTION_ROUTES[path], body,
                              actor=who.id, request=request)
 
 
-async def _media_upload_multipart(request: Request, conn):
+async def _media_upload_multipart(request: Request, conn, who):
     """Multipart creative upload: bytes ride outside JSON.
 
     The file streams in chunks so the real media.MAX_BYTES (100 MB)
     limit is enforced by counting, not by the JSON body cap.
     """
+    check_user_limit(request, who.id, *UPLOAD_RATE_LIMIT, "upload")
     try:
         form = await request.form()
     except Exception:
@@ -600,6 +676,12 @@ async def _run_action(conn, prov, action: str, payload: dict, actor: str = "",
     """
     if action in ("connect-sheets", "connect-drive") and request is not None:
         _resolve_google_bearer(payload, actor, request)
+    if request is not None and action in (
+            "sync-now", "connect-sheets", "connect-drive",
+            "connect-meta", "connect-tiktok"):
+        check_user_limit(request, actor, *SYNC_RATE_LIMIT, "sync")
+    if request is not None and action == "media-upload":
+        check_user_limit(request, actor, *UPLOAD_RATE_LIMIT, "upload")
     try:
         result = await asyncio.get_running_loop().run_in_executor(
             _WORKERS, functools.partial(legacy.apply_action, conn, action,

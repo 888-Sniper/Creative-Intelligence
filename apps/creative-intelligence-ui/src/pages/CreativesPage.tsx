@@ -591,10 +591,33 @@ export function CreativesPage() {
 
   const runPipeline = async () => {
     if (!selected) return;
-    setActionStatus("");
+    setActionStatus("Pipeline queued…");
     try {
-      await api("POST", "/api/pipeline/run", { creative_key: selected, brand_terms: brandTerms });
-      setActionStatus("Pipeline run complete.");
+      const job = await api<{ job_id: string }>("POST", "/api/pipeline/run", {
+        creative_key: selected,
+        brand_terms: brandTerms,
+      });
+      let terminal = "";
+      for (let i = 0; i < 150; i += 1) {
+        await new Promise((r) => setTimeout(r, 2000));
+        const st = await api<{ status: string; error: string }>(
+          "GET",
+          `/api/pipeline/jobs/${encodeURIComponent(job.job_id)}`,
+        );
+        if (st.status === "completed") {
+          terminal = "complete";
+          break;
+        }
+        if (st.status === "failed" || st.status === "cancelled") {
+          throw new Error(st.error || st.status);
+        }
+        setActionStatus(`Pipeline ${st.status}…`);
+      }
+      setActionStatus(
+        terminal === "complete"
+          ? "Pipeline run complete."
+          : "Pipeline still running — refresh again shortly.",
+      );
       await refresh();
     } catch (e) {
       setActionStatus(e instanceof Error ? e.message : String(e));

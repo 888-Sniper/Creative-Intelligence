@@ -87,6 +87,7 @@ cp "${APP_DIR}/deploy/oracle/creative-intelligence-backup.service" "/etc/systemd
 cp "${APP_DIR}/deploy/oracle/creative-intelligence-backup.timer" "/etc/systemd/system/${SERVICE_NAME}-backup.timer"
 cp "${APP_DIR}/deploy/oracle/creative-intelligence-duckdns.service" "/etc/systemd/system/${SERVICE_NAME}-duckdns.service"
 cp "${APP_DIR}/deploy/oracle/creative-intelligence-duckdns.timer" "/etc/systemd/system/${SERVICE_NAME}-duckdns.timer"
+cp "${APP_DIR}/deploy/oracle/creative-intelligence-worker.service" "/etc/systemd/system/${SERVICE_NAME}-worker.service"
 if [[ ! -f "${ENV_DIR}/duckdns.env" ]]; then
   cp "${APP_DIR}/deploy/oracle/duckdns.env.example" "${ENV_DIR}/duckdns.env"
   chmod 600 "${ENV_DIR}/duckdns.env"
@@ -103,6 +104,8 @@ nginx -t
 systemctl daemon-reload
 systemctl enable "${SERVICE_NAME}"
 systemctl restart "${SERVICE_NAME}"
+systemctl enable --now "${SERVICE_NAME}-worker"
+systemctl restart "${SERVICE_NAME}-worker"
 systemctl enable --now "${SERVICE_NAME}-backup.timer"
 if grep -q "^DUCKDNS_TOKEN=.\+" "${ENV_DIR}/duckdns.env" 2>/dev/null; then
   systemctl enable --now "${SERVICE_NAME}-duckdns.timer"

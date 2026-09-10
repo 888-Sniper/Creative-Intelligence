@@ -112,6 +112,9 @@ def query_multidict(request: Request) -> dict[str, list[str]]:
 # with a shared store, but must keep the same 429 contract.
 AUTH_RATE_LIMIT = (30, 60.0)    # 30 calls / 60s per IP, auth-sensitive
 ADMIN_RATE_LIMIT = (120, 60.0)  # 120 calls / 60s per IP, admin actions
+AI_RATE_LIMIT = (30, 60.0)      # 30 calls / 60s per user, AI spend
+SYNC_RATE_LIMIT = (20, 60.0)    # 20 calls / 60s per user, connector runs
+UPLOAD_RATE_LIMIT = (30, 60.0)  # 30 calls / 60s per user, large uploads
 
 
 def _buckets(request: Request) -> dict:
@@ -144,6 +147,37 @@ def rate_limiter(calls: int, per_seconds: float, group: str):
 
 auth_rate_limit = rate_limiter(*AUTH_RATE_LIMIT, "auth")
 admin_rate_limit = rate_limiter(*ADMIN_RATE_LIMIT, "admin")
+
+
+def check_user_limit(request: Request, who_id: str, calls: int,
+                     per_seconds: float, group: str) -> None:
+    """Per-employee sliding window; 429 past the budget (AI bill guard)."""
+    import time
+
+    now = time.monotonic()
+    key = (group, "user", who_id)
+    buckets = _buckets(request)
+    window = [t for t in buckets.get(key, []) if now - t < per_seconds]
+    if len(window) >= calls:
+        raise HTTPException(
+            status_code=429,
+            detail={"error": "Too many requests. Try again shortly.",
+                    "gate": "rate_limited"})
+    buckets[key] = window + [now]
+
+
+def user_rate_limiter(calls: int, per_seconds: float, group: str):
+    """Dependency factory: per-employee 429 (same contract as IP limits)."""
+
+    async def guard(request: Request, who=Depends(get_current_employee)):
+        check_user_limit(request, who.id, calls, per_seconds, group)
+
+    return guard
+
+
+ai_rate_limit = user_rate_limiter(*AI_RATE_LIMIT, "ai")
+sync_rate_limit = user_rate_limiter(*SYNC_RATE_LIMIT, "sync")
+upload_rate_limit = user_rate_limiter(*UPLOAD_RATE_LIMIT, "upload")
 
 
 async def json_payload(request: Request) -> dict:

@@ -76,6 +76,14 @@ class XlsxTest(unittest.TestCase):
         self.assertIn(b"FFFFC7CE", files["xl/styles.xml"])
         self.assertIn(b"<cols>", files["xl/worksheets/sheet1.xml"])
 
+    def test_wide_body_text_widens_column(self):
+        blob = ooxml.build_xlsx([
+            {"name": "W", "header": ["note"],
+             "rows": [["x" * 100]]}])
+        files = parts(blob)
+        assert_all_xml_valid(self, files)
+        self.assertIn(b'width="102"', files["xl/worksheets/sheet1.xml"])
+
     def test_roundtrip(self):
         rows = [["Alpha", 120.5, 0.0125, True], ["Beta", 0, 0.0, False]]
         blob = ooxml.build_xlsx([

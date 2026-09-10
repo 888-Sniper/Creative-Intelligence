@@ -364,13 +364,13 @@ def _cell_len(value):
 
 
 def _col_widths(grid):
-    """Per-column widths from content length, clamped for readability."""
+    """Per-column widths from full content length (Excel caps at 255)."""
     widths = []
     ncols = max([len(row) for row in grid] or [0])
     for c in range(ncols):
         longest = max([_cell_len(row[c]) for row in grid
                        if c < len(row)] or [0])
-        widths.append(min(50, max(10, longest + 2)))
+        widths.append(min(255, max(10, longest + 2)))
     return widths
 
 

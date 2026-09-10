@@ -72,12 +72,20 @@ class XlsxTest(unittest.TestCase):
         assert_all_xml_valid(self, files)
         self.assertIn(b"00C7B2", files["xl/styles.xml"])
         self.assertIn(b'horizontal="center"', files["xl/styles.xml"])
+        self.assertIn(b"FFC6EFCE", files["xl/styles.xml"])
+        self.assertIn(b"FFFFC7CE", files["xl/styles.xml"])
+        self.assertIn(b"<cols>", files["xl/worksheets/sheet1.xml"])
 
     def test_roundtrip(self):
         rows = [["Alpha", 120.5, 0.0125, True], ["Beta", 0, 0.0, False]]
         blob = ooxml.build_xlsx([
             {"name": "Campaigns", "header": ["campaign", "spend", "ctr", "flag"],
              "rows": rows}])
+        files = parts(blob)
+        assert_all_xml_valid(self, files)
+        sheet1 = files["xl/worksheets/sheet1.xml"]
+        self.assertIn(b't="b" s="2"', sheet1)
+        self.assertIn(b't="b" s="3"', sheet1)
         got = ooxml.parse_xlsx(blob)
         self.assertEqual(len(got), 2)
         self.assertEqual(got[0]["campaign"], "Alpha")

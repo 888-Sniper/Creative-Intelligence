@@ -276,18 +276,24 @@ _XLSX_STYLES = (
     '<font><sz val="11"/><name val="Calibri"/></font>'
     '<font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font>'
     "</fonts>"
-    '<fills count="3">'
+    '<fills count="5">'
     '<fill><patternFill patternType="none"/></fill>'
     '<fill><patternFill patternType="gray125"/></fill>'
     '<fill><patternFill patternType="solid"><fgColor'
     ' rgb="FF00C7B2"/><bgColor indexed="64"/></patternFill></fill>'
+    '<fill><patternFill patternType="solid"><fgColor'
+    ' rgb="FFC6EFCE"/><bgColor indexed="64"/></patternFill></fill>'
+    '<fill><patternFill patternType="solid"><fgColor'
+    ' rgb="FFFFC7CE"/><bgColor indexed="64"/></patternFill></fill>'
     "</fills>"
     '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'
     '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
-    '<cellXfs count="2">'
+    '<cellXfs count="4">'
     '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
     '<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFill="1" applyFont="1"'
     ' applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>'
+    '<xf numFmtId="0" fontId="0" fillId="3" borderId="0" xfId="0" applyFill="1"/>'
+    '<xf numFmtId="0" fontId="0" fillId="4" borderId="0" xfId="0" applyFill="1"/>'
     "</cellXfs></styleSheet>" % SPREADSHEET)
 
 
@@ -331,7 +337,14 @@ class _Strings:
 
 
 def _xlsx_cell(ref, value, strings, header=False):
-    style = ' s="1"' if header else ""
+    if header:
+        style = ' s="1"'
+    elif value is True:
+        style = ' s="2"'
+    elif value is False:
+        style = ' s="3"'
+    else:
+        style = ""
     if value is None:
         return '<c r="%s"%s/>' % (ref, style)
     if isinstance(value, bool):
@@ -340,6 +353,25 @@ def _xlsx_cell(ref, value, strings, header=False):
         return '<c r="%s"%s><v>%s</v></c>' % (ref, style, repr(value))
     return '<c r="%s" t="s"%s><v>%d</v></c>' % (
         ref, style, strings.idx(str(value)))
+
+
+def _cell_len(value):
+    if value is None:
+        return 0
+    if isinstance(value, bool):
+        return 5
+    return len(str(value))
+
+
+def _col_widths(grid):
+    """Per-column widths from content length, clamped for readability."""
+    widths = []
+    ncols = max([len(row) for row in grid] or [0])
+    for c in range(ncols):
+        longest = max([_cell_len(row[c]) for row in grid
+                       if c < len(row)] or [0])
+        widths.append(min(50, max(10, longest + 2)))
+    return widths
 
 
 def build_xlsx(sheets):
@@ -351,11 +383,15 @@ def build_xlsx(sheets):
     for pos, sheet in enumerate(sheets):
         header = [str(h) for h in sheet.get("header", [])]
         rows = sheet.get("rows", [])
-        width = max([len(header)] + [len(r) for r in rows] or [0])
+        grid = [header] + [list(map(str_or_num, r_)) for r_ in rows]
+        width = max([len(row) for row in grid] or [0])
+        cols = "".join(
+            '<col min="%d" max="%d" width="%d" customWidth="1"/>' % (i + 1, i + 1, w)
+            for i, w in enumerate(_col_widths(grid)))
         xml = ['<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
-               '<worksheet xmlns="%s"><sheetData>' % SPREADSHEET]
-        for r, values in enumerate([header] + [list(map(str_or_num, r_))
-                                               for r_ in rows]):
+               '<worksheet xmlns="%s"><cols>%s</cols><sheetData>'
+               % (SPREADSHEET, cols)]
+        for r, values in enumerate(grid):
             xml.append('<row r="%d">' % (r + 1))
             for c in range(width):
                 val = values[c] if c < len(values) else None

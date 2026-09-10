@@ -20,7 +20,7 @@ jobs:
       - name: Install dependencies
         run: |
           python3 -m pip install --upgrade pip
-          python3 -m pip install -r requirements.lock "ruff==0.16.6"
+          python3 -m pip install --require-hashes -r requirements.lock
       - name: Backend lint (Ruff, Nextly-aligned config)
         run: ruff check Backend tests Source
       - name: Pytest suite (FastAPI + SQLAlchemy + httpx)
@@ -29,6 +29,16 @@ jobs:
         run: python3 -m unittest discover -s tests
       - name: Analysis-library self checks
         run: python3 Source/self_check.py
+      - name: Python vulnerability audit
+        run: |
+          python3 -m pip install pip-audit
+          python3 -m pip_audit -r requirements.lock
+      - name: Shellcheck Oracle scripts
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          shellcheck -S warning deploy/oracle/*.sh
+      - name: Secret scanning (Gitleaks)
+        uses: gitleaks/gitleaks-action@v2
 
   frontend:
     runs-on: ubuntu-latest
@@ -43,11 +53,13 @@ jobs:
       - name: Install backend dependencies (E2E server)
         run: |
           python3 -m pip install --upgrade pip
-          python3 -m pip install -r requirements.lock
+          python3 -m pip install --require-hashes -r requirements.lock
       - name: Install pnpm (Nextly packageManager strategy)
         run: corepack enable && corepack prepare pnpm@10.14.0 --activate
       - name: Install frontend dependencies
         run: pnpm --dir apps/creative-intelligence-ui install --frozen-lockfile
+      - name: JavaScript dependency audit
+        run: pnpm --dir apps/creative-intelligence-ui audit --audit-level high
       - name: Frontend typecheck
         run: pnpm --dir apps/creative-intelligence-ui typecheck
       - name: Vitest suite

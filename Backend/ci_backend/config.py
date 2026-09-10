@@ -80,6 +80,12 @@ class Settings(BaseSettings):
     the production scheduler switch (e.g. 3600 for hourly).
     """
 
+    slow_request_ms: int = 2000
+    """Requests slower than this are access-logged at WARNING."""
+
+    access_log: bool = True
+    """Emit one JSON access line per request (method/path/status only)."""
+
     @property
     def database_path(self) -> Path:
         return self.data_dir / self.db_filename

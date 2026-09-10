@@ -40,8 +40,11 @@ fi
 echo "== 1b/7 demo fail-safe preflight =="
 ENV_FILE="${ENV_DIR}/creative-intelligence.env"
 if [[ ! -f "${ENV_FILE}" ]]; then
-  echo "Missing ${ENV_FILE}: copy deploy/oracle/demo.env.example there and fill it." >&2
-  exit 1
+  echo "No ${ENV_FILE}: installing the demo configuration automatically."
+  mkdir -p "${ENV_DIR}"
+  cp "${SOURCE_DIR}/deploy/oracle/demo.env.example" "${ENV_FILE}"
+  chmod 600 "${ENV_FILE}"
+  echo "Fill the WorkOS/admin values in ${ENV_FILE}, then re-run this script."
 fi
 DOMAIN="${DOMAIN}" ENV_FILE="${ENV_FILE}" python3 - <<'PY'
 import os

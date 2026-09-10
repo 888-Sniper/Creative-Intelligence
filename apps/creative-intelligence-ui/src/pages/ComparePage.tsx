@@ -149,7 +149,12 @@ export function ComparePage() {
       seen.forEach((k) => params.append("key", k));
       params.set("rank_by", creativeRank);
       const r = await api<CompareResponse>("GET", scopedPath(`/api/compare?${params.toString()}`, scope));
-      setCreativeKeys(seen);
+      // Display the backend ranking order, never the entered key order:
+      // columns and the winner both follow the selected rank_by.
+      const ranked = Array.isArray(r.ranking) ? r.ranking : [];
+      const sameSet =
+        ranked.length === seen.length && ranked.every((k) => seen.includes(k));
+      setCreativeKeys(sameSet ? ranked : seen);
       setCreativeData(r);
     } catch (e) {
       setCreativeData(null);

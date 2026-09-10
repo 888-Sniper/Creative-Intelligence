@@ -23,9 +23,9 @@ if [[ -z "${ROOT}" || ! -f "${ROOT}/creative_intel.db" ]]; then
   exit 1
 fi
 
-mkdir -p "${DATA_DIR}"
-cp "${ROOT}/creative_intel.db" "${DATA_DIR}/creative_intel.db"
-rm -rf "${DATA_DIR}/media" "${DATA_DIR}/avatars"
+mkdir -p "${DATA_DIR:?}"
+cp "${ROOT}/creative_intel.db" "${DATA_DIR:?}/creative_intel.db"
+rm -rf "${DATA_DIR:?}/media" "${DATA_DIR:?}/avatars"
 [[ -d "${ROOT}/media" ]] && cp -a "${ROOT}/media" "${DATA_DIR}/media"
 [[ -d "${ROOT}/avatars" ]] && cp -a "${ROOT}/avatars" "${DATA_DIR}/avatars"
 mkdir -p "${DATA_DIR}/media"

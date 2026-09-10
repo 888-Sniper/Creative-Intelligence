@@ -899,3 +899,41 @@ def test_slow_action_does_not_block_health(tmp_path, monkeypatch):
     # The loop stayed free while the worker slept: generous margin
     # (4s sleep vs 3s budget) so loaded CI cannot flake this.
     assert elapsed < 3.0, elapsed
+
+
+class TestCsrfOriginGuard:
+    def _owner_client(self, tmp_path, **headers):
+        http, db = make_client(tmp_path, admin_email="boss@foap.test")
+        engine = make_engine(db)
+        with make_session_factory(engine)() as sess:
+            boss = emp_store.admin_create(sess, "root", "boss@foap.test",
+                                          role="admin")
+            cookie = ("ci_session="
+                      + emp_store.create_session(sess, boss.id, ""))
+        authed = TestClient(http.app, raise_server_exceptions=False)
+        authed.headers.update({"Cookie": cookie, **headers})
+        return authed
+
+    def test_cross_origin_cookie_write_refused(self, tmp_path):
+        authed = self._owner_client(tmp_path,
+                                    Origin="https://evil.example")
+        resp = authed.post("/api/ask", json={"question": "hi"})
+        assert resp.status_code == 403
+        assert resp.json()["gate"] == "csrf"
+
+    def test_referer_mismatch_refused(self, tmp_path):
+        authed = self._owner_client(tmp_path,
+                                    Referer="https://evil.example/x")
+        resp = authed.post("/api/ask", json={"question": "hi"})
+        assert resp.status_code == 403
+
+    def test_same_origin_cookie_write_allowed(self, tmp_path):
+        authed = self._owner_client(tmp_path,
+                                    Origin="http://testserver")
+        resp = authed.post("/api/ask", json={"question": "hi"})
+        assert resp.status_code in (200, 429)
+
+    def test_no_origin_cookie_write_allowed(self, tmp_path):
+        authed = self._owner_client(tmp_path)
+        resp = authed.post("/api/ask", json={"question": "hi"})
+        assert resp.status_code in (200, 429)

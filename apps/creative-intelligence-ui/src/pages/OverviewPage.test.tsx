@@ -33,7 +33,7 @@ const syncData = {
   jobs: ["meta"],
 };
 
-const healthData = { provider_mode: "mock", keys: {} };
+const statusData = { mode: "mock", capabilities: {} };
 
 interface SeenCall {
   url: string;
@@ -64,7 +64,7 @@ function mockDefault() {
   mockFetch((url) => {
     if (url.startsWith("/api/campaigns")) return Response.json(campaignData);
     if (url === "/api/sync/status") return Response.json(syncData);
-    if (url === "/api/health") return Response.json(healthData);
+    if (url === "/api/providers/status") return Response.json(statusData);
     if (url === "/api/ingest") return Response.json({ inserted: 3, updated: 0, quarantined_count: 0 });
     if (url === "/api/sync/run") return Response.json({ inserted: 2, updated: 1, quarantined_count: 0 });
     return Response.json({ error: "unexpected " + url }, { status: 500 });
@@ -105,7 +105,7 @@ describe("OverviewPage", () => {
     expect(screen.getByText("Meta: ok @ 2026-09-01 (2 new, 1 updated)", { exact: false })).toBeDefined();
     expect(screen.getByText("Scheduled jobs: meta.", { exact: false })).toBeDefined();
     expect(
-      screen.getByText("Providers: mock mode — set provider_mode=live and add Keychain keys", { exact: false }),
+      screen.getByText("Providers: mock mode — set CREATIVE_INTEL_PROVIDER_MODE=live", { exact: false }),
     ).toBeDefined();
     const campaignsCall = seen.find((c) => c.url.startsWith("/api/campaigns"));
     expect(campaignsCall).toBeDefined();
@@ -120,7 +120,7 @@ describe("OverviewPage", () => {
         });
       }
       if (url === "/api/sync/status") return Response.json({ sources: {}, jobs: [] });
-      if (url === "/api/health") return Response.json(healthData);
+      if (url === "/api/providers/status") return Response.json(statusData);
       return Response.json({}, { status: 500 });
     });
     renderPage();
@@ -135,7 +135,7 @@ describe("OverviewPage", () => {
     mockFetch((url) => {
       if (url.startsWith("/api/campaigns")) return Response.json({ error: "boom" }, { status: 500 });
       if (url === "/api/sync/status") return Response.json({ sources: {}, jobs: [] });
-      if (url === "/api/health") return Response.json(healthData);
+      if (url === "/api/providers/status") return Response.json(statusData);
       return Response.json({}, { status: 500 });
     });
     renderPage();

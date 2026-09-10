@@ -1,0 +1,13 @@
+# Gitleaks policy for secret scanning in CI.
+#
+# Only synthetic test fixtures are allowlisted: TEST_MASTER_KEY values
+# under tests/ are random throwaway keys generated for encryption
+# unit tests, never real credentials. Everything else (provider keys,
+# OAuth codes, tokens, private keys) still fails the scan.
+
+title = "Creative Intelligence secret-scan policy"
+
+[[allowlists]]
+description = "Synthetic crypto fixtures in tests (random, test-only keys)."
+paths = ['''tests/.*''']
+regexes = ['''TEST_MASTER_KEY''']

@@ -39,10 +39,11 @@ from creative_intel import (
 )
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse  # noqa: E402
-from pydantic import BaseModel, Field  # noqa: E402
+from pydantic import BaseModel, Field, field_validator, model_validator  # noqa: E402
 
 from ci_backend import actions as legacy  # noqa: E402
 from ci_backend import employees as emp  # noqa: E402
+from ci_backend import product_audit as paudit  # noqa: E402
 from ci_backend.deps import (  # noqa: E402
     SYNC_RATE_LIMIT,
     UPLOAD_RATE_LIMIT,
@@ -79,9 +80,9 @@ def _guarded():
 
 @router.get("/api/health")
 def health(request: Request, prov=Depends(get_providers)):
-    return {"ok": True, "provider_mode": prov.mode,
-            "keys": providers_mod.key_status(),
-            "providers": providers_mod.provider_matrix()}
+    """Minimal public health: liveness + mode only. Key inventory and
+    the provider matrix stay behind authenticated /api/providers/status."""
+    return {"ok": True, "provider_mode": prov.mode}
 
 
 @router.get("/api/providers/status")
@@ -241,6 +242,301 @@ class SyncJobUpdate(BaseModel):
     enabled: bool | None = None
 
 
+# ---------------------------------------------------------------------------
+# Explicit request schemas for every external write API.
+#
+# json_payload() stays the tolerant transport (size-capped, {} on empty),
+# but each handler validates shape here first: enum membership, maximum
+# lengths, list limits, ISO dates and allowed filter/KPI values. Invalid
+# bodies fail with the same 409 contract as downstream ValueErrors, so
+# malformed input never reaches library code as a 500. Unknown extra
+# keys are ignored (Pydantic default), keeping the UI forward-compatible.
+# ---------------------------------------------------------------------------
+
+# Filter axes callers may send (Scope axes plus cohort project lists).
+_FILTER_KEYS = (set(benchmarks.Scope.AXES)
+                | {"include_projects", "exclude_projects"})
+# KPI values build_report() understands (rankable metrics + volume).
+_REPORT_KPIS = (set(benchmarks.KPI_KEYS)
+                | {"spend", "impressions", "clicks", "conversions",
+                   "cpc"})
+
+
+def _iso_day(value, *, what: str) -> str:
+    import datetime
+    import re
+    text = str(value or "").strip()
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", text):
+        raise ValueError("%s must be YYYY-MM-DD, got %r" % (what, value))
+    try:
+        datetime.date.fromisoformat(text)
+    except ValueError:
+        raise ValueError("%s is not a real date: %r" % (what, value))
+    return text
+
+
+def _filter_dict(values, *, what: str) -> dict:
+    if values is None:
+        return {}
+    if not isinstance(values, dict):
+        raise ValueError("%s.filters must be an object" % what)
+    if len(values) > 20:
+        raise ValueError("%s.filters has too many axes" % what)
+    for key, vals in values.items():
+        if key not in _FILTER_KEYS:
+            raise ValueError("%s.filters has unknown key %r" % (what, key))
+        items = [vals] if isinstance(vals, str) else vals
+        if not isinstance(items, list) or len(items) > 50:
+            raise ValueError(
+                "%s.filters[%r] must be a list of at most 50" % (what, key))
+        for item in items:
+            if not isinstance(item, str) or not item or len(item) > 200:
+                raise ValueError(
+                    "%s.filters[%r] values must be 1-200 chars"
+                    % (what, key))
+    for key in ("date_from", "date_to"):
+        vals = values.get(key)
+        items = [vals] if isinstance(vals, str) else (vals or [])
+        if items and items[0] not in ("", "all"):
+            _iso_day(items[0], what="%s.filters[%s]" % (what, key))
+    return values
+
+
+def _kpi(value, *, what: str) -> str:
+    text = str(value or "").lower()
+    if text not in benchmarks.KPI_KEYS:
+        raise ValueError("%s must be one of %s"
+                         % (what, sorted(benchmarks.KPI_KEYS)))
+    return text
+
+
+def _validated(model, raw, label: str):
+    try:
+        return model.model_validate(raw)
+    except Exception as exc:
+        raise HTTPException(status_code=409,
+                            detail={"error": "Invalid %s: %s" % (label, exc)})
+
+
+class AskBody(BaseModel):
+    question: str = Field(min_length=1, max_length=2000)
+    filters: dict = Field(default_factory=dict)
+
+    @field_validator("filters", mode="before")
+    @classmethod
+    def _check_filters(cls, values):
+        return _filter_dict(values, what="ask")
+
+
+class ReviewsMarkBody(BaseModel):
+    review_id: int = Field(gt=0, le=2 ** 31)
+
+
+class ExportBody(BaseModel):
+    creative_keys: list[str] = Field(min_length=1, max_length=50)
+    override: bool = False
+
+    @field_validator("creative_keys", mode="before")
+    @classmethod
+    def _check_keys(cls, values):
+        return _str_list(values, what="export", allow_empty=False)
+
+
+def _str_list(values, *, what: str, max_items=50, max_len=200,
+              allow_empty=True) -> list:
+    items = [values] if isinstance(values, str) else values
+    if not isinstance(items, list):
+        raise ValueError("%s must be a list of strings" % what)
+    if len(items) > max_items:
+        raise ValueError("%s has more than %d items" % (what, max_items))
+    if not allow_empty and not items:
+        raise ValueError("%s must not be empty" % what)
+    for item in items:
+        if not isinstance(item, str) or not item or len(item) > max_len:
+            raise ValueError("%s items must be 1-%d chars" % (what, max_len))
+    return items
+
+
+class CohortBody(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    filters: dict = Field(default_factory=dict)
+
+    @field_validator("filters", mode="before")
+    @classmethod
+    def _check_filters(cls, values):
+        return _filter_dict(values, what="cohort")
+
+
+class CompareBody(BaseModel):
+    campaigns: list[str] = Field(default_factory=list, max_length=50)
+    rank_by: str = "cpa"
+    filters: dict = Field(default_factory=dict)
+
+    @field_validator("filters", mode="before")
+    @classmethod
+    def _check_filters(cls, values):
+        return _filter_dict(values, what="compare")
+
+    @field_validator("rank_by", mode="before")
+    @classmethod
+    def _check_rank(cls, value):
+        return _kpi(value or "cpa", what="rank_by")
+
+
+class ReportBody(BaseModel):
+    campaigns: list[str] | None = Field(default=None, max_length=50)
+    kpis: list[str] = Field(default_factory=lambda: ["cpa", "ctr"],
+                            max_length=12)
+    benchmark: str | None = Field(default=None, max_length=120)
+    benchmark_scope: str = Field(default="filters",
+                                 pattern="^(filters|global)$")
+    rank_by: str | None = None
+    override: bool = False
+    strict_human: bool = False
+    filters: dict = Field(default_factory=dict)
+    format: str = Field(default="one-pager",
+                        pattern="^(one-pager|csv|deck|pptx|xlsx)$")
+
+    @field_validator("filters", mode="before")
+    @classmethod
+    def _check_filters(cls, values):
+        return _filter_dict(values, what="report")
+
+    @field_validator("rank_by", mode="before")
+    @classmethod
+    def _check_rank(cls, value):
+        return None if value is None else _kpi(value, what="rank_by")
+
+    @field_validator("kpis", mode="before")
+    @classmethod
+    def _kpis(cls, values):
+        items = _str_list(values if values is not None else [], what="kpis",
+                          max_items=12, max_len=40)
+        unknown = [k for k in items if k.lower() not in _REPORT_KPIS]
+        if unknown:
+            raise ValueError("unknown kpis: %s" % unknown)
+        if not items:
+            raise ValueError("kpis must not be empty")
+        return [k.lower() for k in items]
+
+
+class AnnotateBody(BaseModel):
+    annotation: dict = Field()
+
+    @field_validator("annotation", mode="before")
+    @classmethod
+    def _check_annotation(cls, values):
+        return _bounded_dict(values, what="annotation")
+
+
+def _bounded_dict(values, *, what: str, max_keys=100) -> dict:
+    if not isinstance(values, dict):
+        raise ValueError("%s must be an object" % what)
+    if len(values) > max_keys:
+        raise ValueError("%s has more than %d keys" % (what, max_keys))
+    return values
+
+
+# Per-route schemas for the generic action-dispatch surface. Routes not
+# listed here take a free-form object and rely on per-action library
+# validation (ValueError -> 409) behind the dispatch allowlist.
+
+
+class IngestBody(BaseModel):
+    platform: str = Field(min_length=1, max_length=120)
+    source: str = Field(default="upload", max_length=120)
+    csv: str | None = None
+    xlsx_b64: str | None = None
+
+    @model_validator(mode="after")
+    def _need_payload_body(self):
+        if not self.csv and not self.xlsx_b64:
+            raise ValueError(
+                "ingest needs csv text or xlsx_b64 plus platform")
+        return self
+
+
+class MediaUploadJSONBody(BaseModel):
+    creative_key: str = Field(min_length=1, max_length=200)
+    filename: str = Field(default="", max_length=255)
+    content_b64: str = Field(min_length=1)
+    mime: str | None = Field(default=None, max_length=127)
+
+
+class ConnectorSheetsBody(BaseModel):
+    platform: str = Field(min_length=1, max_length=120)
+    url: str = Field(default="", max_length=2000)
+    google_auth: bool = False
+
+
+class ConnectorMetaBody(BaseModel):
+    ad_account_id: str = Field(default="", max_length=120)
+    since: str = Field(default="", max_length=30)
+    until: str = Field(default="", max_length=30)
+
+
+class ConnectorTikTokBody(BaseModel):
+    advertiser_id: str = Field(default="", max_length=120)
+    start_date: str = Field(default="", max_length=30)
+    end_date: str = Field(default="", max_length=30)
+
+
+class SyncNowBody(BaseModel):
+    source: str = Field(min_length=1, max_length=120)
+
+
+class RetentionBody(BaseModel):
+    creative_key: str = Field(min_length=1, max_length=200)
+    points: list[list[float]] = Field(min_length=1, max_length=500)
+
+    @field_validator("points", mode="before")
+    @classmethod
+    def _check_points(cls, values):
+        return _point_pairs(values)
+
+
+def _point_pairs(values) -> list:
+    if not isinstance(values, list) or not values or len(values) > 500:
+        raise ValueError("points must be 1-500 [t_sec, pct] pairs")
+    out = []
+    for pair in values:
+        if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+            raise ValueError("each point must be a [t_sec, pct] pair")
+        try:
+            out.append([float(pair[0]), float(pair[1])])
+        except (TypeError, ValueError):
+            raise ValueError("point values must be numbers")
+    return out
+
+
+class SaveViewBody(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    state: dict = Field(default_factory=dict)
+
+    @field_validator("state", mode="before")
+    @classmethod
+    def _check_state(cls, values):
+        return _bounded_dict(values, what="view state", max_keys=20)
+
+
+class DeleteViewBody(BaseModel):
+    id: int = Field(gt=0, le=2 ** 31)
+
+
+_DISPATCH_SCHEMAS = {
+    "/api/ingest": (IngestBody, "ingest"),
+    "/api/media/upload": (MediaUploadJSONBody, "media upload"),
+    "/api/connect/drive": (ConnectorSheetsBody, "drive import"),
+    "/api/connect/sheets": (ConnectorSheetsBody, "sheets import"),
+    "/api/connect/meta": (ConnectorMetaBody, "meta import"),
+    "/api/connect/tiktok": (ConnectorTikTokBody, "tiktok import"),
+    "/api/sync/run": (SyncNowBody, "sync"),
+    "/api/retention": (RetentionBody, "retention points"),
+    "/api/views": (SaveViewBody, "view"),
+    "/api/views/delete": (DeleteViewBody, "view delete"),
+}
+
+
 def _job_or_404(conn, job_id: str) -> dict:
     job = sync.get_job(conn, job_id)
     if job is None:
@@ -267,7 +563,11 @@ async def sync_job_create(request: Request, conn=Depends(get_product_conn),
         job = sync.create_job(conn, body.source, body.name, body.params,
                               owner=who.id)
     except ValueError as exc:
+        paudit.audit_request(request, conn, employee_id=who.id,
+                             action="sync_job_created", result="error")
         raise _conflict(exc)
+    paudit.audit_request(request, conn, employee_id=who.id,
+                         action="sync_job_created", target=job["id"])
     if not body.enabled:
         job = sync.set_job_enabled(conn, job["id"], False)
     return {"job": job}
@@ -276,7 +576,7 @@ async def sync_job_create(request: Request, conn=Depends(get_product_conn),
 @router.patch("/api/sync/jobs/{job_id}")
 async def sync_job_update(job_id: str, request: Request,
                           conn=Depends(get_product_conn),
-                          _emp=Depends(get_current_employee)):
+                          who=Depends(get_current_employee)):
     from urllib.parse import unquote
     _job_or_404(conn, unquote(job_id))
     try:
@@ -291,17 +591,24 @@ async def sync_job_update(job_id: str, request: Request,
         if body.enabled is not None:
             sync.set_job_enabled(conn, unquote(job_id), body.enabled)
     except ValueError as exc:
+        paudit.audit_request(request, conn, employee_id=who.id,
+                             action="sync_job_updated",
+                             target=unquote(job_id), result="error")
         raise _conflict(exc)
+    paudit.audit_request(request, conn, employee_id=who.id,
+                         action="sync_job_updated", target=unquote(job_id))
     return {"job": sync.get_job(conn, unquote(job_id))}
 
 
 @router.delete("/api/sync/jobs/{job_id}")
 def sync_job_delete(job_id: str, request: Request,
                     conn=Depends(get_product_conn),
-                    _emp=Depends(get_current_employee)):
+                    who=Depends(get_current_employee)):
     from urllib.parse import unquote
     _job_or_404(conn, unquote(job_id))
     sync.delete_job(conn, unquote(job_id))
+    paudit.audit_request(request, conn, employee_id=who.id,
+                         action="sync_job_deleted", target=unquote(job_id))
     return {"ok": True}
 
 
@@ -333,7 +640,12 @@ def sync_job_run(job_id: str, request: Request,
         out = sync.import_once(
             conn, job["source"], _fetch, job_id=job["id"])
     except (ValueError, export_gate.ExportBlocked, emp.StoreError) as exc:
+        paudit.audit_request(request, conn, employee_id=who.id,
+                             action="sync_started", target=job["id"],
+                             result="error")
         raise _conflict(exc)
+    paudit.audit_request(request, conn, employee_id=who.id,
+                         action="sync_started", target=job["id"])
     out["job"] = sync.get_job(conn, job["id"])
     return out
 
@@ -402,21 +714,29 @@ async def ask(request: Request, conn=Depends(get_product_conn),
               who=Depends(get_current_employee),
               _limited=Depends(ai_rate_limit)):
     _ = _limited
-    body = await json_payload(request)
+    body = _validated(AskBody, await json_payload(request), "ask")
     settings = request.app.state.ci_settings
     ctx = {"settings": settings, "media_dir": None}
     try:
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
+        out = await loop.run_in_executor(
             _WORKERS, functools.partial(
-                jobs_mod.run_through, conn, "ask", dict(body),
+                jobs_mod.run_through, conn, "ask", body.model_dump(),
                 who.id, 180.0, 2.0, ctx))
     except jobs_mod.JobTimeout as exc:
+        paudit.audit_request(request, conn, employee_id=who.id,
+                             action="ask", result="error")
         raise HTTPException(status_code=504, detail={"error": str(exc)})
     except jobs_mod.JobFailed as exc:
+        paudit.audit_request(request, conn, employee_id=who.id,
+                             action="ask", result="error")
         raise _conflict(exc)
     except (ValueError, export_gate.ExportBlocked, emp.StoreError) as exc:
+        paudit.audit_request(request, conn, employee_id=who.id,
+                             action="ask", result="error")
         raise _conflict(exc)
+    paudit.audit_request(request, conn, employee_id=who.id, action="ask")
+    return out
 
 
 class PipelineRunBody(BaseModel):
@@ -438,6 +758,9 @@ def pipeline_run(body: PipelineRunBody, request: Request,
          "brand_terms": [t for t in body.brand_terms
                          if isinstance(t, str)][:20]},
         owner=who.id)
+    paudit.audit_request(request, conn, employee_id=who.id,
+                         action="pipeline_run", target=job["id"],
+                         result="queued")
     return {"job_id": job["id"], "status": job["status"]}
 
 
@@ -476,37 +799,52 @@ def pipeline_cancel(job_id: str, request: Request,
     if job is None:
         raise HTTPException(status_code=404, detail={
             "error": "no such job or not yours"})
+    paudit.audit_request(request, conn, employee_id=who.id,
+                         action="pipeline_cancel", target=job["id"])
     return {"job_id": job["id"], "status": job["status"]}
 
 
 @router.post("/api/reviews/mark")
 async def reviews_mark(request: Request, conn=Depends(get_product_conn),
-                       _emp=Depends(get_current_employee)):
-    body = await json_payload(request)
+                       who=Depends(get_current_employee)):
+    body = _validated(ReviewsMarkBody, await json_payload(request),
+                      "review")
     try:
-        pending = qa.mark_reviewed(conn, int(body["review_id"]))
+        pending = qa.mark_reviewed(conn, body.review_id)
     except (ValueError, export_gate.ExportBlocked, emp.StoreError) as exc:
+        paudit.audit_request(request, conn, employee_id=who.id,
+                             action="annotation_verified", result="error")
         raise _conflict(exc)
+    paudit.audit_request(request, conn, employee_id=who.id,
+                         action="annotation_verified",
+                         target=str(body.review_id))
     return {"ok": True, "pending": pending}
 
 
 @router.post("/api/export")
 async def export(request: Request, conn=Depends(get_product_conn),
-                 _emp=Depends(get_current_employee)):
-    body = await json_payload(request)
+                 who=Depends(get_current_employee)):
+    body = _validated(ExportBody, await json_payload(request), "export")
     try:
         export_gate.check_reviews(conn)
         result = export_gate.build_one_pager(
-            conn, body.get("creative_keys", []),
+            conn, body.creative_keys,
             benchmarks.benchmark(conn, "hook_type"),
-            override=bool(body.get("override")))
+            override=body.override)
     except export_gate.ExportBlocked as exc:
+        paudit.audit_request(request, conn, employee_id=who.id,
+                             action="report_exported", result="error")
         raise HTTPException(status_code=409, detail={
             "error": str(exc), "missing": exc.missing})
     except (ValueError, emp.StoreError) as exc:
+        paudit.audit_request(request, conn, employee_id=who.id,
+                             action="report_exported", result="error")
         raise _conflict(exc)
-    replay.log(conn, "export", {"creative_keys": body.get("creative_keys", []),
-                                "override": bool(body.get("override"))})
+    replay.log(conn, "export", {"creative_keys": body.creative_keys,
+                                "override": body.override})
+    paudit.audit_request(request, conn, employee_id=who.id,
+                         action="report_exported",
+                         target=",".join(body.creative_keys))
     return result
 
 
@@ -533,10 +871,10 @@ def replay_run(request: Request, conn=Depends(get_product_conn),
 @router.post("/api/cohorts")
 async def save_cohort(request: Request, conn=Depends(get_product_conn),
                       _emp=Depends(get_current_employee)):
-    body = await json_payload(request)
+    body = _validated(CohortBody, await json_payload(request), "cohort")
     try:
-        return cohorts.save_cohort(conn, body.get("name", ""),
-                                   body.get("filters", {}))
+        return cohorts.save_cohort(conn, body.name.strip(),
+                                   body.filters)
     except ValueError as exc:
         raise _conflict(exc)
 
@@ -545,11 +883,12 @@ async def save_cohort(request: Request, conn=Depends(get_product_conn),
 async def compare_campaigns_post(request: Request,
                                  conn=Depends(get_product_conn),
                                  _emp=Depends(get_current_employee)):
-    body = await json_payload(request)
+    body = _validated(CompareBody, await json_payload(request),
+                      "campaign comparison")
     try:
-        pseudo = {"campaigns": [",".join(body.get("campaigns", []) or [])],
-                  "rank_by": [body.get("rank_by", "cpa")]}
-        for key, vals in ((body.get("filters") or {}).items()):
+        pseudo = {"campaigns": [",".join(body.campaigns)],
+                  "rank_by": [body.rank_by]}
+        for key, vals in body.filters.items():
             pseudo[key] = (list(vals) if isinstance(vals, list) else [vals])
         return legacy.expert2_compare_route(conn, pseudo)
     except ValueError as exc:
@@ -558,12 +897,18 @@ async def compare_campaigns_post(request: Request,
 
 @router.post("/api/report")
 async def report(request: Request, conn=Depends(get_product_conn),
-                 _emp=Depends(get_current_employee)):
-    body = await json_payload(request)
+                 who=Depends(get_current_employee)):
+    body = _validated(ReportBody, await json_payload(request), "report")
+    payload = body.model_dump()
     try:
-        return legacy.expert2_report_route(conn, body)
+        out = legacy.expert2_report_route(conn, payload)
     except ValueError as exc:
+        paudit.audit_request(request, conn, employee_id=who.id,
+                             action="report_generated", result="error")
         raise _conflict(exc)
+    paudit.audit_request(request, conn, employee_id=who.id,
+                         action="report_generated")
+    return out
 
 
 @router.post("/api/creatives/{key}/verify")
@@ -572,7 +917,7 @@ async def creative_verify(key: str, request: Request,
                           prov=Depends(get_providers),
                           who=Depends(get_current_employee)):
     return await _run_action(conn, prov, "verify", {"creative_key": unquote(key)},
-                             actor=who.id)
+                             actor=who.id, request=request)
 
 
 @router.post("/api/creatives/{key}/annotate")
@@ -580,11 +925,12 @@ async def creative_annotate(key: str, request: Request,
                             conn=Depends(get_product_conn),
                             prov=Depends(get_providers),
                             who=Depends(get_current_employee)):
-    body = await json_payload(request)
+    body = _validated(AnnotateBody, await json_payload(request),
+                      "annotation")
     return await _run_action(conn, prov, "annotate",
                              {"creative_key": unquote(key),
-                              "annotation": body.get("annotation", {})},
-                             actor=who.id)
+                              "annotation": body.annotation},
+                             actor=who.id, request=request)
 
 
 @router.post("/api/{action:path}")
@@ -598,17 +944,30 @@ async def action_dispatch(action: str, request: Request,
     if path == "/api/media/upload" and request.headers.get(
             "content-type", "").split(";")[0].strip() == "multipart/form-data":
         return await _media_upload_multipart(request, conn, who)
-    body = await json_payload(request)
-    return await _run_action(conn, prov, _ACTION_ROUTES[path], body,
-                             actor=who.id, request=request)
+    # Cost guard first: rate limits apply before schema validation so
+    # malformed bodies cannot burn provider budget limit-free.
+    _route_limits(request, _ACTION_ROUTES[path], who.id)
+    raw = await json_payload(request)
+    schema = _DISPATCH_SCHEMAS.get(path)
+    body = (_validated(schema[0], raw, schema[1]) if schema is not None
+            else raw)
+    payload = (body.model_dump() if isinstance(body, BaseModel) else body)
+    return await _run_action(conn, prov, _ACTION_ROUTES[path], payload,
+                             actor=who.id, request=request,
+                             limits_checked=True)
 
 
 async def _media_upload_multipart(request: Request, conn, who):
     """Multipart creative upload: bytes ride outside JSON.
 
-    The file streams in chunks so the real media.MAX_BYTES (100 MB)
-    limit is enforced by counting, not by the JSON body cap.
+    Genuinely streaming: chunks flow straight to a temp file in the
+    media store while bytes are counted and hashed, so a 100 MB video
+    never sits whole in server RAM. Magic/MIME validation reads only
+    the head; the temp file is then atomically renamed into place.
     """
+    import hashlib
+    import tempfile
+
     check_user_limit(request, who.id, *UPLOAD_RATE_LIMIT, "upload")
     try:
         form = await request.form()
@@ -623,25 +982,45 @@ async def _media_upload_multipart(request: Request, conn, who):
         raise HTTPException(
             status_code=409,
             detail={"error": "upload needs creative_key and a file part"})
-    chunks, total = [], 0
-    while True:
-        piece = await read(media.CHUNK_BYTES)
-        if not piece:
-            break
-        total += len(piece)
-        if total > media.MAX_BYTES:
-            raise HTTPException(
-                status_code=409,
-                detail={"error": "upload exceeds %d MB"
-                        % (media.MAX_BYTES // (1024 * 1024))})
-        chunks.append(piece)
-    content = b"".join(chunks)
+    store = legacy._media_dir()
+    os.makedirs(store, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(dir=store, prefix=".upload-")
+    digest, total = hashlib.sha256(), 0
+    target = str(creative_key)[:200]
     try:
-        return media.save_media_bytes(
-            conn, legacy._media_dir(), creative_key, filename, content,
+        with os.fdopen(fd, "wb") as fh:
+            while True:
+                piece = await read(media.CHUNK_BYTES)
+                if not piece:
+                    break
+                total += len(piece)
+                if total > media.MAX_BYTES:
+                    raise HTTPException(
+                        status_code=409,
+                        detail={"error": "upload exceeds %d MB"
+                                % (media.MAX_BYTES // (1024 * 1024))})
+                digest.update(piece)
+                fh.write(piece)
+        out = media.save_media_file(
+            conn, store, creative_key, filename, tmp_path, total,
+            digest.hexdigest(),
             getattr(upload, "content_type", None) or None)
+    except HTTPException:
+        paudit.audit_request(request, conn, employee_id=who.id,
+                             action="creative_uploaded", target=target,
+                             result="error")
+        raise
     except ValueError as exc:
+        paudit.audit_request(request, conn, employee_id=who.id,
+                             action="creative_uploaded", target=target,
+                             result="error")
         raise _conflict(exc)
+    finally:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+    paudit.audit_request(request, conn, employee_id=who.id,
+                         action="creative_uploaded", target=target)
+    return out
 
 
 def _resolve_google_bearer(payload: dict, actor: str,
@@ -664,8 +1043,43 @@ def _resolve_google_bearer(payload: dict, actor: str,
     payload["_google_bearer"] = headers["Authorization"].split(" ", 1)[1]
 
 
+# Product writes worth an audit row: uploads, annotation checks,
+# sync starts and connector changes. Targets stay metadata (keys,
+# action names); payloads (annotations, tokens, file bytes) never do.
+_AUDITED_ACTIONS = {
+    "verify": "annotation_verified",
+    "annotate": "creative_annotated",
+    "media-upload": "creative_uploaded",
+    "sync-now": "sync_started",
+    "connect-sheets": "connector_changed",
+    "connect-drive": "connector_changed",
+    "connect-meta": "connector_changed",
+    "connect-tiktok": "connector_changed",
+}
+
+
+def _audit_target(action: str, payload: dict) -> str:
+    if action in ("verify", "annotate", "media-upload"):
+        key = payload.get("creative_key", "") if isinstance(
+            payload, dict) else ""
+        return str(key)[:200]
+    if action.startswith("connect-"):
+        return action
+    return ""
+
+
+def _route_limits(request, action: str, actor: str) -> None:
+    """Per-user cost guards for sync/connector runs and uploads."""
+    if request is not None and action in (
+            "sync-now", "connect-sheets", "connect-drive",
+            "connect-meta", "connect-tiktok"):
+        check_user_limit(request, actor, *SYNC_RATE_LIMIT, "sync")
+    if request is not None and action == "media-upload":
+        check_user_limit(request, actor, *UPLOAD_RATE_LIMIT, "upload")
+
+
 async def _run_action(conn, prov, action: str, payload: dict, actor: str = "",
-                      request=None):
+                      request=None, limits_checked=False):
     """Run one product action without blocking the event loop.
 
     Video/AI work (pipeline, imports, media) is synchronous blocking
@@ -676,23 +1090,29 @@ async def _run_action(conn, prov, action: str, payload: dict, actor: str = "",
     """
     if action in ("connect-sheets", "connect-drive") and request is not None:
         _resolve_google_bearer(payload, actor, request)
-    if request is not None and action in (
-            "sync-now", "connect-sheets", "connect-drive",
-            "connect-meta", "connect-tiktok"):
-        check_user_limit(request, actor, *SYNC_RATE_LIMIT, "sync")
-    if request is not None and action == "media-upload":
-        check_user_limit(request, actor, *UPLOAD_RATE_LIMIT, "upload")
+    if not limits_checked:
+        _route_limits(request, action, actor)
+    audit_name = _AUDITED_ACTIONS.get(action)
     try:
         result = await asyncio.get_running_loop().run_in_executor(
             _WORKERS, functools.partial(legacy.apply_action, conn, action,
                                         payload, prov, actor=actor))
     except (ValueError, export_gate.ExportBlocked, emp.StoreError) as exc:
+        if audit_name is not None and request is not None:
+            paudit.audit_request(request, conn, employee_id=actor,
+                                 action=audit_name,
+                                 target=_audit_target(action, payload),
+                                 result="error")
         raise _conflict(exc)
     finally:
         if isinstance(payload, dict):
             payload.pop("_google_bearer", None)
     if action != "media-upload":
         replay.log(conn, action, payload)
+    if audit_name is not None and request is not None:
+        paudit.audit_request(request, conn, employee_id=actor,
+                             action=audit_name,
+                             target=_audit_target(action, payload))
     return result
 
 

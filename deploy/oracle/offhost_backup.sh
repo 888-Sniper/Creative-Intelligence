@@ -3,6 +3,11 @@
 # Destination comes only from the environment (systemd EnvironmentFile or
 # operator shell) so no host, bucket, or credential ever lands in the repo.
 #
+# Encryption rule: once BACKUP_ENCRYPTION_PASSPHRASE is configured, only
+# *.tar.gz.enc archives may leave the VM — a plaintext tarball is refused
+# so client data is never transferred unencrypted. Without a configured
+# passphrase, plaintext transfers proceed with a loud warning.
+#
 #   BACKUP_OFFHOST_DEST   rsync destination, e.g. backup@vault:/srv/ci-backups
 #                         or a mounted bucket path. Empty means "not configured".
 #   BACKUP_OFFHOST_KEEP   keep this many newest tarballs at a local-path
@@ -24,18 +29,40 @@ if [[ -z "${DEST}" ]]; then
 fi
 
 if [[ -z "${TARBALL}" ]]; then
-  TARBALL="$(ls -t "${BACKUP_DIR}"/*.tar.gz 2>/dev/null | head -n 1 || true)"
+  shopt -s nullglob
+  _CANDIDATES=("${BACKUP_DIR}"/*.tar.gz.enc "${BACKUP_DIR}"/*.tar.gz)
+  if ((${#_CANDIDATES[@]})); then
+    TARBALL="$(ls -t "${_CANDIDATES[@]}" | head -n 1)"
+  fi
 fi
 if [[ -z "${TARBALL}" || ! -f "${TARBALL}" ]]; then
   echo "No backup tarball found in ${BACKUP_DIR}." >&2
   exit 1
 fi
 
+if [[ -n "${BACKUP_ENCRYPTION_PASSPHRASE:-}" && "${TARBALL}" != *.enc ]]; then
+  echo "Refusing to transfer unencrypted ${TARBALL} while BACKUP_ENCRYPTION_PASSPHRASE is set." >&2
+  exit 1
+fi
+if [[ "${TARBALL}" != *.enc ]]; then
+  echo "WARNING: transferring unencrypted ${TARBALL}; set BACKUP_ENCRYPTION_PASSPHRASE." >&2
+fi
+
 rsync -a "${TARBALL}" "${DEST}/"
+if [[ -f "${TARBALL}.sha256" ]]; then
+  rsync -a "${TARBALL}.sha256" "${DEST}/"
+fi
 
 # Prune old tarballs only when the destination is a local path we own.
 if [[ "${DEST}" != *:* && -d "${DEST}" ]]; then
-  ls -t "${DEST}"/*.tar.gz 2>/dev/null | tail -n "+$((KEEP + 1))" | xargs -r rm -f
+  shopt -s nullglob
+  _REMOTE=("${DEST}"/*.tar.gz "${DEST}"/*.tar.gz.enc)
+  if ((${#_REMOTE[@]})); then
+    ls -t "${_REMOTE[@]}" | tail -n "+$((KEEP + 1))" \
+      | while IFS= read -r OLD; do
+      rm -f "${OLD}" "${OLD}.sha256"
+    done
+  fi
 fi
 
 echo "Off-host backup complete: $(basename "${TARBALL}") -> ${DEST}"

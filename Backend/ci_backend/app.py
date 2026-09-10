@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -12,6 +13,7 @@ from fastapi.responses import JSONResponse  # noqa: E402
 
 from ci_backend.config import Settings  # noqa: E402
 from ci_backend.deps import bind_database  # noqa: E402
+from ci_backend.observability import access_log_middleware  # noqa: E402
 from ci_backend.routers import admin, auth, google, product  # noqa: E402
 
 
@@ -41,6 +43,35 @@ async def _internal_error_body(_request, _exc: Exception) -> JSONResponse:
     # logs, not in the response body.
     return JSONResponse(status_code=500,
                         content={"error": "Something went wrong."})
+
+
+async def _csrf_origin_guard(request: Request, call_next):
+    # Cookie-based CSRF defence: credentialed browser writes (the ones
+    # carrying the ci_session cookie) must come from our own origin.
+    # Requests without an Origin/Referer header (same-origin form
+    # posts, non-browser API clients, TestClient) still pass.
+    if request.method in ("POST", "PATCH", "PUT", "DELETE"):
+        if "ci_session" in request.headers.get("cookie", ""):
+            presented = (request.headers.get("origin")
+                         or request.headers.get("referer"))
+            if presented:
+                from urllib.parse import urlparse
+                if urlparse(presented).hostname != request.url.hostname:
+                    return JSONResponse(
+                        status_code=403,
+                        content={"error": "Cross-origin request refused.",
+                                 "gate": "csrf"})
+    return await call_next(request)
+
+
+async def _request_id(request: Request, call_next):
+    # Observability without sensitive data: every request gets a short
+    # random ID (also echoed as X-Request-ID) that product audit rows
+    # reference. Nothing about the caller or payload is encoded in it.
+    request.state.request_id = uuid.uuid4().hex[:16]
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request.state.request_id
+    return response
 
 
 async def _security_headers(request: Request, call_next):
@@ -77,7 +108,12 @@ def create_app(db_path: str = "", settings: Settings | None = None,
     app = FastAPI(title="Creative Intelligence")
     app.add_exception_handler(HTTPException, _http_error_body)
     app.add_exception_handler(Exception, _internal_error_body)
+    app.middleware("http")(_csrf_origin_guard)
     app.middleware("http")(_security_headers)
+    app.middleware("http")(_request_id)
+    # Outermost: the duration covers every inner layer. The request ID
+    # is read after the inner chain ran, so it is always populated.
+    app.middleware("http")(access_log_middleware)
     app.state.ci_settings = settings
     bind_database(app, db_path)
     if providers is not None:

@@ -57,20 +57,104 @@ def check_key(creative_key):
 
 
 def check_upload(filename, content):
+    if not isinstance(content, (bytes, bytearray)):
+        raise ValueError("empty upload")
+    return check_upload_head(filename, bytes(content)[:32], len(content))
+
+
+def check_upload_head(filename, head, total):
+    """Validate extension + magic from the head bytes + total size.
+
+    Same rules as check_upload() for the streaming path, which never
+    holds the whole file: magic prefixes sit in the first bytes, so a
+    32-byte head plus the counted total enforces everything.
+    """
     if not isinstance(filename, str) or "." not in filename:
         raise ValueError("upload needs a named file with an extension")
     ext = filename[filename.rfind("."):].lower()
     if ext not in TYPES:
         raise ValueError("disallowed media type %r (allowed: %s)"
                          % (ext, ", ".join(sorted(TYPES))))
-    if not isinstance(content, (bytes, bytearray)) or not content:
+    if not head or not total:
         raise ValueError("empty upload")
-    if len(content) > MAX_BYTES:
+    if total > MAX_BYTES:
         raise ValueError("upload exceeds %d MB" % (MAX_BYTES // (1024 * 1024)))
     _mime, magics = TYPES[ext]
-    if magics and not any(bytes(content).startswith(m) for m in magics):
+    if magics and not any(bytes(head).startswith(m) for m in magics):
         raise ValueError("content does not look like %s" % ext)
     return ext, TYPES[ext][0]
+
+
+def check_upload_path(filename, path):
+    """Head validation for a streamed temp file. Returns (ext, mime)."""
+    total = os.path.getsize(path)
+    with open(path, "rb") as fh:
+        head = fh.read(32)
+    return check_upload_head(filename, head, total)
+
+
+def save_media_file(conn, store, creative_key, filename, tmp_path, total,
+                    digest, mime=None):
+    """Persist a streamed upload: validate, atomically rename, record.
+
+    tmp_path is a complete temp file on the same filesystem as store
+    (the handler streams request chunks there while counting bytes and
+    hashing). Magic/MIME validation reads only the head; the file is
+    then atomically renamed into place, so a crash can never leave a
+    partial asset behind. Duplicate bytes reuse the stored file and the
+    temp file is always consumed (renamed or removed).
+    """
+    os.makedirs(store, exist_ok=True)
+    try:
+        check_key(creative_key)
+        ext, sniffed = check_upload_path(filename, tmp_path)
+        if mime and mime != sniffed:
+            raise ValueError("mime %r does not match %s content"
+                             % (mime, ext))
+        ensure_schema(conn)
+        dupe = conn.execute(
+            "SELECT id, stored_name, mime, bytes, sha256, created_at"
+            " FROM media WHERE creative_key=? AND sha256=?",
+            (creative_key, digest)).fetchone()
+        if dupe:
+            return _record(creative_key, filename, dupe)
+        stored = "%s_%s%s" % (creative_key, digest[:12], ext)
+        dest = os.path.join(store, stored)
+        if os.path.basename(stored) != stored:
+            raise ValueError("bad creative_key %r" % (creative_key,))
+        if os.path.isfile(dest):
+            return _existing(conn, creative_key, filename, stored,
+                             sniffed, total, digest)
+        os.replace(tmp_path, dest)
+        tmp_path = None
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        cur = conn.execute(
+            "INSERT INTO media (creative_key, filename, stored_name, mime,"
+            " bytes, sha256, created_at) VALUES (?,?,?,?,?,?,?)",
+            (creative_key, os.path.basename(filename), stored, sniffed,
+             total, digest, now))
+        conn.commit()
+        row = (cur.lastrowid, stored, sniffed, total, digest, now)
+        _link_source_url(conn, creative_key, cur.lastrowid)
+        return _record(creative_key, filename, row)
+    finally:
+        if tmp_path is not None and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
+
+def _existing(conn, creative_key, filename, stored, sniffed, total,
+              digest):
+    """Adopt an identical stored file (same name <=> same content)."""
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    cur = conn.execute(
+        "INSERT INTO media (creative_key, filename, stored_name, mime,"
+        " bytes, sha256, created_at) VALUES (?,?,?,?,?,?,?)",
+        (creative_key, os.path.basename(filename), stored, sniffed,
+         total, digest, now))
+    conn.commit()
+    row = (cur.lastrowid, stored, sniffed, total, digest, now)
+    _link_source_url(conn, creative_key, cur.lastrowid)
+    return _record(creative_key, filename, row)
 
 
 def media_dir(base_dir):

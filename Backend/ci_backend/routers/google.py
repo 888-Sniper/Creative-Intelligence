@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from ci_backend import employees as emp
 from ci_backend import google_oauth as goog
+from ci_backend import product_audit as paudit
 from ci_backend import security_log
 from ci_backend.config import Settings
 from ci_backend.deps import get_db, get_settings
@@ -72,6 +73,8 @@ def google_callback(request: Request, db: Session = Depends(get_db),
     except (emp.StoreError, goog.GoogleError):
         return RedirectResponse("/settings?google=failed", status_code=302)
     security_log.event("google_connected", actor=employee.id)
+    paudit.audit_request(request, employee_id=employee.id,
+                         action="connector_changed", target="connect-google")
     response = RedirectResponse("/settings?google=connected", status_code=302)
     response.delete_cookie(GOOGLE_STATE_COOKIE, path="/")
     return response
@@ -89,4 +92,7 @@ def google_disconnect(request: Request, db: Session = Depends(get_db),
     employee = _actor(request, db)
     goog.forget(db, employee.id, settings)
     security_log.event("google_disconnected", actor=employee.id)
+    paudit.audit_request(request, employee_id=employee.id,
+                         action="connector_changed",
+                         target="disconnect-google")
     return {"ok": True}

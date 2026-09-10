@@ -138,6 +138,17 @@ describe("ComparePage", () => {
     });
   });
 
+  it("displays the backend ranking order, not the entered key order", async () => {
+    mockFetchAll();
+    renderPage();
+    fireEvent.change(screen.getByPlaceholderText("creative A key"), { target: { value: "kb" } });
+    fireEvent.change(screen.getByPlaceholderText("creative B key"), { target: { value: "ka" } });
+    fireEvent.click(screen.getByRole("button", { name: "Compare creatives" }));
+    await waitFor(() => {
+      expect(screen.getByText(/order: ka · kb/)).toBeDefined();
+    });
+  });
+
   it("requires at least two creative keys", async () => {
     mockFetchAll();
     renderPage();

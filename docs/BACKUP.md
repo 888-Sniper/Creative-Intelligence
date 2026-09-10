@@ -32,6 +32,44 @@ Free options that need no paid infrastructure:
 Verify with `ls` at the destination after the next timer run
 (`systemctl list-timers 'creative-intelligence-*'`).
 
+## Encryption
+
+Set a passphrase in `/etc/creative-intelligence/creative-intelligence.env`
+(generate: `openssl rand -base64 32`):
+
+```text
+BACKUP_ENCRYPTION_PASSPHRASE=<secret>
+```
+
+`backup.sh` then writes `<stamp>.tar.gz.enc` (AES-256-CBC, PBKDF2) and
+removes the plaintext. Once the passphrase is configured,
+`offhost_backup.sh` refuses to transfer plaintext archives, so client
+data never leaves the VM unencrypted. The passphrase itself is never
+logged and never enters the repo — it lives only in the 600-permission
+env file and the operator shell.
+
+## Integrity + retention
+
+Every archive ships a `<archive>.sha256` sidecar, verified by the
+backup run itself (`sha256sum -c`) and re-checked by every restore
+test. On-host retention keeps the newest `BACKUP_KEEP_DAILY` archives
+(default 14) plus their hashes; older ones are pruned automatically.
+
+## Weekly restore self-test
+
+`creative-intelligence-restorecheck.timer` runs
+`deploy/oracle/verify-restore.sh` weekly against the newest backup:
+hash check, manifest + database presence, SQLite `integrity_check` —
+all in a temp dir, never touching live data. A failure exits non-zero
+(a failed systemd unit — check `systemctl status
+creative-intelligence-restorecheck` and the journal). Run it manually
+any time:
+
+```sh
+sudo -u creative-intel deploy/oracle/verify-restore.sh
+# RESTORE_OK /var/backups/creative-intelligence/<stamp>.tar.gz[.enc]
+```
+
 ## Locations
 
 | What              | Default location (override)                          |

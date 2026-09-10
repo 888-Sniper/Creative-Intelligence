@@ -43,9 +43,9 @@ interface SyncStatusResponse {
   jobs?: string[];
 }
 
-interface HealthResponse {
-  provider_mode?: string;
-  keys?: Record<string, string>;
+interface ProviderStatusResponse {
+  mode?: string;
+  capabilities?: Record<string, { status?: string }>;
 }
 
 interface KpiCard {
@@ -169,16 +169,16 @@ export function OverviewPage() {
 
   const loadHealth = useCallback(async () => {
     try {
-      const h = await api<HealthResponse>("GET", "/api/health");
-      const keys = h.keys || {};
-      const missing = Object.entries(keys)
-        .filter(([, v]) => v !== "configured")
+      const h = await api<ProviderStatusResponse>("GET", "/api/providers/status");
+      const caps = h.capabilities || {};
+      const missing = Object.entries(caps)
+        .filter(([, v]) => v?.status !== "configured")
         .map(([k]) => k);
       setProvStatus(
-        h.provider_mode === "live"
+        h.mode === "live"
           ? "Providers: live mode." +
-              (missing.length ? " Missing keys: " + missing.join(", ") + "." : " All capability groups configured.")
-          : "Providers: mock mode — set provider_mode=live and add Keychain keys for live transcription, vision and structuring.",
+              (missing.length ? " Missing: " + missing.join(", ") + "." : " All capability groups configured.")
+          : "Providers: mock mode — set CREATIVE_INTEL_PROVIDER_MODE=live and add provider keys for live transcription, vision and structuring.",
       );
     } catch {
       setProvStatus("Provider status unavailable.");

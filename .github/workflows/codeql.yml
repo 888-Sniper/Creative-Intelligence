@@ -1,0 +1,40 @@
+# CodeQL static analysis for Python + TypeScript.
+#
+# NOTE: uploading results needs GitHub Advanced Security (public repo
+# or Pro with GHAS). The visibility guard below keeps this workflow
+# green on private repos without GHAS (job skips) and runs the real
+# analysis wherever results can be uploaded. When the repo goes
+# public, analysis starts automatically with no workflow change.
+
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 6 * * 1"
+
+jobs:
+  analyze:
+    if: github.repository_visibility == 'public'
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      packages: read
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python, typescript]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"

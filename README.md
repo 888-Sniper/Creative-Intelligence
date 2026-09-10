@@ -14,22 +14,24 @@ HUMAN-VERIFIED gate before one-pager export.
 ```text
 Creative Intelligence/
 ├── README.md                  # this file
-├── docs/
-│   ├── Architecture.md
-│   └── PROVIDERS.md           # provider mirror (cf. Nextly AI docs/PROVIDERS.md)
+├── docs/                      # Architecture, PROVIDERS, BACKUP, FRONTEND, Oracle guide
 ├── Backend/                   # FastAPI service (Nextly-aligned stack)
 │   ├── ci_backend/            # app, routers, SQLAlchemy store, WorkOS client
 │   ├── alembic/               # employee-access migrations
 │   └── creative_intel/        # importable analytics library
+├── apps/
+│   └── creative-intelligence-ui/  # React + Vite frontend (same-origin)
+├── deploy/
+│   └── oracle/                # install/update/verify/backup scripts + systemd units
 ├── Source/                    # analysis library: adapters, benchmarks,
 │                              # creative analysis, Q&A, reports, dashboard,
 │                              # providers, deck export + self_check suite
 ├── Schema/
 │   └── Canonical Schema V0.json  # canonical dataset definition (truth)
-├── Web/
-│   └── Index.html             # Main / Campaign / Creative / Compare / Benchmark views
 ├── fixtures/                  # sample CSVs (Title Case file names)
-├── pyproject.toml             # Nextly-aligned dependencies + pytest config
+├── pyproject.toml             # dependencies (uv.lock is the full graph)
+├── requirements.lock          # hashed pip export of uv.lock (CI + VM install this)
+├── uv.lock                    # complete resolved dependency graph with hashes
 └── tests/                     # pytest suite (unittest files run under both)
 ```
 
@@ -37,15 +39,24 @@ Creative Intelligence/
 
 ```bash
 cd "/Users/simrandhillon/University Studies/Creative Intelligence"
-python3 -m pip install "fastapi>=0.115" "uvicorn[standard]>=0.32" \
-  "pydantic>=2.10" "pydantic-settings>=2.6" "sqlalchemy>=2.0" \
-  "alembic>=1.14" "httpx>=0.28" "python-multipart>=0.0.12" \
-  "keyring>=25.0" "pytest>=8.3" "pytest-asyncio>=0.24"
+python3 -m venv .venv && . .venv/bin/activate
+python3 -m pip install --require-hashes -r requirements.lock   # exact CI-tested tree
 python3 -m pytest tests/ -q                        # full suite (Nextly stack)
 python3 -m unittest discover -s tests              # legacy runner (same tests)
 python3 Source/self_check.py                      # analysis-library checks
 python3 Backend/ci_backend/main.py --db Data/local.db   # serve on 127.0.0.1:4321
 ```
+
+Frontend (same-origin React UI, served by the backend in production):
+
+```bash
+cd apps/creative-intelligence-ui
+pnpm install --frozen-lockfile
+pnpm typecheck && pnpm test && pnpm build
+```
+
+Free Oracle demo deploy: `docs/ORACLE_ALWAYS_FREE.md` (one command:
+`sudo DOMAIN=… EMAIL=… bash deploy/oracle/setup-demo.sh`).
 
 Open `http://127.0.0.1:4321`. Fixture load + replay:
 
@@ -56,10 +67,13 @@ curl -X POST http://127.0.0.1:4321/api/replay/run
 
 ## Secrets
 
-No secrets in the repo. Provider keys live in macOS Keychain only
-(see `docs/PROVIDERS.md`). The repo never contains `.env` files, keys,
-or tokens; live provider calls fail closed to mock/fixture data when no
-key is present.
+No secrets in the repo. Provider keys resolve environment-first
+(`CREATIVE_INTEL_KEY_<PROVIDER>`, see `docs/PROVIDERS.md`), falling
+back to the OS keychain on developer Macs only. The repo never
+contains `.env` files, keys, or tokens; live provider calls fail
+closed to mock/fixture data when no key is present. Google refresh
+tokens are encrypted in the server database under
+`CREATIVE_INTEL_MASTER_KEY`; the browser never sees any token.
 
 ## Google Drive (private Sheets / Drive sync)
 

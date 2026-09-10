@@ -62,7 +62,7 @@ chmod 750 "${APP_DIR}/deploy/oracle/"*.sh
 
 python3.13 -m venv "${APP_DIR}/.venv"
 "${APP_DIR}/.venv/bin/python" -m pip install --upgrade pip wheel
-"${APP_DIR}/.venv/bin/pip" install -r "${APP_DIR}/requirements.lock"
+"${APP_DIR}/.venv/bin/pip" install --require-hashes -r "${APP_DIR}/requirements.lock"
 "${APP_DIR}/.venv/bin/pip" install --no-deps "${APP_DIR}"
 
 pushd "${APP_DIR}/apps/creative-intelligence-ui" >/dev/null
@@ -88,6 +88,8 @@ cp "${APP_DIR}/deploy/oracle/creative-intelligence-backup.timer" "/etc/systemd/s
 cp "${APP_DIR}/deploy/oracle/creative-intelligence-duckdns.service" "/etc/systemd/system/${SERVICE_NAME}-duckdns.service"
 cp "${APP_DIR}/deploy/oracle/creative-intelligence-duckdns.timer" "/etc/systemd/system/${SERVICE_NAME}-duckdns.timer"
 cp "${APP_DIR}/deploy/oracle/creative-intelligence-worker.service" "/etc/systemd/system/${SERVICE_NAME}-worker.service"
+cp "${APP_DIR}/deploy/oracle/creative-intelligence-restorecheck.service" "/etc/systemd/system/${SERVICE_NAME}-restorecheck.service"
+cp "${APP_DIR}/deploy/oracle/creative-intelligence-restorecheck.timer" "/etc/systemd/system/${SERVICE_NAME}-restorecheck.timer"
 if [[ ! -f "${ENV_DIR}/duckdns.env" ]]; then
   cp "${APP_DIR}/deploy/oracle/duckdns.env.example" "${ENV_DIR}/duckdns.env"
   chmod 600 "${ENV_DIR}/duckdns.env"
@@ -100,20 +102,6 @@ rm -f /etc/nginx/sites-enabled/default
 chown -R "${APP_USER}:${APP_GROUP}" "${APP_DIR}" "${DATA_DIR}"
 chmod 750 "${DATA_DIR}" "${DATA_DIR}/media"
 
-nginx -t
-systemctl daemon-reload
-systemctl enable "${SERVICE_NAME}"
-systemctl restart "${SERVICE_NAME}"
-systemctl enable --now "${SERVICE_NAME}-worker"
-systemctl restart "${SERVICE_NAME}-worker"
-systemctl enable --now "${SERVICE_NAME}-backup.timer"
-if grep -q "^DUCKDNS_TOKEN=.\+" "${ENV_DIR}/duckdns.env" 2>/dev/null; then
-  systemctl enable --now "${SERVICE_NAME}-duckdns.timer"
-else
-  echo "DuckDNS token not set: fill ${ENV_DIR}/duckdns.env, then run"
-  echo "  sudo systemctl enable --now ${SERVICE_NAME}-duckdns.timer"
-fi
-
 # Backup landing zone: the timer runs as creative-intel, so the
 # directory must exist with service-account ownership BEFORE the
 # timer is enabled (backup.sh cannot create it under /var/backups
@@ -122,6 +110,21 @@ BACKUP_DIR="${BACKUP_DIR:-/var/backups/creative-intelligence}"
 mkdir -p "${BACKUP_DIR}"
 chown creative-intel:creative-intel "${BACKUP_DIR}"
 chmod 700 "${BACKUP_DIR}"
+
+nginx -t
+systemctl daemon-reload
+systemctl enable "${SERVICE_NAME}"
+systemctl restart "${SERVICE_NAME}"
+systemctl enable --now "${SERVICE_NAME}-worker"
+systemctl restart "${SERVICE_NAME}-worker"
+systemctl enable --now "${SERVICE_NAME}-backup.timer"
+systemctl enable --now "${SERVICE_NAME}-restorecheck.timer"
+if grep -q "^DUCKDNS_TOKEN=.\+" "${ENV_DIR}/duckdns.env" 2>/dev/null; then
+  systemctl enable --now "${SERVICE_NAME}-duckdns.timer"
+else
+  echo "DuckDNS token not set: fill ${ENV_DIR}/duckdns.env, then run"
+  echo "  sudo systemctl enable --now ${SERVICE_NAME}-duckdns.timer"
+fi
 
 # Host firewall: SSH first (never lock out the current session), then
 # web ports. Port 4321 stays loopback-only (see nginx template).

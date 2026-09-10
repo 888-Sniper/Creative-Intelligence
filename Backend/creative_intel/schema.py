@@ -171,6 +171,19 @@ CREATE TABLE IF NOT EXISTS employee_audit (
     new_value TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS product_audit (
+    id TEXT PRIMARY KEY,
+    request_id TEXT NOT NULL DEFAULT '',
+    employee_id TEXT NOT NULL DEFAULT '',
+    action TEXT NOT NULL DEFAULT '',
+    target TEXT NOT NULL DEFAULT '',
+    result TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_product_audit_created
+    ON product_audit (created_at);
+CREATE INDEX IF NOT EXISTS idx_product_audit_employee
+    ON product_audit (employee_id);
 """
 
 # Natural dedup key for re-imports: the same fact from the same origin
@@ -244,6 +257,18 @@ def migrate(conn):
         " prev_value TEXT NOT NULL DEFAULT '',"
         " new_value TEXT NOT NULL DEFAULT '',"
         " created_at TEXT NOT NULL DEFAULT '')")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS product_audit ("
+        "id TEXT PRIMARY KEY, request_id TEXT NOT NULL DEFAULT '',"
+        " employee_id TEXT NOT NULL DEFAULT '',"
+        " action TEXT NOT NULL DEFAULT '',"
+        " target TEXT NOT NULL DEFAULT '',"
+        " result TEXT NOT NULL DEFAULT '',"
+        " created_at TEXT NOT NULL DEFAULT '')")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_product_audit_created"
+                 " ON product_audit (created_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_product_audit_employee"
+                 " ON product_audit (employee_id)")
     key_cols = ", ".join(SYNC_KEY_COLUMNS)
     conn.execute(
         "DELETE FROM ads WHERE rowid NOT IN"

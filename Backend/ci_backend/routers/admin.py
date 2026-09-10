@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from ci_backend import employees as emp
+from ci_backend import product_audit as paudit
 from ci_backend import security_log
 from ci_backend.deps import (
     admin_rate_limit,
@@ -101,6 +102,55 @@ def audit(request: Request, db=Depends(get_db),
           admin=Depends(get_current_admin)):
     return {"events": [e.model_dump() for e in emp.admin_audit_list(
         db, request.query_params.get("limit", "100"))]}
+
+
+@router.get("/ops")
+def ops(request: Request, db=Depends(get_db),
+        admin=Depends(get_current_admin)):
+    """Operations health: storage sizes, disk space, job durations and
+    recent sync failures, with plain-language warnings. Admin-only:
+    infrastructure detail, never payloads or secrets."""
+    _ = (db, admin)
+    import os
+    import sqlite3
+
+    from ci_backend import actions as legacy
+    from ci_backend.observability import ops_summary
+
+    db_path = str(request.app.state.ci_db_path)
+    try:
+        media_dir = legacy._media_dir()
+    except Exception:
+        media_dir = ""
+    backup_dir = os.environ.get("BACKUP_DIR",
+                                "/var/backups/creative-intelligence")
+    conn = sqlite3.connect(db_path, check_same_thread=False)
+    try:
+        from creative_intel import schema
+        schema.init_db(conn)
+        return ops_summary(conn, db_path=db_path, media_dir=media_dir,
+                           backup_dir=backup_dir)
+    finally:
+        conn.close()
+
+
+@router.get("/audit/product")
+def audit_product(request: Request, db=Depends(get_db),
+                  admin=Depends(get_current_admin)):
+    """Product audit trail: uploads, analyses, verifications, syncs,
+    reports and connector changes. Rows carry request/employee IDs,
+    action, target and result only — never payloads or secrets."""
+    _ = (db, admin)
+    import sqlite3
+
+    limit = request.query_params.get("limit", "100")
+    conn = sqlite3.connect(request.app.state.ci_db_path,
+                           check_same_thread=False)
+    try:
+        paudit.ensure(conn)
+        return {"events": paudit.recent(conn, limit)}
+    finally:
+        conn.close()
 
 
 @router.get("/employees/{employee_id}")

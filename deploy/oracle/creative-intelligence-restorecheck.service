@@ -1,0 +1,10 @@
+[Unit]
+Description=Creative Intelligence weekly restore self-test
+After=creative-intelligence-backup.service
+
+[Service]
+Type=oneshot
+User=creative-intel
+Group=creative-intel
+EnvironmentFile=-/etc/creative-intelligence/creative-intelligence.env
+ExecStart=/opt/creative-intelligence/deploy/oracle/verify-restore.sh

@@ -125,7 +125,7 @@ class LiveProviderTest(unittest.TestCase):
 
     def setUp(self):
         self._saved = dict(os.environ)
-        os.environ["provider_mode"] = "live"
+        os.environ["CREATIVE_INTEL_PROVIDER_MODE"] = "live"
         os.environ["CREATIVE_INTEL_KEY_DEEPGRAM"] = "dummy-deepgram"
         os.environ["CREATIVE_INTEL_BASE_DEEPGRAM"] = self.base
         os.environ["CREATIVE_INTEL_KEY_DEEPSEEK"] = "dummy-deepseek"
@@ -206,7 +206,7 @@ class LiveProviderTest(unittest.TestCase):
             prov.stt.transcribe("k", audio_bytes=b"xx")
 
     def test_mock_default_ignores_env_keys(self):
-        os.environ["provider_mode"] = "mock"
+        os.environ["CREATIVE_INTEL_PROVIDER_MODE"] = "mock"
         prov = providers.Providers()
         text, _ = prov.stt.transcribe("k")
         self.assertIn("mock transcript", text)

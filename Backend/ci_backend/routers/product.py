@@ -9,6 +9,7 @@ so both shells run identical logic during the transition.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import functools
 import mimetypes
 import os
@@ -49,6 +50,12 @@ from ci_backend.deps import (  # noqa: E402
 
 router = APIRouter(tags=["product"])
 
+# Bounded worker pool for blocking video/AI work (item 24): the event
+# loop never runs pipeline/media/import code directly, and at most
+# four such jobs run concurrently per process.
+_WORKERS = concurrent.futures.ThreadPoolExecutor(
+    max_workers=4, thread_name_prefix="ci-worker")
+
 
 def _conflict(exc: Exception) -> HTTPException:
     return HTTPException(status_code=409, detail={"error": str(exc)})
@@ -68,6 +75,24 @@ def health(request: Request, prov=Depends(get_providers)):
     return {"ok": True, "provider_mode": prov.mode,
             "keys": providers_mod.key_status(),
             "providers": providers_mod.provider_matrix()}
+
+
+@router.get("/api/providers/status")
+def providers_status(request: Request,
+                     _emp=Depends(get_current_employee)):
+    """Safe AI readiness for the demo (item 30): per-capability
+    configured/missing plus adapter names. Never carries key values,
+    bearer tokens, or provider secrets."""
+    caps = {}
+    for cap, roster in (
+            ("stt", providers_mod.LiveBundle.STT_ROSTER),
+            ("vision", providers_mod.LiveBundle.VISION_ROSTER),
+            ("llm", providers_mod.LiveBundle.LLM_ROSTER)):
+        names = sorted({p for p, _model, _tier in roster
+                        if providers_mod._configured(p)})
+        caps[cap] = {"status": "configured" if names else "missing",
+                     "adapters": names}
+    return {"mode": providers_mod.mode(), "capabilities": caps}
 
 
 @router.get("/api/campaigns")
@@ -577,8 +602,8 @@ async def _run_action(conn, prov, action: str, payload: dict, actor: str = "",
         _resolve_google_bearer(payload, actor, request)
     try:
         result = await asyncio.get_running_loop().run_in_executor(
-            None, functools.partial(legacy.apply_action, conn, action,
-                                    payload, prov, actor=actor))
+            _WORKERS, functools.partial(legacy.apply_action, conn, action,
+                                        payload, prov, actor=actor))
     except (ValueError, export_gate.ExportBlocked, emp.StoreError) as exc:
         raise _conflict(exc)
     finally:
@@ -620,7 +645,7 @@ def serve_media(media_id: str, request: Request,
         raise HTTPException(status_code=404, detail={"error": str(exc)})
     return FileResponse(path, media_type=info["mime"],
                         filename=info["filename"],
-                        headers={"Cache-Control": "private, max-age=86400"})
+                        headers={"Cache-Control": "private, no-store"})
 
 
 _ALLOWED_ASSET_EXTS = (".png", ".svg", ".ico", ".webp")

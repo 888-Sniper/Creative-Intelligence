@@ -1,7 +1,8 @@
 """Provider adapters mirroring Nextly AI docs/PROVIDERS.md.
 
 Mock implementations are first-class in mock mode. Live adapters fail
-closed when the Keychain key is missing or provider_mode != live: they
+closed when the Keychain key is missing or CREATIVE_INTEL_PROVIDER_MODE
+!= live: they
 raise ProviderUnavailable instead of silently returning mocks.
 """
 
@@ -89,7 +90,9 @@ class ProviderUnavailable(Exception):
 
 
 def mode():
-    return "live" if os.environ.get("provider_mode") == "live" else "mock"
+    """Live only via the namespaced setting (never bare `provider_mode`)."""
+    return "live" if os.environ.get(
+        "CREATIVE_INTEL_PROVIDER_MODE") == "live" else "mock"
 
 
 def keychain_has(service):
@@ -825,10 +828,10 @@ def _configured(provider):
 class LiveBundle:
     """Live provider bundle: real HTTP clients, fail-closed, never mocks.
 
-    Raises ProviderUnavailable unless provider_mode=live AND at least one
-    adapter per capability is configured. Media bytes (audio/frames) must
-    be supplied by the caller; without them stages raise instead of
-    inventing content.
+    Raises ProviderUnavailable unless CREATIVE_INTEL_PROVIDER_MODE=live
+    AND at least one adapter per capability is configured. Media bytes
+    (audio/frames) must be supplied by the caller; without them stages
+    raise instead of inventing content.
     """
 
     STT_ROSTER = [
@@ -863,7 +866,8 @@ class LiveBundle:
 
     def __init__(self):
         if mode() != "live":
-            raise ProviderUnavailable("provider_mode != live (mock is active)")
+            raise ProviderUnavailable(
+                "CREATIVE_INTEL_PROVIDER_MODE != live (mock is active)")
         stt = [(p, m, t) for p, m, t in self.STT_ROSTER if _configured(p)]
         vision = [(p, m, t) for p, m, t in self.VISION_ROSTER
                   if _configured(p)]

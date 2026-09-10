@@ -67,9 +67,51 @@ class Settings(BaseSettings):
     the session cookie is never transmitted over cleartext.
     """
 
+    environment: str = "local"
+    """Deployment environment: local, demo, or production."""
+
+    provider_mode: str = "mock"
+    """AI provider mode: mock or live (CREATIVE_INTEL_PROVIDER_MODE)."""
+
     @property
     def database_path(self) -> Path:
         return self.data_dir / self.db_filename
+
+    def require_public_safety(self) -> None:
+        """Fail closed for public demo/production environments.
+
+        A public deployment must never silently run mock AI analysis,
+        cleartext cookies, or missing auth identity. Raises ConfigError
+        with secret-free messages; local development is unaffected.
+        """
+        if self.environment.strip().lower() not in ("demo", "production"):
+            return
+        problems = []
+        if self.provider_mode.strip().lower() != "live":
+            problems.append(
+                "CREATIVE_INTEL_PROVIDER_MODE must be 'live' in environment "
+                "'%s' (refusing to serve mock AI analysis publicly)."
+                % self.environment.strip())
+        if not self.cookie_secure:
+            problems.append(
+                "CREATIVE_INTEL_COOKIE_SECURE must be true in environment "
+                "'%s'." % self.environment.strip())
+        required = (
+            ("CREATIVE_INTEL_ADMIN_EMAIL", self.admin_email),
+            ("CREATIVE_INTEL_WORKOS_CLIENT_ID", self.workos_client_id),
+            ("CREATIVE_INTEL_KEY_WORKOS", self.key_workos),
+            ("CREATIVE_INTEL_WORKOS_REDIRECT_URI",
+             self.workos_redirect_uri),
+        )
+        for label, value in required:
+            if not str(value or "").strip():
+                problems.append("%s is not configured." % label)
+        if problems:
+            raise ConfigError("; ".join(problems))
+
+
+class ConfigError(ValueError):
+    """Startup configuration failure (messages never carry secrets)."""
 
 
 @lru_cache

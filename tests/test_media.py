@@ -204,8 +204,8 @@ class MediaMultipartTest(unittest.TestCase):
         r = self.client.get(rec["url"])
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.content, PNG)
-        self.assertIn("private", r.headers.get("cache-control", ""))
-        self.assertNotIn("public", r.headers.get("cache-control", ""))
+        self.assertEqual(r.headers.get("cache-control"),
+                         "private, no-store")
 
     def test_multipart_serves_ranges(self):
         r = self.client.post(

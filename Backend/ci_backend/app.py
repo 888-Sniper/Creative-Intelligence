@@ -56,6 +56,8 @@ def create_app(db_path: str = "", settings: Settings | None = None,
                providers=None) -> FastAPI:
     """Build the app bound to one sqlite file (auth + product facts)."""
     settings = settings or Settings()
+    # Fail startup (never serve) when a public environment is misconfigured.
+    settings.require_public_safety()
     db_path = db_path or str(settings.database_path)
     os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
 

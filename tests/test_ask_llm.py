@@ -150,7 +150,7 @@ class AskHttpTest(unittest.TestCase):
 
     def test_live_ask_end_to_end(self):
         saved = dict(os.environ)
-        os.environ["provider_mode"] = "live"
+        os.environ["CREATIVE_INTEL_PROVIDER_MODE"] = "live"
         os.environ["CREATIVE_INTEL_KEY_DEEPSEEK"] = "dummy"
         os.environ["CREATIVE_INTEL_BASE_DEEPSEEK"] = self.base
         try:

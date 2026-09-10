@@ -15,7 +15,7 @@ from urllib.parse import urlencode
 
 import httpx
 
-from ci_backend import secrets as secrets_mod
+from ci_backend import credentials as secrets_mod
 
 PROVIDERS = {
     "google": "GoogleOAuth",

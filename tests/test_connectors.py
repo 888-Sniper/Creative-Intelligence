@@ -209,7 +209,7 @@ class ConnectorTest(unittest.TestCase):
             self.fail("expected failure without account id")
 
     def test_drive_csv_and_xlsx(self):
-        import server
+        from ci_backend import actions as server
         conn = sqlite3.connect(":memory:")
         try:
             schema.init_db(conn)
@@ -228,7 +228,7 @@ class ConnectorTest(unittest.TestCase):
             conn.close()
 
     def test_drive_login_page_refused(self):
-        import server
+        from ci_backend import actions as server
         conn = sqlite3.connect(":memory:")
         try:
             schema.init_db(conn)
@@ -241,7 +241,7 @@ class ConnectorTest(unittest.TestCase):
             conn.close()
 
     def test_server_connect_actions(self):
-        import server
+        from ci_backend import actions as server
         os.environ["CREATIVE_INTEL_KEY_META"] = "dummy-meta-token"
         os.environ["CREATIVE_INTEL_API_META"] = self.base
         conn = sqlite3.connect(":memory:")

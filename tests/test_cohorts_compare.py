@@ -12,7 +12,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Backend"))
 
 from creative_intel import benchmarks, cohorts, creative, ingest, schema  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from auth_help import authed, req as areq  # noqa: E402
 
 META = ("Campaign,Ad Name,Creative Name,Amount Spent,Impressions,"
         "Link Clicks,Conversions\n"

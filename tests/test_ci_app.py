@@ -73,6 +73,13 @@ def test_oauth_start_shape(client):
     body = r.json()
     assert "GoogleOAuth" in body["url"] and "code_challenge=" in body["url"]
     assert "sk-test-key" not in body["url"]
+    for provider, tag in (("apple", "AppleOAuth"),
+                          ("github", "GitHubOAuth"),
+                          ("microsoft", "MicrosoftOAuth")):
+        r = client.post("/api/auth/oauth/start",
+                        json={"provider": provider})
+        assert r.status_code == 200, provider
+        assert tag in r.json()["url"], provider
     r = client.post("/api/auth/oauth/start", json={"provider": "nope"})
     assert r.status_code == 409
 
@@ -146,9 +153,10 @@ def test_employee_cannot_use_admin_api(tmp_path, monkeypatch):
     state = r.json()["state"]
     http2.post("/api/auth/oauth/finish",
                json={"code": "auth_code", "state": state})
-    # Pending newcomer: admin list forbidden, not leaked.
+    # Pending newcomer: admin list forbidden, not leaked, not admin.
     r = http2.get("/api/admin/employees")
     assert r.status_code == 403
+    assert http2.get("/api/auth/me").json()["is_admin"] is False
 
 
 def test_last_admin_refused(tmp_path, monkeypatch):
@@ -198,19 +206,114 @@ def test_product_parity_ingest_then_campaigns(tmp_path, monkeypatch):
     assert r.json()[0]["metrics"]["cpa"] == 10.0
 
 
-def test_legacy_and_new_stores_agree(tmp_path):
-    # Same sqlite file: SQLAlchemy store sees legacy-written rows.
-    import sqlite3
-    db = str(tmp_path / "shared.db")
-    legacy = sqlite3.connect(db)
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..",
-                                    "Backend"))
-    from creative_intel import auth as legacy_auth
-    from creative_intel import schema
-    schema.init_db(legacy)
-    legacy_auth.admin_create(legacy, "root", "ada@foap.test", role="admin")
-    legacy.close()
+def test_switch_rechecks_authorization(tmp_path):
+    http, db = make_client(tmp_path, admin_email="boss@foap.test")
     engine = make_engine(db)
     with make_session_factory(engine)() as sess:
-        found = emp_store.find_employee(sess, "", "ada@foap.test")
-        assert found is not None and found.role == "admin"
+        boss = emp_store.admin_create(sess, "root", "boss@foap.test",
+                                      role="admin")
+        staff = emp_store.admin_create(sess, "root", "staff@foap.test",
+                                       role="employee")
+        boss_cookie = "ci_session=" + emp_store.create_session(
+            sess, boss.id, "")
+        staff_cookie = "ci_session=" + emp_store.create_session(
+            sess, staff.id, "")
+    boss_client = TestClient(http.app, raise_server_exceptions=False)
+    boss_client.headers.update({"Cookie": boss_cookie})
+    staff_client = TestClient(http.app, raise_server_exceptions=False)
+    staff_client.headers.update({"Cookie": staff_cookie})
+
+    accounts = boss_client.get("/api/auth/accounts").json()["accounts"]
+    assert {a["email"] for a in accounts} == {"boss@foap.test",
+                                             "staff@foap.test"}
+    # Switching to a live account works and keeps the first intact.
+    r = boss_client.post("/api/auth/switch",
+                         json={"employee_id": staff.id})
+    assert r.status_code == 200
+    assert r.json()["employee"]["email"] == "staff@foap.test"
+    assert boss_client.get("/api/auth/me").json()["gate"] == "app"
+    # After suspension, switching to that account is refused.
+    http2 = TestClient(http.app, raise_server_exceptions=False)
+    http2.headers.update({"Cookie": boss_cookie})
+    http2.post("/api/admin/employees/%s/suspend" % staff.id, json={})
+    r = boss_client.post("/api/auth/switch",
+                         json={"employee_id": staff.id})
+    assert r.status_code == 404
+    # Suspended staff's old session is dead (401), and the roster
+    # shows the suspension — no privilege leaks to the other account.
+    assert staff_client.get("/api/campaigns").status_code == 401
+    staff_row = next(e for e in
+                     boss_client.get("/api/admin/employees").json()
+                     ["employees"] if e["email"] == "staff@foap.test")
+    assert staff_row["status"] == "suspended"
+    assert boss_client.get("/api/auth/me").json()["is_admin"] is True
+
+
+def test_secrets_never_leak(tmp_path, monkeypatch):
+    from ci_backend import workos as workos_mod
+
+    class BadResponse:
+        status_code = 400
+
+        def json(self):
+            return {"message": "bad stuff", "code": "bad"}
+
+    class StubClient:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def post(self, url, headers=None, json=None):
+            return BadResponse()
+
+    monkeypatch.setattr(workos_mod.httpx, "Client", StubClient)
+    monkeypatch.setenv("CREATIVE_INTEL_KEY_WORKOS", "sk-live-SECRET-XYZ")
+    http, _db = make_client(tmp_path)
+    r = http.post("/api/auth/oauth/start", json={"provider": "google"})
+    assert r.status_code == 200
+    # Force the WorkOS exchange itself to fail: the secret must not
+    # surface in the 409 body.
+    r = http.post("/api/auth/oauth/finish",
+                  json={"code": "x", "state": r.json()["state"]})
+    assert r.status_code == 409
+    assert "SECRET-XYZ" not in r.text and "sk-live" not in r.text
+
+
+def test_frontend_gates():
+    html = open(os.path.join(os.path.dirname(__file__), "..", "Web",
+                             "Index.html"), encoding="utf-8").read()
+    assert "Welcome to Creative Intelligence" in html
+    for label in ("Continue with Google", "Continue with Microsoft",
+                  "Continue with Apple", "Continue with GitHub"):
+        assert label in html
+    assert "Access pending" in html
+    assert "Admin" in html and "Employees" in html
+    for secret in ("CREATIVE_INTEL_KEY_WORKOS", "sk-live", "sk_test"):
+        assert secret not in html
+    assert "localStorage" not in html
+
+
+def test_no_licensing_concepts():
+    root = os.path.join(os.path.dirname(__file__), "..")
+    banned = ("do" + "do", "needs_license", "licence_", "license_key",
+              "grace_period", "device_limit")
+    hits = []
+    for dirpath, _dirs, files in os.walk(root):
+        if "__pycache__" in dirpath:
+            continue
+        for name in files:
+            if not name.endswith((".py", ".html")):
+                continue
+            if name in ("test_ci_app.py", "test_ci_auth.py"):
+                continue  # these files name the banned concepts
+            path = os.path.join(dirpath, name)
+            text = open(path, encoding="utf-8", errors="replace").read()
+            for bad in banned:
+                if bad in text.lower():
+                    hits.append("%s: %s" % (path, bad))
+    assert hits == []

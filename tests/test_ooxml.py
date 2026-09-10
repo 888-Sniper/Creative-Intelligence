@@ -161,7 +161,7 @@ class XlsxIngestTest(unittest.TestCase):
         self.assertEqual(quarantined[0]["source_row"], 3)
 
     def test_xlsx_inserts(self):
-        import server
+        from ci_backend import actions as server
         rows, _ = ingest.parse_xlsx_report(self._workbook(), "tiktok", "test")
         self.assertEqual(ingest.insert_rows(self.conn, rows), 1)
         out = server.apply_action(

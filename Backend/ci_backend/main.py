@@ -6,7 +6,7 @@ import argparse
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from ci_backend.app import create_app  # noqa: E402
 from ci_backend.config import Settings  # noqa: E402
@@ -27,8 +27,8 @@ def main() -> None:
     os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
 
     if args.load_fixture:
-        import server as legacy
-        print("fixture rows: %d" % legacy.load_fixtures(db_path))
+        from ci_backend.actions import load_fixtures
+        print("fixture rows: %d" % load_fixtures(db_path))
         return
 
     app = create_app(db_path, settings)

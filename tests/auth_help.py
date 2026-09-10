@@ -1,38 +1,32 @@
-"""Shared login helper for live-server tests (stdlib unittest).
+"""Session minting for tests that drive a real server subprocess.
 
-Production authentication is default-deny from the very first launch:
-every protected API needs a session cookie for an active employee.
-This helper mints an active employee plus session directly against a
-test database file so live-server tests can act as signed-in staff::
-
-    from auth_help import authed
-    cookie = authed(db_path)                      # active admin session
-    req = urllib.request.Request(url, headers={"Cookie": cookie})
+The FastAPI TestClient tests use tests/conftest.py instead; this helper
+exists for the launch-path tests whose server runs in another process,
+so the cookie is minted straight into the database file.
 """
 
 import os
-import sqlite3
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Backend"))
 
-from creative_intel import auth, schema
+from ci_backend import employees as emp_store
+from ci_backend.db import init_db, make_engine, make_session_factory
 
 
 def authed(db_path, email="staff@example.com", role="admin"):
     """Return a Cookie header value for an active employee session."""
-    conn = sqlite3.connect(db_path)
-    try:
-        schema.init_db(conn)
+    engine = make_engine(db_path)
+    init_db(engine)
+    with make_session_factory(engine)() as sess:
         try:
-            emp = auth.admin_create(conn, "test-helper", email, role=role)
-        except auth.AuthError:
-            emp = auth.find_employee(conn, "", email.strip().lower())
-        token = auth.create_session(conn, emp["id"],
-                                    emp.get("workos_user_id") or "")
-    finally:
-        conn.close()
-    return "%s=%s" % (auth.COOKIE_NAME, token)
+            employee = emp_store.admin_create(sess, "test-helper", email,
+                                              role=role)
+        except emp_store.StoreError:
+            employee = emp_store.find_employee(sess, "", email.strip().lower())
+        token = emp_store.create_session(sess, employee.id,
+                                         employee.workos_user_id or "")
+    return "ci_session=%s" % token
 
 
 def req(url, cookie, data=None, content_type="application/json"):

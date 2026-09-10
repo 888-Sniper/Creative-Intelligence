@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Backend"))
 
 from ci_backend import db as db_mod
 from ci_backend import employees as emp
-from ci_backend import secrets as secrets_mod
+from ci_backend import credentials as secrets_mod
 from ci_backend import workos as workos_mod
 from ci_backend.config import Settings
 
@@ -196,6 +196,29 @@ def test_pending_states_single_use(session):
     row = emp.pending_pop(session, "st")
     assert row is not None and emp.pending_valid(row)
     assert emp.pending_pop(session, "st") is None
+
+
+def test_pending_states_expire(session):
+    from ci_backend.db import AuthPending
+    emp.pending_put(session, "old", "google", "verifier")
+    row = session.get(AuthPending, "old")
+    row.created_at = "2000-01-01T00:00:00+00:00"
+    session.commit()
+    assert emp.pending_valid(row) is False
+    emp.sweep_pending(session)
+    assert session.get(AuthPending, "old") is None
+
+
+def test_illegal_transitions_rejected(session):
+    _tok, employee, _c = emp.login_identity(session, dict(IDENT))
+    with pytest.raises(emp.StoreError):
+        emp.admin_set_status(session, "root", employee.id, "suspended",
+                             "EMPLOYEE_SUSPENDED")
+    emp.admin_set_status(session, "root", employee.id, "revoked",
+                         "EMPLOYEE_REVOKED")
+    with pytest.raises(emp.StoreError):
+        emp.admin_set_status(session, "root", employee.id, "active",
+                             "EMPLOYEE_REACTIVATED")
 
 
 def test_me_envelope_and_cookies(session):

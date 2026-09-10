@@ -1,24 +1,16 @@
 """Foap application-shell regression tests (stdlib unittest).
 
-Static assertions over Web/Index.html plus live checks against a real
-server instance: branding slots, navigation integrity, filter wiring,
+Static assertions over Web/Index.html plus live checks through the
+FastAPI app: branding slots, navigation integrity, filter wiring,
 asset sandbox, and escaping discipline.
 """
 
-import json
 import os
-import sqlite3
 import sys
 import tempfile
-import threading
 import unittest
-import urllib.request
-from http.server import HTTPServer
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Backend"))
-
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from auth_help import authed
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 HTML = open(os.path.join(ROOT, "Web", "Index.html")).read()
@@ -71,27 +63,18 @@ class ShellStaticTest(unittest.TestCase):
 class ShellLiveTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        import server
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from conftest import make_client
         cls._db = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
-        server.Handler.db_path = cls._db
-        cls._srv = HTTPServer(("127.0.0.1", 0), server.Handler)
-        cls.port = cls._srv.server_address[1]
-        cls._thread = threading.Thread(target=cls._srv.serve_forever,
-                                       daemon=True)
-        cls._thread.start()
+        cls.client = make_client(cls._db)
 
     @classmethod
     def tearDownClass(cls):
-        cls._srv.shutdown()
-        cls._thread.join(timeout=10)
         os.unlink(cls._db)
 
     def _get(self, path):
-        with urllib.request.urlopen(
-                "http://127.0.0.1:%d%s" % (self.port, path),
-                timeout=5) as resp:
-            return resp.status, resp.headers.get("Content-Type"), \
-                resp.read()
+        r = self.client.get(path)
+        return r.status_code, r.headers.get("content-type"), r.content
 
     def test_index_serves(self):
         status, ctype, body = self._get("/")
@@ -211,39 +194,26 @@ class ShellLiveTest(unittest.TestCase):
 
     def test_report_office_formats_end_to_end(self):
         import base64
-        import urllib.request
-        cookie = authed(self._db)
-        headers = {"Content-Type": "application/json", "Cookie": cookie}
+        from conftest import mint_admin
+        self.client.headers.update(mint_admin(self._db))
         csv_payload = ("Campaign,Spend,Impressions,Clicks,Conversions\n"
-                       "LiveCamp,50,5000,100,5\n").encode()
-        req = urllib.request.Request(
-            "http://127.0.0.1:%d/api/ingest" % self.port, data=json.dumps(
-                {"platform": "meta",
-                 "csv": csv_payload.decode()}).encode(),
-            headers=headers, method="POST")
-        with urllib.request.urlopen(req, timeout=5):
-            pass
+                       "LiveCamp,50,5000,100,5\n")
+        r = self.client.post("/api/ingest", json={
+            "platform": "meta", "csv": csv_payload})
+        assert r.status_code == 200, r.text
         for fmt, key in (("pptx", "pptx_b64"), ("xlsx", "xlsx_b64")):
-            req = urllib.request.Request(
-                "http://127.0.0.1:%d/api/report" % self.port,
-                data=json.dumps({"format": fmt,
-                                 "kpis": ["cpa", "ctr"]}).encode(),
-                headers=headers, method="POST")
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                rep = json.loads(resp.read())
+            rep = self.client.post(
+                "/api/report",
+                json={"format": fmt, "kpis": ["cpa", "ctr"]}).json()
             self.assertEqual(rep["format"], fmt)
             self.assertTrue(base64.b64decode(rep[key]).startswith(b"PK"))
 
     def test_asset_sandbox(self):
-        import urllib.error
         for bad in ("/assets/../Index.html", "/assets/.hidden",
                     "/assets/x.py", "/assets/nope.png",
                     "/assets/favicon.svg"):
-            try:
-                self._get(bad)
-                self.fail("served %s" % bad)
-            except urllib.error.HTTPError as exc:
-                self.assertEqual(exc.code, 404)
+            status, _ctype, _body = self._get(bad)
+            self.assertEqual(status, 404, bad)
 
 
 if __name__ == "__main__":

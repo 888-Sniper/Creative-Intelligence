@@ -34,9 +34,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Backend"))
 from creative_intel import (benchmarks, creative, ingest, providers, qa,  # noqa: E402
                             retention, schema)
 from creative_intel.benchmarks import Scope  # noqa: E402
-import server  # noqa: E402  (route-level scope threading)
+from ci_backend import actions as server  # noqa: E402  (shared builders)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from auth_help import authed  # noqa: E402
 
 ACC_CSV = ("Campaign,Ad Name,Creative Name,Amount Spent,Impressions,"
            "Link Clicks,Conversions,Video Views,Revenue,"
@@ -643,16 +642,16 @@ _SRV = {}
 
 
 def _test_port():
-    """Lazily-started shared HTTP server over a fixture snapshot.
+    """Lazily-built shared TestClient over a fixture snapshot.
 
     Module-level and lazy so HTTP tests pass regardless of the
     alphabetical class order unittest imposes; torn down by
     tearDownModule. Mutating tests must leave the snapshot clean.
     """
-    if "port" not in _SRV:
-        from http.server import HTTPServer
+    if "client" not in _SRV:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from conftest import make_client, mint_admin
         import tempfile
-        import threading
         live = fresh_acc_db()
         path = tempfile.NamedTemporaryFile(suffix=".db",
                                            delete=False).name
@@ -664,46 +663,30 @@ def _test_port():
         disk.commit()
         live.close()
         disk.close()
-        _SRV["prev"] = server.Handler.db_path
-        server.Handler.db_path = path
-        srv = HTTPServer(("127.0.0.1", 0), server.Handler)
-        _SRV.update(port=srv.server_address[1], srv=srv, path=path,
-                    thread=threading.Thread(
-                        target=srv.serve_forever, daemon=True))
-        _SRV["thread"].start()
-        _SRV["cookie"] = authed(path)
-    return _SRV["port"]
+        client = make_client(path)
+        client.headers.update(mint_admin(path))
+        _SRV.update(client=client, path=path)
+    return _SRV["client"]
 
 
 def tearDownModule():
-    if "srv" in _SRV:
-        _SRV["srv"].shutdown()
-        _SRV["thread"].join(timeout=10)
-        server.Handler.db_path = _SRV["prev"]
+    if "client" in _SRV:
         os.unlink(_SRV["path"])
         _SRV.clear()
 
 
 def _fetch(path, timeout=10):
-    import urllib.request
-    _test_port()
-    req = urllib.request.Request(
-        "http://127.0.0.1:%d%s" % (_SRV["port"], path),
-        headers={"Cookie": _SRV["cookie"]})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read())
+    client = _test_port()
+    r = client.get(path)
+    assert r.status_code == 200, (path, r.text)
+    return r.json()
 
 
 def _post(path, body, timeout=10):
-    import urllib.request
-    _test_port()
-    req = urllib.request.Request(
-        "http://127.0.0.1:%d%s" % (_SRV["port"], path),
-        data=json.dumps(body).encode(),
-        headers={"Content-Type": "application/json",
-                 "Cookie": _SRV["cookie"]})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read())
+    client = _test_port()
+    r = client.post(path, json=body)
+    assert r.status_code == 200, (path, r.text)
+    return r.json()
 
 
 class RouteScopeIntegrationTest(unittest.TestCase):
@@ -1034,11 +1017,10 @@ class MultiCompareTest(unittest.TestCase):
         self.assertIn("differences", pair["why"])
 
     def test_route_rejects_seventh_key(self):
-        import urllib.error
         query = "&".join("key=k%d" % i for i in range(7))
-        with self.assertRaises(urllib.error.HTTPError) as ctx:
-            _fetch("/api/compare?" + query)
-        self.assertEqual(ctx.exception.code, 409)
+        r = _test_port().get("/api/compare?" + query)
+        self.assertEqual(r.status_code, 409)
+        self.assertIn("error", r.json())
 
 
 class SavedViewsTest(unittest.TestCase):
@@ -1502,11 +1484,11 @@ class DateRangeTest(unittest.TestCase):
         self.assertEqual(got["scope"], "All data")
 
     def test_periods_route_rejects_reversed(self):
-        import urllib.error
-        with self.assertRaises(urllib.error.HTTPError) as ctx:
-            _fetch("/api/compare/periods?a_from=2026-08-05&a_to=2026-08-01"
-                   "&b_from=2026-08-04&b_to=2026-08-07")
-        self.assertEqual(ctx.exception.code, 409)
+        r = _test_port().get(
+            "/api/compare/periods?a_from=2026-08-05&a_to=2026-08-01"
+            "&b_from=2026-08-04&b_to=2026-08-07")
+        self.assertEqual(r.status_code, 409)
+        self.assertIn("error", r.json())
 
     def test_describe_shows_range(self):
         scope = Scope({"market": ["Spain"],

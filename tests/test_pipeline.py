@@ -74,7 +74,7 @@ class IngestTest(unittest.TestCase):
         self.assertEqual(len(ingest.parse_csv(dirty, "meta")), 1)
 
     def test_ingest_rejects_bad_payload(self):
-        import server
+        from ci_backend import actions as server
         conn = fresh_db()
         with self.assertRaises(ValueError):
             server.apply_action(conn, "ingest", {}, providers.Providers())
@@ -84,7 +84,7 @@ class IngestTest(unittest.TestCase):
         conn.close()
 
     def test_load_fixtures_into_temp_db(self):
-        import server
+        from ci_backend import actions as server
         import tempfile
         db = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
         try:
@@ -201,9 +201,10 @@ class CrossEngineTest(unittest.TestCase):
 
 class LaunchPathTest(unittest.TestCase):
     def test_normal_launch_serves_new_routes(self):
-        """Reproduces `python3 Backend/server.py`: module-level code must
-        fully execute (no NameError from definitions after main())."""
-        import server
+        """Reproduces `python3 Backend/ci_backend/main.py`: the FastAPI
+        app must boot and lock a fresh database from the first launch."""
+        import os.path
+        from ci_backend import main as entry
         import socket
         import subprocess
         import time
@@ -214,7 +215,7 @@ class LaunchPathTest(unittest.TestCase):
         sock.close()
         db = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
         proc = subprocess.Popen(
-            [sys.executable, server.__file__, "--db", db,
+            [sys.executable, entry.__file__, "--db", db,
              "--port", str(port)],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         try:
@@ -254,7 +255,7 @@ class LaunchContractTest(unittest.TestCase):
     """UI contract endpoints, exercised over the real launch path."""
 
     def _launched(self):
-        import server
+        from ci_backend import main as entry
         import socket
         import subprocess
         import time
@@ -266,7 +267,7 @@ class LaunchContractTest(unittest.TestCase):
         sock.close()
         db = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
         proc = subprocess.Popen(
-            [sys.executable, server.__file__, "--db", db,
+            [sys.executable, entry.__file__, "--db", db,
              "--port", str(port)],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         base = "http://127.0.0.1:%d" % port
@@ -336,7 +337,7 @@ class LaunchContractTest(unittest.TestCase):
 
 class ReplayTest(unittest.TestCase):
     def test_log_round_trip(self):
-        import server
+        from ci_backend import actions as server
         conn = fresh_db()
         prov = providers.Providers()
         payload = {"platform": "meta", "source": "upload", "csv": META_CSV}

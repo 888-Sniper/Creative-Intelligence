@@ -14,7 +14,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Backend"))
 
 from creative_intel import ingest, schema, sync
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from auth_help import authed, req as areq
 
 CSV = ("campaign,ad set,ad name,spend,impressions,clicks,conversions,date\n"
        "CampA,Set1,ad-1,10,1000,20,2,2026-08-01\n"
@@ -238,7 +237,7 @@ class JobsTest(unittest.TestCase):
 
 class ServerSyncTest(unittest.TestCase):
     def test_connect_upserts_and_saves_job(self):
-        import server
+        from ci_backend import actions as server
         conn = _conn()
         try:
             import creative_intel.sync as sync_mod
@@ -267,7 +266,7 @@ class ServerSyncTest(unittest.TestCase):
             conn.close()
 
     def test_sync_now_needs_saved_job(self):
-        import server
+        from ci_backend import actions as server
         conn = _conn()
         try:
             with self.assertRaises(ValueError):

@@ -96,6 +96,15 @@ describe("AnalystPage", () => {
     expect(screen.getByRole("button", { name: "3 Points" })).toBeDefined();
   });
 
+  it("renders the partner heading and supporting copy", () => {
+    mockFetch();
+    renderPage();
+    expect(screen.getByRole("heading", { name: "Your Creative Partner" })).toBeDefined();
+    expect(
+      screen.getByText("Ask questions, uncover insights, and get recommendations from your creative data."),
+    ).toBeDefined();
+  });
+
   it("exposes report and workbook exports", () => {
     mockFetch();
     renderPage();

@@ -322,6 +322,9 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
         </ul>
       </aside>
       <section className="analyst-main" aria-label="Foap Analyst Conversation">
+        <p className="eyebrow">AI Analyst</p>
+        <h1 className="page-title">Your Creative Partner</h1>
+        <p className="page-sub">Ask questions, uncover insights, and get recommendations from your creative data.</p>
         <div className="analyst-controls">
           <label>
             Objective{" "}

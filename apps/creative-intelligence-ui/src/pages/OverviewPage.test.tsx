@@ -93,7 +93,7 @@ describe("OverviewPage", () => {
     renderPage();
     expect(screen.getByText("Overview")).toBeDefined();
     expect(
-      screen.getByText("How Are Your Campaigns Performing? What Creatives Are Winning? What Needs Attention?"),
+      screen.getByText("Your creative performance at a glance."),
     ).toBeDefined();
     await waitFor(() => {
       expect(screen.getByText("$200.00")).toBeDefined();

@@ -264,7 +264,7 @@ export function OverviewPage() {
   return (
     <>
       <h1 className="page-title">Overview</h1>
-      <p className="page-sub">How Are Your Campaigns Performing? What Creatives Are Winning? What Needs Attention?</p>
+      <p className="page-sub">Your creative performance at a glance.</p>
       <div className="card">
         <h3>Upload (Meta / TikTok CSV, Excel .xlsx, Sheets Link)</h3>
         <select value={platform} onChange={(e) => setPlatform(e.target.value)} aria-label="Platform">

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "@/auth/AuthProvider";
+import { AccountMenu } from "@/auth/AccountMenu";
 import { Icon } from "@/components/icons";
 
 const NAV = [
@@ -22,22 +23,11 @@ const NAV_ACCOUNT = [
   { to: "/settings", label: "Settings", icon: "gear" },
 ] as const;
 
-function initials(name: string): string {
-  const bits = name.trim().split(/\s+/).filter(Boolean);
-  if (!bits.length) return "•";
-  return (bits[0][0] + (bits[1]?.[0] ?? "")).toUpperCase();
-}
-
 export function AppShell() {
   const { me } = useAuth();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const employee = me?.employee;
-  const name =
-    `${employee?.first_name ?? ""} ${employee?.last_name ?? ""}`.trim() ||
-    employee?.email ||
-    "Employee";
   const close = () => setOpen(false);
   return (
     <div className="shell">
@@ -94,11 +84,7 @@ export function AppShell() {
               <Icon name="bell" size={20} />
               <span className="dot" aria-hidden="true" />
             </Link>
-            <Link to="/profile" className="user-chip" aria-label={`${name}, profile`}>
-              <span className="avatar" aria-hidden="true">{initials(name)}</span>
-              <span className="uname">{name}</span>
-              <Icon name="chev" size={15} />
-            </Link>
+            <AccountMenu />
           </div>
         </header>
         <main className="page">

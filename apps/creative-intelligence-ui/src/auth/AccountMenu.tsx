@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { api, ApiError } from "@/api/client";
 import { useAuth } from "@/auth/AuthProvider";
+import { Icon } from "@/components/icons";
 
 interface StoredAccount {
   employee_id: string;
@@ -89,12 +91,16 @@ export function AccountMenu() {
             {employee.role} · {employee.status}
           </span>
         </span>
-        <span aria-hidden="true" className="menu-chevron">
-          {expanded ? "▾" : "▸"}
+        <span aria-hidden="true" className="menu-chevron"
+          style={{ transform: expanded ? "rotate(-90deg)" : "rotate(90deg)" }}>
+          <Icon name="chev" size={15} />
         </span>
       </button>
       {expanded ? (
         <div id="account-menu-body">
+          <Link to="/profile" className="link-btn" onClick={() => setExpanded(false)}>
+            Profile
+          </Link>
           {accounts === null ? (
             <p className="muted">Loading Accounts…</p>
           ) : (

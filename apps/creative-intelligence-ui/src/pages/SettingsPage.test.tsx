@@ -83,7 +83,7 @@ describe("SettingsPage", () => {
         setItem: (k: string, v: string) => { store.set(k, String(v)); },
         removeItem: (k: string) => { store.delete(k); },
         clear: () => { store.clear(); },
-      } satisfies Storage,
+      },
       configurable: true,
       writable: true,
     });

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { AuthProvider } from "@/auth/AuthProvider";
@@ -73,6 +73,22 @@ function renderSettings() {
 }
 
 describe("SettingsPage", () => {
+  beforeEach(() => {
+    // This jsdom build exposes no window.localStorage; install a fresh
+    // in-memory stand-in so save/load persistence behaves like a browser.
+    const store = new Map<string, string>();
+    Object.defineProperty(window, "localStorage", {
+      value: {
+        getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
+        setItem: (k: string, v: string) => { store.set(k, String(v)); },
+        removeItem: (k: string) => { store.delete(k); },
+        clear: () => { store.clear(); },
+      } satisfies Storage,
+      configurable: true,
+      writable: true,
+    });
+  });
+
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();

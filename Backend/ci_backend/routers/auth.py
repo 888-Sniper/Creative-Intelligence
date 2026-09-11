@@ -385,16 +385,23 @@ async def switch(request: Request, db=Depends(get_db),
                  settings: Settings = Depends(get_settings)):
     body = await json_payload(request)
     token = bearer_token(request)
-    if emp.valid_session(db, token) is None:
-        raise HTTPException(status_code=401, detail={
-            "error": "Sign in to continue.", "gate": "login"})
-    # Item 18: the target needs a live session in the CALLER's container.
-    # A live session anywhere else no longer authorizes the switch, and
-    # the fresh session inherits the caller's container.
+    # The caller must be an approved (active) employee: pending,
+    # suspended and revoked callers cannot pivot into other accounts.
+    try:
+        caller, _gate = emp.authorize(db, token)
+    except emp.Denied as exc:
+        raise HTTPException(
+            status_code=401 if exc.gate == "login" else 403,
+            detail={"error": str(exc), "gate": exc.gate})
+    # The target needs a live session in the CALLER's bound container.
+    # Unbound callers prove no shared tenancy, so they switch nowhere;
+    # the target must also be active right now. Every refusal is 404 so
+    # callers cannot probe which accounts exist or their status.
     container = emp.session_container(db, token) or ""
     target = emp.get_employee(db, body.get("employee_id", ""))
-    if target is None or not emp.has_live_session_in(
-            db, target.id, container):
+    if (not container or target is None
+            or (target.status or "pending") != "active"
+            or not emp.has_live_session_in(db, target.id, container)):
         raise HTTPException(status_code=404, detail={
             "error": "Sign in with that account first."})
     fresh = emp.create_session(db, target.id, target.workos_user_id or "",

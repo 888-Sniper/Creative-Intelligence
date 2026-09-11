@@ -499,11 +499,17 @@ def valid_session(db: Session, token: str) -> Employee | None:
 
 def has_live_session_in(db: Session, employee_id: str,
                         container_id: str) -> bool:
-    """Item 18: live session for employee inside one container only."""
+    """Item 18: live session for employee inside one container only.
+
+    An empty container proves nothing about shared tenancy, so it
+    never authorizes: unbound sessions match no switching target.
+    """
+    if not container_id:
+        return False
     now = datetime.datetime.now(datetime.timezone.utc).isoformat()
     return db.scalar(select(func.count()).select_from(AuthSession).where(
         AuthSession.employee_id == employee_id,
-        AuthSession.container_id == (container_id or ""),
+        AuthSession.container_id == container_id,
         AuthSession.expires_at > now)) not in (None, 0)
 
 
@@ -512,13 +518,16 @@ def list_accounts(db: Session, container_id: str = "") -> list[dict]:
 
     Only accounts with a live session bound to the caller's container
     are returned, so one installation can never enumerate accounts from
-    another. Unbound ("") callers see unbound sessions (legacy parity).
+    another. Unbound ("") callers see nothing: the empty container is
+    shared by every fresh session and must never authorize enumeration.
     """
+    if not container_id:
+        return []
     now = datetime.datetime.now(datetime.timezone.utc).isoformat()
     rows = db.execute(
         select(AuthSession, Employee)
         .outerjoin(Employee, Employee.id == AuthSession.employee_id)
-        .where(AuthSession.container_id == (container_id or ""),
+        .where(AuthSession.container_id == container_id,
                AuthSession.expires_at > now)
         .order_by(AuthSession.last_seen_at.desc())).all()
     out = []

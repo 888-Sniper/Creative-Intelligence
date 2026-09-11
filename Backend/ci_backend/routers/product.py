@@ -578,12 +578,30 @@ async def sync_job_create(request: Request, conn=Depends(get_product_conn),
     return {"job": job}
 
 
+def _job_owner_or_403(conn, job_id: str, who) -> dict:
+    """Sync jobs are owned: only the owning employee or an admin may
+    change, delete or re-target them.
+
+    Without this, any active employee could rewrite another owner's
+    sheets/drive job destination, and the scheduled runner would then
+    send the OWNER's Google token to the attacker's endpoint.
+    """
+    job = _job_or_404(conn, job_id)
+    if who.id != (job.get("owner_employee_id") or "") \
+            and (who.role or "") != "admin":
+        raise HTTPException(status_code=403, detail={
+            "error": "Only the job owner or an administrator can"
+                     " change this sync job.",
+            "gate": "forbidden"})
+    return job
+
+
 @router.patch("/api/sync/jobs/{job_id}")
 async def sync_job_update(job_id: str, request: Request,
                           conn=Depends(get_product_conn),
                           who=Depends(get_current_employee)):
     from urllib.parse import unquote
-    _job_or_404(conn, unquote(job_id))
+    _job_owner_or_403(conn, unquote(job_id), who)
     try:
         body = SyncJobUpdate.model_validate(await json_payload(request))
     except Exception as exc:
@@ -610,7 +628,7 @@ def sync_job_delete(job_id: str, request: Request,
                     conn=Depends(get_product_conn),
                     who=Depends(get_current_employee)):
     from urllib.parse import unquote
-    _job_or_404(conn, unquote(job_id))
+    _job_owner_or_403(conn, unquote(job_id), who)
     sync.delete_job(conn, unquote(job_id))
     paudit.audit_request(request, conn, employee_id=who.id,
                          action="sync_job_deleted", target=unquote(job_id))

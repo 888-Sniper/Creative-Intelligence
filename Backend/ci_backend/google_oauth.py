@@ -133,7 +133,11 @@ def _store(db: Session, employee_id: str, body: dict[str, Any],
     if row is None:
         row = OAuthToken(provider=PROVIDER, owner_employee_id=employee_id)
         db.add(row)
-    row.access_token = str(body.get("access_token") or "")
+    access = str(body.get("access_token") or "")
+    # Usable token: encrypted at rest, never plaintext in the row.
+    row.access_token_enc = token_crypto.encrypt_secret(access, settings) \
+        if access else ""
+    row.access_token = ""
     row.expires_at = (now + datetime.timedelta(
         seconds=max(seconds, 60))).isoformat(timespec="seconds")
     row.scope = scope or " ".join(SCOPES)
@@ -178,7 +182,13 @@ def forget(db: Session, employee_id: str, settings=None) -> None:
     """Disconnect Google: revoke at Google, then drop the stored row."""
     row = db.get(OAuthToken, (PROVIDER, employee_id))
     if row is not None:
-        _revoke(getattr(row, "refresh_token_enc", ""), row.access_token,
+        # Disconnect must never strand a row: an undecryptable access
+        # token (wrong master key) still gets wiped locally.
+        try:
+            access = _plain_access_token(db, row, settings)
+        except token_crypto.CryptoError:
+            access = ""
+        _revoke(getattr(row, "refresh_token_enc", ""), access,
                 settings)
         db.delete(row)
         db.commit()
@@ -221,11 +231,43 @@ def status(db: Session, employee_id: str) -> dict[str, Any]:
             "scope": row.scope or ""}
 
 
+def _plain_access_token(db: Session, row: OAuthToken,
+                          settings=None) -> str:
+    """Decrypt the stored access token, upgrading legacy rows.
+
+    New rows keep it in access_token_enc only; rows written before
+    encryption carry plaintext in access_token and are moved into the
+    encrypted column on first use. Decryption failures propagate as
+    CryptoError: both tokens share the master key, so a wrong key
+    cannot be recovered through the refresh flow either.
+    """
+    enc = getattr(row, "access_token_enc", "") or ""
+    if enc:
+        return token_crypto.decrypt_secret(enc, settings)
+    legacy = row.access_token or ""
+    if legacy:
+        row.access_token_enc = token_crypto.encrypt_secret(
+            legacy, settings)
+        row.access_token = ""
+        db.commit()
+    return legacy
+
+
 def access_token_for(db: Session, employee_id: str,
                      settings=None) -> str:
     """Valid access token, refreshing transparently when expired."""
     row = db.get(OAuthToken, (PROVIDER, employee_id))
-    if row is None or not row.access_token:
+    if row is None:
+        raise emp.StoreError(
+            "Google Drive is not connected. Connect it in Settings.")
+    try:
+        access = _plain_access_token(db, row, settings)
+    except token_crypto.CryptoError as exc:
+        raise emp.StoreError(
+            "Cannot decrypt the stored Google token: wrong master "
+            "key. Fix CREATIVE_INTEL_MASTER_KEY, then reconnect.") \
+            from exc
+    if not access:
         raise emp.StoreError(
             "Google Drive is not connected. Connect it in Settings.")
     try:
@@ -235,7 +277,7 @@ def access_token_for(db: Session, employee_id: str,
     except ValueError:
         expired = True
     if not expired:
-        return row.access_token
+        return access
     try:
         refresh = _refresh_token_for(db, employee_id, settings)
     except token_crypto.CryptoError as exc:

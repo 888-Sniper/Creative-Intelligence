@@ -82,10 +82,11 @@ class AuthPending(Base):
 class OAuthToken(Base):
     """Per-employee third-party OAuth tokens (item 31: Google).
 
-    The SHORT-LIVED access token lives here in plaintext; the
-    long-lived REFRESH token lives here too but encrypted under the
-    server master key (never in logs or the browser). Composite PK
-    stops duplicate rows per owner.
+    Both the SHORT-LIVED access token and the long-lived REFRESH
+    token are encrypted under the server master key (never in logs
+    or the browser). The legacy plaintext access_token column stays
+    readable for one-time upgrade and is cleared on write. Composite
+    PK stops duplicate rows per owner.
     """
 
     __tablename__ = "oauth_tokens"
@@ -94,6 +95,7 @@ class OAuthToken(Base):
     owner_employee_id: Mapped[str] = mapped_column(
         String, ForeignKey("employees.id"), primary_key=True)
     access_token: Mapped[str] = mapped_column(String, default="")
+    access_token_enc: Mapped[str] = mapped_column(String, default="")
     expires_at: Mapped[str] = mapped_column(String, default="")
     scope: Mapped[str] = mapped_column(String, default="")
     updated_at: Mapped[str] = mapped_column(String, default="")

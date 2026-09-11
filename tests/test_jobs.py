@@ -75,6 +75,41 @@ def test_run_through_inline_without_worker():
     conn.close()
 
 
+def test_sync_job_update_delete_need_owner_or_admin(tmp_path):
+    from conftest import make_client, mint_admin
+    db = str(tmp_path / "o.db")
+    owner = make_client(db)
+    owner.headers.update(mint_admin(db, email="owner@foap.test",
+                                    role="employee"))
+    other = make_client(db)
+    other.headers.update(mint_admin(db, email="other@foap.test",
+                                    role="employee"))
+    boss = make_client(db)
+    boss.headers.update(mint_admin(db, email="boss@foap.test",
+                                   role="admin"))
+    r = owner.post("/api/sync/jobs", json={
+        "source": "sheets", "name": "O",
+        "params": {"url": "https://docs.google.com/x",
+                   "google_auth": True}})
+    assert r.status_code == 200, r.text
+    job_id = r.json()["job"]["id"]
+    # Another employee can neither re-target nor delete it.
+    r = other.patch("/api/sync/jobs/%s" % job_id, json={
+        "params": {"url": "https://evil.example/x"}})
+    assert r.status_code == 403, r.text
+    r = other.delete("/api/sync/jobs/%s" % job_id)
+    assert r.status_code == 403, r.text
+    # Owner and admin can.
+    r = owner.patch("/api/sync/jobs/%s" % job_id,
+                    json={"name": "O2"})
+    assert r.status_code == 200, r.text
+    r = boss.patch("/api/sync/jobs/%s" % job_id,
+                   json={"name": "O3"})
+    assert r.status_code == 200, r.text
+    r = boss.delete("/api/sync/jobs/%s" % job_id)
+    assert r.status_code == 200, r.text
+
+
 def test_run_through_retries_inline_after_transient_failure():
     import ci_backend.worker_handlers as wh
     from creative_intel import schema

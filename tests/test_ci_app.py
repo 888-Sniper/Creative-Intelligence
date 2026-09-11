@@ -638,6 +638,17 @@ def test_switch_rechecks_authorization(tmp_path):
     staff_client = TestClient(http.app, raise_server_exceptions=False)
     staff_client.headers.update({"Cookie": staff_cookie})
 
+    # Unbound sessions prove no shared tenancy: no enumeration, no
+    # switching, even between two live unbound accounts.
+    assert boss_client.get("/api/auth/accounts").json() == {"accounts": []}
+    r = boss_client.post("/api/auth/switch",
+                         json={"employee_id": staff.id})
+    assert r.status_code == 404
+    # Bind both sessions into one installation container first.
+    for authed in (boss_client, staff_client):
+        r = authed.post("/api/auth/container",
+                        json={"container_id": "box-1"})
+        assert r.json() == {"ok": True, "container_id": "box-1"}
     accounts = boss_client.get("/api/auth/accounts").json()["accounts"]
     assert {a["email"] for a in accounts} == {"boss@foap.test",
                                              "staff@foap.test"}
@@ -811,6 +822,14 @@ def _login(http, monkeypatch, email, box=""):
     return r
 
 
+def _approve(http, email, by="root@foap.test"):
+    with employee_session(http.app.state.ci_db_path) as sess:
+        me = emp_store.find_employee(sess, email=email)
+        root = emp_store.find_employee(sess, email=by)
+        emp_store.admin_set_status(sess, root.id, me.id, "active",
+                                   "EMPLOYEE_APPROVED")
+
+
 def test_accounts_scoped_to_caller_container(client, monkeypatch):
     # Bootstrap admin first (no container), then X on box-a, Y on box-b.
     _login(client, monkeypatch, "root@foap.test")
@@ -829,16 +848,44 @@ def test_switch_refused_across_containers(client, monkeypatch):
     _login(client, monkeypatch, "root@foap.test")
     _login(client, monkeypatch, "x@foap.test", "box-a")
     y = _login(client, monkeypatch, "y@foap.test", "box-b").json()["employee"]
+    for email in ("x@foap.test", "y@foap.test"):
+        _approve(client, email)
     # X on box-a cannot switch to Y (live session, foreign container).
     _login(client, monkeypatch, "x@foap.test", "box-a")
     r = client.post("/api/auth/switch", json={"employee_id": y["id"]})
     assert r.status_code == 404
     # Same-container switch works and inherits the container.
     z = _login(client, monkeypatch, "zed@foap.test", "box-a").json()["employee"]
+    _approve(client, "zed@foap.test")
     _login(client, monkeypatch, "x@foap.test", "box-a")
     r = client.post("/api/auth/switch", json={"employee_id": z["id"]})
     assert r.status_code == 200, r.text
     assert r.json()["employee"]["id"] == z["id"]
+
+
+def test_pending_caller_cannot_switch_into_unbound_admin(client,
+                                                     monkeypatch):
+    # A01 attack shape: a pending user plus a live UNBOUND admin
+    # session. Neither enumeration nor switching may cross that gap.
+    _login(client, monkeypatch, "boss@foap.test")
+    with employee_session(client.app.state.ci_db_path) as sess:
+        pending = emp_store.admin_create(sess, "root", "pending@foap.test",
+                                         role="employee")
+        # Simulate a first-login user awaiting approval (no valid
+        # active->pending transition exists by design).
+        pending.status = "pending"
+        sess.commit()
+        cookie = ("ci_session="
+                  + emp_store.create_session(sess, pending.id, ""))
+        admin = emp_store.find_employee(sess, email="boss@foap.test")
+        admin_id = admin.id
+    intruder = TestClient(client.app, raise_server_exceptions=False)
+    intruder.headers.update({"Cookie": cookie})
+    assert intruder.get("/api/auth/accounts").json() == {"accounts": []}
+    r = intruder.post("/api/auth/switch",
+                      json={"employee_id": admin_id})
+    assert r.status_code in (401, 403, 404)
+    assert intruder.get("/api/auth/me").json()["gate"] == "pending"
 
 
 def test_container_bind_adopt_and_refuse(client, monkeypatch):

@@ -120,7 +120,9 @@ def _row(engine, emp_id):
     with make_session_factory(engine)() as sess:
         row = sess.get(goog.OAuthToken, ("google", emp_id))
         return None if row is None else {
-            "access": row.access_token, "enc": row.refresh_token_enc,
+            "access": row.access_token,
+            "access_enc": row.access_token_enc,
+            "enc": row.refresh_token_enc,
             "scope": row.scope, "expires": row.expires_at}
 
 
@@ -166,12 +168,17 @@ def test_full_connect_status_disconnect(app_data, fake_keyring, monkeypatch):
     assert "client_secret" not in sent or sent.get("client_secret")
     emp_id = _emp_id(engine)
     stored = _row(engine, emp_id)
-    assert stored is not None and stored["access"] == "ya-access"
-    # Refresh token is encrypted at rest: present, opaque, decryptable.
+    # Both tokens encrypted at rest: no plaintext usable secret in
+    # the row; each decrypts back under the master key.
+    assert stored is not None and stored["access"] == ""
+    assert stored["access_enc"] and stored["access_enc"] != "ya-access"
+    assert token_crypto.decrypt_secret(stored["access_enc"], settings) \
+        == "ya-access"
     assert stored["enc"] and stored["enc"] != "ya-refresh"
     assert token_crypto.decrypt_secret(stored["enc"], settings) \
         == "ya-refresh"
     assert "ya-refresh" not in (stored["access"] + stored["scope"])
+    assert "ya-access" not in (stored["access"] + stored["scope"])
     assert fake_keyring == {}
     status = http.get("/api/auth/google/status").json()
     assert status["connected"] is True
@@ -253,6 +260,40 @@ def test_legacy_keychain_row_upgrades_to_database(
     assert token_crypto.decrypt_secret(stored["enc"], settings) \
         == "ya-legacy"
     assert fake_keyring == {}
+
+
+def test_legacy_plaintext_access_token_upgrades_on_read(app_data,
+                                                     monkeypatch):
+    http, engine, settings = app_data
+    emp_id = _emp_id(engine)
+    with make_session_factory(engine)() as sess:
+        row = goog.OAuthToken(provider="google",
+                              owner_employee_id=emp_id)
+        row.access_token = "ya-legacy-access"
+        row.expires_at = "2999-01-01T00:00:00+00:00"
+        row.scope = GRANTED_SCOPE
+        sess.add(row)
+        sess.commit()
+    with make_session_factory(engine)() as sess:
+        assert goog.access_token_for(sess, emp_id, settings) \
+            == "ya-legacy-access"
+    stored = _row(engine, emp_id)
+    assert stored["access"] == ""
+    assert token_crypto.decrypt_secret(stored["access_enc"], settings) \
+        == "ya-legacy-access"
+
+
+def test_disconnect_wipes_row_with_wrong_master_key(app_data, monkeypatch):
+    http, engine, settings = app_data
+    calls = []
+    fake_google(monkeypatch, calls)
+    _connect(http, monkeypatch, calls)
+    emp_id = _emp_id(engine)
+    bad = Settings(**dict(GSET, master_key=OTHER_MASTER_KEY))
+    with make_session_factory(engine)() as sess:
+        # Must not strand the row even though nothing decrypts.
+        goog.forget(sess, emp_id, bad)
+    assert _row(engine, emp_id) is None
 
 
 def test_wrong_master_key_fails_closed(app_data, monkeypatch):

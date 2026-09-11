@@ -152,12 +152,12 @@ describe("AdminEmployeesPage", () => {
     expect(screen.getByRole("button", { name: "Reactivate" })).toBeDefined();
     // Revoked rows offer no Revoke action; every other row does.
     expect(screen.getAllByRole("button", { name: "Revoke" })).toHaveLength(3);
-    expect(screen.getByRole("button", { name: "Make employee" })).toBeDefined();
-    expect(screen.getAllByRole("button", { name: "Make admin" })).toHaveLength(3);
-    expect(screen.getByText("Last login")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Make Employee" })).toBeDefined();
+    expect(screen.getAllByRole("button", { name: "Make Admin" })).toHaveLength(3);
+    expect(screen.getByText("Last Login")).toBeDefined();
     expect(screen.getByText("Approval")).toBeDefined();
     expect(screen.getByText("2026-09-01")).toBeDefined();
-    expect(screen.getByText("Audit trail")).toBeDefined();
+    expect(screen.getByText("Audit Trail")).toBeDefined();
     expect(screen.getByText("EMPLOYEE_APPROVED")).toBeDefined();
     expect(screen.getByText("pending → active")).toBeDefined();
   });
@@ -167,7 +167,7 @@ describe("AdminEmployeesPage", () => {
       () => new Promise<Response>(() => {}),
     ) as unknown as typeof fetch;
     render(<AdminEmployeesPage />);
-    expect(screen.getByText("Loading employees…")).toBeDefined();
+    expect(screen.getByText("Loading Employees…")).toBeDefined();
   });
 
   it("renders list errors", async () => {
@@ -188,7 +188,7 @@ describe("AdminEmployeesPage", () => {
     const revoke = screen.getAllByRole("button", { name: "Revoke" })[0];
     fireEvent.click(revoke);
     expect(window.confirm).toHaveBeenCalledWith(
-      "Revoke this employee's access? Their sessions stop working immediately.",
+      "Revoke This Employee's Access? Their Sessions Stop Working Immediately.",
     );
     expect(calls.some((c) => c.method === "POST")).toBe(false);
     stubConfirm(true);
@@ -212,7 +212,7 @@ describe("AdminEmployeesPage", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Suspend" }));
     expect(window.confirm).toHaveBeenCalledWith(
-      "Suspend this admin? Their sessions stop working immediately. The server refuses when they are the last active admin.",
+      "Suspend This Admin? Their Sessions Stop Working Immediately. The Server Refuses When They Are The Last Active Admin.",
     );
     await waitFor(() => {
       expect(
@@ -223,9 +223,9 @@ describe("AdminEmployeesPage", () => {
       ).toBe(true);
     });
     stubConfirm(false);
-    fireEvent.click(screen.getByRole("button", { name: "Make employee" }));
+    fireEvent.click(screen.getByRole("button", { name: "Make Employee" }));
     expect(window.confirm).toHaveBeenCalledWith(
-      "Demote this admin to employee? They lose admin access immediately.",
+      "Demote This Admin To Employee? They Lose Admin Access Immediately.",
     );
     expect(
       calls.some(
@@ -244,12 +244,12 @@ describe("AdminEmployeesPage", () => {
     fireEvent.change(screen.getByPlaceholderText("email"), {
       target: { value: "new@foap.test" },
     });
-    fireEvent.change(screen.getByLabelText("New employee role"), {
+    fireEvent.change(screen.getByLabelText("New Employee Role"), {
       target: { value: "employee" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Add (active)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add (Active)" }));
     await waitFor(() => {
-      expect(screen.getByText("Employee added as active.")).toBeDefined();
+      expect(screen.getByText("Employee Added As Active.")).toBeDefined();
     });
     const post = calls.find(
       (c) => c.method === "POST" && c.url === "/api/admin/employees",
@@ -268,10 +268,10 @@ describe("AdminEmployeesPage", () => {
       expect(screen.getByRole("button", { name: "Suspend" })).toBeDefined();
     });
     fireEvent.click(
-      screen.getAllByRole("button", { name: "Invalidate sessions" })[1],
+      screen.getAllByRole("button", { name: "Invalidate Sessions" })[1],
     );
     expect(window.confirm).toHaveBeenCalledWith(
-      "Invalidate all sessions for this employee? They are signed out everywhere immediately.",
+      "Invalidate All Sessions For This Employee? They Are Signed Out Everywhere Immediately.",
     );
     await waitFor(() => {
       expect(
@@ -283,7 +283,7 @@ describe("AdminEmployeesPage", () => {
       ).toBe(true);
     });
     await waitFor(() => {
-      expect(screen.getByText("2 session(s) revoked.")).toBeDefined();
+      expect(screen.getByText("2 Session(s) Revoked.")).toBeDefined();
     });
   });
 
@@ -306,7 +306,7 @@ describe("AdminEmployeesPage", () => {
         ),
       ).toBe(true);
     });
-    fireEvent.change(screen.getByLabelText("Filter by status"), {
+    fireEvent.change(screen.getByLabelText("Filter By Status"), {
       target: { value: "active" },
     });
     await waitFor(() => {
@@ -316,10 +316,10 @@ describe("AdminEmployeesPage", () => {
         ),
       ).toBe(true);
     });
-    fireEvent.change(screen.getByLabelText("Filter by status"), {
+    fireEvent.change(screen.getByLabelText("Filter By Status"), {
       target: { value: "" },
     });
-    fireEvent.change(screen.getByLabelText("Filter by role"), {
+    fireEvent.change(screen.getByLabelText("Filter By Role"), {
       target: { value: "admin" },
     });
     await waitFor(() => {

@@ -3,18 +3,18 @@ import { OAuthButtons } from "@/auth/OAuthButton";
 import { EmailSignIn } from "@/auth/EmailSignIn";
 
 const TITLES: Record<string, string> = {
-  pending: "Access pending",
-  suspended: "Access suspended",
-  revoked: "Access revoked",
+  pending: "Access Pending",
+  suspended: "Access Suspended",
+  revoked: "Access Revoked",
 };
 
 const NOTES: Record<string, string> = {
   pending:
-    "Your account has been authenticated, but you don't currently have access to Creative Intelligence. An administrator needs to approve your account.",
+    "Your Account Has Been Authenticated, But You Don't Currently Have Access To Creative Intelligence. An Administrator Needs To Approve Your Account.",
   suspended:
-    "Your access to Creative Intelligence has been suspended. Contact an administrator if you believe this is incorrect.",
+    "Your Access To Creative Intelligence Has Been Suspended. Contact An Administrator If You Believe This Is Incorrect.",
   revoked:
-    "Your access to Creative Intelligence has been revoked. Contact an administrator if you believe this is incorrect.",
+    "Your Access To Creative Intelligence Has Been Revoked. Contact An Administrator If You Believe This Is Incorrect.",
 };
 
 export function AccessPending() {
@@ -43,10 +43,10 @@ function GateScreen({ gate }: { gate: "pending" | "suspended" | "revoked" }) {
         <p className="muted">{who}</p>
         <p>{NOTES[gate]}</p>
         <button type="button" className="auth-btn" onClick={() => void refresh()}>
-          Refresh access
+          Refresh Access
         </button>
         <button type="button" className="auth-btn" onClick={() => void logout()}>
-          Log out
+          Log Out
         </button>
       </div>
     </div>
@@ -61,13 +61,13 @@ export function LoginPage() {
   return (
     <div id="auth-screen">
       <div className="auth-card">
-        <h1>Welcome to Creative Intelligence</h1>
-        <p className="muted">Sign in with your work account to continue.</p>
-        {authError ? <p className="muted">Sign-in failed: {authError}</p> : null}
+        <h1>Welcome To Creative Intelligence</h1>
+        <p className="muted">Sign In With Your Work Account To Continue.</p>
+        {authError ? <p className="muted">Sign-In Failed: {authError}</p> : null}
         <OAuthButtons />
         <EmailSignIn />
         {me?.workos_configured === false ? (
-          <p className="muted">WorkOS is not configured on this server yet — ask your administrator to set it up.</p>
+          <p className="muted">WorkOS Is Not Configured On This Server Yet — Ask Your Administrator To Set It Up.</p>
         ) : null}
       </div>
     </div>

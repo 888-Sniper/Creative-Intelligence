@@ -101,7 +101,7 @@ describe("BenchmarksPage", () => {
     // Null KPIs render as an em dash, never zero.
     expect(screen.getAllByText("—").length).toBeGreaterThan(0);
     await waitFor(() => {
-      expect(screen.getByText(/lose ~/)).toBeDefined();
+      expect(screen.getByText(/Lose ~/)).toBeDefined();
     });
     expect(screen.getByText(/during hook/)).toBeDefined();
     expect(screen.getByText(/Beauty/)).toBeDefined();
@@ -111,10 +111,10 @@ describe("BenchmarksPage", () => {
   it("shows loading states while fetching", () => {
     window.fetch = vi.fn(() => new Promise<Response>(() => {})) as unknown as typeof fetch;
     renderPage();
-    expect(screen.getByText("Loading benchmarks…")).toBeDefined();
-    expect(screen.getByText("Loading retention patterns…")).toBeDefined();
-    expect(screen.getByText("Loading saved cohorts…")).toBeDefined();
-    expect(screen.getByText("Loading saved views…")).toBeDefined();
+    expect(screen.getByText("Loading Benchmarks…")).toBeDefined();
+    expect(screen.getByText("Loading Retention Patterns…")).toBeDefined();
+    expect(screen.getByText("Loading Saved Cohorts…")).toBeDefined();
+    expect(screen.getByText("Loading Saved Views…")).toBeDefined();
   });
 
   it("renders backend errors", async () => {
@@ -162,9 +162,9 @@ describe("BenchmarksPage", () => {
     await waitFor(() => {
       expect(screen.getByText("question")).toBeDefined();
     });
-    fireEvent.change(screen.getByLabelText("Cohort name"), { target: { value: "Lower" } });
-    fireEvent.change(screen.getByLabelText("Include projects"), { target: { value: "P1, P2" } });
-    fireEvent.change(screen.getByLabelText("Exclude projects"), { target: { value: "PX" } });
+    fireEvent.change(screen.getByLabelText("Cohort Name"), { target: { value: "Lower" } });
+    fireEvent.change(screen.getByLabelText("Include Projects"), { target: { value: "P1, P2" } });
+    fireEvent.change(screen.getByLabelText("Exclude Projects"), { target: { value: "PX" } });
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
     await waitFor(() => {
       const post = calls.find((c) => c.url === "/api/cohorts" && c.method === "POST");
@@ -217,8 +217,8 @@ describe("BenchmarksPage", () => {
     await waitFor(() => {
       expect(screen.getByText("Spain view")).toBeDefined();
     });
-    fireEvent.click(screen.getByRole("button", { name: "Save current view" }));
-    expect(screen.getByText("Name the view first.")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Save Current View" }));
+    expect(screen.getByText("Name The View First.")).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     await waitFor(() => {
       const del = calls.find((c) => c.url === "/api/views/delete" && c.method === "POST");

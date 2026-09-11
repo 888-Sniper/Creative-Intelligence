@@ -75,7 +75,7 @@ describe("AnalystPage", () => {
     expect(screen.getByLabelText("Ask Foap Analyst")).toBeDefined();
     expect(screen.getByText("Objective")).toBeDefined();
     expect(screen.getByText("Language")).toBeDefined();
-    expect(screen.getByRole("button", { name: "New conversation" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "New Conversation" })).toBeDefined();
   });
 
   it("sends a question and renders table plus finding actions", async () => {
@@ -91,9 +91,9 @@ describe("AnalystPage", () => {
     expect(screen.getByText("Hook rate: A 30%, B 12%.")).toBeDefined();
     expect(screen.getByText("Low 2s retention on B")).toBeDefined();
     expect(
-      screen.getByRole("button", { name: "Save to next-flight plan" }),
+      screen.getByRole("button", { name: "Save To Next-Flight Plan" }),
     ).toBeDefined();
-    expect(screen.getByRole("button", { name: "3 points" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "3 Points" })).toBeDefined();
   });
 
   it("exposes report and workbook exports", () => {
@@ -101,7 +101,7 @@ describe("AnalystPage", () => {
     renderPage();
     expect(screen.getByRole("button", { name: "Report" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Report XLSX" })).toBeDefined();
-    expect(screen.getByRole("link", { name: "Blank workbook" })).toHaveProperty(
+    expect(screen.getByRole("link", { name: "Blank Workbook" })).toHaveProperty(
       "href",
       expect.stringContaining("/api/analyst/workbook"),
     );
@@ -185,10 +185,10 @@ describe("AnalystPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Ask" }));
     await waitFor(() => {
       expect(
-        screen.getByRole("button", { name: "Save to next-flight plan" }),
+        screen.getByRole("button", { name: "Save To Next-Flight Plan" }),
       ).toBeDefined();
     });
-    fireEvent.click(screen.getByRole("button", { name: "Save to next-flight plan" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save To Next-Flight Plan" }));
     const fetchMock = window.fetch as unknown as ReturnType<typeof vi.fn>;
     await waitFor(() => {
       const call = fetchMock.mock.calls.find((c) =>

@@ -64,16 +64,16 @@ describe("AuthGate screens", () => {
   it("shows the initial loading state, then the login screen", async () => {
     mockMe(base);
     renderGate();
-    expect(screen.getByText("Checking your session…")).toBeDefined();
+    expect(screen.getByText("Checking Your Session…")).toBeDefined();
     await waitFor(() => {
-      expect(screen.getByText("Welcome to Creative Intelligence")).toBeDefined();
+      expect(screen.getByText("Welcome To Creative Intelligence")).toBeDefined();
     });
   });
 
   it("renders all four provider buttons on login", async () => {
     mockMe(base);
     renderGate();
-    for (const name of ["Continue with Google", "Continue with Microsoft", "Continue with Apple", "Continue with GitHub"]) {
+    for (const name of ["Continue With Google", "Continue With Microsoft", "Continue With Apple", "Continue With GitHub"]) {
       await waitFor(() => {
         expect(screen.getByRole("button", { name })).toBeDefined();
       });
@@ -82,9 +82,9 @@ describe("AuthGate screens", () => {
 
   it("shows pending / suspended / revoked gates without the dashboard", async () => {
     for (const [gate, title] of [
-      ["pending", "Access pending"],
-      ["suspended", "Access suspended"],
-      ["revoked", "Access revoked"],
+      ["pending", "Access Pending"],
+      ["suspended", "Access Suspended"],
+      ["revoked", "Access Revoked"],
     ] as const) {
       window.fetch = vi.fn(async () => Response.json({ ...base, authenticated: true, gate })) as unknown as typeof fetch;
       const view = renderGate();

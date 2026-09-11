@@ -62,13 +62,13 @@ describe("ReportsPage", () => {
     expect(screen.getByRole("checkbox", { name: "Ad 1" })).toBeDefined();
     // Legacy defaults: every KPI checked except roas.
     expect(
-      (screen.getByRole("checkbox", { name: "cpa" }) as HTMLInputElement).checked,
+      (screen.getByRole("checkbox", { name: "CPA" }) as HTMLInputElement).checked,
     ).toBe(true);
     expect(
-      (screen.getByRole("checkbox", { name: "roas" }) as HTMLInputElement).checked,
+      (screen.getByRole("checkbox", { name: "ROAS" }) as HTMLInputElement).checked,
     ).toBe(false);
     expect(
-      screen.getByRole("button", { name: "Generate presentation (HTML deck)" }),
+      screen.getByRole("button", { name: "Generate Presentation (HTML Deck)" }),
     ).toBeDefined();
   });
 
@@ -131,7 +131,7 @@ describe("ReportsPage", () => {
       expect(screen.getByRole("checkbox", { name: "Ad 1" })).toBeDefined();
     });
     fireEvent.click(screen.getByRole("checkbox", { name: "Ad 1" }));
-    fireEvent.click(screen.getByRole("button", { name: "Export one-pager" }));
+    fireEvent.click(screen.getByRole("button", { name: "Export One-Pager" }));
     await waitFor(() => {
       expect(screen.getByText("BLOCKED: 2 reviews pending")).toBeDefined();
     });

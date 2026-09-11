@@ -22,6 +22,23 @@ const DEFAULT_KPIS = KPI_OPTIONS.filter((k) => k !== "roas");
 const BENCH_OPTIONS = ["hook_type", "creator_vs_branded", "edit_style", "platform", "campaign"];
 const RANK_OPTIONS = ["cpa", "cpm", "ctr", "vtr", "roas"];
 
+/** UI copy rule: Title Case labels, true acronyms (CPA/CTR/…) stay caps. */
+const KPI_LABELS: Record<string, string> = {
+  vtr: "VTR (Completed)",
+  view_rate: "Play Rate",
+  spend: "Spend",
+  impressions: "Impressions",
+  clicks: "Clicks",
+  conversions: "Conversions",
+  video_views: "Video Views",
+  hook_type: "Hook Type",
+  creator_vs_branded: "Creator Vs Branded",
+  edit_style: "Edit Style",
+  platform: "Platform",
+  campaign: "Campaign",
+};
+const kpiLabel = (k: string): string => KPI_LABELS[k] ?? k.toUpperCase();
+
 type ReportFormat = "one-pager" | "csv" | "pptx" | "xlsx" | "deck";
 
 interface CreativeRow {
@@ -99,7 +116,7 @@ function b64Download(filename: string, mime: string, b64: string): DownloadLink 
 function deckHtml(d: Deck): string {
   const rk = d.rank_by || "cpa";
   const sym = ["spend", "cpa", "cpc", "cpm"].includes(rk) ? "$" : "";
-  const fmtv = (v: unknown) => (v == null ? "n/a" : sym + String(v));
+  const fmtv = (v: unknown) => (v == null ? "N/A" : sym + String(v));
   const slides = (d.slides || [])
     .map((s) => {
       const cw = (d.creatives || {})[s.campaign] || {};
@@ -109,13 +126,13 @@ function deckHtml(d: Deck): string {
       const worst = cw.worst
         ? `<p>Watch: ${esc(cw.worst.creative_key)} (${esc(rk.toUpperCase())} ${esc(fmtv(cw.worst[rk]))})</p>`
         : "";
-      return `<section class="slide"><h2>${esc(s.campaign)}</h2><p>${esc(Object.entries(s.kpis || {}).map(([k, v]) => k + ": " + (v == null ? "n/a" : v)).join(" · "))}</p>${best}${worst}</section>`;
+      return `<section class="slide"><h2>${esc(s.campaign)}</h2><p>${esc(Object.entries(s.kpis || {}).map(([k, v]) => k + ": " + (v == null ? "N/A" : v)).join(" · "))}</p>${best}${worst}</section>`;
     })
     .join("");
   const why = (d.why || []).map((w) => `<li>${esc(w)}</li>`).join("");
   const learn = (d.learnings || []).map((w) => `<li>${esc(w)}</li>`).join("");
   const reco = (d.recommendations || []).map((w) => `<li>${esc(w)}</li>`).join("");
-  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>${esc(d.title || "Client deck")}</title><style>body{font-family:system-ui,sans-serif;color:#1a1a1a;margin:0}.slide{padding:48px;page-break-after:always;border-bottom:2px solid #e2e2e0}</style></head><body><h1 style="padding:48px 48px 0">${esc(d.title || "Client deck")}</h1>${slides}<section class="slide"><h2>Why it won</h2><ul>${why}</ul></section><section class="slide"><h2>Creative learnings</h2><ul>${learn}</ul></section><section class="slide"><h2>Recommendations / next steps</h2><ul>${reco}</ul></section></body></html>`;
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>${esc(d.title || "Client Deck")}</title><style>body{font-family:system-ui,sans-serif;color:#1a1a1a;margin:0}.slide{padding:48px;page-break-after:always;border-bottom:2px solid #e2e2e0}</style></head><body><h1 style="padding:48px 48px 0">${esc(d.title || "Client Deck")}</h1>${slides}<section class="slide"><h2>Why It Won</h2><ul>${why}</ul></section><section class="slide"><h2>Creative Learnings</h2><ul>${learn}</ul></section><section class="slide"><h2>Recommendations / Next Steps</h2><ul>${reco}</ul></section></body></html>`;
 }
 
 /** Reports (legacy v-report): campaign/KPI/benchmark selection with
@@ -166,7 +183,7 @@ export function ReportsPage() {
         setCheckedCampaigns(keys);
       })
       .catch((err) => {
-        if (!cancelled) setCampaignError(errMessage(err, "Failed to load campaigns."));
+        if (!cancelled) setCampaignError(errMessage(err, "Failed To Load Campaigns."));
       });
     return () => {
       cancelled = true;
@@ -192,7 +209,7 @@ export function ReportsPage() {
         );
       })
       .catch((err) => {
-        if (!cancelled) setCreativeError(errMessage(err, "Failed to load creatives."));
+        if (!cancelled) setCreativeError(errMessage(err, "Failed To Load Creatives."));
       });
     return () => {
       cancelled = true;
@@ -219,7 +236,7 @@ export function ReportsPage() {
   }
 
   function blocked(err: unknown) {
-    setStatus("BLOCKED: " + errMessage(err, "Report blocked."));
+    setStatus("BLOCKED: " + errMessage(err, "Report Blocked."));
     setLinks([]);
   }
 
@@ -233,7 +250,7 @@ export function ReportsPage() {
         setStatus(r.csv ?? "");
         setLinks([textDownload("report.csv", "text/csv", r.csv ?? "")]);
       } else if (format === "pptx") {
-        setStatus("PowerPoint built: " + r.filename + ".");
+        setStatus("PowerPoint Built: " + r.filename + ".");
         setLinks([
           b64Download(
             r.filename ?? "campaign-report.pptx",
@@ -242,7 +259,7 @@ export function ReportsPage() {
           ),
         ]);
       } else if (format === "xlsx") {
-        setStatus("Excel workbook built: " + r.filename + ".");
+        setStatus("Excel Workbook Built: " + r.filename + ".");
         setLinks([
           b64Download(
             r.filename ?? "campaign-report.xlsx",
@@ -252,7 +269,7 @@ export function ReportsPage() {
         ]);
       } else {
         const deck = r.deck ?? {};
-        setStatus("Deck built: " + (deck.slides || []).length + " campaign slides + why-analysis.");
+        setStatus("Deck Built: " + (deck.slides || []).length + " Campaign Slides + Why-Analysis.");
         setLinks([textDownload("deck.html", "text/html", deckHtml(deck))]);
       }
     } catch (err) {
@@ -278,8 +295,8 @@ export function ReportsPage() {
     <>
       <h1 className="page-title">Reports</h1>
       <p className="page-sub">
-        Select campaigns, KPIs and a benchmark, then generate. One-pager, CSV, true PowerPoint
-        (.pptx), true Excel (.xlsx) and presentation (HTML deck) formats.
+        Select Campaigns, KPIs And A Benchmark, Then Generate. One-Pager, CSV, True PowerPoint
+        (.Pptx), True Excel (.Xlsx) And Presentation (HTML Deck) Formats.
       </p>
       <div className="card">
         <h3>Campaigns</h3>
@@ -301,11 +318,11 @@ export function ReportsPage() {
             </div>
           ))
         ) : (
-          <span className="muted">No campaigns.</span>
+          <span className="muted">No Campaigns.</span>
         )}
       </div>
       <div className="card">
-        <h3>Creatives (one-pager source)</h3>
+        <h3>Creatives (One-Pager Source)</h3>
         {creatives === null && creativeError === null ? (
           <p className="muted">Loading…</p>
         ) : creativeError !== null ? (
@@ -324,11 +341,11 @@ export function ReportsPage() {
             </div>
           ))
         ) : (
-          <span className="muted">No creatives.</span>
+          <span className="muted">No Creatives.</span>
         )}
         <div style={{ marginTop: 8 }}>
           <button type="button" className="action" onClick={() => void runExport()}>
-            Export one-pager
+            Export One-Pager
           </button>
         </div>
       </div>
@@ -341,35 +358,35 @@ export function ReportsPage() {
               checked={kpis.includes(k)}
               onChange={() => setKpis((prev) => toggle(prev, k))}
             />{" "}
-            {k}
+            {kpiLabel(k)}
           </label>
         ))}
       </div>
       <div className="card">
         <h3>Benchmark</h3>
         <label>
-          Group by{" "}
+          Group By{" "}
           <select value={benchmark} onChange={(e) => setBenchmark(e.target.value)}>
             {BENCH_OPTIONS.map((o) => (
               <option key={o} value={o}>
-                {o}
+                {kpiLabel(o)}
               </option>
             ))}
           </select>
         </label>{" "}
         <label>
-          Benchmark scope{" "}
+          Benchmark Scope{" "}
           <select value={benchmarkScope} onChange={(e) => setBenchmarkScope(e.target.value)}>
-            <option value="filters">Current filters</option>
+            <option value="filters">Current Filters</option>
             <option value="global">Global</option>
           </select>
         </label>{" "}
         <label>
-          Rank Best/Watch by{" "}
+          Rank Best/Watch By{" "}
           <select value={rankBy} onChange={(e) => setRankBy(e.target.value)}>
             {RANK_OPTIONS.map((o) => (
               <option key={o} value={o}>
-                {o.toUpperCase()}
+                {kpiLabel(o)}
               </option>
             ))}
           </select>
@@ -380,7 +397,7 @@ export function ReportsPage() {
             checked={override}
             onChange={(e) => setOverride(e.target.checked)}
           />{" "}
-          override (logged)
+          Override (Logged)
         </label>{" "}
         <label>
           <input
@@ -388,12 +405,12 @@ export function ReportsPage() {
             checked={strictHuman}
             onChange={(e) => setStrictHuman(e.target.checked)}
           />{" "}
-          HUMAN-VERIFIED insights only
+          HUMAN-VERIFIED Insights Only
         </label>
         <br />
         <br />
         <button type="button" className="action" onClick={() => void runReport("one-pager")}>
-          Generate one-pager
+          Generate One-Pager
         </button>
         <button type="button" className="action" onClick={() => void runReport("csv")}>
           Generate CSV
@@ -405,7 +422,7 @@ export function ReportsPage() {
           Generate Excel (.xlsx)
         </button>
         <button type="button" className="action" onClick={() => void runReport("deck")}>
-          Generate presentation (HTML deck)
+          Generate Presentation (HTML Deck)
         </button>
         <pre className="muted">{status}</pre>
         <span className="report-outputs">

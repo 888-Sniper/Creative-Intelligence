@@ -30,10 +30,9 @@ export function AppLayout() {
     <>
       <header className="app-header">
         <div className="app-header-inner">
-          <NavLink to="/" className="brand" aria-label="Foap Creative Intelligence home">
+          <NavLink to="/" className="brand" aria-label="Foap Creative Intelligence Home">
             <img src="/foap-logo.png" alt="Foap" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
           </NavLink>
-          <span className="product-name">Creative Intelligence</span>
           <nav className="main-nav" aria-label="Primary">
             {TABS.map((t) => (
               <NavLink key={t.to} to={t.to} end={t.end} className={tabClass}>

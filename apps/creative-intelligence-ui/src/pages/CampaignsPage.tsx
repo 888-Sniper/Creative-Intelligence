@@ -4,10 +4,16 @@ import { useFilters } from "@/state/FilterContext";
 
 const KPI_LOWER_BETTER = ["cpa", "cpc", "cpm"];
 
-/** A15: VTR is completions-based; the plays-based number reads Play rate. */
+/** A15: VTR is completions-based; the plays-based number reads Play Rate.
+ *  UI copy rule: Title Case labels, true acronyms (CPA/CTR/…) stay caps. */
 const KPI_LABELS: Record<string, string> = {
-  vtr: "VTR (completed)",
-  view_rate: "Play rate",
+  vtr: "VTR (Completed)",
+  view_rate: "Play Rate",
+  spend: "Spend",
+  impressions: "Impressions",
+  clicks: "Clicks",
+  conversions: "Conversions",
+  video_views: "Video Views",
 };
 const kpiLabel = (k: string): string => KPI_LABELS[k] ?? k.toUpperCase();
 const SUMMARY_METRICS = [
@@ -194,7 +200,7 @@ export function CampaignsPage() {
     const worst = ranked[ranked.length - 1];
     const med = bench[selected] ? bench[selected][k] : null;
     const sym = ["spend", "cpa", "cpc", "cpm"].includes(k) ? "$" : "";
-    const delta = med != null ? ` vs campaign-benchmark ${k.toUpperCase()} ${sym}${String(med)}` : "";
+    const delta = med != null ? ` Vs Campaign-Benchmark ${kpiLabel(k)} ${sym}${String(med)}` : "";
     const hooks: Record<string, number> = {};
     inCamp.forEach((r) => {
       const h = r.annotation?.hook_type;
@@ -212,28 +218,28 @@ export function CampaignsPage() {
       index: i,
     }));
     const legacyReco: string[] = [
-      `Scale: ${best.name || best.creative_key} leads on ${k.toUpperCase()} (${String(best.metrics?.[k] ?? "—")}).`,
+      `Scale: ${best.name || best.creative_key} Leads On ${kpiLabel(k)} (${String(best.metrics?.[k] ?? "—")}).`,
     ];
     if (worst.creative_key !== best.creative_key) {
       legacyReco.push(
-        `Review or replace: ${worst.name || worst.creative_key} trails on ${k.toUpperCase()} (${String(worst.metrics?.[k] ?? "—")}).`,
+        `Review Or Replace: ${worst.name || worst.creative_key} Trails On ${kpiLabel(k)} (${String(worst.metrics?.[k] ?? "—")}).`,
       );
     }
     if (topHook && inCamp.length > 1 && topHook[1] >= Math.ceil(inCamp.length / 2)) {
       legacyReco.push(
-        `Hook concentration: ${topHook[1]} of ${inCamp.length} creatives use ${topHook[0]} — the next test should break from it.`,
+        `Hook Concentration: ${topHook[1]} Of ${inCamp.length} Creatives Use ${topHook[0]} — The Next Test Should Break From It.`,
       );
     }
     return { empty: false as const, ranked, best, worst, delta, topHook, summary, rankList, legacyReco };
   }, [selected, creatives, bench, rankKpi]);
 
-  const perfCard = (r: Creative, tag: "Best" | "Watch" | "Only creative", cls: string) => {
+  const perfCard = (r: Creative, tag: "Best" | "Watch" | "Only Creative", cls: string) => {
     const a = r.annotation ?? {};
     const m: CreativeMetrics = r.metrics ?? { cpa: null, ctr: null, roas: null };
     return (
       <div className={`creative-card ${cls}`}>
         <div className="media">
-          {a.hook_type || "untagged hook"} · {String(a.duration_s ?? r.duration_s ?? "—")}s
+          {a.hook_type || "Untagged Hook"} · {String(a.duration_s ?? r.duration_s ?? "—")}s
         </div>
         <div className="body">
           <div className="title">{r.name || r.creative_key}</div>
@@ -253,12 +259,12 @@ export function CampaignsPage() {
   return (
     <>
       <h1 className="page-title">Campaigns</h1>
-      <p className="page-sub">Select a campaign for best and worst creatives, benchmark comparison and learnings.</p>
+      <p className="page-sub">Select A Campaign For Best And Worst Creatives, Benchmark Comparison And Learnings.</p>
       <div id="campaign-detail">
-        {detailLoading && <p className="muted">Loading campaign detail…</p>}
+        {detailLoading && <p className="muted">Loading Campaign Detail…</p>}
         {detailError && <p className="muted">{detailError}</p>}
         {!detailLoading && !detailError && detail && detail.empty && selected && (
-          <p className="muted">No creatives for {selected}.</p>
+          <p className="muted">No Creatives For {selected}.</p>
         )}
         {!detailLoading && !detailError && detail && !detail.empty && selected && (
           <div className="card">
@@ -268,7 +274,7 @@ export function CampaignsPage() {
             </h3>
             <div className="cmp-grid">
               <div>
-                <h4>Campaign totals (scoped)</h4>
+                <h4>Campaign Totals (Scoped)</h4>
                 <table>
                   <tbody>
                     {detail.summary.map((s) => (
@@ -281,11 +287,11 @@ export function CampaignsPage() {
                 </table>
               </div>
               <div>
-                <h4>Creatives ranked by {rankKpi.toUpperCase()}</h4>
+                <h4>Creatives Ranked By {kpiLabel(rankKpi)}</h4>
                 <ul className="plain">
                   {detail.rankList.map((r) => (
                     <li key={r.key}>
-                      #{r.index + 1} {r.label} — {rankKpi.toUpperCase()} {r.value}
+                      #{r.index + 1} {r.label} — {kpiLabel(rankKpi)} {r.value}
                     </li>
                   ))}
                 </ul>
@@ -293,17 +299,17 @@ export function CampaignsPage() {
             </div>
             <div className="creative-grid" style={{ marginTop: 12 }}>
               {detail.best.creative_key === detail.worst.creative_key
-                ? perfCard(detail.best, "Only creative", "selected")
+                ? perfCard(detail.best, "Only Creative", "selected")
                 : perfCard(detail.best, "Best", "selected")}
               {detail.best.creative_key !== detail.worst.creative_key &&
                 perfCard(detail.worst, "Watch", "")}
             </div>
             <div className="insight-panel">
-              <h4>Creative learning</h4>
+              <h4>Creative Learning</h4>
               <p style={{ margin: 0 }}>
                 {detail.topHook
-                  ? `${detail.topHook[0]} hooks lead ${detail.topHook[1]} of ${detail.ranked.length} creatives here`
-                  : "No hook labels yet — annotate creatives to unlock learnings."}
+                  ? `${detail.topHook[0]} Hooks Lead ${detail.topHook[1]} Of ${detail.ranked.length} Creatives Here`
+                  : "No Hook Labels Yet — Annotate Creatives To Unlock Learnings."}
               </p>
             </div>
             <div className="insight-panel">
@@ -334,7 +340,7 @@ export function CampaignsPage() {
         )}
       </div>
       <div id="campaigns">
-        {groups === null && !listError && <p className="muted">Loading campaigns…</p>}
+        {groups === null && !listError && <p className="muted">Loading Campaigns…</p>}
         {listError && <p className="muted">{listError}</p>}
         {groups !== null && (
           <table>

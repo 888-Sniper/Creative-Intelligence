@@ -17,7 +17,7 @@ export function AskBar() {
 
   const ask = async () => {
     if (!question.trim()) {
-      setOutput({ error: "Type a question first." });
+      setOutput({ error: "Type A Question First." });
       return;
     }
     const filters: Record<string, string[]> = {};
@@ -30,7 +30,7 @@ export function AskBar() {
       const res = await api<AskAnswer>("POST", "/api/ask", { question, filters });
       setOutput(res);
     } catch (err) {
-      setOutput({ error: err instanceof ApiError ? err.message : "Ask failed." });
+      setOutput({ error: err instanceof ApiError ? err.message : "Ask Failed." });
     }
   };
 
@@ -57,15 +57,15 @@ export function AskBar() {
       </div>
       <div className="muted">
         {output === null ? (
-          "Answers cite your uploaded data first."
+          "Answers Cite Your Uploaded Data First."
         ) : "error" in output ? (
           <p className="muted">{output.error}</p>
         ) : (
           <>
             <p>{output.answer}</p>
             <p className="muted">
-              sources: {(output.sources ?? []).join(", ") || "—"} · scope: {output.scope || "All data"}
-              {output.review_id ? ` · review ${output.review_id} opened — export stays blocked until reviews are marked reviewed` : ""}
+              Sources: {(output.sources ?? []).join(", ") || "—"} · Scope: {output.scope || "All data"}
+              {output.review_id ? ` · Review ${output.review_id} Opened — Export Stays Blocked Until Reviews Are Marked Reviewed` : ""}
             </p>
           </>
         )}

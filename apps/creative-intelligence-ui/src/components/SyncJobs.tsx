@@ -23,6 +23,13 @@ interface SyncJob {
 }
 
 const SOURCES = ["meta", "tiktok", "sheets", "drive"] as const;
+/** UI copy rule: Title Case source display (values stay API codes). */
+const SOURCE_LABELS: Record<string, string> = {
+  meta: "Meta",
+  tiktok: "TikTok",
+  sheets: "Sheets",
+  drive: "Drive",
+};
 
 /** Mask secret-shaped param values in read-only display (item 26: safe
  *  handling for account tokens). Editing replaces the whole params
@@ -36,10 +43,10 @@ export function displayParams(params: Record<string, unknown>): Record<string, u
 }
 
 function runSummary(run: JobRun | null): string {
-  if (!run) return "never run";
+  if (!run) return "Never Run";
   const when = run.last_finished_at || run.last_run_at || "—";
   if (run.last_status === "ok") {
-    return `ok @ ${when} (+${run.last_inserted}/~${run.last_updated})`;
+    return `OK @ ${when} (+${run.last_inserted}/~${run.last_updated})`;
   }
   return `${run.last_status} @ ${when}${run.last_error ? `: ${run.last_error}` : ""}`;
 }
@@ -63,7 +70,7 @@ export function SyncJobs() {
       setJobs(res.jobs);
       setError("");
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not load sync jobs.");
+      setError(err instanceof ApiError ? err.message : "Could Not Load Sync Jobs.");
     }
   }, []);
 
@@ -74,7 +81,7 @@ export function SyncJobs() {
   const parseParams = (text: string): Record<string, unknown> => {
     const value: unknown = JSON.parse(text) as unknown;
     if (typeof value !== "object" || value === null || Array.isArray(value)) {
-      throw new Error("Params must be a JSON object.");
+      throw new Error("Params Must Be A JSON Object.");
     }
     return value as Record<string, unknown>;
   };
@@ -86,17 +93,17 @@ export function SyncJobs() {
     try {
       params = parseParams(paramsText);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Invalid params.");
+      setError(err instanceof Error ? err.message : "Invalid Params.");
       return;
     }
     try {
       await api("POST", "/api/sync/jobs", { source, name, params });
       setName("");
       setParamsText("{}");
-      setNotice("Job created.");
+      setNotice("Job Created.");
       await load();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not create job.");
+      setError(err instanceof ApiError ? err.message : "Could Not Create Job.");
     }
   };
 
@@ -106,7 +113,7 @@ export function SyncJobs() {
       await api("PATCH", `/api/sync/jobs/${encodeURIComponent(job.id)}`, { enabled: !job.enabled });
       await load();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not update job.");
+      setError(err instanceof ApiError ? err.message : "Could Not Update Job.");
     }
   };
 
@@ -119,20 +126,20 @@ export function SyncJobs() {
       setNotice(`Run finished (+${res.inserted ?? 0}/~${res.updated ?? 0}).`);
       await load();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Run failed.");
+      setError(err instanceof ApiError ? err.message : "Run Failed.");
     }
   };
 
   const remove = async (job: SyncJob) => {
     setError("");
-    if (!window.confirm(`Delete sync job "${job.name}"? Scheduled runs stop immediately; already-imported rows stay.`)) {
+    if (!window.confirm(`Delete Sync Job "${job.name}"? Scheduled Runs Stop Immediately; Already-Imported Rows Stay.`)) {
       return;
     }
     try {
       await api("DELETE", `/api/sync/jobs/${encodeURIComponent(job.id)}`);
       await load();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not delete job.");
+      setError(err instanceof ApiError ? err.message : "Could Not Delete Job.");
     }
   };
 
@@ -148,7 +155,7 @@ export function SyncJobs() {
     try {
       params = parseParams(editParams);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Invalid params.");
+      setError(err instanceof Error ? err.message : "Invalid Params.");
       return;
     }
     try {
@@ -156,19 +163,19 @@ export function SyncJobs() {
       setEditing(null);
       await load();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not save job.");
+      setError(err instanceof ApiError ? err.message : "Could Not Save Job.");
     }
   };
 
   return (
     <div className="card">
-      <h3>Scheduled sync jobs</h3>
+      <h3>Scheduled Sync Jobs</h3>
       {error ? <p className="muted" role="alert">{error}</p> : null}
       {notice ? <p className="muted" role="status">{notice}</p> : null}
       {jobs === null ? (
-        <p className="muted">Loading sync jobs…</p>
+        <p className="muted">Loading Sync Jobs…</p>
       ) : jobs.length === 0 ? (
-        <p className="muted">No scheduled jobs yet — create one below.</p>
+        <p className="muted">No Scheduled Jobs Yet — Create One Below.</p>
       ) : (
         <div style={{ overflowX: "auto" }}>
           <table>
@@ -178,7 +185,7 @@ export function SyncJobs() {
                 <th>Source</th>
                 <th>On</th>
                 <th>Owner</th>
-                <th>Last run</th>
+                <th>Last Run</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -187,12 +194,12 @@ export function SyncJobs() {
                 <tr key={job.id}>
                   <td>{job.name}</td>
                   <td>{job.source}</td>
-                  <td>{job.enabled ? "yes" : "no"}</td>
+                  <td>{job.enabled ? "Yes" : "No"}</td>
                   <td className="muted">{job.owner_employee_id || "—"}</td>
                   <td className="muted">{runSummary(job.last_run)}</td>
                   <td>
                     <button type="button" className="secondary" onClick={() => void runNow(job)}>
-                      Run now
+                      Run Now
                     </button>{" "}
                     <button type="button" className="secondary" onClick={() => void toggle(job)}>
                       {job.enabled ? "Disable" : "Enable"}
@@ -204,12 +211,12 @@ export function SyncJobs() {
                       Delete
                     </button>
                     <div className="muted" style={{ fontSize: 12 }}>
-                      params: {JSON.stringify(displayParams(job.params))}
+                      Params: {JSON.stringify(displayParams(job.params))}
                     </div>
                     {editing === job.id ? (
                       <div style={{ marginTop: 6 }}>
-                        <input type="text" aria-label="Job name" value={editName} onChange={(e) => setEditName(e.target.value)} />
-                        <textarea aria-label="Job params JSON" rows={4} value={editParams} onChange={(e) => setEditParams(e.target.value)} style={{ width: "100%" }} />
+                        <input type="text" aria-label="Job Name" value={editName} onChange={(e) => setEditName(e.target.value)} />
+                        <textarea aria-label="Job Params JSON" rows={4} value={editParams} onChange={(e) => setEditParams(e.target.value)} style={{ width: "100%" }} />
                         <button type="button" className="action" onClick={() => void saveEdit(job)}>
                           Save
                         </button>{" "}
@@ -225,37 +232,37 @@ export function SyncJobs() {
           </table>
         </div>
       )}
-      <h4>New job</h4>
+      <h4>New Job</h4>
       <div>
         <label>
           Source{" "}
-          <select aria-label="New job source" value={source} onChange={(e) => setSource(e.target.value)}>
+          <select aria-label="New Job Source" value={source} onChange={(e) => setSource(e.target.value)}>
             {SOURCES.map((s) => (
               <option key={s} value={s}>
-                {s}
+                {SOURCE_LABELS[s]}
               </option>
             ))}
           </select>
         </label>{" "}
         <label>
           Name{" "}
-          <input type="text" aria-label="New job name" placeholder="Meta Account A" value={name} onChange={(e) => setName(e.target.value)} />
+          <input type="text" aria-label="New Job Name" placeholder="Meta Account A" value={name} onChange={(e) => setName(e.target.value)} />
         </label>
       </div>
       <div>
         <label>
-          Params (JSON object; secret values are masked in the list and must be re-entered on edit)
-          <textarea aria-label="New job params JSON" rows={3} value={paramsText} onChange={(e) => setParamsText(e.target.value)} style={{ width: "100%" }} />
+          Params (JSON Object; Secret Values Are Masked In The List And Must Be Re-Entered On Edit)
+          <textarea aria-label="New Job Params JSON" rows={3} value={paramsText} onChange={(e) => setParamsText(e.target.value)} style={{ width: "100%" }} />
         </label>
         {(source === "sheets" || source === "drive") && (
           <p className="muted">
-            Private files need your Google account: connect it in Settings, then add{" "}
+            Private Files Need Your Google Account: Connect It In Settings, Then Add{" "}
             <code>&quot;google_auth&quot;: true</code> to the params.
           </p>
         )}
       </div>
       <button type="button" className="action" onClick={() => void create()}>
-        Create job
+        Create Job
       </button>
     </div>
   );

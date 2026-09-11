@@ -159,7 +159,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
       await loadConversations();
     } catch (e) {
       if (key !== accountRef.current) return;
-      setError(e instanceof Error ? e.message : "Could not start a conversation");
+      setError(e instanceof Error ? e.message : "Could Not Start A Conversation");
     }
   }
 
@@ -193,7 +193,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
       await loadConversations();
     } catch (e) {
       if (key !== accountRef.current) return;
-      setError(e instanceof Error ? e.message : "Analyst request failed");
+      setError(e instanceof Error ? e.message : "Analyst Request Failed");
     } finally {
       if (key === accountRef.current) setBusy(false);
     }
@@ -237,7 +237,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Report export failed");
+      setError(e instanceof Error ? e.message : "Report Export Failed");
     }
   }
 
@@ -266,7 +266,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
       );
     } catch (e) {
       if (key !== accountRef.current) return;
-      setError(e instanceof Error ? e.message : "Could not save the decision");
+      setError(e instanceof Error ? e.message : "Could Not Save The Decision");
     }
   }
 
@@ -298,9 +298,9 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
 
   return (
     <div className="analyst-layout">
-      <aside className="analyst-sidebar" aria-label="Saved analyst conversations">
+      <aside className="analyst-sidebar" aria-label="Saved Analyst Conversations">
         <button type="button" onClick={() => void startConversation()}>
-          New conversation
+          New Conversation
         </button>
         <ul>
           {conversations.map((c) => (
@@ -314,21 +314,21 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
                 }}
                 title={c.objective ? `Objective: ${c.objective}` : undefined}
               >
-                {c.title || "Untitled conversation"}
+                {c.title || "Untitled Conversation"}
                 {typeof c.message_count === "number" ? ` (${c.message_count})` : ""}
               </button>
             </li>
           ))}
         </ul>
       </aside>
-      <section className="analyst-main" aria-label="Foap Analyst conversation">
+      <section className="analyst-main" aria-label="Foap Analyst Conversation">
         <div className="analyst-controls">
           <label>
             Objective{" "}
             <select value={objective} onChange={(e) => setObjective(e.target.value)}>
               {OBJECTIVES.map((o) => (
                 <option key={o} value={o}>
-                  {o || "auto"}
+                  {(o || "auto").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
                 </option>
               ))}
             </select>
@@ -336,8 +336,8 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
           <label>
             Language{" "}
             <select value={locale} onChange={(e) => setLocale(e.target.value)}>
-              <option value="auto">auto</option>
-              <option value="pl">polski</option>
+              <option value="auto">Auto</option>
+              <option value="pl">Polski</option>
               <option value="en">English</option>
             </select>
           </label>
@@ -345,7 +345,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
             type="button"
             onClick={() => void downloadReport("one-pager")}
             disabled={busy}
-            title="Sectioned findings report (markdown)"
+            title="Sectioned Findings Report (Markdown)"
           >
             Report
           </button>
@@ -353,15 +353,15 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
             type="button"
             onClick={() => void downloadReport("xlsx")}
             disabled={busy}
-            title="Sectioned findings report (Excel)"
+            title="Sectioned Findings Report (Excel)"
           >
             Report XLSX
           </button>
-          <a href="/api/analyst/workbook">Blank workbook</a>
+          <a href="/api/analyst/workbook">Blank Workbook</a>
           {(lastScope || datasetVersion) && (
             <p className="muted">
               {lastScope}
-              {datasetVersion ? ` · data v${datasetVersion}` : ""}
+              {datasetVersion ? ` · Data v${datasetVersion}` : ""}
             </p>
           )}
         </div>
@@ -381,8 +381,8 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
                     <div key={f.finding_id} className="analyst-finding">
                       <p>
                         <strong>{f.primary_signal || f.finding_id}</strong>
-                        {f.priority ? ` · priority: ${f.priority}` : ""}
-                        {f.confidence_level ? ` · confidence: ${f.confidence_level}` : ""}
+                        {f.priority ? ` · Priority: ${f.priority}` : ""}
+                        {f.confidence_level ? ` · Confidence: ${f.confidence_level}` : ""}
                         {f.status && f.status !== "proposed" ? ` · ${f.status}` : ""}
                       </p>
                       {f.diagnosis ? <p>Diagnosis: {f.diagnosis}</p> : null}
@@ -402,7 +402,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
                             type="button"
                             onClick={() => void decideFinding(f.finding_id, "accepted")}
                           >
-                            Save to next-flight plan
+                            Save To Next-Flight Plan
                           </button>
                           <button
                             type="button"
@@ -463,9 +463,9 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
             type="button"
             disabled={busy || !input.trim()}
             onClick={() => void send(3)}
-            title="Condense the answer to 3 points"
+            title="Condense The Answer To 3 Points"
           >
-            3 points
+            3 Points
           </button>
         </form>
       </section>

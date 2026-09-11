@@ -76,27 +76,27 @@ function buildKpiCards(campaigns: CampaignsResponse): KpiCard[] {
   const roas = spend ? rev / spend : 0;
   const cpas = groups.map((g) => g.cpa).filter((v): v is number => typeof v === "number" && v > 0);
   const best = cpas.length ? Math.min(...cpas) : null;
-  const scope = `across ${groups.length} campaign${groups.length === 1 ? "" : "s"}`;
+  const scope = `Across ${groups.length} Campaign${groups.length === 1 ? "" : "s"}`;
   return [
     { value: "$" + spend.toFixed(2), label: "Spend", delta: scope },
-    { value: impr ? impr.toLocaleString("en-US") : "—", label: "Impressions", delta: impr ? scope : "no impressions yet" },
-    { value: impr ? "$" + cpm.toFixed(2) : "—", label: "CPM", delta: impr ? scope : "no impressions yet" },
+    { value: impr ? impr.toLocaleString("en-US") : "—", label: "Impressions", delta: impr ? scope : "No Impressions Yet" },
+    { value: impr ? "$" + cpm.toFixed(2) : "—", label: "CPM", delta: impr ? scope : "No Impressions Yet" },
     {
       value: impr ? ((vtr * 100).toFixed(1) + "%") : "—",
-      label: "Play rate",
-      delta: impr ? (views ? scope : "no video views yet") : "no impressions yet",
+      label: "Play Rate",
+      delta: impr ? (views ? scope : "No Video Views Yet") : "No Impressions Yet",
     },
-    { value: impr ? ((ctr * 100).toFixed(2) + "%") : "—", label: "CTR", delta: impr ? scope : "no impressions yet" },
-    { value: conv ? "$" + cpa.toFixed(2) : "—", label: "CPA", delta: conv ? "blended " + scope : "no conversions yet" },
+    { value: impr ? ((ctr * 100).toFixed(2) + "%") : "—", label: "CTR", delta: impr ? scope : "No Impressions Yet" },
+    { value: conv ? "$" + cpa.toFixed(2) : "—", label: "CPA", delta: conv ? "Blended " + scope : "No Conversions Yet" },
     {
       value: spend && rev ? roas.toFixed(2) + "x" : "—",
       label: "ROAS",
-      delta: spend && rev ? "blended " + scope : "no revenue yet",
+      delta: spend && rev ? "Blended " + scope : "No Revenue Yet",
     },
     {
       value: best != null ? "$" + best.toFixed(2) : "—",
       label: "Best CPA",
-      delta: best != null ? "lowest single campaign" : "no conversions yet",
+      delta: best != null ? "Lowest Single Campaign" : "No Conversions Yet",
     },
   ];
 }
@@ -112,17 +112,17 @@ const SYNC_NAMES: Record<string, string> = {
 function buildSyncText(s: SyncStatusResponse): string {
   const rows = Object.keys(SYNC_NAMES).map((k) => {
     const v = (s.sources || {})[k];
-    if (!v) return SYNC_NAMES[k] + ": never synced";
+    if (!v) return SYNC_NAMES[k] + ": Never Synced";
     const when = v.last_finished_at || v.last_run_at || "?";
     if (v.last_status === "ok") {
-      return `${SYNC_NAMES[k]}: ok @ ${when} (${v.last_inserted} new, ${v.last_updated} updated)`;
+      return `${SYNC_NAMES[k]}: OK @ ${when} (${v.last_inserted} New, ${v.last_updated} Updated)`;
     }
     return `${SYNC_NAMES[k]}: ${v.last_status} @ ${when}${v.last_error ? ": " + v.last_error : ""}`;
   });
   const jobs = (s.jobs || []).map((j) => SYNC_NAMES[j] || j);
   return (
     rows.join("\n") +
-    (jobs.length ? "\nScheduled jobs: " + jobs.join(", ") + "." : "\nNo scheduled jobs yet — run an import above first.")
+    (jobs.length ? "\nScheduled Jobs: " + jobs.join(", ") + "." : "\nNo Scheduled Jobs Yet — Run An Import Above First.")
   );
 }
 
@@ -130,7 +130,7 @@ function readFileB64(file: File): Promise<string> {
   return new Promise((res, rej) => {
     const fr = new FileReader();
     fr.onload = () => res(String(fr.result).split(",", 2)[1] || "");
-    fr.onerror = () => rej(new Error("could not read file"));
+    fr.onerror = () => rej(new Error("Could Not Read File"));
     fr.readAsDataURL(file);
   });
 }
@@ -163,7 +163,7 @@ export function OverviewPage() {
       const s = await api<SyncStatusResponse>("GET", "/api/sync/status");
       setSyncOut(buildSyncText(s));
     } catch {
-      setSyncMsg("Sync status unavailable.");
+      setSyncMsg("Sync Status Unavailable.");
     }
   }, []);
 
@@ -176,12 +176,12 @@ export function OverviewPage() {
         .map(([k]) => k);
       setProvStatus(
         h.mode === "live"
-          ? "Providers: live mode." +
-              (missing.length ? " Missing: " + missing.join(", ") + "." : " All capability groups configured.")
-          : "Providers: mock mode — set CREATIVE_INTEL_PROVIDER_MODE=live and add provider keys for live transcription, vision and structuring.",
+          ? "Providers: Live Mode." +
+              (missing.length ? " Missing: " + missing.join(", ") + "." : " All Capability Groups Configured.")
+          : "Providers: Mock Mode — Set CREATIVE_INTEL_PROVIDER_MODE=live And Add Provider Keys For Live Transcription, Vision And Structuring.",
       );
     } catch {
-      setProvStatus("Provider status unavailable.");
+      setProvStatus("Provider Status Unavailable.");
     }
   }, []);
 
@@ -199,7 +199,7 @@ export function OverviewPage() {
     try {
       const r = await api<IngestResponse>("POST", "/api/ingest", { platform, csv });
       setUpStatus(
-        "Inserted " + r.inserted + " rows, " + r.updated + " updated (" + r.quarantined_count + " quarantined).",
+        "Inserted " + r.inserted + " Rows, " + r.updated + " Updated (" + r.quarantined_count + " Quarantined).",
       );
       refreshViews();
     } catch (e) {
@@ -210,13 +210,13 @@ export function OverviewPage() {
   const uploadXlsx = async (e: ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (!f) {
-      setUpStatus("Choose an .xlsx file first.");
+      setUpStatus("Choose An .Xlsx File First.");
       return;
     }
     try {
       const b64 = await readFileB64(f);
       const r = await api<IngestResponse>("POST", "/api/ingest", { platform, xlsx_b64: b64, source: "upload" });
-      setUpStatus("Inserted " + r.inserted + " rows (" + r.quarantined_count + " quarantined).");
+      setUpStatus("Inserted " + r.inserted + " Rows (" + r.quarantined_count + " Quarantined).");
       refreshViews();
     } catch (err) {
       setUpStatus(errorMessage(err));
@@ -230,8 +230,9 @@ export function OverviewPage() {
   const syncNow = async (source: string) => {
     try {
       const r = await api<SyncRunResponse>("POST", "/api/sync/run", { source });
+      const display = SYNC_NAMES[source] ?? source;
       setSyncMsg(
-        "Synced " + source + ": " + r.inserted + " new, " + r.updated + " updated (" + r.quarantined_count + " quarantined).",
+        "Synced " + display + ": " + r.inserted + " New, " + r.updated + " Updated (" + r.quarantined_count + " Quarantined).",
       );
       refreshViews();
     } catch (e) {
@@ -245,7 +246,7 @@ export function OverviewPage() {
   } else if (!campaigns) {
     kpiContent = <>—</>;
   } else if (!Object.values(campaigns).length) {
-    kpiContent = <div className="empty-state">Upload performance data to begin.</div>;
+    kpiContent = <div className="empty-state">Upload Performance Data To Begin.</div>;
   } else {
     kpiContent = (
       <div className="kpi-grid">
@@ -263,9 +264,9 @@ export function OverviewPage() {
   return (
     <>
       <h1 className="page-title">Overview</h1>
-      <p className="page-sub">How are your campaigns performing? What creatives are winning? What needs attention?</p>
+      <p className="page-sub">How Are Your Campaigns Performing? What Creatives Are Winning? What Needs Attention?</p>
       <div className="card">
-        <h3>Upload (Meta / TikTok CSV, Excel .xlsx, Sheets link)</h3>
+        <h3>Upload (Meta / TikTok CSV, Excel .xlsx, Sheets Link)</h3>
         <select value={platform} onChange={(e) => setPlatform(e.target.value)} aria-label="Platform">
           <option value="meta">Meta</option>
           <option value="tiktok">TikTok</option>
@@ -274,7 +275,7 @@ export function OverviewPage() {
           value={csv}
           onChange={(e) => setCsv(e.target.value)}
           placeholder="Paste CSV export text here"
-          aria-label="CSV export text"
+          aria-label="CSV Export Text"
         />
         <br />
         <br />
@@ -296,17 +297,17 @@ export function OverviewPage() {
         </button>
         <span className="muted">{upStatus}</span>
         <div style={{ marginTop: 12 }}>
-          <h4>Scheduled sync</h4>
+          <h4>Scheduled Sync</h4>
           <div className="muted" style={{ fontSize: 12 }}>
-            Successful imports are remembered as sync jobs: re-imports update matching rows instead of duplicating them,
-            and the server re-runs them on a timer when started with --sync-every SECONDS.
+            Successful Imports Are Remembered As Sync Jobs: Re-Imports Update Matching Rows Instead Of Duplicating Them,
+            And The Server Re-Runs Them On A Timer When Started With --sync-every SECONDS.
           </div>
           <div style={{ marginTop: 8 }}>
             <button type="button" className="action" onClick={() => void syncNow("meta")}>
-              Sync Meta now
+              Sync Meta Now
             </button>
             <button type="button" className="action" onClick={() => void syncNow("tiktok")}>
-              Sync TikTok now
+              Sync TikTok Now
             </button>
             <span className="muted">{syncMsg}</span>
           </div>

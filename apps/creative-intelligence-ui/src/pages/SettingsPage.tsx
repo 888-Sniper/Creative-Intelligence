@@ -32,9 +32,9 @@ function GoogleDriveCard() {
 
   useEffect(() => {
     const flag = searchParams.get("google");
-    if (flag === "connected") setNotice("Google Drive connected.");
-    else if (flag === "failed") setNotice("Google connection failed. Try again.");
-    else if (flag === "expired") setNotice("That Google sign-in expired. Try again.");
+    if (flag === "connected") setNotice("Google Drive Connected.");
+    else if (flag === "failed") setNotice("Google Connection Failed. Try Again.");
+    else if (flag === "expired") setNotice("That Google Sign-In Expired. Try Again.");
     if (flag) {
       const next = new URLSearchParams(searchParams);
       next.delete("google");
@@ -50,7 +50,7 @@ function GoogleDriveCard() {
       const res = await api<{ url: string }>("POST", "/api/auth/google/start", {});
       window.location.href = res.url;
     } catch (err) {
-      setNotice(err instanceof ApiError ? err.message : "Could not start Google sign-in.");
+      setNotice(err instanceof ApiError ? err.message : "Could Not Start Google Sign-In.");
       setBusy(false);
     }
   };
@@ -61,9 +61,9 @@ function GoogleDriveCard() {
     try {
       await api("POST", "/api/auth/google/disconnect", {});
       setConnected(false);
-      setNotice("Google Drive disconnected.");
+      setNotice("Google Drive Disconnected.");
     } catch (err) {
-      setNotice(err instanceof ApiError ? err.message : "Could not disconnect Google Drive.");
+      setNotice(err instanceof ApiError ? err.message : "Could Not Disconnect Google Drive.");
     } finally {
       setBusy(false);
     }
@@ -73,11 +73,11 @@ function GoogleDriveCard() {
     <div className="card">
       <h3>Google Drive</h3>
       <p className="muted">
-        Connect Google Drive for private Sheets and Drive sync. Read-only access;
-        tokens stay on the server.
+        Connect Google Drive For Private Sheets And Drive Sync. Read-Only Access;
+        Tokens Stay On The Server.
       </p>
       <p>
-        Status: <strong>{connected === null ? "…" : connected ? "Connected" : "Not connected"}</strong>
+        Status: <strong>{connected === null ? "…" : connected ? "Connected" : "Not Connected"}</strong>
       </p>
       {connected ? (
         <button type="button" className="secondary" disabled={busy} onClick={() => void disconnect()}>
@@ -101,20 +101,20 @@ export function SettingsPage() {
   const [message, setMessage] = useState("");
   const employee = me?.employee;
 
-  if (!employee) return <p className="muted">Sign in to manage settings.</p>;
+  if (!employee) return <p className="muted">Sign In To Manage Settings.</p>;
   const name = `${employee.first_name} ${employee.last_name}`.trim() || employee.email;
 
   const logoutAll = async () => {
     setMessage("");
-    if (!window.confirm("Log out all sessions? Every device and browser signed in as this account is signed out immediately.")) {
+    if (!window.confirm("Log Out All Sessions? Every Device And Browser Signed In As This Account Is Signed Out Immediately.")) {
       return;
     }
     try {
       await api("POST", "/api/auth/sessions/revoke-all", {});
       await refresh();
-      setMessage("All sessions signed out.");
+      setMessage("All Sessions Signed Out.");
     } catch (err) {
-      setMessage(err instanceof ApiError ? err.message : "Could not sign out all sessions.");
+      setMessage(err instanceof ApiError ? err.message : "Could Not Sign Out All Sessions.");
     }
   };
 
@@ -134,19 +134,19 @@ export function SettingsPage() {
           <span>
             <strong>{name}</strong>
             <br />
-            <span className="muted">{employee.email} (verified, read-only)</span>
+            <span className="muted">{employee.email} (Verified, Read-Only)</span>
           </span>
         </div>
         <p>
-          Authentication provider: <strong>{PROVIDER_LABELS[employee.provider] ?? "—"}</strong>
+          Authentication Provider: <strong>{PROVIDER_LABELS[employee.provider] ?? "—"}</strong>
           <br />
-          Current role: <strong>{employee.role}</strong> · status: <strong>{employee.status}</strong>
+          Current Role: <strong>{employee.role}</strong> · Status: <strong>{employee.status}</strong>
         </p>
         <button type="button" className="secondary" onClick={() => void logout()}>
-          Log out
+          Log Out
         </button>{" "}
         <button type="button" className="secondary" onClick={() => void logoutAll()}>
-          Log out all sessions
+          Log Out All Sessions
         </button>
         {message ? <p className="muted" role="status">{message}</p> : null}
       </div>
@@ -164,7 +164,7 @@ export function SettingsPage() {
                 onChange={() => set(m.id)}
               />{" "}
               {m.label}
-              {m.id === "system" ? " (follows your device)" : ""}
+              {m.id === "system" ? " (Follows Your Device)" : ""}
             </label>
           ))}
         </div>

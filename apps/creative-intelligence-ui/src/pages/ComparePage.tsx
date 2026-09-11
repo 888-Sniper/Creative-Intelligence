@@ -24,10 +24,16 @@ interface CreativeSide {
   annotation?: CompareAnnotation | null;
 }
 
-/** A15: VTR is completions-based; the plays-based number reads Play rate. */
+/** A15: VTR is completions-based; the plays-based number reads Play Rate.
+ *  UI copy rule: Title Case labels, true acronyms (CPA/CTR/…) stay caps. */
 const KPI_LABELS: Record<string, string> = {
-  vtr: "VTR (completed)",
-  view_rate: "Play rate",
+  vtr: "VTR (Completed)",
+  view_rate: "Play Rate",
+  spend: "Spend",
+  impressions: "Impressions",
+  clicks: "Clicks",
+  conversions: "Conversions",
+  video_views: "Video Views",
 };
 const kpiLabel = (k: string): string => KPI_LABELS[k] ?? k.toUpperCase();
 
@@ -149,7 +155,7 @@ export function ComparePage() {
     if (seen.length < 2) {
       setCreativeData(null);
       setCreativeKeys([]);
-      setCreativeError("Enter at least two creative keys (up to six).");
+      setCreativeError("Enter At Least Two Creative Keys (Up To Six).");
       return;
     }
     setCreativeLoading(true);
@@ -168,7 +174,7 @@ export function ComparePage() {
       setCreativeData(r);
     } catch (e) {
       setCreativeData(null);
-      setCreativeError(e instanceof Error ? e.message : "Request failed");
+      setCreativeError(e instanceof Error ? e.message : "Request Failed");
     } finally {
       setCreativeLoading(false);
     }
@@ -189,7 +195,7 @@ export function ComparePage() {
       setCampaignData(r);
     } catch (e) {
       setCampaignData(null);
-      setCampaignError(e instanceof Error ? e.message : "Request failed");
+      setCampaignError(e instanceof Error ? e.message : "Request Failed");
     } finally {
       setCampaignLoading(false);
     }
@@ -197,7 +203,7 @@ export function ComparePage() {
 
   async function comparePeriods(): Promise<void> {
     if (!aFrom || !aTo || !bFrom || !bTo) {
-      setPeriodError("Fill all four period dates.");
+      setPeriodError("Fill All Four Period Dates.");
       return;
     }
     setPeriodLoading(true);
@@ -211,7 +217,7 @@ export function ComparePage() {
       setPeriodData(r);
     } catch (e) {
       setPeriodData(null);
-      setPeriodError(e instanceof Error ? e.message : "Request failed");
+      setPeriodError(e instanceof Error ? e.message : "Request Failed");
     } finally {
       setPeriodLoading(false);
     }
@@ -223,23 +229,23 @@ export function ComparePage() {
   const creativeRankBy = creativeData?.rank_by ?? creativeRank;
   const creativeHead = creativeWinner
     ? creativeKeys.length > 2
-      ? `${creativeWinner} leads the comparison`
-      : `Why ${creativeWinner} won`
-    : "Insufficient data / no winner";
+      ? `${creativeWinner} Leads The Comparison`
+      : `Why ${creativeWinner} Won`
+    : "Insufficient Data / No Winner";
   const creativeRankLine = creativeData?.winner
-    ? `Winner by ${creativeRankBy.toUpperCase()}: ${creativeData.winner} — order: ${creativeKeys.join(" · ")}`
-    : "No winner: the selected KPI is unmeasurable for every side.";
+    ? `Winner By ${kpiLabel(creativeRankBy)}: ${creativeData.winner} — order: ${creativeKeys.join(" · ")}`
+    : "No Winner: The Selected KPI Is Unmeasurable For Every Side.";
 
   const campaignWinner = campaignData?.winner ?? null;
   const campaignRankBy = campaignData?.rank_by ?? campaignRank;
   const campaignRankLine = campaignWinner
-    ? `Winner by ${campaignRankBy.toUpperCase()}: ${campaignWinner}`
-    : "No winner: the selected KPI is unmeasurable for every campaign.";
+    ? `Winner By ${kpiLabel(campaignRankBy)}: ${campaignWinner}`
+    : "No Winner: The Selected KPI Is Unmeasurable For Every Campaign.";
 
   return (
     <>
       <h1 className="page-title">Compare</h1>
-      <p className="page-sub">Two modes: creatives side-by-side, or campaigns ranked with why-analysis.</p>
+      <p className="page-sub">Two Modes: Creatives Side-By-Side, Or Campaigns Ranked With Why-Analysis.</p>
 
       <div className="card">
         <label>
@@ -249,7 +255,7 @@ export function ComparePage() {
           Creative B <input placeholder="creative B key" value={keyB} onChange={(e) => setKeyB(e.target.value)} />
         </label>{" "}
         <label>
-          More creatives{" "}
+          More Creatives{" "}
           <input
             placeholder="more keys, comma-separated (up to 4 more)"
             style={{ width: "60%" }}
@@ -258,26 +264,26 @@ export function ComparePage() {
           />
         </label>{" "}
         <label>
-          Rank by{" "}
-          <select aria-label="Rank creatives by" value={creativeRank} onChange={(e) => setCreativeRank(e.target.value)}>
+          Rank By{" "}
+          <select aria-label="Rank Creatives By" value={creativeRank} onChange={(e) => setCreativeRank(e.target.value)}>
             {CREATIVE_RANKS.map((r) => (
               <option key={r} value={r}>
-                {r.toUpperCase()}
+                {kpiLabel(r)}
               </option>
             ))}
           </select>
         </label>{" "}
         <button className="action" onClick={() => void compareCreatives()}>
-          Compare creatives
+          Compare Creatives
         </button>
         <div className="muted" style={{ fontSize: 12 }}>
-          GET /api/compare — 2 to 6 creatives, side by side with per-metric leaders. Every side is computed over
-          the current top filter bar scope.
+          GET /api/compare — 2 To 6 Creatives, Side By Side With Per-Metric Leaders. Every Side Is Computed Over
+          The Current Top Filter Bar Scope.
         </div>
       </div>
 
       <div className="card">
-        <h3>Campaign compare</h3>
+        <h3>Campaign Compare</h3>
         <label>
           Campaigns{" "}
           <input
@@ -288,20 +294,20 @@ export function ComparePage() {
           />
         </label>{" "}
         <label>
-          Rank by{" "}
-          <select aria-label="Rank campaigns by" value={campaignRank} onChange={(e) => setCampaignRank(e.target.value)}>
+          Rank By{" "}
+          <select aria-label="Rank Campaigns By" value={campaignRank} onChange={(e) => setCampaignRank(e.target.value)}>
             {CAMPAIGN_RANKS.map((r) => (
               <option key={r} value={r}>
-                {r.toUpperCase()}
+                {kpiLabel(r)}
               </option>
             ))}
           </select>
         </label>{" "}
         <button className="action" onClick={() => void compareCampaigns()}>
-          Compare campaigns
+          Compare Campaigns
         </button>
         <div className="muted" style={{ fontSize: 12 }}>
-          GET /api/compare/campaigns — full KPI set plus why-analysis.
+          GET /api/compare/campaigns — Full KPI Set Plus Why-Analysis.
         </div>
       </div>
 
@@ -321,7 +327,7 @@ export function ComparePage() {
                       {creativeWinner === key && key ? " (top)" : ""}
                     </h3>
                     <div className="muted" style={{ fontSize: 12 }}>
-                      Scope: {creativeData.scope ?? "All data"} — KPIs computed over scoped rows only
+                      Scope: {creativeData.scope ?? "All data"} — KPIs Computed Over Scoped Rows Only
                     </div>
                     <table>
                       <tbody>
@@ -342,7 +348,7 @@ export function ComparePage() {
                           <td>{ann.creator_vs_branded ?? "—"}</td>
                         </tr>
                         <tr>
-                          <th scope="row">Edit style</th>
+                          <th scope="row">Edit Style</th>
                           <td>{ann.edit_style ?? "—"}</td>
                         </tr>
                         <tr>
@@ -358,7 +364,7 @@ export function ComparePage() {
             <div className="insight-panel">
               <h4>{creativeHead}</h4>
               <p className="muted" style={{ fontSize: 12 }}>
-                Scope: {creativeData.scope ?? "All data"} · Ranked by {creativeRankBy.toUpperCase()}
+                Scope: {creativeData.scope ?? "All data"} · Ranked By {kpiLabel(creativeRankBy)}
               </p>
               <p>{creativeRankLine}</p>
               <ul className="plain">
@@ -370,7 +376,7 @@ export function ComparePage() {
             </div>
             {(creativeData.attributes ?? []).length > 0 ? (
               <div className="card">
-                <h4>Attributes side-by-side</h4>
+                <h4>Attributes Side-By-Side</h4>
                 <table>
                   <thead>
                     <tr>
@@ -402,7 +408,7 @@ export function ComparePage() {
         {campaignError && !campaignLoading ? <p className="muted">{campaignError}</p> : null}
         {campaignData && !campaignLoading ? (
           <div className="card">
-            <h4>Ranked by {campaignData.rank_by ?? ""}</h4>
+            <h4>Ranked By {kpiLabel(campaignData.rank_by ?? "")}</h4>
             <p className="muted" style={{ fontSize: 12 }}>
               Scope: {campaignData.scope ?? "All data"}
             </p>
@@ -431,7 +437,7 @@ export function ComparePage() {
               </tbody>
             </table>
             <div className="insight-panel">
-              <h4>{campaignWinner ? `Why ${campaignWinner} won` : "Insufficient data / no winner"}</h4>
+              <h4>{campaignWinner ? `Why ${campaignWinner} Won` : "Insufficient Data / No Winner"}</h4>
               <ul className="plain">
                 {(campaignData.why?.differences ?? []).map((d) => (
                   <li key={d}>{d}</li>
@@ -444,32 +450,32 @@ export function ComparePage() {
       </div>
 
       <div className="card">
-        <h3>Period comparison</h3>
+        <h3>Period Comparison</h3>
         <div className="muted" style={{ fontSize: 12 }}>
-          Period A vs Period B over the identical scoped population (GET /api/compare/periods follows the top
-          filter bar, except its own dates).
+          Period A Vs Period B Over The Identical Scoped Population (GET /api/compare/periods Follows The Top
+          Filter Bar, Except Its Own Dates).
         </div>
         <div className="filter-grid">
           <label>
-            A from
-            <input type="date" aria-label="A from" value={aFrom} onChange={(e) => setAFrom(e.target.value)} />
+            A From
+            <input type="date" aria-label="A From" value={aFrom} onChange={(e) => setAFrom(e.target.value)} />
           </label>
           <label>
-            A to
-            <input type="date" aria-label="A to" value={aTo} onChange={(e) => setATo(e.target.value)} />
+            A To
+            <input type="date" aria-label="A To" value={aTo} onChange={(e) => setATo(e.target.value)} />
           </label>
           <label>
-            B from
-            <input type="date" aria-label="B from" value={bFrom} onChange={(e) => setBFrom(e.target.value)} />
+            B From
+            <input type="date" aria-label="B From" value={bFrom} onChange={(e) => setBFrom(e.target.value)} />
           </label>
           <label>
-            B to
-            <input type="date" aria-label="B to" value={bTo} onChange={(e) => setBTo(e.target.value)} />
+            B To
+            <input type="date" aria-label="B To" value={bTo} onChange={(e) => setBTo(e.target.value)} />
           </label>
         </div>
         <div style={{ marginTop: 8 }}>
           <button className="action" onClick={() => void comparePeriods()}>
-            Compare periods
+            Compare Periods
           </button>
         </div>
         <div id="per-out" className="muted" style={{ marginTop: 8 }}>

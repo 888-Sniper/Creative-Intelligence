@@ -49,14 +49,14 @@ describe("ProfilePage", () => {
     });
     expect(screen.getByText("ada@foap.test")).toBeDefined();
     expect(screen.getByText("employee · active")).toBeDefined();
-    expect((screen.getByLabelText("First name") as HTMLInputElement).value).toBe("Ada");
-    expect((screen.getByLabelText("Last name") as HTMLInputElement).value).toBe("Lovelace");
+    expect((screen.getByLabelText("First Name") as HTMLInputElement).value).toBe("Ada");
+    expect((screen.getByLabelText("Last Name") as HTMLInputElement).value).toBe("Lovelace");
     expect(
-      (screen.getByLabelText("Avatar URL (optional)") as HTMLInputElement).value,
+      (screen.getByLabelText("Avatar URL (Optional)") as HTMLInputElement).value,
     ).toBe("");
-    expect(screen.getByRole("button", { name: "Save profile" })).toBeDefined();
-    expect(screen.getByRole("button", { name: "Remove avatar" })).toBeDefined();
-    expect(screen.getByRole("button", { name: "Log out everywhere" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Save Profile" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Remove Avatar" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Log Out Everywhere" })).toBeDefined();
     // No avatar URL set: initials fallback.
     expect(screen.getByText("AL")).toBeDefined();
   });
@@ -75,7 +75,7 @@ describe("ProfilePage", () => {
     const img = document.querySelector("img.avatar") as HTMLImageElement | null;
     expect(img?.src).toBe("https://cdn.test/a.png");
     expect(
-      (screen.getByLabelText("Avatar URL (optional)") as HTMLInputElement).value,
+      (screen.getByLabelText("Avatar URL (Optional)") as HTMLInputElement).value,
     ).toBe("https://cdn.test/a.png");
   });
 
@@ -84,7 +84,7 @@ describe("ProfilePage", () => {
       () => new Promise<Response>(() => {}),
     ) as unknown as typeof fetch;
     render(<ProfilePage />);
-    expect(screen.getByText("Loading profile…")).toBeDefined();
+    expect(screen.getByText("Loading Profile…")).toBeDefined();
   });
 
   it("renders load errors", async () => {
@@ -112,8 +112,8 @@ describe("ProfilePage", () => {
     await waitFor(() => {
       expect(screen.getByText("Ada Lovelace")).toBeDefined();
     });
-    fireEvent.change(screen.getByLabelText("First name"), { target: { value: "Grace" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save profile" }));
+    fireEvent.change(screen.getByLabelText("First Name"), { target: { value: "Grace" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Profile" }));
     await waitFor(() => {
       expect(screen.getByText("Saved.")).toBeDefined();
     });
@@ -152,13 +152,13 @@ describe("ProfilePage", () => {
     await waitFor(() => {
       expect(screen.getByText("Ada Lovelace")).toBeDefined();
     });
-    const fileInput = screen.getByLabelText("Avatar image file") as HTMLInputElement;
+    const fileInput = screen.getByLabelText("Avatar Image File") as HTMLInputElement;
     Object.defineProperty(fileInput, "files", {
       value: [new File(["png-bytes"], "me.png", { type: "image/png" })],
       configurable: true,
     });
     fireEvent.change(fileInput);
-    fireEvent.click(screen.getByRole("button", { name: "Save profile" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save Profile" }));
     await waitFor(() => {
       expect(screen.getByText("Saved.")).toBeDefined();
     });
@@ -171,7 +171,7 @@ describe("ProfilePage", () => {
     expect(typeof body.get).toBe("function");
     expect((body.get("avatar") as File).name).toBe("me.png");
     // Uploaded avatars blank the URL field (legacy load_profile parity).
-    expect((screen.getByLabelText("Avatar URL (optional)") as HTMLInputElement).value).toBe(
+    expect((screen.getByLabelText("Avatar URL (Optional)") as HTMLInputElement).value).toBe(
       "",
     );
   });
@@ -192,11 +192,11 @@ describe("ProfilePage", () => {
     }) as unknown as typeof fetch;
     render(<ProfilePage />);
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Remove avatar" })).toBeDefined();
+      expect(screen.getByRole("button", { name: "Remove Avatar" })).toBeDefined();
     });
-    fireEvent.click(screen.getByRole("button", { name: "Remove avatar" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove Avatar" }));
     await waitFor(() => {
-      expect(screen.getByText("Avatar removed.")).toBeDefined();
+      expect(screen.getByText("Avatar Removed.")).toBeDefined();
     });
   });
 
@@ -212,11 +212,11 @@ describe("ProfilePage", () => {
     }) as unknown as typeof fetch;
     render(<ProfilePage />);
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Log out everywhere" })).toBeDefined();
+      expect(screen.getByRole("button", { name: "Log Out Everywhere" })).toBeDefined();
     });
-    fireEvent.click(screen.getByRole("button", { name: "Log out everywhere" }));
+    fireEvent.click(screen.getByRole("button", { name: "Log Out Everywhere" }));
     await waitFor(() => {
-      expect(screen.getByText("Signed out of 2 session(s).")).toBeDefined();
+      expect(screen.getByText("Signed Out Of 2 Session(s).")).toBeDefined();
     });
   });
 });

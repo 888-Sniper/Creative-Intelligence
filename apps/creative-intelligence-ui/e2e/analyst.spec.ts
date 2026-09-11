@@ -14,7 +14,7 @@ test.describe("analyst journey", () => {
     await expect(controls.getByLabel("Objective")).toBeVisible();
     await expect(controls.getByLabel("Language")).toBeVisible();
     await expect(
-      page.getByRole("button", { name: "New conversation" }),
+      page.getByRole("button", { name: "New Conversation" }),
     ).toBeVisible();
     await expect(
       page.getByRole("button", { name: "Report", exact: true }),
@@ -23,7 +23,7 @@ test.describe("analyst journey", () => {
       page.getByRole("button", { name: "Report XLSX" }),
     ).toBeVisible();
     await expect(
-      page.getByRole("link", { name: "Blank workbook" }),
+      page.getByRole("link", { name: "Blank Workbook" }),
     ).toHaveAttribute("href", "/api/analyst/workbook");
   });
 });

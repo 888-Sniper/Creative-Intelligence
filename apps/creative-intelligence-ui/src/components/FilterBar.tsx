@@ -2,6 +2,21 @@ import { useFilters } from "@/state/FilterContext";
 import type { FilterValues } from "@/state/FilterContext";
 
 const KPI_OPTIONS = ["all", "spend", "ctr", "cpc", "cpa", "cpm", "vtr", "view_rate", "roas"];
+/** UI copy rule: Title Case option display (values stay API codes). */
+const OPTION_LABELS: Record<string, string> = {
+  all: "All",
+  meta: "Meta",
+  tiktok: "TikTok",
+  spend: "Spend",
+  ctr: "CTR",
+  cpc: "CPC",
+  cpa: "CPA",
+  cpm: "CPM",
+  vtr: "VTR (Completed)",
+  view_rate: "Play Rate",
+  roas: "ROAS",
+};
+const optionLabel = (k: string): string => OPTION_LABELS[k] ?? k;
 
 function TextField({ name, label, placeholder }: { name: keyof FilterValues; label: string; placeholder: string }) {
   const { filters, setFilter } = useFilters();
@@ -37,9 +52,9 @@ export function FilterBar() {
         <label>
           Platform
           <select value={filters.platform} onChange={(e) => setFilter("platform", e.target.value)} className={filters.platform !== "all" ? "active" : undefined}>
-            <option value="all">all</option>
-            <option value="meta">meta</option>
-            <option value="tiktok">tiktok</option>
+            <option value="all">All</option>
+            <option value="meta">Meta</option>
+            <option value="tiktok">TikTok</option>
           </select>
         </label>
         <TextField name="vertical" label="Vertical" placeholder="vertical" />
@@ -51,7 +66,7 @@ export function FilterBar() {
           <select value={filters.kpi} onChange={(e) => setFilter("kpi", e.target.value)} className={filters.kpi !== "all" ? "active" : undefined}>
             {KPI_OPTIONS.map((k) => (
               <option key={k} value={k}>
-                {k}
+                {optionLabel(k)}
               </option>
             ))}
           </select>
@@ -71,18 +86,18 @@ export function FilterBar() {
           Presets:
         </span>{" "}
         <button type="button" className="secondary" onClick={() => applyPresetDays(7)}>
-          Last 7 days
+          Last 7 Days
         </button>{" "}
         <button type="button" className="secondary" onClick={() => applyPresetDays(30)}>
-          Last 30 days
+          Last 30 Days
         </button>{" "}
         <button type="button" className="secondary" onClick={() => applyPresetDays(90)}>
-          Last 90 days
+          Last 90 Days
         </button>
       </div>
       <div style={{ marginTop: 8 }}>
         <button type="button" className="secondary" onClick={clearFilters}>
-          Clear filters
+          Clear Filters
         </button>
       </div>
     </div>

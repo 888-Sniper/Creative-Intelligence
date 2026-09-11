@@ -93,9 +93,9 @@ describe("CreativesPage", () => {
     });
     expect(screen.getByText("Beta")).toBeDefined();
     expect(screen.getByText("HUMAN-VERIFIED")).toBeDefined();
-    expect(screen.getByText("auto")).toBeDefined();
+    expect(screen.getByText("Auto")).toBeDefined();
     expect(document.getElementById("creative-detail")).not.toBeNull();
-    expect(screen.getByText("Select a creative below.")).toBeDefined();
+    expect(screen.getByText("Select A Creative Below.")).toBeDefined();
   });
 
   it("shows a loading state while fetching", () => {
@@ -103,7 +103,7 @@ describe("CreativesPage", () => {
       () => new Promise<Response>(() => undefined),
     ) as unknown as typeof fetch;
     renderPage();
-    expect(screen.getByText("Loading creatives…")).toBeDefined();
+    expect(screen.getByText("Loading Creatives…")).toBeDefined();
   });
 
   it("renders fetch errors", async () => {

@@ -15,27 +15,27 @@ export function EmailSignIn() {
       const msg = await fn();
       setMessage(typeof msg === "string" ? msg : "");
     } catch (err) {
-      setMessage(err instanceof ApiError ? err.message : "Sign-in failed.");
+      setMessage(err instanceof ApiError ? err.message : "Sign-In Failed.");
     }
   };
 
   return (
     <div>
-      <h3>Or continue with email</h3>
-      <input type="text" placeholder="work email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} aria-label="Work email" />
+      <h3>Or Continue With Email</h3>
+      <input type="text" placeholder="work email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} aria-label="Work Email" />
       <input type="password" placeholder="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} aria-label="Password" />
       <button type="button" className="auth-btn" onClick={() => void submit(() => emailSignIn(email, password))}>
-        Sign in with email
+        Sign In With Email
       </button>
       <button type="button" className="auth-btn" onClick={() => void submit(() => emailCodeSend(email))}>
-        Email me a sign-in code
+        Email Me A Sign-In Code
       </button>
-      <input type="text" placeholder="6-digit code" autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value)} aria-label="Sign-in code" />
+      <input type="text" placeholder="6-digit code" autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value)} aria-label="Sign-In Code" />
       <button type="button" className="auth-btn" onClick={() => void submit(() => emailCodeSignIn(email, code))}>
-        Verify code &amp; sign in
+        Verify Code &amp; Sign In
       </button>
       <button type="button" className="auth-btn" onClick={() => void submit(() => emailReset(email))}>
-        Forgot password — send reset
+        Forgot Password — Send Reset
       </button>
       <p className="muted" role="status">{message}</p>
     </div>

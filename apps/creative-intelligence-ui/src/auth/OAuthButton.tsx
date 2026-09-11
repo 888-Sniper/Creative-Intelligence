@@ -1,10 +1,10 @@
 import { useAuth } from "@/auth/AuthProvider";
 
 const PROVIDERS = [
-  { id: "google", label: "Continue with Google" },
-  { id: "microsoft", label: "Continue with Microsoft" },
-  { id: "apple", label: "Continue with Apple" },
-  { id: "github", label: "Continue with GitHub" },
+  { id: "google", label: "Continue With Google" },
+  { id: "microsoft", label: "Continue With Microsoft" },
+  { id: "apple", label: "Continue With Apple" },
+  { id: "github", label: "Continue With GitHub" },
 ] as const;
 
 /** One OAuth provider button. Redirects to WorkOS; secrets never touch

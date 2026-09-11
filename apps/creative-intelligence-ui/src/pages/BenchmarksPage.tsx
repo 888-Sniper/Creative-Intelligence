@@ -5,6 +5,14 @@ import { useFilters } from "@/state/FilterContext";
 import type { FilterValues } from "@/state/FilterContext";
 
 const GROUP_OPTIONS = ["hook_type", "creator_vs_branded", "edit_style", "platform", "campaign"];
+/** UI copy rule: Title Case labels for group-by option display (values stay API codes). */
+const GROUP_LABELS: Record<string, string> = {
+  hook_type: "Hook Type",
+  creator_vs_branded: "Creator Vs Branded",
+  edit_style: "Edit Style",
+  platform: "Platform",
+  campaign: "Campaign",
+};
 const METRIC_OPTIONS = ["cpa", "cpm", "ctr", "vtr", "roas"];
 const KPI_OPTIONS = ["all", "spend", "ctr", "cpc", "cpa", "cpm", "vtr", "roas"];
 const LOWER_BETTER = ["cpa", "cpc", "cpm"];
@@ -362,7 +370,7 @@ export function BenchmarksPage() {
   async function saveView(): Promise<void> {
     const name = viewName.trim();
     if (!name) {
-      setViewStatus("Name the view first.");
+      setViewStatus("Name The View First.");
       return;
     }
     try {
@@ -398,11 +406,11 @@ export function BenchmarksPage() {
       </p>
       <div className="card">
         <label>
-          Group by{" "}
-          <select aria-label="Group by" value={groupBy} onChange={(e) => setGroupBy(e.target.value)}>
+          Group By{" "}
+          <select aria-label="Group By" value={groupBy} onChange={(e) => setGroupBy(e.target.value)}>
             {GROUP_OPTIONS.map((g) => (
               <option key={g} value={g}>
-                {g}
+                {GROUP_LABELS[g] ?? g}
               </option>
             ))}
           </select>
@@ -448,7 +456,7 @@ export function BenchmarksPage() {
       </div>
       <div>
         {benchLoading ? (
-          <p className="muted">Loading benchmarks…</p>
+          <p className="muted">Loading Benchmarks…</p>
         ) : benchError ? (
           <p className="muted">{benchError}</p>
         ) : (
@@ -479,25 +487,25 @@ export function BenchmarksPage() {
         )}
       </div>
       <div className="card">
-        <h3>Retention patterns</h3>
+        <h3>Retention Patterns</h3>
         <div className="muted" style={{ fontSize: 12 }}>
-          Where the scoped population normally loses viewers, aggregated across creatives (GET
-          /api/retention/patterns follows the top filter bar).
+          Where The Scoped Population Normally Loses Viewers, Aggregated Across Creatives (GET
+          /api/retention/patterns Follows The Top Filter Bar).
         </div>
         {patternsLoading ? (
-          <p className="muted">Loading retention patterns…</p>
+          <p className="muted">Loading Retention Patterns…</p>
         ) : patternsError ? (
           <p className="muted">{patternsError}</p>
         ) : !patternList.length ? (
           <span className="muted">
-            No steep drops in scope ({patterns?.scope || "All data"}, {String(patterns?.n_creatives ?? 0)}{" "}
-            creatives with curves).
+            No Steep Drops In Scope ({patterns?.scope || "All data"}, {String(patterns?.n_creatives ?? 0)}{" "}
+            Creatives With Curves).
           </span>
         ) : (
           <>
             <p className="muted" style={{ fontSize: 12 }}>
-              Scope: {patterns?.scope || "All data"} · {String(patterns?.n_creatives)} creatives,{" "}
-              {String(patterns?.n_events)} drop events.
+              Scope: {patterns?.scope || "All data"} · {String(patterns?.n_creatives)} Creatives,{" "}
+              {String(patterns?.n_events)} Drop Events.
             </p>
             <ul className="plain">
               {patternList.slice(0, 8).map((pt, i) => (
@@ -505,7 +513,7 @@ export function BenchmarksPage() {
                   <strong>
                     {pt.n_creatives} creative{pt.n_creatives === 1 ? "" : "s"}
                   </strong>{" "}
-                  lose ~{pt.avg_drop_pts} pts (max {pt.max_drop_pts}) {patternBits(pt)} — e.g.{" "}
+                  Lose ~{pt.avg_drop_pts} Pts (Max {pt.max_drop_pts}) {patternBits(pt)} — E.g.{" "}
                   {(pt.examples || []).join(", ")}
                 </li>
               ))}
@@ -514,16 +522,16 @@ export function BenchmarksPage() {
         )}
       </div>
       <div className="card">
-        <h3>Benchmark builder</h3>
+        <h3>Benchmark Builder</h3>
         <div className="muted" style={{ fontSize: 12 }}>
-          Saved cohorts persist server-side (/api/cohorts) and start from the active top filter bar.
+          Saved Cohorts Persist Server-Side (/api/cohorts) And Start From The Active Top Filter Bar.
         </div>
         <div className="filter-grid">
           <label>
             Name
             <input
               type="text"
-              aria-label="Cohort name"
+              aria-label="Cohort Name"
               placeholder="e.g. Beauty TikTok lower"
               value={cohortName}
               onChange={(e) => setCohortName(e.target.value)}
@@ -531,7 +539,7 @@ export function BenchmarksPage() {
           </label>
           <label>
             Metric
-            <select aria-label="Cohort metric" value={cohortMetric} onChange={(e) => setCohortMetric(e.target.value)}>
+            <select aria-label="Cohort Metric" value={cohortMetric} onChange={(e) => setCohortMetric(e.target.value)}>
               {METRIC_OPTIONS.map((m) => (
                 <option key={m} value={m}>
                   {m.toUpperCase()}
@@ -540,20 +548,20 @@ export function BenchmarksPage() {
             </select>
           </label>
           <label>
-            Include projects (comma-separated)
+            Include Projects (Comma-Separated)
             <input
               type="text"
-              aria-label="Include projects"
+              aria-label="Include Projects"
               placeholder="optional"
               value={includeProjects}
               onChange={(e) => setIncludeProjects(e.target.value)}
             />
           </label>
           <label>
-            Exclude projects (comma-separated)
+            Exclude Projects (Comma-Separated)
             <input
               type="text"
-              aria-label="Exclude projects"
+              aria-label="Exclude Projects"
               placeholder="optional"
               value={excludeProjects}
               onChange={(e) => setExcludeProjects(e.target.value)}
@@ -567,11 +575,11 @@ export function BenchmarksPage() {
         </div>
         <div style={{ marginTop: 8 }}>
           {cohortsLoading ? (
-            <p className="muted">Loading saved cohorts…</p>
+            <p className="muted">Loading Saved Cohorts…</p>
           ) : cohortsError ? (
             <p className="muted">{cohortsError}</p>
           ) : !cohorts || !cohorts.length ? (
-            <span className="muted">No saved cohorts yet.</span>
+            <span className="muted">No Saved Cohorts Yet.</span>
           ) : (
             <ul className="plain">
               {cohorts.map((b) => (
@@ -608,7 +616,7 @@ export function BenchmarksPage() {
         </div>
       </div>
       <div className="card">
-        <h3>Saved views</h3>
+        <h3>Saved Views</h3>
         <div className="muted" style={{ fontSize: 12 }}>
           Named snapshots of filters + KPI + tab + benchmark + report rank (GET/POST /api/views). Applying a view
           restores the exact analysis setup.
@@ -616,22 +624,22 @@ export function BenchmarksPage() {
         <div className="ask-row">
           <input
             type="text"
-            aria-label="View name"
+            aria-label="View Name"
             placeholder="e.g. Beauty Spain TikTok"
             value={viewName}
             onChange={(e) => setViewName(e.target.value)}
           />
           <button type="button" className="action" onClick={() => void saveView()}>
-            Save current view
+            Save Current View
           </button>
         </div>
         <div className="muted" style={{ marginTop: 8 }}>
           {viewsLoading ? (
-            <p className="muted">Loading saved views…</p>
+            <p className="muted">Loading Saved Views…</p>
           ) : viewsError ? (
             <span className="muted">{viewsError}</span>
           ) : !views || !views.length ? (
-            <span>No saved views yet.</span>
+            <span>No Saved Views Yet.</span>
           ) : (
             <ul className="plain">
               {views.map((v) => (

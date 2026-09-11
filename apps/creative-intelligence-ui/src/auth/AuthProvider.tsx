@@ -167,7 +167,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const emailCodeSend = useCallback(async (email: string) => {
     await api("POST", "/api/auth/email/code", { email });
-    return "Code sent — check your email.";
+    return "Code Sent — Check Your Email.";
   }, []);
 
   const emailCodeSignIn = useCallback(
@@ -190,7 +190,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const emailReset = useCallback(async (email: string) => {
     await api("POST", "/api/auth/email/reset", { email });
-    return "If that email exists, a reset is on its way.";
+    return "If That Email Exists, A Reset Is On Its Way.";
   }, []);
 
   const logout = useCallback(async () => {

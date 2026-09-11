@@ -18,7 +18,7 @@ import type { ReactNode } from "react";
  *  re-authorizes every admin API call; this never grants access by itself. */
 function AdminOnly({ children }: { children: ReactNode }) {
   const { me } = useAuth();
-  if (!me?.is_admin) return <p className="muted">Admin access required.</p>;
+  if (!me?.is_admin) return <p className="muted">Admin Access Required.</p>;
   return <>{children}</>;
 }
 

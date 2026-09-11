@@ -33,13 +33,13 @@ interface AdminAuditEvent {
 }
 
 const REVOKE_CONFIRM =
-  "Revoke this employee's access? Their sessions stop working immediately.";
+  "Revoke This Employee's Access? Their Sessions Stop Working Immediately.";
 const SUSPEND_ADMIN_CONFIRM =
-  "Suspend this admin? Their sessions stop working immediately. The server refuses when they are the last active admin.";
+  "Suspend This Admin? Their Sessions Stop Working Immediately. The Server Refuses When They Are The Last Active Admin.";
 const DEMOTE_ADMIN_CONFIRM =
-  "Demote this admin to employee? They lose admin access immediately.";
+  "Demote This Admin To Employee? They Lose Admin Access Immediately.";
 const INVALIDATE_CONFIRM =
-  "Invalidate all sessions for this employee? They are signed out everywhere immediately.";
+  "Invalidate All Sessions For This Employee? They Are Signed Out Everywhere Immediately.";
 
 function msg(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -186,7 +186,7 @@ export function AdminEmployeesPage() {
         {},
       );
       await reloadLists();
-      setNotice(`${Number(r.revoked) || 0} session(s) revoked.`);
+      setNotice(`${Number(r.revoked) || 0} Session(s) Revoked.`);
     } catch (e) {
       setNotice(msg(e));
     }
@@ -204,7 +204,7 @@ export function AdminEmployeesPage() {
       setAddFirst("");
       setAddLast("");
       await reloadLists();
-      setNotice("Employee added as active.");
+      setNotice("Employee Added As Active.");
     } catch (e) {
       setNotice(msg(e));
     }
@@ -214,8 +214,8 @@ export function AdminEmployeesPage() {
     <>
       <h1 className="page-title">Admin — Employees</h1>
       <p className="page-sub">
-        Access is decided here, on the server. Changes take effect immediately,
-        including on live sessions.
+        Access Is Decided Here, On The Server. Changes Take Effect Immediately,
+        Including On Live Sessions.
       </p>
       <div className="card">
         <div style={{ margin: "12px 0" }}>
@@ -223,32 +223,32 @@ export function AdminEmployeesPage() {
             type="text"
             id="admin-search"
             placeholder="search name or email"
-            aria-label="Search name or email"
+            aria-label="Search Name Or Email"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             style={{ width: 220 }}
           />
           <select
             id="admin-status-filter"
-            aria-label="Filter by status"
+            aria-label="Filter By Status"
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
           >
-            <option value="">all</option>
-            <option value="pending">pending</option>
-            <option value="active">active</option>
-            <option value="suspended">suspended</option>
-            <option value="revoked">revoked</option>
+            <option value="">All</option>
+            <option value="pending">Pending</option>
+            <option value="active">Active</option>
+            <option value="suspended">Suspended</option>
+            <option value="revoked">Revoked</option>
           </select>
           <select
             id="admin-role-filter"
-            aria-label="Filter by role"
+            aria-label="Filter By Role"
             value={roleFilter}
             onChange={(e) => setRoleFilter(e.target.value)}
           >
-            <option value="">all</option>
-            <option value="admin">admin</option>
-            <option value="employee">employee</option>
+            <option value="">All</option>
+            <option value="admin">Admin</option>
+            <option value="employee">Employee</option>
           </select>
           <button className="action" onClick={() => void refreshAll()}>
             Refresh
@@ -260,7 +260,7 @@ export function AdminEmployeesPage() {
           )}
         </div>
         {loading && employees === null && notice === "" ? (
-          <p className="muted">Loading employees…</p>
+          <p className="muted">Loading Employees…</p>
         ) : (
           employees !== null && (
             <div style={{ overflow: "auto" }}>
@@ -271,7 +271,7 @@ export function AdminEmployeesPage() {
                     <th scope="col">Email</th>
                     <th scope="col">Role</th>
                     <th scope="col">Status</th>
-                    <th scope="col">Last login</th>
+                    <th scope="col">Last Login</th>
                     <th scope="col">Approval</th>
                     <th scope="col">Actions</th>
                   </tr>
@@ -279,7 +279,7 @@ export function AdminEmployeesPage() {
                 <tbody>
                   {employees.length === 0 ? (
                     <tr>
-                      <td colSpan={7}>No employees match.</td>
+                      <td colSpan={7}>No Employees Match.</td>
                     </tr>
                   ) : (
                     employees.map((e) => {
@@ -358,13 +358,13 @@ export function AdminEmployeesPage() {
                                 void runAction("role", e.id, e.role, nextRole)
                               }
                             >
-                              Make {nextRole}
+                              Make {nextRole === "admin" ? "Admin" : "Employee"}
                             </button>{" "}
                             <button
                               className="link-btn"
                               onClick={() => void invalidateSessions(e.id)}
                             >
-                              Invalidate sessions
+                              Invalidate Sessions
                             </button>
                           </td>
                         </tr>
@@ -376,12 +376,12 @@ export function AdminEmployeesPage() {
             </div>
           )
         )}
-        <h4>Add employee</h4>
+        <h4>Add Employee</h4>
         <div>
           <input
             type="text"
             placeholder="email"
-            aria-label="New employee email"
+            aria-label="New Employee Email"
             value={addEmail}
             onChange={(e) => setAddEmail(e.target.value)}
             style={{ width: 220 }}
@@ -389,7 +389,7 @@ export function AdminEmployeesPage() {
           <input
             type="text"
             placeholder="first name (optional)"
-            aria-label="New employee first name"
+            aria-label="New Employee First Name"
             value={addFirst}
             onChange={(e) => setAddFirst(e.target.value)}
             style={{ width: 150 }}
@@ -397,13 +397,13 @@ export function AdminEmployeesPage() {
           <input
             type="text"
             placeholder="last name (optional)"
-            aria-label="New employee last name"
+            aria-label="New Employee Last Name"
             value={addLast}
             onChange={(e) => setAddLast(e.target.value)}
             style={{ width: 150 }}
           />
           <select
-            aria-label="New employee role"
+            aria-label="New Employee Role"
             value={addRole}
             onChange={(e) => setAddRole(e.target.value)}
           >
@@ -411,10 +411,10 @@ export function AdminEmployeesPage() {
             <option value="admin">Admin</option>
           </select>
           <button className="action" onClick={() => void addEmployee()}>
-            Add (active)
+            Add (Active)
           </button>
         </div>
-        <h4>Audit trail</h4>
+        <h4>Audit Trail</h4>
         <div style={{ overflow: "auto" }}>
           <table>
             <thead>
@@ -429,7 +429,7 @@ export function AdminEmployeesPage() {
             <tbody>
               {events.length === 0 ? (
                 <tr>
-                  <td colSpan={5}>No events yet.</td>
+                  <td colSpan={5}>No Events Yet.</td>
                 </tr>
               ) : (
                 events.map((v) => (

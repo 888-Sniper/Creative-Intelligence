@@ -47,7 +47,7 @@ describe("SyncJobs (item 26)", () => {
       expect(screen.getByText("Meta Account A")).toBeDefined();
     });
     expect(screen.getByText("emp-9")).toBeDefined();
-    expect(screen.getByText(/ok @ 2026-01-03/)).toBeDefined();
+    expect(screen.getByText(/OK @ 2026-01-03/)).toBeDefined();
     expect(screen.queryByText(/sekret/)).toBeNull();
   });
 
@@ -56,10 +56,10 @@ describe("SyncJobs (item 26)", () => {
     mockJobs(calls, []);
     render(<SyncJobs />);
     await waitFor(() => {
-      expect(screen.getByText("No scheduled jobs yet — create one below.")).toBeDefined();
+      expect(screen.getByText("No Scheduled Jobs Yet — Create One Below.")).toBeDefined();
     });
-    fireEvent.change(screen.getByLabelText("New job name"), { target: { value: "TikTok B" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create job" }));
+    fireEvent.change(screen.getByLabelText("New Job Name"), { target: { value: "TikTok B" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create Job" }));
     await waitFor(() => {
       const post = calls.find((c) => c.method === "POST" && c.url === "/api/sync/jobs");
       expect(post).toBeDefined();
@@ -77,9 +77,9 @@ describe("SyncJobs (item 26)", () => {
     });
     render(<SyncJobs />);
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Run now" })).toBeDefined();
+      expect(screen.getByRole("button", { name: "Run Now" })).toBeDefined();
     });
-    fireEvent.click(screen.getByRole("button", { name: "Run now" }));
+    fireEvent.click(screen.getByRole("button", { name: "Run Now" }));
     fireEvent.click(screen.getByRole("button", { name: "Disable" }));
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     await waitFor(() => {

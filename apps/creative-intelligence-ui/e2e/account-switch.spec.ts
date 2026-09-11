@@ -62,10 +62,10 @@ test.describe("account switch isolation", () => {
     // The ask request is now in flight (held above).
     await askSeen;
 
-    await page.getByRole("button", { name: /Switch to Boss Admin/ }).click();
+    await page.getByRole("button", { name: /Switch To Boss Admin/ }).click();
     // The switch POST is held: the dedicated switching state must
     // hide all protected content from either account.
-    await expect(page.getByText("Switching accounts…")).toBeVisible();
+    await expect(page.getByText("Switching Accounts…")).toBeVisible();
 
     releaseSwitch();
     await expect(page.getByText("Boss Admin").first()).toBeVisible();

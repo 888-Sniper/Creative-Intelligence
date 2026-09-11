@@ -15,7 +15,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
         <div id="auth-screen">
           <div className="auth-card">
             <h1>Creative Intelligence</h1>
-            <p className="muted" role="status">Checking your session…</p>
+            <p className="muted" role="status">Checking Your Session…</p>
           </div>
         </div>
       );
@@ -26,7 +26,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
         <div id="auth-screen">
           <div className="auth-card">
             <h1>Creative Intelligence</h1>
-            <p className="muted" role="status">Switching accounts…</p>
+            <p className="muted" role="status">Switching Accounts…</p>
           </div>
         </div>
       );

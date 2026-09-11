@@ -142,7 +142,7 @@ export function ProfilePage() {
     try {
       const r = await api<ProfileResponse>("PATCH", "/api/auth/me", { avatar_url: "" });
       applyEmployee(r.employee);
-      setStatus("Avatar removed.");
+      setStatus("Avatar Removed.");
     } catch (e: unknown) {
       setStatus(e instanceof Error ? e.message : String(e));
     }
@@ -152,7 +152,7 @@ export function ProfilePage() {
     setSessionStatus("");
     try {
       const r = await api<RevokeResponse>("POST", "/api/auth/sessions/revoke-all", {});
-      setSessionStatus(`Signed out of ${Number(r.revoked ?? 0)} session(s).`);
+      setSessionStatus(`Signed Out Of ${Number(r.revoked ?? 0)} Session(s).`);
     } catch (e: unknown) {
       setSessionStatus(e instanceof Error ? e.message : String(e));
     }
@@ -161,10 +161,10 @@ export function ProfilePage() {
   return (
     <>
       <h1 className="page-title">Profile</h1>
-      <p className="page-sub">Your employee profile. Changes are saved to your account immediately.</p>
-      {loading && <p className="muted">Loading profile…</p>}
+      <p className="page-sub">Your Employee Profile. Changes Are Saved To Your Account Immediately.</p>
+      {loading && <p className="muted">Loading Profile…</p>}
       {!loading && loadError && <p className="muted">{loadError}</p>}
-      {!loading && !loadError && !employee && <p className="muted">Signed out.</p>}
+      {!loading && !loadError && !employee && <p className="muted">Signed Out.</p>}
       {!loading && !loadError && employee && (
         <>
           <div className="card">
@@ -185,7 +185,7 @@ export function ProfilePage() {
             </div>
             <div style={{ margin: "12px 0" }}>
               <label>
-                First name
+                First Name
                 <input
                   type="text"
                   value={first}
@@ -194,7 +194,7 @@ export function ProfilePage() {
                 />
               </label>
               <label>
-                Last name
+                Last Name
                 <input
                   type="text"
                   value={last}
@@ -205,7 +205,7 @@ export function ProfilePage() {
             </div>
             <div style={{ margin: "12px 0" }}>
               <label>
-                Avatar URL (optional)
+                Avatar URL (Optional)
                 <input
                   type="text"
                   value={avatarUrl}
@@ -215,21 +215,21 @@ export function ProfilePage() {
                 />
               </label>
               <span className="muted" style={{ fontSize: 12 }}>
-                …or upload an image (JPEG/PNG/WebP, up to 2 MB):
+                …Or Upload An Image (JPEG/PNG/WebP, Up To 2 MB):
               </span>
               <input
                 ref={fileRef}
                 type="file"
                 accept=".jpg,.jpeg,.png,.webp"
-                aria-label="Avatar image file"
+                aria-label="Avatar Image File"
               />
             </div>
             <div>
               <button type="button" className="action" onClick={() => void save()}>
-                Save profile
+                Save Profile
               </button>
               <button type="button" className="action" onClick={() => void removeAvatar()}>
-                Remove avatar
+                Remove Avatar
               </button>
               <span className="muted" role="status">
                 {status}
@@ -240,7 +240,7 @@ export function ProfilePage() {
             <h3>Sessions</h3>
             <div>
               <button type="button" className="action" onClick={() => void revokeAll()}>
-                Log out everywhere
+                Log Out Everywhere
               </button>
               <span className="muted" role="status">
                 {sessionStatus}

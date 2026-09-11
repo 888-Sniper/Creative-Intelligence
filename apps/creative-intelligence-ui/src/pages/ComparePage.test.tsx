@@ -84,11 +84,11 @@ function mockFetchAll() {
 describe("ComparePage", () => {
   it("renders all three compare modes", () => {
     renderPage();
-    expect(screen.getByRole("button", { name: "Compare creatives" })).toBeDefined();
-    expect(screen.getByText("Campaign compare")).toBeDefined();
-    expect(screen.getByText("Period comparison")).toBeDefined();
-    expect(screen.getByLabelText("Rank creatives by")).toBeDefined();
-    expect(screen.getByLabelText("Rank campaigns by")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Compare Creatives" })).toBeDefined();
+    expect(screen.getByText("Campaign Compare")).toBeDefined();
+    expect(screen.getByText("Period Comparison")).toBeDefined();
+    expect(screen.getByLabelText("Rank Creatives By")).toBeDefined();
+    expect(screen.getByLabelText("Rank Campaigns By")).toBeDefined();
   });
 
   it("compares creatives side by side with winner copy", async () => {
@@ -96,12 +96,12 @@ describe("ComparePage", () => {
     renderPage();
     fireEvent.change(screen.getByPlaceholderText("creative A key"), { target: { value: "ka" } });
     fireEvent.change(screen.getByPlaceholderText("creative B key"), { target: { value: "kb" } });
-    fireEvent.click(screen.getByRole("button", { name: "Compare creatives" }));
+    fireEvent.click(screen.getByRole("button", { name: "Compare Creatives" }));
     await waitFor(() => {
-      expect(screen.getByText("Why ka won")).toBeDefined();
+      expect(screen.getByText("Why ka Won")).toBeDefined();
     });
-    expect(screen.getByText(/Winner by CPA: ka/)).toBeDefined();
-    expect(screen.getByText("Attributes side-by-side")).toBeDefined();
+    expect(screen.getByText(/Winner By CPA: ka/)).toBeDefined();
+    expect(screen.getByText("Attributes Side-By-Side")).toBeDefined();
     const fetchMock = window.fetch as unknown as ReturnType<typeof vi.fn>;
     const calledUrl = String(fetchMock.mock.calls[0]?.[0] ?? "");
     expect(calledUrl).toContain("key=ka");
@@ -117,13 +117,13 @@ describe("ComparePage", () => {
     renderPage();
     fireEvent.change(screen.getByPlaceholderText("creative A key"), { target: { value: "ka" } });
     fireEvent.change(screen.getByPlaceholderText("creative B key"), { target: { value: "kb" } });
-    fireEvent.click(screen.getByRole("button", { name: "Compare creatives" }));
+    fireEvent.click(screen.getByRole("button", { name: "Compare Creatives" }));
     await waitFor(() => {
       expect(screen.getByText("Loading…")).toBeDefined();
     });
     resolveFetch(Response.json(creativePayload));
     await waitFor(() => {
-      expect(screen.getByText("Why ka won")).toBeDefined();
+      expect(screen.getByText("Why ka Won")).toBeDefined();
     });
   });
 
@@ -132,7 +132,7 @@ describe("ComparePage", () => {
     renderPage();
     fireEvent.change(screen.getByPlaceholderText("creative A key"), { target: { value: "ka" } });
     fireEvent.change(screen.getByPlaceholderText("creative B key"), { target: { value: "kb" } });
-    fireEvent.click(screen.getByRole("button", { name: "Compare creatives" }));
+    fireEvent.click(screen.getByRole("button", { name: "Compare Creatives" }));
     await waitFor(() => {
       expect(screen.getByText("boom")).toBeDefined();
     });
@@ -143,7 +143,7 @@ describe("ComparePage", () => {
     renderPage();
     fireEvent.change(screen.getByPlaceholderText("creative A key"), { target: { value: "kb" } });
     fireEvent.change(screen.getByPlaceholderText("creative B key"), { target: { value: "ka" } });
-    fireEvent.click(screen.getByRole("button", { name: "Compare creatives" }));
+    fireEvent.click(screen.getByRole("button", { name: "Compare Creatives" }));
     await waitFor(() => {
       expect(screen.getByText(/order: ka · kb/)).toBeDefined();
     });
@@ -153,9 +153,9 @@ describe("ComparePage", () => {
     mockFetchAll();
     renderPage();
     fireEvent.change(screen.getByPlaceholderText("creative A key"), { target: { value: "ka" } });
-    fireEvent.click(screen.getByRole("button", { name: "Compare creatives" }));
+    fireEvent.click(screen.getByRole("button", { name: "Compare Creatives" }));
     await waitFor(() => {
-      expect(screen.getByText("Enter at least two creative keys (up to six).")).toBeDefined();
+      expect(screen.getByText("Enter At Least Two Creative Keys (Up To Six).")).toBeDefined();
     });
     expect(window.fetch as unknown as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
   });
@@ -166,12 +166,12 @@ describe("ComparePage", () => {
     fireEvent.change(screen.getByPlaceholderText("campaigns, comma-separated (blank = all)"), {
       target: { value: "Camp A, Camp B" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Compare campaigns" }));
+    fireEvent.click(screen.getByRole("button", { name: "Compare Campaigns" }));
     await waitFor(() => {
-      expect(screen.getByText("Why Camp A won")).toBeDefined();
+      expect(screen.getByText("Why Camp A Won")).toBeDefined();
     });
-    expect(screen.getByText("Ranked by cpa")).toBeDefined();
-    expect(screen.getByText("Winner by CPA: Camp A")).toBeDefined();
+    expect(screen.getByText("Ranked By CPA")).toBeDefined();
+    expect(screen.getByText("Winner By CPA: Camp A")).toBeDefined();
     const fetchMock = window.fetch as unknown as ReturnType<typeof vi.fn>;
     const calledUrl = String(fetchMock.mock.calls[0]?.[0] ?? "");
     expect(calledUrl.startsWith("/api/compare/campaigns")).toBe(true);
@@ -181,9 +181,9 @@ describe("ComparePage", () => {
   it("requires all four period dates", async () => {
     mockFetchAll();
     renderPage();
-    fireEvent.click(screen.getByRole("button", { name: "Compare periods" }));
+    fireEvent.click(screen.getByRole("button", { name: "Compare Periods" }));
     await waitFor(() => {
-      expect(screen.getByText("Fill all four period dates.")).toBeDefined();
+      expect(screen.getByText("Fill All Four Period Dates.")).toBeDefined();
     });
     expect(window.fetch as unknown as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
   });
@@ -191,11 +191,11 @@ describe("ComparePage", () => {
   it("compares periods with a B−A delta table", async () => {
     mockFetchAll();
     renderPage();
-    fireEvent.change(screen.getByLabelText("A from"), { target: { value: "2026-08-01" } });
-    fireEvent.change(screen.getByLabelText("A to"), { target: { value: "2026-08-07" } });
-    fireEvent.change(screen.getByLabelText("B from"), { target: { value: "2026-08-08" } });
-    fireEvent.change(screen.getByLabelText("B to"), { target: { value: "2026-08-14" } });
-    fireEvent.click(screen.getByRole("button", { name: "Compare periods" }));
+    fireEvent.change(screen.getByLabelText("A From"), { target: { value: "2026-08-01" } });
+    fireEvent.change(screen.getByLabelText("A To"), { target: { value: "2026-08-07" } });
+    fireEvent.change(screen.getByLabelText("B From"), { target: { value: "2026-08-08" } });
+    fireEvent.change(screen.getByLabelText("B To"), { target: { value: "2026-08-14" } });
+    fireEvent.click(screen.getByRole("button", { name: "Compare Periods" }));
     await waitFor(() => {
       expect(screen.getByText("B−A")).toBeDefined();
     });

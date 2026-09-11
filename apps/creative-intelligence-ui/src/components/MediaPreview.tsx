@@ -79,7 +79,7 @@ export function MediaPreview({ src, creativeKey, videoRef, testId, mutedPreview 
         playsInline
         preload="metadata"
         src={src}
-        title="Preview — click to play/pause"
+        title="Preview — Click To Play/Pause"
         data-testid={testId}
         onClick={(e) => {
           const v = e.currentTarget;

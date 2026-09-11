@@ -88,7 +88,7 @@ describe("CampaignsPage", () => {
       () => new Promise<Response>(() => {}),
     ) as unknown as typeof fetch;
     renderPage();
-    expect(screen.getByText("Loading campaigns…")).toBeDefined();
+    expect(screen.getByText("Loading Campaigns…")).toBeDefined();
   });
 
   it("renders list errors", async () => {
@@ -112,10 +112,10 @@ describe("CampaignsPage", () => {
       expect(screen.getByText("Best")).toBeDefined();
     });
     expect(screen.getByText("Watch")).toBeDefined();
-    expect(screen.getByText("Campaign totals (scoped)")).toBeDefined();
-    expect(screen.getByText("Creatives ranked by CPA")).toBeDefined();
-    expect(screen.getByText("Creative learning")).toBeDefined();
+    expect(screen.getByText("Campaign Totals (Scoped)")).toBeDefined();
+    expect(screen.getByText("Creatives Ranked By CPA")).toBeDefined();
+    expect(screen.getByText("Creative Learning")).toBeDefined();
     expect(screen.getByText("Scale: c1 — lowest CPA.")).toBeDefined();
-    expect(screen.getByText(/question hooks lead 2 of 2 creatives here/)).toBeDefined();
+    expect(screen.getByText(/question Hooks Lead 2 Of 2 Creatives Here/)).toBeDefined();
   });
 });

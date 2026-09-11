@@ -93,19 +93,19 @@ describe("OverviewPage", () => {
     renderPage();
     expect(screen.getByText("Overview")).toBeDefined();
     expect(
-      screen.getByText("How are your campaigns performing? What creatives are winning? What needs attention?"),
+      screen.getByText("How Are Your Campaigns Performing? What Creatives Are Winning? What Needs Attention?"),
     ).toBeDefined();
     await waitFor(() => {
       expect(screen.getByText("$200.00")).toBeDefined();
     });
-    expect(screen.getAllByText("across 2 campaigns").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Across 2 Campaigns").length).toBeGreaterThan(0);
     expect(screen.getByText("Best CPA")).toBeDefined();
     expect(screen.getByText("$12.05")).toBeDefined();
     expect(screen.getByText("15,000")).toBeDefined();
-    expect(screen.getByText("Meta: ok @ 2026-09-01 (2 new, 1 updated)", { exact: false })).toBeDefined();
-    expect(screen.getByText("Scheduled jobs: meta.", { exact: false })).toBeDefined();
+    expect(screen.getByText("Meta: OK @ 2026-09-01 (2 New, 1 Updated)", { exact: false })).toBeDefined();
+    expect(screen.getByText("Scheduled Jobs: Meta.", { exact: false })).toBeDefined();
     expect(
-      screen.getByText("Providers: mock mode — set CREATIVE_INTEL_PROVIDER_MODE=live", { exact: false }),
+      screen.getByText("Providers: Mock Mode — Set CREATIVE_INTEL_PROVIDER_MODE=live", { exact: false }),
     ).toBeDefined();
     const campaignsCall = seen.find((c) => c.url.startsWith("/api/campaigns"));
     expect(campaignsCall).toBeDefined();
@@ -155,7 +155,7 @@ describe("OverviewPage", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Upload CSV" }));
     await waitFor(() => {
-      expect(screen.getByText("Inserted 3 rows, 0 updated (0 quarantined).")).toBeDefined();
+      expect(screen.getByText("Inserted 3 Rows, 0 Updated (0 Quarantined).")).toBeDefined();
     });
     const ingest = seen.find((c) => c.url === "/api/ingest");
     expect(ingest?.method).toBe("POST");
@@ -168,9 +168,9 @@ describe("OverviewPage", () => {
     await waitFor(() => {
       expect(screen.getByText("$200.00")).toBeDefined();
     });
-    fireEvent.click(screen.getByRole("button", { name: "Sync Meta now" }));
+    fireEvent.click(screen.getByRole("button", { name: "Sync Meta Now" }));
     await waitFor(() => {
-      expect(screen.getByText("Synced meta: 2 new, 1 updated (0 quarantined).")).toBeDefined();
+      expect(screen.getByText("Synced Meta: 2 New, 1 Updated (0 Quarantined).")).toBeDefined();
     });
     const run = seen.find((c) => c.url === "/api/sync/run");
     expect(run?.method).toBe("POST");

@@ -44,7 +44,7 @@ export function AccountMenu() {
         if (live) setAccounts(r.accounts);
       })
       .catch((err) => {
-        if (live) setError(err instanceof ApiError ? err.message : "Could not load accounts.");
+        if (live) setError(err instanceof ApiError ? err.message : "Could Not Load Accounts.");
       });
     return () => {
       live = false;
@@ -62,7 +62,7 @@ export function AccountMenu() {
     try {
       await switchAccount(employeeId);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Switch failed.");
+      setError(err instanceof ApiError ? err.message : "Switch Failed.");
     }
   };
 
@@ -79,7 +79,7 @@ export function AccountMenu() {
         </span>
       </div>
       {accounts === null ? (
-        <p className="muted">Loading accounts…</p>
+        <p className="muted">Loading Accounts…</p>
       ) : (
         <ul className="plain">
           {accounts
@@ -87,7 +87,7 @@ export function AccountMenu() {
             .map((a) => (
               <li key={a.employee_id}>
                 <button type="button" className="link-btn" disabled={switching} onClick={() => void switchTo(a.employee_id)}>
-                  Switch to {`${a.first_name} ${a.last_name}`.trim() || a.email}
+                  Switch To {`${a.first_name} ${a.last_name}`.trim() || a.email}
                 </button>{" "}
                 <span className="muted">
                   ({a.role} · {a.status})
@@ -98,7 +98,7 @@ export function AccountMenu() {
       )}
       {error ? <p className="muted">{error}</p> : null}
       <button type="button" className="link-btn" onClick={() => void logout()}>
-        Log out
+        Log Out
       </button>
     </div>
   );

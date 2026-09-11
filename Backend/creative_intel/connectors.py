@@ -394,25 +394,61 @@ class _MetricRejected(Exception):
     """The API refused the requested value metric (retry with base)."""
 
 
+# Synchronous-report contract (A09): TikTok specifies GET with query
+# parameters for /report/integrated/get/, not a JSON POST body.
+TIKTOK_REPORT_TYPE = "BASIC"
+TIKTOK_DIMENSIONS = ("campaign_id", "adgroup_id", "ad_id",
+                     "stat_time_day")
+TIKTOK_METRICS = tuple(list(TIKTOK_FIELDS[3:]) + list(TIKTOK_VALUE_METRICS))
+
+
+def _tiktok_check_date(value, name):
+    import datetime as _dt
+    try:
+        _dt.date.fromisoformat(str(value))
+    except ValueError:
+        raise ConnectorUnavailable(
+            "tiktok needs %s as YYYY-MM-DD, got %r" % (name, value))
+    return str(value)
+
+
+def _tiktok_report_url(url, advertiser_id, start_date, end_date,
+                       dimensions, metrics, page):
+    # stat_time_day gives the daily breakdown backing the Date
+    # column; without it every row is range-aggregate and period
+    # analysis is impossible.
+    if tuple(dimensions) != TIKTOK_DIMENSIONS and \
+            set(dimensions) - set(TIKTOK_DIMENSIONS):
+        raise ConnectorUnavailable(
+            "tiktok supports dimensions %s, got %r"
+            % (list(TIKTOK_DIMENSIONS), list(dimensions)))
+    unknown_metrics = [m for m in metrics if m not in TIKTOK_METRICS]
+    if not metrics or unknown_metrics:
+        raise ConnectorUnavailable(
+            "tiktok supports metrics %s, got %r"
+            % (list(TIKTOK_METRICS), list(metrics)))
+    query = urllib.parse.urlencode({
+        "advertiser_id": str(advertiser_id).strip(),
+        "report_type": TIKTOK_REPORT_TYPE,
+        "dimensions": json.dumps(list(dimensions)),
+        "metrics": json.dumps(list(metrics)),
+        "start_date": _tiktok_check_date(start_date, "start_date"),
+        "end_date": _tiktok_check_date(end_date, "end_date"),
+        "page": page,
+        "page_size": 500,
+    })
+    return url + ("&" if "?" in url else "?") + query
+
+
 def _tiktok_pages(url, token, advertiser_id, start_date, end_date,
                   dimensions, metrics):
     rows = []
     page = 1
     while page <= MAX_API_PAGES:
-        payload = {
-            "advertiser_id": str(advertiser_id).strip(),
-            "report_type": "BASIC",
-            # stat_time_day gives the daily breakdown backing the Date
-            # column; without it every row is range-aggregate and period
-            # analysis is impossible.
-            "dimensions": dimensions,
-            "metrics": metrics,
-            "start_date": start_date,
-            "end_date": end_date,
-            "page": page,
-            "page_size": 500,
-        }
-        got = _api_json(url, token=None, payload=payload,
+        page_url = _tiktok_report_url(
+            url, advertiser_id, start_date, end_date,
+            dimensions, metrics, page)
+        got = _api_json(page_url, token=None,
                         headers={"Access-Token": token})
         if got.get("code", 0) != 0:
             message = str(got.get("message") or "")
@@ -435,6 +471,11 @@ def _tiktok_pages(url, token, advertiser_id, start_date, end_date,
         elif len(chunk) < size:
             break
         page += 1
+    else:
+        # Pages exhausted without the API ever signalling completion:
+        # fail loudly instead of treating a prefix as the full report.
+        raise ConnectorUnavailable(
+            "tiktok report incomplete after %d pages" % MAX_API_PAGES)
     return rows
 
 

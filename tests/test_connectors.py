@@ -85,39 +85,54 @@ class StubHandler(BaseHTTPRequestHandler):
                     "video_play_actions": [{"value": 900}]}],
                     "paging": {"next": "http://%s/act/insights?after=page2"
                                "&access_token=%s" % (host, tok)}})
+        elif "/report/integrated/get/" in self.path:
+            # Synchronous-report contract (A09): GET with query
+            # parameters — a JSON POST body must never arrive here.
+            query = parse_qs(urlparse(self.path).query)
+            StubHandler.seen["access_token"] = self.headers.get(
+                "Access-Token")
+            StubHandler.seen["report_type"] = (
+                query.get("report_type") or [""])[0]
+            StubHandler.seen["dimensions"] = json.loads(
+                (query.get("dimensions") or ["[]"])[0])
+            StubHandler.seen["metrics"] = json.loads(
+                (query.get("metrics") or ["[]"])[0])
+            StubHandler.seen["start_date"] = (
+                query.get("start_date") or [""])[0]
+            page = int((query.get("page") or ["1"])[0])
+            StubHandler.seen["page"] = page
+            if page >= 2:
+                rows = [{
+                    "dimensions": {"campaign_id": "TikCamp2",
+                                   "adgroup_id": "g",
+                                   "ad_id": "tt-ad-2",
+                                   "stat_time_day": "2026-08-02"},
+                    "metrics": {"spend": 25.0, "impressions": 2500,
+                                "clicks": 50, "conversion": 5,
+                                "video_views": 600,
+                                "purchase_value": 40.0}}]
+            else:
+                rows = [{
+                    "dimensions": {"campaign_id": "TikCamp",
+                                   "adgroup_id": "g", "ad_id": "tt-ad",
+                                   "stat_time_day": "2026-08-01"},
+                    "metrics": {"spend": 15.0, "impressions": 1500,
+                                "clicks": 30, "conversion": 3,
+                                "video_views": 400, "roas": 2.0}}]
+            self._send(200, {"code": 0, "data": {
+                "list": rows,
+                "page_info": {"page": page, "page_size": 1,
+                              "total_number": 2}}})
         else:
             self._send(404, {"error": "no stub"})
 
     def do_POST(self):
-        StubHandler.seen["access_token"] = self.headers.get("Access-Token")
-        length = int(self.headers.get("Content-Length", 0))
-        body = self.rfile.read(length)
-        StubHandler.seen["body"] = body
-        try:
-            page = (json.loads(body.decode("utf-8") or "{}")).get("page", 1)
-        except ValueError:
-            page = 1
-        StubHandler.seen["page"] = page
-        if page >= 2:
-            rows = [{
-                "dimensions": {"campaign_id": "TikCamp2", "adgroup_id": "g",
-                               "ad_id": "tt-ad-2",
-                               "stat_time_day": "2026-08-02"},
-                "metrics": {"spend": 25.0, "impressions": 2500, "clicks": 50,
-                            "conversion": 5, "video_views": 600,
-                            "purchase_value": 40.0}}]
-        else:
-            rows = [{
-                "dimensions": {"campaign_id": "TikCamp", "adgroup_id": "g",
-                               "ad_id": "tt-ad",
-                               "stat_time_day": "2026-08-01"},
-                "metrics": {"spend": 15.0, "impressions": 1500, "clicks": 30,
-                            "conversion": 3, "video_views": 400,
-                            "roas": 2.0}}]
-        self._send(200, {"code": 0, "data": {
-            "list": rows,
-            "page_info": {"page": page, "page_size": 1,
-                          "total_number": 2}}})
+        # A09: the synchronous TikTok report is GET-only. Any POST
+        # here means the client regressed to a JSON body — fail the
+        # request so the test errors instead of certifying it.
+        StubHandler.seen["unexpected_post"] = self.path
+        self._send(405, {"code": 405,
+                         "message": "report reads must use GET"})
 
 
 class ConnectorTest(unittest.TestCase):
@@ -244,22 +259,74 @@ class ConnectorTest(unittest.TestCase):
         self.assertEqual(rows[1]["date"], "2026-08-02")
         self.assertEqual(rows[1]["revenue"], 40.0)
 
+    def test_tiktok_report_uses_get_with_query_params(self):
+        # A09: synchronous reporting is GET with query parameters
+        # (report_type BASIC, JSON-array dimensions/metrics, dates,
+        # paging) — never a JSON POST body.
+        os.environ["CREATIVE_INTEL_KEY_TIKTOK"] = "dummy-tt-token"
+        os.environ["CREATIVE_INTEL_API_TIKTOK"] = self.base
+        connectors.tiktok_report_csv("456", "2026-08-01",
+                                            "2026-08-31")
+        self.assertNotIn("unexpected_post", StubHandler.seen)
+        self.assertEqual(StubHandler.seen["report_type"], "BASIC")
+        self.assertIn("roas", StubHandler.seen["metrics"])
+        self.assertIn("stat_time_day", StubHandler.seen["dimensions"])
+        self.assertEqual(StubHandler.seen["start_date"], "2026-08-01")
+
     def test_tiktok_roas_metric_requested_with_fallback(self):
         os.environ["CREATIVE_INTEL_KEY_TIKTOK"] = "dummy-tt-token"
         os.environ["CREATIVE_INTEL_API_TIKTOK"] = self.base
         connectors.tiktok_report_csv("456", "2026-08-01",
                                             "2026-08-31")
-        body = json.loads(StubHandler.seen["body"].decode("utf-8"))
-        self.assertIn("roas", body["metrics"])
-        self.assertIn("stat_time_day", body["dimensions"])
+        self.assertIn("roas", StubHandler.seen["metrics"])
+        self.assertIn("stat_time_day", StubHandler.seen["dimensions"])
+
+    def test_tiktok_bad_params_rejected_before_http(self):
+        os.environ["CREATIVE_INTEL_KEY_TIKTOK"] = "dummy-tt-token"
+        os.environ["CREATIVE_INTEL_API_TIKTOK"] = self.base
+        with self.assertRaises(connectors.ConnectorUnavailable):
+            connectors._tiktok_pages(
+                self.base + "/open_api/v1.3/report/integrated/get/",
+                "tok", "456", "2026-08-01", "2026-08-31",
+                ["campaign_id"], ["spend", "no_such_metric"])
+        with self.assertRaises(connectors.ConnectorUnavailable):
+            connectors._tiktok_pages(
+                self.base + "/open_api/v1.3/report/integrated/get/",
+                "tok", "456", "08/01/2026", "2026-08-31",
+                ["campaign_id"], ["spend"])
+
+    def test_tiktok_exhausted_pages_fail_explicitly(self):
+        import creative_intel.connectors as conn_mod
+        orig = conn_mod._api_json
+
+        def fake(url, token=None, headers=None):
+            # Full pages forever, never a completion signal.
+            return {"code": 0, "data": {
+                "list": [{"dimensions": {}, "metrics": {}}] * 500,
+                "page_info": {}}}
+
+        conn_mod._api_json = fake
+        try:
+            with self.assertRaises(connectors.ConnectorUnavailable):
+                connectors._tiktok_pages(
+                    "https://business-api.tiktok.com"
+                    "/open_api/v1.3/report/integrated/get/",
+                    "tok", "456", "2026-08-01", "2026-08-31",
+                    ["campaign_id"], ["spend"])
+        finally:
+            conn_mod._api_json = orig
 
     def test_tiktok_metric_rejection_falls_back(self):
+        from urllib.parse import parse_qs, urlparse
+
         import creative_intel.connectors as conn_mod
         calls = []
         orig = conn_mod._api_json
 
-        def fake(url, token=None, payload=None, headers=None):
-            calls.append((payload or {}).get("metrics", []))
+        def fake(url, token=None, headers=None):
+            query = parse_qs(urlparse(url).query)
+            metrics = json.loads((query.get("metrics") or ["[]"])[0])
+            calls.append(metrics)
             if "roas" in calls[-1]:
                 return {"code": 40001, "message": "invalid metric: roas"}
             return {"code": 0, "data": {"list": [], "page_info": {}}}

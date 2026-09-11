@@ -53,7 +53,10 @@ GROUPS = {
 # Full Active/Fallback registry: (kind, active_model, fallback_model).
 # "local" kind needs no key; "gateway" covers TeamoRouter/OpenRouter/LiteLLM.
 REGISTRY = {
-    "deepgram": ("transcription", "flux-general-en", "nova-3"),
+    # Deepgram serves uploaded files via prerecorded models only;
+    # flux-general-en is WebSocket-only (A08) and stays out of the
+    # HTTP roster.
+    "deepgram": ("transcription", "nova-3", "nova-2"),
     "groq-whisper": ("transcription", "whisper-large-v3-turbo",
                      "whisper-large-v3"),
     "gemini": ("vision+generation", "gemini-3.5-flash-lite",
@@ -612,13 +615,31 @@ class LiveStt:
             except (TypeError, ValueError):
                 continue
 
+    # Prerecorded transcription for uploaded files (A08): Deepgram's
+    # Flux models (/v2/listen) are WebSocket-only streaming models and
+    # cannot be driven by an HTTP POST of file bytes. Uploaded audio
+    # therefore goes to the prerecorded endpoint (/v1/listen) with a
+    # prerecorded model; Flux names are refused instead of silently
+    # sent down a protocol that cannot serve them.
+    DEEPGRAM_PRERECORDED_PATH = "/v1/listen"
+    DEEPGRAM_PRERECORDED_MODELS = ("nova-3", "nova-2", "nova",
+                                   "whisper")
+
     @staticmethod
     def _deepgram(name, model, audio, mime, timings_out=None):
         base = live_base("deepgram", ENDPOINTS["deepgram"]["base"])
         key = live_secret(ENDPOINTS["deepgram"]["key"])
         if not key:
             raise ProviderUnavailable("missing key for deepgram")
-        url = base.rstrip("/") + "/v2/listen?model=" + model + "&smart_format=true"
+        if str(model or "").startswith("flux-") or model not in \
+                LiveStt.DEEPGRAM_PRERECORDED_MODELS:
+            raise ProviderUnavailable(
+                "deepgram model %r needs the Flux WebSocket flow, not"
+                " HTTP file upload; configure a prerecorded model (%s)"
+                % (model,
+                   ", ".join(LiveStt.DEEPGRAM_PRERECORDED_MODELS)))
+        url = base.rstrip("/") + LiveStt.DEEPGRAM_PRERECORDED_PATH + \
+            "?model=" + model + "&smart_format=true"
         req = urllib.request.Request(url, data=bytes(audio),
                                      headers={"Authorization": "Token " + key,
                                               "Content-Type": mime},
@@ -840,9 +861,9 @@ class LiveBundle:
     """
 
     STT_ROSTER = [
-        ("deepgram", "flux-general-en", "active"),
+        ("deepgram", "nova-3", "active"),
         ("groq-whisper", "whisper-large-v3-turbo", "active"),
-        ("deepgram", "nova-3", "fallback"),
+        ("deepgram", "nova-2", "fallback"),
         ("groq-whisper", "whisper-large-v3", "fallback"),
     ]
     VISION_ROSTER = [

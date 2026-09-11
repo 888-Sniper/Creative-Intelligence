@@ -39,7 +39,7 @@ they raise instead of inventing content.
 
 | Provider | Active | Fallback | Keychain service |
 |---|---|---|---|
-| Deepgram | `flux-general-en` (`/v2/listen`) | `nova-3` replay | `creative-intel-deepgram` |
+| Deepgram | `nova-3` (`/v1/listen` prerecorded POST) | `nova-2` replay | `creative-intel-deepgram` |
 | Groq Whisper | `whisper-large-v3-turbo` | `whisper-large-v3` | `creative-intel-groq-stt` |
 
 Nextly thresholds mirrored: `eot_threshold=0.7`,

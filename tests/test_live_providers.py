@@ -19,6 +19,7 @@ import sys
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Backend"))
 
@@ -59,9 +60,18 @@ class StubHandler(BaseHTTPRequestHandler):
         if self.mode == "error":
             self._send(500, {"error": "boom"})
             return
-        if self.path.startswith("/v2/listen"):
+        # Contract stub for Deepgram's documented prerecorded endpoint
+        # (A08/AUD-001): HTTP POST of file bytes to /v1/listen with a
+        # prerecorded model. The old /v2/listen POST has NO stub on
+        # purpose — Flux is WebSocket-only, so imitating it would
+        # certify a protocol the provider does not serve.
+        if self.path.startswith("/v1/listen"):
             assert self.headers.get("Authorization", "").startswith("Token "), \
                 "deepgram auth scheme"
+            query = parse_qs(urlparse(self.path).query)
+            model = (query.get("model") or [""])[0]
+            assert not model.startswith("flux-"), \
+                "flux models need the WebSocket flow, not HTTP upload"
             alt = {"transcript": "stub spoken hook here", "confidence": 0.9,
                    "words": [{"word": "stub", "start": 0.1, "end": 0.4},
                              {"word": "hook", "start": 0.5, "end": 0.9}]}
@@ -139,7 +149,7 @@ class LiveProviderTest(unittest.TestCase):
         os.environ.update(self._saved)
 
     def test_live_stt_parses_deepgram(self):
-        stt = providers.LiveStt([("deepgram", "deepgram", "flux-general-en",
+        stt = providers.LiveStt([("deepgram", "deepgram", "nova-3",
                                   "active")])
         text, conf = stt.transcribe("k", audio_bytes=b"RIFF....", mime="audio/wav")
         self.assertEqual(text, "stub spoken hook here")
@@ -147,7 +157,7 @@ class LiveProviderTest(unittest.TestCase):
         self.assertNotIn("mock", text)
 
     def test_live_stt_captures_word_timings(self):
-        stt = providers.LiveStt([("deepgram", "deepgram", "flux-general-en",
+        stt = providers.LiveStt([("deepgram", "deepgram", "nova-3",
                                   "active")])
         timings = []
         text, _conf = stt.transcribe("k", audio_bytes=b"RIFF....",
@@ -159,7 +169,7 @@ class LiveProviderTest(unittest.TestCase):
                                     "end": 0.9}])
 
     def test_live_stt_needs_audio(self):
-        stt = providers.LiveStt([("deepgram", "deepgram", "flux-general-en",
+        stt = providers.LiveStt([("deepgram", "deepgram", "nova-3",
                                   "active")])
         with self.assertRaises(providers.ProviderUnavailable):
             stt.transcribe("k")
@@ -193,10 +203,27 @@ class LiveProviderTest(unittest.TestCase):
 
     def test_error_responses_fail_closed(self):
         StubHandler.mode = "error"
-        stt = providers.LiveStt([("deepgram", "deepgram", "flux-general-en",
+        stt = providers.LiveStt([("deepgram", "deepgram", "nova-3",
                                   "active")])
         with self.assertRaises(providers.ProviderUnavailable):
             stt.transcribe("k", audio_bytes=b"xx")
+
+    def test_flux_model_refused_over_http(self):
+        # A08: a Flux model must fail closed BEFORE any HTTP request:
+        # the adapter refuses it outright (the stub has no /v2/listen
+        # route, so reaching the network would mean the wrong
+        # protocol is being attempted).
+        with self.assertRaises(providers.ProviderUnavailable) as ctx:
+            providers.LiveStt._deepgram("t", "flux-general-en",
+                                        b"RIFF....", "audio/wav")
+        self.assertIn("WebSocket", str(ctx.exception))
+        # Through the public path the refusal surfaces as fail-closed
+        # (race() maps adapter errors to unavailable, never mock).
+        stt = providers.LiveStt([("deepgram", "deepgram",
+                                  "flux-general-en", "active")])
+        with self.assertRaises(providers.ProviderUnavailable):
+            stt.transcribe("k", audio_bytes=b"RIFF....",
+                           mime="audio/wav")
 
     def test_no_keys_fail_closed_never_mock(self):
         for var in list(os.environ):
@@ -213,7 +240,11 @@ class LiveProviderTest(unittest.TestCase):
         text, _ = prov.stt.transcribe("k")
         self.assertIn("mock transcript", text)
 
-    def test_full_live_pipeline_end_to_end(self):
+    def test_stub_backed_pipeline_end_to_end(self):
+        # AUD-001: this exercises the real HTTP request/response code
+        # paths against loopback stubs — it is NOT acceptance against
+        # the real providers. Stub-backed greens must never be read
+        # as proof of provider compatibility.
         conn = sqlite3.connect(":memory:")
         try:
             schema.init_db(conn)
@@ -228,7 +259,7 @@ class LiveProviderTest(unittest.TestCase):
             # Vision roster needs a configured vision key for the bundle;
             # drive stages directly to isolate the HTTP paths.
             stt = providers.LiveStt([("deepgram", "deepgram",
-                                      "flux-general-en", "active")])
+                                      "nova-3", "active")])
             llm = providers.LiveLlm([("deepseek", "deepseek-v4-flash",
                                       "active")])
             text, conf = stt.transcribe("live-k", audio_bytes=media["audio"][0])

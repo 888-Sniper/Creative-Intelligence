@@ -11,6 +11,9 @@ export interface FilterValues {
   funnel: string;
   objective: string;
   kpi: string;
+  hook_type: string;
+  creator_vs_branded: string;
+  format: string;
   date: string;
   date_from: string;
   date_to: string;
@@ -26,6 +29,9 @@ export const EMPTY_FILTERS: FilterValues = {
   funnel: "",
   objective: "",
   kpi: "all",
+  hook_type: "",
+  creator_vs_branded: "",
+  format: "",
   date: "",
   date_from: "",
   date_to: "",

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { ReportsPage } from "@/pages/ReportsPage";
 import { FilterProvider } from "@/state/FilterContext";
 
@@ -28,12 +28,10 @@ function mockFetch(
 }
 
 const campaignsBody = { "Camp A": { n_ads: 2 }, "Camp B": { n_ads: 1 } };
-const creativesBody = [{ creative_key: "ck1", name: "Ad 1", campaigns: ["Camp A"] }];
 
 function mockCatalog() {
   mockFetch((url, init) => {
     if (init?.method === "POST") return jsonResponse({});
-    if (url.includes("/api/creatives")) return jsonResponse(creativesBody);
     if (url.includes("/api/campaigns")) return jsonResponse(campaignsBody);
     return jsonResponse({});
   });
@@ -46,94 +44,150 @@ describe("ReportsPage", () => {
       obj: Blob | MediaSource,
     ) => string;
     window.URL.revokeObjectURL = vi.fn();
+    try {
+      window.localStorage.clear();
+    } catch {
+      /* storage unavailable */
+    }
   });
 
   afterEach(() => {
     cleanup();
   });
 
-  it("renders campaigns, creatives, and KPI defaults with mocked data", async () => {
+  it("renders the generator with campaign/KPI multiselects and format cards", async () => {
     mockCatalog();
     renderPage();
     await waitFor(() => {
-      expect(screen.getByRole("checkbox", { name: "Camp A" })).toBeDefined();
+      expect(screen.getByText("Generate a New Report")).toBeDefined();
     });
-    expect(screen.getByRole("checkbox", { name: "Camp B" })).toBeDefined();
-    expect(screen.getByRole("checkbox", { name: "Ad 1" })).toBeDefined();
-    // Legacy defaults: every KPI checked except roas.
-    expect(
-      (screen.getByRole("checkbox", { name: "CPA" }) as HTMLInputElement).checked,
-    ).toBe(true);
-    expect(
-      (screen.getByRole("checkbox", { name: "ROAS" }) as HTMLInputElement).checked,
-    ).toBe(false);
-    expect(
-      screen.getByRole("button", { name: "Generate Presentation (HTML Deck)" }),
-    ).toBeDefined();
+    expect(screen.getByText("2 Campaigns Selected")).toBeDefined();
+    expect(screen.getByText("5 KPIs Selected")).toBeDefined();
+    expect(screen.getByRole("button", { name: /PPTX Presentation Deck/ })).toBeDefined();
+    expect(screen.getByRole("button", { name: /XLSX Data Workbook/ })).toBeDefined();
+    expect(screen.getByRole("button", { name: /One-Pager Executive Summary/ })).toBeDefined();
+    expect(screen.getByRole("button", { name: /Generate Report/ })).toBeDefined();
+    expect(screen.getByText("Reporting Tips")).toBeDefined();
+    expect(screen.getByText("Latest Generated Files")).toBeDefined();
   });
 
-  it("shows a loading state while the catalogs resolve", () => {
+  it("shows a loading state while the catalog resolves", () => {
     window.fetch = vi.fn(
       () => new Promise<Response>(() => {}),
     ) as unknown as typeof fetch;
     renderPage();
-    expect(screen.getAllByText("Loading…")).toHaveLength(2);
+    expect(screen.getByText("Loading Reports…")).toBeDefined();
   });
 
-  it("renders load errors instead of the lists", async () => {
+  it("renders catalog errors", async () => {
     mockFetch(() => jsonResponse({ error: "catalog down" }, 500));
     renderPage();
     await waitFor(() => {
-      expect(screen.getAllByText("catalog down")).toHaveLength(2);
+      expect(screen.getByText("catalog down")).toBeDefined();
     });
   });
 
-  it("generates CSV with the selected campaigns and KPIs, plus a download link", async () => {
+  it("generates a PPTX with selected campaigns/KPIs and adds history", async () => {
     let reportBody: Record<string, unknown> = {};
     mockFetch((url, init) => {
       if (url === "/api/report" && init?.method === "POST") {
         reportBody = JSON.parse(String(init.body)) as Record<string, unknown>;
-        return jsonResponse({
-          format: "csv",
-          csv: "campaign,cpa\nCamp A,1.5\n",
-          markdown: "# Campaign Report",
-        });
+        return jsonResponse({ format: "pptx", filename: "camp-report.pptx", pptx_b64: "eA==" });
       }
-      if (url.includes("/api/creatives")) return jsonResponse(creativesBody);
       if (url.includes("/api/campaigns")) return jsonResponse(campaignsBody);
       return jsonResponse({});
     });
     renderPage();
     await waitFor(() => {
-      expect(screen.getByRole("checkbox", { name: "Camp A" })).toBeDefined();
+      expect(screen.getByText("2 Campaigns Selected")).toBeDefined();
     });
-    fireEvent.click(screen.getByRole("button", { name: "Generate CSV" }));
+    fireEvent.click(screen.getByRole("button", { name: /Generate Report/ }));
     await waitFor(() => {
-      expect(screen.getByText(/campaign,cpa/)).toBeDefined();
+      expect(screen.getByText("PPTX Built: camp-report.pptx.")).toBeDefined();
     });
-    expect(reportBody["format"]).toBe("csv");
+    expect(reportBody["format"]).toBe("pptx");
     expect(reportBody["campaigns"]).toEqual(["Camp A", "Camp B"]);
-    expect(reportBody["kpis"]).toContain("cpa");
-    expect(screen.getByRole("link", { name: "Download report.csv" })).toBeDefined();
+    expect(reportBody["kpis"]).toEqual(["spend", "impressions", "clicks", "ctr", "roas"]);
+    expect(screen.getByRole("link", { name: "Download 2-Campaign Performance" })).toBeDefined();
   });
 
-  it("renders BLOCKED status when the gated export is refused", async () => {
+  it("falls back to cpa + ctr when every KPI is deselected", async () => {
+    let reportBody: Record<string, unknown> = {};
     mockFetch((url, init) => {
-      if (url === "/api/export" && init?.method === "POST") {
-        return jsonResponse({ detail: { error: "2 reviews pending" } }, 409);
+      if (url === "/api/report" && init?.method === "POST") {
+        reportBody = JSON.parse(String(init.body)) as Record<string, unknown>;
+        return jsonResponse({ format: "one-pager", markdown: "# Report" });
       }
-      if (url.includes("/api/creatives")) return jsonResponse(creativesBody);
       if (url.includes("/api/campaigns")) return jsonResponse(campaignsBody);
       return jsonResponse({});
     });
     renderPage();
     await waitFor(() => {
-      expect(screen.getByRole("checkbox", { name: "Ad 1" })).toBeDefined();
+      expect(screen.getByText("5 KPIs Selected")).toBeDefined();
     });
-    fireEvent.click(screen.getByRole("checkbox", { name: "Ad 1" }));
-    fireEvent.click(screen.getByRole("button", { name: "Export One-Pager" }));
+    fireEvent.click(screen.getByRole("button", { name: /One-Pager Executive Summary/ }));
+    fireEvent.click(screen.getByText("5 KPIs Selected"));
+    for (const k of ["Spend", "Impressions", "Clicks", "CTR", "ROAS"]) {
+      fireEvent.click(screen.getByRole("checkbox", { name: k }));
+    }
+    fireEvent.click(screen.getByRole("button", { name: /Generate Report/ }));
+    await waitFor(() => {
+      expect(reportBody["kpis"]).toEqual(["cpa", "ctr"]);
+    });
+  });
+
+  it("renders BLOCKED status when generation is refused", async () => {
+    mockFetch((url, init) => {
+      if (url === "/api/report" && init?.method === "POST") {
+        return jsonResponse({ detail: { error: "2 reviews pending" } }, 409);
+      }
+      if (url.includes("/api/campaigns")) return jsonResponse(campaignsBody);
+      return jsonResponse({});
+    });
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("2 Campaigns Selected")).toBeDefined();
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Generate Report/ }));
     await waitFor(() => {
       expect(screen.getByText("BLOCKED: 2 reviews pending")).toBeDefined();
+    });
+  });
+
+  it("seeds demo history rows that regenerate through the backend", async () => {
+    let posts = 0;
+    mockFetch((url, init) => {
+      if (url === "/api/report" && init?.method === "POST") {
+        posts += 1;
+        return jsonResponse({ format: "pptx", filename: "regen.pptx", pptx_b64: "eA==" });
+      }
+      if (url.includes("/api/campaigns")) return jsonResponse(campaignsBody);
+      return jsonResponse({});
+    });
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getAllByText("Camp A Performance").length).toBeGreaterThan(0);
+    });
+    const table = screen.getByRole("table");
+    expect(within(table).getAllByText("Completed").length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "Download Camp A Performance" }));
+    await waitFor(() => {
+      expect(posts).toBe(1);
+    });
+    await waitFor(() => {
+      expect(screen.getByText("PPTX Built: regen.pptx.")).toBeDefined();
+    });
+  });
+
+  it("filters history by search text", async () => {
+    mockCatalog();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getAllByText("Camp A Performance").length).toBeGreaterThan(0);
+    });
+    fireEvent.change(screen.getByLabelText("Search reports"), { target: { value: "zzz-no-match" } });
+    await waitFor(() => {
+      expect(screen.getByText("No reports match these filters.")).toBeDefined();
     });
   });
 });

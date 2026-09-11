@@ -51,7 +51,7 @@ test.describe("employee journey", () => {
     await expect(page.getByText(/create account/i)).toHaveCount(0);
     await expect(page.getByText(/sign up/i)).toHaveCount(0);
     // No dashboard behind the gate.
-    await expect(page.getByRole("link", { name: "Overview" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Dashboard" })).toHaveCount(0);
   });
 
   test("failed password sign-in shows a clean inline error", async ({ page }) => {
@@ -71,11 +71,12 @@ test.describe("employee journey", () => {
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "Welcome Back" })).toBeVisible();
     // No dashboard behind the gate.
-    await expect(page.getByRole("link", { name: "Overview" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Dashboard" })).toHaveCount(0);
 
     const seeds = readSeeds();
     await loginAs(context, page, seeds.employee);
-    await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+    // Approved Dashboard greets by daypart: "Good Morning, Ada".
+    await expect(page.getByRole("heading", { name: /Good (Morning|Afternoon|Evening),/ })).toBeVisible();
     await expect(page.getByText("Ada L")).toBeVisible();
 
     await page.getByRole("link", { name: "Profile" }).click();
@@ -117,7 +118,8 @@ test.describe("employee journey", () => {
     // NOTE: the admin session — the employee session is destroyed by
     // the logout step of the first journey in this file.
     await loginAs(context, page, seeds.admin);
-    await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+    // Approved Dashboard greets by daypart: "Good Morning, Ada".
+    await expect(page.getByRole("heading", { name: /Good (Morning|Afternoon|Evening),/ })).toBeVisible();
     const toggle = page.getByRole("button", { name: "Toggle Account Menu" });
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
     await expect(page.getByRole("button", { name: "Log Out", exact: true })).toHaveCount(0);
@@ -133,19 +135,19 @@ test.describe("employee journey", () => {
     const seeds = readSeeds();
     await loginAs(context, page, seeds.pending);
     await expect(page.getByRole("heading", { name: "Access Pending" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Overview" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Dashboard" })).toHaveCount(0);
     await expect(page.getByText("Campaigns")).toHaveCount(0);
   });
 
   test("settings shows Google Drive card unconnected (item 31)", async ({ page, context }) => {
     const seeds = readSeeds();
     await loginAs(context, page, seeds.admin, "/settings");
-    await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Settings", exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Google Drive" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Connect Google Drive" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Connect", exact: true })).toBeVisible();
     // E2E has no Google credentials: the server says so instead of bouncing.
     // Plain click: the collapsed account menu cannot intercept it.
-    await page.getByRole("button", { name: "Connect Google Drive" }).click();
+    await page.getByRole("button", { name: "Connect", exact: true }).click();
     await expect(page.getByText("Google Drive is not configured.")).toBeVisible();
   });
 
@@ -154,9 +156,12 @@ test.describe("employee journey", () => {
     // NOTE: the admin session (the employee session is destroyed by the
     // logout step of the first journey in this file).
     await loginAs(context, page, seeds.admin, "/settings");
-    await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
-    await expect(page.getByText("boss@foap.test (verified, read-only)")).toBeVisible();
-    await expect(page.getByRole("radio", { name: /System/ })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Settings", exact: true })).toBeVisible();
+    // Reskinned account line: email, role, status, provider.
+    await expect(page.getByText(/boss@foap\.test/)).toBeVisible();
+    // Reskinned appearance control is a Theme select with a System option.
+    await expect(page.getByLabel("Theme")).toBeVisible();
+    await expect(page.getByLabel("Theme").locator("option", { hasText: "System" })).toHaveCount(1);
     page.on("dialog", (d) => void d.accept());
     await page.getByRole("button", { name: "Log Out All Sessions" }).click();
     // Revoking includes the current session, so the gate returns to login.

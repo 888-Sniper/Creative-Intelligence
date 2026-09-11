@@ -758,7 +758,9 @@ def test_spa_shell_serving(client):
                  "/reports", "/profile", "/settings", "/admin"):
         r = client.get(path)
         assert r.status_code == 200, path
-        assert "Foap Creative Intelligence" in r.text, path
+        # Approved product title is exactly "Creative Intelligence"
+        # (never "Foap Creative Intelligence").
+        assert "<title>Creative Intelligence</title>" in r.text, path
     assert client.get("/no-such-view").status_code == 404
     assert client.get("/health").json() == {"ok": True}
     assert client.get("/readiness").json() == {"ready": True}

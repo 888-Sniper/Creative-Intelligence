@@ -87,8 +87,8 @@ export function LoginPage() {
         <div className="login-providers">
           <EmployeeOAuthButtons />
         </div>
-        <p className="muted login-footer" style={{ textTransform: "capitalize" }}>
-          <span aria-hidden="true">🔒</span> For Foap employees only.
+        <p className="muted login-footer">
+          <span aria-hidden="true">🔒</span> For Foap Employees Only.
         </p>
         {me?.workos_configured === false ? (
           <p className="muted">WorkOS Is Not Configured On This Server Yet — Ask Your Administrator To Set It Up.</p>

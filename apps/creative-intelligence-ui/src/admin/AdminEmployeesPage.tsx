@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "@/api/client";
+import { Icon } from "@/components/icons";
+import { EmptyState, PageHeader, Panel, Skeleton } from "@/components/product";
 
 /** Admin employee management (port of legacy Web/Index.html v-admin).
  *
@@ -210,31 +212,59 @@ export function AdminEmployeesPage() {
     }
   }
 
+  const stats = useMemo(() => {
+    const rows = employees ?? [];
+    return [
+      { label: "Total Employees", value: String(rows.length), icon: "users", tint: "#E7F1FB" },
+      { label: "Active", value: String(rows.filter((e) => e.status === "active").length), icon: "check", tint: "#E5F5EC" },
+      { label: "Pending Approval", value: String(rows.filter((e) => e.status === "pending").length), icon: "clock", tint: "#FBF3E2" },
+      { label: "Admins", value: String(rows.filter((e) => e.role === "admin").length), icon: "lock", tint: "#EFEAFB" },
+    ];
+  }, [employees]);
+
+  const adminCount = stats[3].value;
+  const employeeCount = String((employees ?? []).filter((e) => e.role !== "admin").length);
+
   return (
     <>
-      <h1 className="page-title">Admin — Employees</h1>
-      <p className="page-sub">
-        Access Is Decided Here, On The Server. Changes Take Effect Immediately,
-        Including On Live Sessions.
-      </p>
-      <div className="card">
-        <div style={{ margin: "12px 0" }}>
-          <input
-            type="text"
-            id="admin-search"
-            placeholder="search name or email"
-            aria-label="Search Name Or Email"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            style={{ width: 220 }}
-          />
+      <PageHeader
+        title="Admin"
+        sub="Access is decided here, on the server. Changes take effect immediately, including on live sessions."
+      />
+      <div className="kpi-grid" style={{ marginTop: 0 }}>
+        {stats.map((s) => (
+          <div className="kpi-card" key={s.label}>
+            <span className="kpi-ico" style={{ background: s.tint }}>
+              <Icon name={s.icon} size={22} />
+            </span>
+            <div className="kpi-body">
+              <div className="kpi-label">{s.label}</div>
+              <div className="kpi-value">{employees === null ? "—" : s.value}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <Panel title="Employee Access" sub="Search, approve, suspend, revoke, and change roles.">
+        <div className="rep-filters" style={{ marginBottom: 12 }}>
+          <span className="rep-search">
+            <Icon name="search" size={15} />
+            <input
+              type="text"
+              id="admin-search"
+              placeholder="search name or email"
+              aria-label="Search Name Or Email"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </span>
           <select
             id="admin-status-filter"
             aria-label="Filter By Status"
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
           >
-            <option value="">All</option>
+            <option value="">All Statuses</option>
             <option value="pending">Pending</option>
             <option value="active">Active</option>
             <option value="suspended">Suspended</option>
@@ -246,145 +276,168 @@ export function AdminEmployeesPage() {
             value={roleFilter}
             onChange={(e) => setRoleFilter(e.target.value)}
           >
-            <option value="">All</option>
+            <option value="">All Roles</option>
             <option value="admin">Admin</option>
             <option value="employee">Employee</option>
           </select>
-          <button className="action" onClick={() => void refreshAll()}>
-            Refresh
+          <button type="button" className="btn-outline" onClick={() => void refreshAll()}>
+            <Icon name="reset" size={14} /> Refresh
           </button>
           {notice !== "" && (
-            <span className="muted" role="status">
+            <span className="panel-sub" role="status" style={{ margin: 0 }}>
               {notice}
             </span>
           )}
         </div>
         {loading && employees === null && notice === "" ? (
-          <p className="muted">Loading Employees…</p>
-        ) : (
-          employees !== null && (
-            <div style={{ overflow: "auto" }}>
-              <table>
-                <thead>
+          <>
+            <p className="muted">Loading Employees…</p>
+            <Skeleton height={180} />
+          </>
+        ) : employees !== null && (
+          <div className="tbl-wrap">
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th scope="col">Employee</th>
+                  <th scope="col">Email</th>
+                  <th scope="col">Role</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Last Login</th>
+                  <th scope="col">Approval</th>
+                  <th scope="col">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {employees.length === 0 ? (
                   <tr>
-                    <th scope="col">Employee</th>
-                    <th scope="col">Email</th>
-                    <th scope="col">Role</th>
-                    <th scope="col">Status</th>
-                    <th scope="col">Last Login</th>
-                    <th scope="col">Approval</th>
-                    <th scope="col">Actions</th>
+                    <td colSpan={7}>No Employees Match.</td>
                   </tr>
-                </thead>
-                <tbody>
-                  {employees.length === 0 ? (
-                    <tr>
-                      <td colSpan={7}>No Employees Match.</td>
-                    </tr>
-                  ) : (
-                    employees.map((e) => {
-                      const nextRole =
-                        e.role === "admin" ? "employee" : "admin";
-                      return (
-                        <tr key={e.id}>
-                          <td>{displayName(e)}</td>
-                          <td>{e.email}</td>
-                          <td>{e.role}</td>
-                          <td>{e.status}</td>
-                          <td>{e.last_login_at || "—"}</td>
-                          <td>
-                            {e.approved_at || "—"}
-                            {e.approved_by
-                              ? ` by ${e.approved_by.slice(0, 8)}`
-                              : ""}
-                          </td>
-                          <td>
+                ) : (
+                  employees.map((e) => {
+                    const nextRole =
+                      e.role === "admin" ? "employee" : "admin";
+                    const initials = displayName(e).split(/\s+/)
+                      .map((w) => w[0]).join("").slice(0, 2).toUpperCase() || "•";
+                    return (
+                      <tr key={e.id}>
+                        <td>
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 9 }}>
+                            <span className="avatar" aria-hidden="true">{initials}</span>
+                            <span className="cell-main">{displayName(e)}</span>
+                          </span>
+                        </td>
+                        <td>{e.email}</td>
+                        <td>
+                          <span className={e.role === "admin" ? "pill pill-info" : "chip-static"}>
+                            {e.role}
+                          </span>
+                        </td>
+                        <td>
+                          <span className={
+                            e.status === "active" ? "pill pill-ok"
+                            : e.status === "pending" ? "pill pill-info"
+                            : e.status === "revoked" ? "pill pill-bad" : "chip-static"
+                          }>
+                            {e.status}
+                          </span>
+                        </td>
+                        <td>{e.last_login_at || "—"}</td>
+                        <td>
+                          {e.approved_at || "—"}
+                          {e.approved_by
+                            ? ` by ${e.approved_by.slice(0, 8)}`
+                            : ""}
+                        </td>
+                        <td>
+                          <span className="row-actions" style={{ flexWrap: "wrap", gap: 4, rowGap: 8, columnGap: 12 }}>
                             {e.status === "pending" && (
-                              <>
-                                <button
-                                  className="link-btn"
-                                  onClick={() =>
-                                    void runAction("approve", e.id, e.role, "")
-                                  }
-                                >
-                                  Approve
-                                </button>{" "}
-                              </>
+                              <button
+                                type="button"
+                                className="link-teal"
+                                onClick={() =>
+                                  void runAction("approve", e.id, e.role, "")
+                                }
+                              >
+                                Approve
+                              </button>
                             )}
                             {e.status === "active" && (
-                              <>
-                                <button
-                                  className="link-btn"
-                                  onClick={() =>
-                                    void runAction("suspend", e.id, e.role, "")
-                                  }
-                                >
-                                  Suspend
-                                </button>{" "}
-                              </>
+                              <button
+                                type="button"
+                                className="link-teal"
+                                onClick={() =>
+                                  void runAction("suspend", e.id, e.role, "")
+                                }
+                              >
+                                Suspend
+                              </button>
                             )}
                             {e.status === "suspended" && (
-                              <>
-                                <button
-                                  className="link-btn"
-                                  onClick={() =>
-                                    void runAction(
-                                      "reactivate",
-                                      e.id,
-                                      e.role,
-                                      "",
-                                    )
-                                  }
-                                >
-                                  Reactivate
-                                </button>{" "}
-                              </>
+                              <button
+                                type="button"
+                                className="link-teal"
+                                onClick={() =>
+                                  void runAction(
+                                    "reactivate",
+                                    e.id,
+                                    e.role,
+                                    "",
+                                  )
+                                }
+                              >
+                                Reactivate
+                              </button>
                             )}
                             {e.status !== "revoked" && (
-                              <>
-                                <button
-                                  className="link-btn"
-                                  onClick={() =>
-                                    void runAction("revoke", e.id, e.role, "")
-                                  }
-                                >
-                                  Revoke
-                                </button>{" "}
-                              </>
+                              <button
+                                type="button"
+                                className="link-teal"
+                                onClick={() =>
+                                  void runAction("revoke", e.id, e.role, "")
+                                }
+                              >
+                                Revoke
+                              </button>
                             )}
                             <button
-                              className="link-btn"
+                              type="button"
+                              className="link-teal"
                               onClick={() =>
                                 void runAction("role", e.id, e.role, nextRole)
                               }
                             >
                               Make {nextRole === "admin" ? "Admin" : "Employee"}
-                            </button>{" "}
+                            </button>
                             <button
-                              className="link-btn"
+                              type="button"
+                              className="link-teal"
                               onClick={() => void invalidateSessions(e.id)}
                             >
                               Invalidate Sessions
                             </button>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
         )}
-        <h4>Add Employee</h4>
-        <div>
+      </Panel>
+
+      <div className="section-gap" />
+      <Panel title="Add Employee" sub="New employees join as Active immediately.">
+        <div className="rep-filters">
           <input
             type="text"
             placeholder="email"
             aria-label="New Employee Email"
             value={addEmail}
             onChange={(e) => setAddEmail(e.target.value)}
-            style={{ width: 220 }}
+            style={{ minWidth: 200 }}
           />
           <input
             type="text"
@@ -392,7 +445,6 @@ export function AdminEmployeesPage() {
             aria-label="New Employee First Name"
             value={addFirst}
             onChange={(e) => setAddFirst(e.target.value)}
-            style={{ width: 150 }}
           />
           <input
             type="text"
@@ -400,7 +452,6 @@ export function AdminEmployeesPage() {
             aria-label="New Employee Last Name"
             value={addLast}
             onChange={(e) => setAddLast(e.target.value)}
-            style={{ width: 150 }}
           />
           <select
             aria-label="New Employee Role"
@@ -410,44 +461,106 @@ export function AdminEmployeesPage() {
             <option value="employee">Employee</option>
             <option value="admin">Admin</option>
           </select>
-          <button className="action" onClick={() => void addEmployee()}>
-            Add (Active)
+          <button type="button" className="btn-primary" onClick={() => void addEmployee()}>
+            <Icon name="plus" size={14} /> Add (Active)
           </button>
         </div>
-        <h4>Audit Trail</h4>
-        <div style={{ overflow: "auto" }}>
-          <table>
-            <thead>
-              <tr>
-                <th scope="col">When</th>
-                <th scope="col">Action</th>
-                <th scope="col">Target</th>
-                <th scope="col">Admin</th>
-                <th scope="col">Change</th>
-              </tr>
-            </thead>
-            <tbody>
-              {events.length === 0 ? (
+      </Panel>
+
+      <div className="section-gap" />
+      <div className="cols-2">
+        <Panel title="Teams & Permissions" sub="Who can do what in this workspace.">
+          <div>
+            <div className="insight">
+              <span className="insight-ico" style={{ background: "var(--shell-blue-soft)" }}>
+                <Icon name="lock" size={18} />
+              </span>
+              <div>
+                <h4>Admins{employees !== null ? ` (${adminCount})` : ""}</h4>
+                <p>Approve, suspend, revoke, and re-activate employees; change roles; invalidate sessions; read the audit trail.</p>
+              </div>
+            </div>
+            <div className="insight">
+              <span className="insight-ico" style={{ background: "var(--shell-teal-soft)" }}>
+                <Icon name="user" size={18} />
+              </span>
+              <div>
+                <h4>Employees{employees !== null ? ` (${employeeCount})` : ""}</h4>
+                <p>Full product access — dashboards, campaigns, creatives, reports, Ask The Data, and AI Analyst — without admin controls.</p>
+              </div>
+            </div>
+          </div>
+        </Panel>
+        <Panel title="Access Rules & Permission Groups" sub="Rules the server enforces on every change.">
+          <ul className="tips-list">
+            <li>
+              <span className="insight-ico" style={{ background: "var(--shell-green-soft)" }}>
+                <Icon name="check" size={18} />
+              </span>
+              <div>
+                <h4>Admin gate</h4>
+                <p>Only admins can open this page, and every admin API call is re-authorized on the server.</p>
+              </div>
+            </li>
+            <li>
+              <span className="insight-ico" style={{ background: "var(--shell-amber-soft)" }}>
+                <Icon name="lock" size={18} />
+              </span>
+              <div>
+                <h4>Last-admin protection</h4>
+                <p>Suspending the last active admin is refused by the server, so the workspace can never lock itself out.</p>
+              </div>
+            </li>
+            <li>
+              <span className="insight-ico" style={{ background: "var(--shell-blue-soft)" }}>
+                <Icon name="clock" size={18} />
+              </span>
+              <div>
+                <h4>Immediate effect</h4>
+                <p>Approve, suspend, revoke, and session invalidation apply instantly — including on live sessions.</p>
+              </div>
+            </li>
+          </ul>
+        </Panel>
+      </div>
+
+      <div className="section-gap" />
+      <Panel
+        title="Workspace Activity"
+        sub="Every access decision, newest first."
+      >
+        <h3 style={{ margin: "0 0 10px", fontSize: 13.5, fontWeight: 700 }}>Audit Trail</h3>
+        {events.length === 0 ? (
+          <EmptyState text="No Events Yet." />
+        ) : (
+          <div className="tbl-wrap">
+            <table className="tbl">
+              <thead>
                 <tr>
-                  <td colSpan={5}>No Events Yet.</td>
+                  <th scope="col">When</th>
+                  <th scope="col">Action</th>
+                  <th scope="col">Target</th>
+                  <th scope="col">Admin</th>
+                  <th scope="col">Change</th>
                 </tr>
-              ) : (
-                events.map((v) => (
+              </thead>
+              <tbody>
+                {events.map((v) => (
                   <tr key={v.id}>
                     <td>{v.created_at}</td>
-                    <td>{v.action}</td>
+                    <td className="cell-main">{v.action}</td>
                     <td>{(v.target_id || "").slice(0, 8)}</td>
                     <td>{(v.admin_id || "").slice(0, 8)}</td>
                     <td>
                       {v.prev_value} → {v.new_value}
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Panel>
     </>
   );
 }

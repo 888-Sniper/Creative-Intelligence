@@ -1,1201 +1,560 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { api, scopedPath } from "@/api/client";
-import { MediaPreview } from "@/components/MediaPreview";
+import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+import { api } from "@/api/client";
 import { useFilters } from "@/state/FilterContext";
+import { Icon } from "@/components/icons";
+import { RetentionCurve } from "@/components/charts";
+import {
+  CreativeThumb,
+  EmptyState,
+  FilterPanel,
+  KpiCard,
+  PageHeader,
+  Panel,
+  Skeleton,
+  fmtCompact,
+  platformLabel,
+  useCompare,
+  useScopedApi,
+} from "@/components/product";
 
-/** Creatives library + review workspace (port of legacy Web/Index.html v-creative). */
+/* Creatives keeps every existing backend behavior (scoped rows, sort,
+ * search, compare handoff, CSV export, per-row retention curves) and only
+ * changes the presentation layer to the approved Creatives reference. */
 
-const KPI_LOWER_BETTER = ["cpa", "cpc", "cpm"];
-const MONEY_KEYS = ["spend", "cpa", "cpc", "cpm"];
-
-/** UI copy rule: Title Case labels, true acronyms (CPA/CTR/…) stay caps. */
-const KPI_LABELS: Record<string, string> = {
-  vtr: "VTR (Completed)",
-  view_rate: "Play Rate",
-  spend: "Spend",
-  impressions: "Impressions",
-  clicks: "Clicks",
-  conversions: "Conversions",
-  video_views: "Video Views",
-  question: "Question",
-  bold_claim: "Bold Claim",
-  demo_open: "Demo Open",
-  social_proof: "Social Proof",
-  offer: "Offer",
-  story: "Story",
-  pattern_interrupt: "Pattern Interrupt",
-  other: "Other",
-  creator: "Creator",
-  branded: "Branded",
-  hybrid: "Hybrid",
-};
-const kpiLabel = (k: string): string => KPI_LABELS[k] ?? k.toUpperCase();
-const HOOK_OPTIONS = [
-  "question",
-  "bold_claim",
-  "demo_open",
-  "social_proof",
-  "offer",
-  "story",
-  "pattern_interrupt",
-  "other",
-];
-const FORMAT_OPTIONS = ["creator", "branded", "hybrid"];
-const STRUCTURE_SLOTS = ["hook", "body", "demo", "supers", "cta", "endframe", "voiceover"];
-const SOURCE_KEYS = ["source_url", "video_url", "sourceUrl", "videoUrl"];
-
-interface TimeSpan {
-  start_s: number;
-  end_s?: number;
+interface CreativeMetrics {
+  spend: number; impressions: number; clicks: number; conversions: number;
+  revenue: number; ctr: number | null; cpc: number | null; cpa: number | null; roas: number | null;
 }
 
-interface StructureSeg {
-  start_s?: number;
-  end_s?: number;
-  confidence?: number;
-}
-
-interface Annotation {
-  schema_version?: string;
-  hook_type?: string;
-  hook_modality?: string;
-  hook_confidence?: number;
-  creator_vs_branded?: string;
-  creator_confidence?: number;
-  edit_style?: string;
+interface CreativeAnnotation {
+  hook_type?: string | null;
   duration_s?: number | null;
-  status?: string;
-  source_url?: string;
-  video_url?: string;
-  sourceUrl?: string;
-  videoUrl?: string;
-  brand_seconds?: TimeSpan[];
-  product_seconds?: TimeSpan[];
-  logo_seconds?: TimeSpan[];
-  structure?: Record<string, StructureSeg>;
-  transcript_words?: Array<{ level?: string }>;
-  brand_audio_mention_s?: number | null;
-  brand_audio_matches?: Array<{ end?: number; approx?: boolean }>;
-  brand_audio_approx?: boolean;
-  supers?: string[] | string;
-  cta?: string;
-  voiceover?: string;
-  pace_cuts_per_min?: number | null;
-  [key: string]: unknown;
+  creator_vs_branded?: string | null;
+  funnel_stage?: string | null;
+  objective?: string | null;
 }
 
-interface CreativeRow {
+export interface CreativeRowDatum {
   creative_key: string;
   name?: string;
   platform?: string;
+  format?: string;
+  duration_s?: number | null;
   campaigns?: string[];
-  duration_s?: number;
-  status?: string;
-  annotation?: Annotation;
-  metrics?: Record<string, number | string | null | undefined>;
+  metrics: CreativeMetrics;
+  annotation?: CreativeAnnotation | null;
 }
 
-interface CurvePoint {
-  t: number;
-  p: number;
+interface BenchGroup {
+  impressions: number; clicks: number; spend: number; revenue: number;
+  ctr: number | null; roas: number | null;
 }
 
-interface CurveMarkers {
-  hook?: { start_s: number; end_s: number };
-  product_s?: number;
-  brand_s?: number;
-  cta_s?: number;
-}
+type SortKey = "top" | "ctr" | "roas" | "impressions";
+type LengthKey = "all" | "short" | "sweet" | "long";
 
-interface RetentionCurve {
-  points: CurvePoint[];
-  markers?: CurveMarkers;
-}
+const SORTS: Array<{ value: SortKey; label: string }> = [
+  { value: "top", label: "Top Performing" },
+  { value: "ctr", label: "Highest CTR" },
+  { value: "roas", label: "Highest ROAS" },
+  { value: "impressions", label: "Most Impressions" },
+];
 
-interface DropElement {
-  slot?: string;
-  product_demo?: boolean;
-  brand_visible?: boolean;
-  cta_present?: boolean;
-  voiceover?: boolean;
-}
-
-interface DropEvent {
-  creative_key?: string;
-  start_s: number;
-  end_s: number;
-  seek_s?: number;
-  drop_pts: number;
-  from_pct?: number;
-  to_pct?: number;
-  element?: DropElement;
-}
-
-interface RetentionSeg {
-  segment: string;
-  drop_pts: number;
-  n_points?: number;
-}
-
-interface AnalystLayer {
-  layer?: string;
-  question?: string;
-  status?: string;
-}
-
-interface AnalystFinding {
-  primary_signal?: string;
-  diagnosis?: string;
-  recommended_iteration?: string;
-  priority?: string;
-  confidence_level?: string;
-  element_to_preserve?: string;
-  element_to_change?: string;
-  limitations?: string[];
-}
-
-interface AnalystCreative {
-  creative_key: string;
-  message_class?: string;
-  format_kind?: string;
-  opening_delivery?: string;
-  annotation_status?: string;
-  layers?: AnalystLayer[];
-  metrics?: Record<string, { value?: number | null; state?: string }>;
-  finding?: AnalystFinding | null;
-}
-
-function rankVal(v: number | string | null | undefined, lower: boolean): number {
-  if (v === null || v === undefined || v === "") return lower ? Infinity : -Infinity;
-  const n = Number(v);
+function num(v: unknown): number {
+  const n = Number(v ?? 0);
   return Number.isFinite(n) ? n : 0;
 }
 
-function kpiText(v: number | string | null | undefined, money: boolean): string {
-  if (v === null || v === undefined || v === "") return "—";
-  return (money ? "$" : "") + String(v);
+function secondsOf(c: CreativeRowDatum): number {
+  return num(c.annotation?.duration_s ?? c.duration_s);
 }
 
-function pickSource(a: Annotation): string | null {
-  for (const k of SOURCE_KEYS) {
-    const u = a[k];
-    if (typeof u === "string" && /^(https?:|blob:|\/media\/)/.test(u.trim())) return u.trim();
-  }
-  return null;
+function shortHook(hook: string | null | undefined): string {
+  const h = (hook ?? "").trim();
+  if (!h) return "—";
+  const map: Record<string, string> = {
+    problem_solution: "Problem/Solution",
+    hook_statement: "Hook Statement",
+    product_demo: "Product Demo",
+  };
+  return map[h] ?? h.split("_").map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w)).join(" ");
 }
 
-function spanStart(spans: TimeSpan[] | undefined): number | null {
-  if (!Array.isArray(spans) || !spans.length) return null;
-  const t = Number(spans[0].start_s);
-  return Number.isFinite(t) ? t : null;
+function perfLabel(roas: number | null, base: number | null): { text: string; tone: string } {
+  if (roas == null || base == null || !base) return { text: "Unranked", tone: "#64748B" };
+  const r = roas / base;
+  if (r >= 1.2) return { text: "Top Performer", tone: "#0E7C5B" };
+  if (r >= 0.9) return { text: "High Performer", tone: "#2F6FBE" };
+  if (r >= 0.65) return { text: "Good Performer", tone: "#7C6BD6" };
+  return { text: "Needs Work", tone: "#C2410C" };
 }
 
-function segStart(a: Annotation, slot: string): number {
-  const seg = (a.structure ?? {})[slot];
-  return seg ? Number(seg.start_s) : NaN;
-}
-
-function audioTimingTxt(a: Annotation): string {
-  const tw = Array.isArray(a.transcript_words) ? a.transcript_words : [];
-  if (!tw.length) return "—";
-  const levels = [...new Set(tw.map((e) => e.level ?? "word"))];
-  return `${tw.length} timings (${levels.join("/")}-level)`;
-}
-
-function supersTxt(a: Annotation): string {
-  if (Array.isArray(a.supers) && a.supers.length) return a.supers.join(", ");
-  if (typeof a.supers === "string" && a.supers.trim()) return a.supers;
-  const s = (a.structure ?? {}).supers ?? {};
-  if ((s.end_s ?? 0) > (s.start_s ?? 0)) return `set ${s.start_s}–${s.end_s}s (from structure)`;
-  return "—";
-}
-
-function brandAudioTxt(a: Annotation): string {
-  if (a.brand_audio_mention_s === null || a.brand_audio_mention_s === undefined) return "—";
-  const m = Array.isArray(a.brand_audio_matches) ? a.brand_audio_matches[0] : null;
-  const approx = a.brand_audio_approx ?? m?.approx;
-  if (!approx) return `${a.brand_audio_mention_s}s (word-level)`;
-  const end = m?.end ?? "?";
-  return `within ${a.brand_audio_mention_s}–${end}s segment (segment-level timing, not an exact word time)`;
-}
-
-function storyboardSvg(a: Annotation): { slots: string[]; dur: number } {
-  return { slots: STRUCTURE_SLOTS, dur: Number(a.duration_s) || 30 };
-}
-
-/** Retention graph: curve + drops + per-segment bars, with click-to-seek and
- *  reverse sync (video timeupdate moves the playhead marker). */
-function RetentionGraph({
-  creativeKey,
-  scope,
-  videoRef,
-}: {
-  creativeKey: string;
-  scope: URLSearchParams;
-  videoRef: React.RefObject<HTMLVideoElement | null>;
-}) {
-  const [segs, setSegs] = useState<RetentionSeg[] | null>(null);
-  const [events, setEvents] = useState<DropEvent[]>([]);
-  const [curve, setCurve] = useState<RetentionCurve | null>(null);
-  const [error, setError] = useState("");
-  const playheadRef = useRef<SVGLineElement | null>(null);
-  const labelRef = useRef<SVGTextElement | null>(null);
-
+function CreativeDetail({ datum }: { datum: CreativeRowDatum }) {
+  const [curve, setCurve] = useState<Array<[number, number]> | null>(null);
   useEffect(() => {
     let live = true;
-    setSegs(null);
-    setCurve(null);
-    setEvents([]);
-    setError("");
-    (async () => {
-      try {
-        const s = await api<RetentionSeg[]>(
-          "GET",
-          `/api/retention?creative_key=${encodeURIComponent(creativeKey)}`,
-        );
-        let evs: DropEvent[] = [];
-        try {
-          const pats = await api<{ events?: DropEvent[] }>(
-            "GET",
-            scopedPath("/api/retention/patterns", scope),
-          );
-          if (Array.isArray(pats.events)) evs = pats.events.filter((e) => e.creative_key === creativeKey);
-        } catch {
-          evs = [];
-        }
-        let cv: RetentionCurve | null = null;
-        try {
-          cv = await api<RetentionCurve>(
-            "GET",
-            `/api/retention/curve?creative_key=${encodeURIComponent(creativeKey)}`,
-          );
-        } catch {
-          cv = null;
-        }
-        if (!live) return;
-        setSegs(s);
-        setEvents(evs);
-        setCurve(cv);
-      } catch (e) {
-        if (!live) return;
-        setError(e instanceof Error ? e.message : String(e));
-      }
-    })();
-    return () => {
-      live = false;
-    };
-  }, [creativeKey, scope]);
-
-  const maxT = useMemo(() => {
-    const pts = curve?.points ?? [];
-    if (!pts.length) return 1;
-    return Math.max(...pts.map((p) => Number(p.t) || 0), 1);
-  }, [curve]);
-
-  // Reverse sync: while the video plays, the playhead follows video.currentTime.
-  useEffect(() => {
-    const video = videoRef.current;
-    const pts = curve?.points ?? [];
-    if (!video || !pts.length) return;
-    const W = 560;
-    const ML = 44;
-    const PW = W - ML - 8;
-    const X = (t: number) => ML + Math.min(Math.max(Number(t) || 0, 0), maxT) / maxT * PW;
-    const at = (t: number): number | null => {
-      let bestDt = Infinity;
-      let bestP: number | null = null;
-      for (const p of pts) {
-        const dt = Math.abs(Number(p.t) - t);
-        if (dt < bestDt) {
-          bestDt = dt;
-          bestP = Number(p.p);
-        }
-      }
-      return bestP;
-    };
-    const onTime = () => {
-      const t = Number(video.currentTime) || 0;
-      const head = playheadRef.current;
-      const label = labelRef.current;
-      if (head) {
-        head.setAttribute("x1", String(X(t)));
-        head.setAttribute("x2", String(X(t)));
-        head.style.visibility = "visible";
-      }
-      if (label) {
-        label.setAttribute("x", String(Math.min(X(t) + 4, 540)));
-        const pct = at(t);
-        label.textContent = `${t.toFixed(1)}s${pct === null ? "" : ` · ${pct}%`}`;
-      }
-    };
-    video.addEventListener("timeupdate", onTime);
-    return () => {
-      video.removeEventListener("timeupdate", onTime);
-    };
-  }, [curve, creativeKey, maxT, videoRef]);
-
-  const seek = (t: number) => {
-    const v = videoRef.current;
-    if (v && Number.isFinite(Number(t))) {
-      try {
-        v.currentTime = Number(t);
-      } catch {
-        /* jsdom / seek out of range: ignore */
-      }
-    }
-  };
-
-  if (error) return <span className="muted">{error}</span>;
-  if (segs === null) return <span className="muted">Loading Retention…</span>;
-
-  const pts = curve?.points ?? [];
-  const W = 560;
-  const H = 170;
-  const ML = 44;
-  const MB = 24;
-  const MT = 8;
-  const PW = W - ML - 8;
-  const PH = H - MT - MB;
-  const X = (t: number) => ML + t / maxT * PW;
-  const Y = (p: number) => MT + (100 - Math.min(100, Math.max(0, Number(p) || 0))) / 100 * PH;
-  const mk = curve?.markers ?? {};
-  const step = [1, 2, 3, 5, 6, 10, 15, 30, 60].find((s) => maxT / s <= 7) ?? Math.ceil(maxT / 7);
-  const ticks: number[] = [];
-  for (let t = 0; t <= maxT + 1e-9; t += step) ticks.push(t);
-  const vline = (t: number | undefined, label: string, color: string, key: string) => {
-    if (t === undefined || t === null || !Number.isFinite(Number(t))) return null;
-    return (
-      <g key={key}>
-        <line
-          x1={X(Number(t))}
-          y1={MT}
-          x2={X(Number(t))}
-          y2={MT + PH}
-          stroke={color}
-          strokeWidth={1.5}
-          strokeDasharray="4 3"
-        >
-          <title>{`${label} at ${t}s`}</title>
-        </line>
-        <text x={X(Number(t)) + 3} y={MT + 10} fontSize={10} fill={color}>
-          {label}
-        </text>
-      </g>
-    );
-  };
-  const segMax = Math.max(0.01, ...segs.map((s) => Number(s.drop_pts) || 0));
-
+    api<{ points: Array<{ t: number; p: number }> }>(
+      "GET", `/api/retention/curve?creative_key=${encodeURIComponent(datum.creative_key)}`,
+    )
+      .then((r) => live && setCurve(r.points.map((p) => [num(p.t), num(p.p)] as [number, number])))
+      .catch(() => live && setCurve([]));
+    return () => { live = false; };
+  }, [datum.creative_key]);
+  const a = datum.annotation ?? {};
+  const facts: Array<[string, string]> = [
+    ["Hook Type", shortHook(a.hook_type)],
+    ["Duration", secondsOf(datum) ? `${secondsOf(datum)}s` : "—"],
+    ["Creator vs Branded", a.creator_vs_branded ?? "—"],
+    ["Format", datum.format ?? "—"],
+    ["Platform", platformLabel(datum.platform)],
+    ["Funnel Stage", a.funnel_stage ?? "—"],
+    ["Objective", a.objective ?? "—"],
+    ["Campaigns", (datum.campaigns ?? []).join(", ") || "—"],
+  ];
   return (
-    <div>
-      {pts.length === 0 ? (
-        <div className="empty-state">No Retention Curve Stored For This Creative Yet.</div>
-      ) : (
-        <>
-          <svg
-            id="retention-svg"
-            data-max-t={maxT}
-            viewBox={`0 0 ${W} ${H}`}
-            width="100%"
-            role="img"
-            aria-label="Retention percentage over time"
-          >
-            <title>
-              Retention % vs time from /api/retention/curve; shaded bands are detected drop windows
-              (click to seek)
-            </title>
-            {[0, 25, 50, 75, 100].map((p) => (
-              <g key={p}>
-                <line x1={ML} y1={Y(p)} x2={W - 8} y2={Y(p)} stroke="#D8D5CE" strokeWidth={1} />
-                <text x={ML - 5} y={Y(p) + 4} fontSize={10} fill="#5F6B69" textAnchor="end">
-                  {p}%
-                </text>
-              </g>
-            ))}
-            {ticks.map((t) => (
-              <text key={t} x={X(t)} y={H - 8} fontSize={10} fill="#5F6B69" textAnchor="middle">
-                {t}s
-              </text>
-            ))}
-            {mk.hook && mk.hook.end_s > mk.hook.start_s && (
-              <rect
-                x={X(mk.hook.start_s)}
-                y={MT}
-                width={Math.max(1, X(mk.hook.end_s) - X(mk.hook.start_s))}
-                height={PH}
-                style={{ fill: "var(--foap-primary)" }}
-                opacity={0.14}
-              >
-                <title>
-                  Hook window {mk.hook.start_s}–{mk.hook.end_s}s
-                </title>
-              </rect>
-            )}
-            {vline(mk.product_s, "Product", "#2E7D32", "product")}
-            {vline(mk.brand_s, "Brand", "#0A7C72", "brand")}
-            {vline(mk.cta_s, "CTA", "#C0362C", "cta")}
-            <polyline
-              points={pts.map((p) => `${X(Number(p.t)).toFixed(1)},${Y(Number(p.p)).toFixed(1)}`).join(" ")}
-              fill="none"
-              strokeWidth={2}
-              style={{ stroke: "var(--foap-primary)" }}
-            />
-            {pts.map((p) => (
-              <circle
-                key={`${p.t}-${p.p}`}
-                cx={X(Number(p.t))}
-                cy={Y(Number(p.p))}
-                r={2.5}
-                style={{ fill: "var(--foap-primary)" }}
-              >
-                <title>
-                  {String(p.t)}s — {String(p.p)}%
-                </title>
-              </circle>
-            ))}
-            {events.map((e, i) => (
-              <rect
-                key={i}
-                x={X(Number(e.start_s) || 0)}
-                y={MT}
-                width={Math.max(3, X(Number(e.end_s) || 0) - X(Number(e.start_s) || 0))}
-                height={PH}
-                fill="#C0362C"
-                opacity={0.16}
-                style={{ cursor: "pointer" }}
-                onClick={() => seek(Number(e.seek_s ?? 0))}
-              >
-                <title>
-                  Drop −{String(e.drop_pts)} pts ({String(e.start_s)}–{String(e.end_s)}s) — click to
-                  seek
-                </title>
-              </rect>
-            ))}
-            <line
-              id="retention-playhead"
-              ref={playheadRef}
-              x1={ML}
-              y1={MT}
-              x2={ML}
-              y2={MT + PH}
-              stroke="#17211F"
-              strokeWidth={2}
-              style={{ visibility: "hidden" }}
-            />
-            <text
-              id="retention-playhead-label"
-              ref={labelRef}
-              x={ML + 4}
-              y={MT + 12}
-              fontSize={11}
-              fontWeight={700}
-              fill="#17211F"
-            />
-          </svg>
-          <p className="muted" style={{ fontSize: 12 }}>
-            Curve: retention % over time. Teal band = hook window. Dashed lines = first product /
-            brand / CTA. Red bands = detected drops (click to seek the video).
-          </p>
-        </>
-      )}
-      {events.length === 0 ? (
-        <p className="muted" style={{ fontSize: 12 }}>
-          No steep drops (≥5 pts) in this curve.
-        </p>
-      ) : (
-        <ul className="plain">
-          {events.map((e, i) => {
-            const el = e.element ?? {};
-            const bits =
-              [
-                el.slot ? `During ${el.slot}` : null,
-                el.product_demo ? "Product Demo On Screen" : null,
-                el.brand_visible ? "Brand Visible" : null,
-                el.cta_present ? "CTA Present" : null,
-                el.voiceover ? "Voiceover Running" : null,
-              ]
-                .filter(Boolean)
-                .join(" · ") || "No Element Annotated";
-            return (
-              <li key={i} style={{ fontSize: 13 }}>
-                <button type="button" className="chip" onClick={() => seek(Number(e.seek_s ?? 0))}>
-                  {String(e.start_s)}–{String(e.end_s)}s
-                </button>{" "}
-                <span className="retention-drop">−{String(e.drop_pts)} Pts</span> ({String(e.from_pct)}
-                % → {String(e.to_pct)}%) — {bits}. Click The Time Chip To Seek The Video.
-              </li>
-            );
-          })}
-        </ul>
-      )}
-      {segs.length === 0 ? (
-        <div className="empty-state">No Retention Data Is Available For This Creative.</div>
-      ) : (
-        <svg
-          viewBox={`0 0 560 ${segs.length * 24 + 6}`}
-          width="100%"
-          role="img"
-          aria-label="Retention Drop Per Segment"
-        >
-          <title>Retention Drop Per Segment From /api/retention</title>
-          {segs.map((s, i) => {
-            const dv = Number(s.drop_pts) || 0;
-            const w = Math.round((280 * dv) / segMax);
-            const y = i * 24;
-            const prevMax = Math.max(0, ...segs.slice(0, i).map((x) => Number(x.drop_pts) || 0));
-            const worst = i > 0 && dv >= prevMax && dv > 0;
-            return (
-              <g key={i}>
-                <text x={0} y={y + 15} fontSize={12} fill="#5F6B69">
-                  {String(s.segment)}
-                </text>
-                <rect
-                  x={110}
-                  y={y + 2}
-                  width={w}
-                  height={15}
-                  rx={4}
-                  style={{ fill: "var(--foap-primary)" }}
-                >
-                  <title>{`${String(s.segment)}: ${dv} pts`}</title>
-                </rect>
-                <text x={115 + w} y={y + 15} fontSize={12} fill={dv > 0 ? "#C0362C" : "#5F6B69"}>
-                  {String(dv)} Pts Drop (n={String(s.n_points ?? 0)}){worst ? " — Biggest Drop" : ""}
-                </text>
-              </g>
-            );
-          })}
-        </svg>
-      )}
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 16 }}>
+      <dl className="detail-list">
+        {facts.map(([k, v]) => (
+          <div key={k}>
+            <dt>{k}</dt>
+            <dd>{v}</dd>
+          </div>
+        ))}
+      </dl>
+      <div>
+        <h4 style={{ margin: "0 0 8px", fontSize: 14 }}>Audience Retention</h4>
+        {curve ? (
+          curve.length ? <RetentionCurve points={curve} /> : <EmptyState text="No retention curve for this creative." />
+        ) : <Skeleton height={190} />}
+      </div>
     </div>
   );
 }
 
+function RetentionSpark({ creativeKey }: { creativeKey: string }) {
+  const [points, setPoints] = useState<Array<[number, number]> | null>(null);
+  useEffect(() => {
+    let live = true;
+    api<{ points: Array<{ t: number; p: number }> }>(
+      "GET", `/api/retention/curve?creative_key=${encodeURIComponent(creativeKey)}`,
+    )
+      .then((r) => live && setPoints(r.points.map((p) => [num(p.t), num(p.p)] as [number, number])))
+      .catch(() => live && setPoints([]));
+    return () => { live = false; };
+  }, [creativeKey]);
+  if (!points) return <span className="spark" aria-label="Loading retention curve" />;
+  if (!points.length) return <span className="muted">No Curve</span>;
+  const W = 110, H = 34;
+  const d = points.map(([t, p], i) =>
+    `${i ? "L" : "M"}${((t / Math.max(30, points[points.length - 1][0])) * W).toFixed(1)},${(H - (p / 100) * H).toFixed(1)}`,
+  ).join(" ");
+  return (
+    <svg className="spark" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Retention curve">
+      <path d={d} fill="none" stroke="#0E7C8C" strokeWidth={1.8} strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 export function CreativesPage() {
-  const { filters, scope } = useFilters();
-  const [rows, setRows] = useState<CreativeRow[] | null>(null);
-  const [error, setError] = useState("");
-  const [selected, setSelected] = useState<string | null>(null);
-  const [brandTerms, setBrandTerms] = useState("");
-  const [actionStatus, setActionStatus] = useState("");
-  const [mediaStatus, setMediaStatus] = useState("");
-  const [benchOut, setBenchOut] = useState("");
-  const [diag, setDiag] = useState<Record<string, AnalystCreative> | null>(null);
-  const [edits, setEdits] = useState<Record<string, { hook: string; format: string }>>({});
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const mediaFileRef = useRef<HTMLInputElement | null>(null);
-  const scopeKey = scope.toString();
+  const { clearFilters } = useFilters();
+  const [applied, setApplied] = useState(0);
+  const [sort, setSort] = useState<SortKey>("top");
+  const [view, setView] = useState<"list" | "grid">("list");
+  const [length, setLength] = useState<LengthKey>("all");
+  const [benchmark, setBenchmark] = useState("Industry Benchmark");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const [exportBusy, setExportBusy] = useState(false);
+  const [banner, setBanner] = useState("");
 
-  useEffect(() => {
-    let live = true;
-    setRows(null);
-    setError("");
-    (async () => {
-      try {
-        const params = new URLSearchParams(scopeKey);
-        const data = await api<CreativeRow[]>("GET", scopedPath("/api/creatives", params));
-        if (live) setRows(data);
-      } catch (e) {
-        if (live) setError(e instanceof Error ? e.message : String(e));
-      }
-    })();
-    return () => {
-      live = false;
-    };
-  }, [scopeKey]);
+  const compare = useCompare(applied);
+  const creatives = useScopedApi<CreativeRowDatum[]>("/api/creatives", applied);
+  const hooks = useScopedApi<Record<string, BenchGroup>>("/api/benchmarks?group_by=hook_type", applied);
+  const modes = useScopedApi<Record<string, BenchGroup>>("/api/benchmarks?group_by=creator_vs_branded", applied);
 
-  useEffect(() => {
-    let live = true;
-    setDiag(null);
-    (async () => {
-      try {
-        const params = new URLSearchParams(scopeKey);
-        const data = await api<{ creatives?: AnalystCreative[] }>(
-          "GET",
-          scopedPath("/api/analyst/creatives", params),
-        );
-        if (live) {
-          const byKey: Record<string, AnalystCreative> = {};
-          for (const c of data.creatives ?? []) byKey[c.creative_key] = c;
-          setDiag(byKey);
-        }
-      } catch {
-        if (live) setDiag(null);
-      }
-    })();
-    return () => {
-      live = false;
-    };
-  }, [scopeKey]);
-
-  const kept = useMemo(() => {
-    const list = rows ?? [];
-    const q = filters.campaign.trim().toLowerCase();
-    const filtered = q
-      ? list.filter((r) =>
-          [r.creative_key, r.name ?? "", (r.campaigns ?? []).join(" ")]
-            .join(" | ")
-            .toLowerCase()
-            .includes(q),
-        )
-      : list.slice();
-    if (!filters.kpi || filters.kpi === "all") return filtered;
-    const k = filters.kpi;
-    const lower = KPI_LOWER_BETTER.includes(k);
-    return filtered.slice().sort((a, b) => {
-      const va = rankVal(a.metrics?.[k], lower);
-      const vb = rankVal(b.metrics?.[k], lower);
-      return lower ? va - vb : vb - va;
+  const rows = useMemo(() => {
+    const list = (creatives.data ?? []).filter((c) => {
+      const s = secondsOf(c);
+      if (length === "short" && !(s > 0 && s < 15)) return false;
+      if (length === "sweet" && !(s >= 15 && s <= 30)) return false;
+      if (length === "long" && !(s > 30)) return false;
+      return true;
     });
-  }, [rows, filters.campaign, filters.kpi]);
+    const by = {
+      top: (c: CreativeRowDatum) => num(c.metrics.roas),
+      ctr: (c: CreativeRowDatum) => num(c.metrics.ctr),
+      roas: (c: CreativeRowDatum) => num(c.metrics.roas),
+      impressions: (c: CreativeRowDatum) => num(c.metrics.impressions),
+    }[sort];
+    return list.slice().sort((a, b) => by(b) - by(a));
+  }, [creatives.data, sort, length]);
 
-  const selectedRow = selected ? (kept.find((r) => r.creative_key === selected) ?? null) : null;
-  const selectedHidden =
-    selected !== null && selectedRow === null && (rows ?? []).some((r) => r.creative_key === selected);
-  const kpiKey = filters.kpi && filters.kpi !== "all" ? filters.kpi : "cpa";
+  const topCards = useMemo(
+    () => (creatives.data ?? []).slice()
+      .sort((a, b) => num(b.metrics.impressions) - num(a.metrics.impressions)).slice(0, 5),
+    [creatives.data],
+  );
 
-  const refresh = async () => {
-    try {
-      const data = await api<CreativeRow[]>(
-        "GET",
-        scopedPath("/api/creatives", new URLSearchParams(scopeKey)),
-      );
-      setRows(data);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  };
+  const roasBase = useMemo(() => {
+    const list = (creatives.data ?? []).map((c) => c.metrics.roas).filter((r): r is number => r != null);
+    if (!list.length) return null;
+    return benchmark === "Top Performer" ? Math.max(...list) : list.reduce((t, r) => t + r, 0) / list.length;
+  }, [creatives.data, benchmark]);
 
-  const runPipeline = async () => {
-    if (!selected) return;
-    setActionStatus("Pipeline Queued…");
-    try {
-      const job = await api<{ job_id: string }>("POST", "/api/pipeline/run", {
-        creative_key: selected,
-        brand_terms: brandTerms,
+  const learnings = useMemo(() => {
+    const out: Array<{ icon: string; title: string; body: string }> = [];
+    const hookRows = Object.entries(hooks.data ?? {})
+      .map(([key, g]) => ({ key, ctr: g.ctr == null ? null : g.ctr * 100 }))
+      .filter((r) => r.ctr != null)
+      .sort((a, b) => (b.ctr ?? 0) - (a.ctr ?? 0));
+    if (hookRows[0]?.ctr != null) {
+      out.push({
+        icon: "spark",
+        title: `${shortHook(hookRows[0].key)} Hooks Lead CTR`,
+        body: `${shortHook(hookRows[0].key)} openings average ${(hookRows[0].ctr ?? 0).toFixed(1)}% CTR across the current scope.`,
       });
-      let terminal = "";
-      for (let i = 0; i < 150; i += 1) {
-        await new Promise((r) => setTimeout(r, 2000));
-        const st = await api<{ status: string; error: string }>(
-          "GET",
-          `/api/pipeline/jobs/${encodeURIComponent(job.job_id)}`,
-        );
-        if (st.status === "completed") {
-          terminal = "complete";
-          break;
-        }
-        if (st.status === "failed" || st.status === "cancelled") {
-          throw new Error(st.error || st.status);
-        }
-        setActionStatus(`Pipeline ${st.status}…`);
-      }
-      setActionStatus(
-        terminal === "complete"
-          ? "Pipeline Run Complete."
-          : "Pipeline Still Running — Refresh Again Shortly.",
-      );
-      await refresh();
-    } catch (e) {
-      setActionStatus(e instanceof Error ? e.message : String(e));
     }
-  };
-
-  const verifySelected = async () => {
-    if (!selected) return;
-    setActionStatus("");
-    try {
-      await api("POST", `/api/creatives/${encodeURIComponent(selected)}/verify`);
-      setActionStatus("Marked HUMAN-VERIFIED.");
-      await refresh();
-    } catch (e) {
-      setActionStatus(e instanceof Error ? e.message : String(e));
-    }
-  };
-
-  const saveAnnotation = async (key: string, hook: string, format: string) => {
-    const found = (rows ?? []).find((x) => x.creative_key === key);
-    const base: Annotation = { ...(found?.annotation ?? {}) };
-    if (!base.schema_version) base.schema_version = "v0";
-    if (typeof base.hook_confidence !== "number") base.hook_confidence = 0.5;
-    if (typeof base.creator_confidence !== "number") base.creator_confidence = 0.5;
-    if (!Array.isArray(base.brand_seconds)) base.brand_seconds = [];
-    if (!Array.isArray(base.product_seconds)) base.product_seconds = [];
-    if (!Array.isArray(base.logo_seconds)) base.logo_seconds = [];
-    const st = { ...(base.structure ?? {}) };
-    for (const s of STRUCTURE_SLOTS) {
-      st[s] = { start_s: 0, end_s: 0, confidence: 0, ...(st[s] ?? {}) };
-    }
-    base.structure = st;
-    base.hook_type = hook;
-    base.creator_vs_branded = format;
-    setActionStatus("");
-    try {
-      await api("POST", `/api/creatives/${encodeURIComponent(key)}/annotate`, {
-        annotation: base,
+    const creator = modes.data?.creator;
+    const branded = modes.data?.branded;
+    if (creator?.ctr != null && branded?.ctr != null && branded.ctr) {
+      const lift = ((creator.ctr - branded.ctr) / Math.abs(branded.ctr)) * 100;
+      out.push({
+        icon: "users",
+        title: "Creator-Led Hooks Perform Best",
+        body: `Creatives with creator intros see ${lift >= 0 ? "+" : ""}${lift.toFixed(0)}% CTR versus branded content.`,
       });
-      setActionStatus("Annotation Saved.");
-      await refresh();
-    } catch (e) {
-      setActionStatus(e instanceof Error ? e.message : String(e));
     }
-  };
-
-  const uploadMedia = async () => {
-    if (!selected) {
-      setMediaStatus("Select A Creative Below First.");
-      return;
-    }
-    const f = mediaFileRef.current?.files?.[0];
-    if (!f) {
-      setMediaStatus("Choose A Media File First.");
-      return;
-    }
-    try {
-      // Multipart: bytes ride outside JSON so the real 100 MB server
-      // limit applies instead of the JSON body cap.
-      const form = new FormData();
-      form.append("creative_key", selected);
-      form.append("file", f, f.name);
-      const up = await fetch("/api/media/upload", { method: "POST", body: form });
-      const uj = (await up.json().catch(() => ({}))) as {
-        error?: string;
-        filename?: string;
-        bytes?: number;
-        url?: string;
-      };
-      if (!up.ok) throw new Error(uj.error || String(up.status));
-      setMediaStatus(`Stored ${uj.filename} (${uj.bytes} bytes) → ${uj.url}.`);
-      await refresh();
-    } catch (e) {
-      setMediaStatus(e instanceof Error ? e.message : String(e));
-    }
-  };
-
-  const loadBenchmark = async () => {
-    if (!selectedRow) return;
-    try {
-      const bench = await api<Record<string, Record<string, number | null>>>(
-        "GET",
-        scopedPath("/api/benchmarks?group_by=campaign", new URLSearchParams(scopeKey)),
-      );
-      const m = selectedRow.metrics ?? {};
-      const fmt = (v: number | string | null | undefined) =>
-        v === null || v === undefined ? "—" : `$${String(v)}`;
-      const parts = (selectedRow.campaigns ?? []).map(
-        (c) => `${c}: CPA ${bench[c] ? fmt(bench[c].cpa) : "—"} Vs Mine ${fmt(m.cpa)}`,
-      );
-      setBenchOut(parts.length ? ` — ${parts.join("; ")}` : " — No Campaign Benchmark");
-    } catch (e) {
-      setBenchOut(` — ${e instanceof Error ? e.message : String(e)}`);
-    }
-  };
-
-  const seekVideo = (t: number) => {
-    const v = videoRef.current;
-    if (v && Number.isFinite(Number(t))) {
-      try {
-        v.currentTime = Number(t);
-      } catch {
-        /* ignore seek failures */
+    const buckets = [
+      { key: "Under 15s", test: (s: number) => s > 0 && s < 15 },
+      { key: "15–30s", test: (s: number) => s >= 15 && s <= 30 },
+      { key: "Over 30s", test: (s: number) => s > 30 },
+    ].map((b) => ({ ...b, clicks: 0, impr: 0 }));
+    for (const c of creatives.data ?? []) {
+      const s = secondsOf(c);
+      const b = buckets.find((x) => x.test(s));
+      if (b) {
+        b.clicks += num(c.metrics.clicks);
+        b.impr += num(c.metrics.impressions);
       }
     }
-  };
+    const ranked = buckets
+      .map((b) => ({ key: b.key, ctr: b.impr ? (b.clicks / b.impr) * 100 : null }))
+      .filter((b) => b.ctr != null)
+      .sort((a, b) => (b.ctr ?? 0) - (a.ctr ?? 0));
+    if (ranked[0]?.ctr != null) {
+      out.push({
+        icon: "bars",
+        title: "Shorter Videos Convert Better",
+        body: `Videos in the ${ranked[0].key} bucket average ${(ranked[0].ctr ?? 0).toFixed(1)}% CTR in the current scope.`,
+      });
+    }
+    return out.slice(0, 5);
+  }, [hooks.data, modes.data, creatives.data]);
 
-  const renderDetail = () => {
-    if (!selected) return <p className="muted">Select A Creative Below.</p>;
-    if (selectedHidden || !selectedRow)
-      return <p className="muted">Selected Creative Is Hidden By The Current Filters.</p>;
-    const found = selectedRow;
-    const a = found.annotation ?? {};
-    const m = found.metrics ?? {};
-    const diagCard = diag?.[found.creative_key] ?? null;
-    const src = pickSource(a);
-    const hookT = segStart(a, "hook");
-    const ctaT = segStart(a, "cta");
-    const brandT = spanStart(a.brand_seconds);
-    const productT = spanStart(a.product_seconds);
-    const chips: Array<{ label: string; t: number }> = [];
-    if (Number.isFinite(hookT)) chips.push({ label: "Hook", t: hookT });
-    if (brandT !== null) chips.push({ label: "Brand", t: brandT });
-    if (productT !== null) chips.push({ label: "Product", t: productT });
-    if (Number.isFinite(ctaT)) chips.push({ label: "CTA", t: ctaT });
-    const status = String(a.status ?? found.status ?? "auto");
-    const { slots, dur } = storyboardSvg(a);
-    const kpiRow = (label: string, value: string) => (
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, padding: "3px 0" }}>
-        <span className="muted">{label}</span>
-        <strong>{value}</strong>
-      </div>
-    );
-    const intelRow = (label: string, value: string) => (
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, padding: "3px 0" }}>
-        <span className="muted">{label}</span>
-        <span>{value}</span>
-      </div>
-    );
-    return (
-      <div>
-        <h3 style={{ margin: "0 0 2px" }}>{found.name || found.creative_key}</h3>
-        <div className="muted" style={{ fontSize: 13, marginBottom: 12 }}>
-          key={found.creative_key} · {found.platform ?? "—"} ·{" "}
-          <span className={status === "human_verified" ? "verified" : "unverified"}>{status}</span>
-        </div>
-        <div className="detail-layout">
-          <div className="detail-main">
-            <div>
-              {src ? (
-                <>
-                  <MediaPreview
-                    src={src}
-                    creativeKey={found.creative_key}
-                    videoRef={videoRef}
-                    testId="creative-video"
-                  />
-                  <div className="muted" style={{ fontSize: 12 }}>
-                    Playing Annotated Source URL.
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div>
-                    <svg viewBox="0 0 560 64" width="100%" role="img" aria-label="Storyboard">
-                      <title>{`Storyboard, Duration ${dur}s`}</title>
-                      {slots.map((s, i) => {
-                        const seg = (a.structure ?? {})[s] ?? { start_s: 0, end_s: 0 };
-                        const w = Math.max(8, Math.round(560 / slots.length));
-                        const op = (0.25 + (0.75 * (i + 1)) / slots.length).toFixed(2);
-                        return (
-                          <g key={s}>
-                            <rect
-                              x={i * w}
-                              y={8}
-                              width={w - 2}
-                              height={40}
-                              fill="#00C7B2"
-                              fillOpacity={op}
-                              stroke="#008F7F"
-                            />
-                            <text x={i * w + 4} y={32} fontSize={10} fill="#17211F">
-                              {s}
-                            </text>
-                            <title>{`${s} ${seg.start_s ?? 0}-${seg.end_s ?? 0}s`}</title>
-                          </g>
-                        );
-                      })}
-                      <text x={0} y={62} fontSize={10}>
-                        {`Duration ${dur}s`}
-                      </text>
-                    </svg>
-                  </div>
-                  <div className="muted" style={{ fontSize: 12 }}>
-                    No Annotated Source URL — SVG Storyboard From Annotation Structure.
-                  </div>
-                </>
-              )}
-            </div>
-            <div style={{ marginTop: 8 }}>
-              {chips.map((c) => (
-                <button
-                  key={c.label}
-                  type="button"
-                  className="chip"
-                  onClick={() => seekVideo(c.t)}
-                >
-                  {c.label} @ {String(c.t)}s
-                </button>
-              ))}
-            </div>
-            <h4>Retention</h4>
-            <div id="retention-graph" className="muted">
-              <RetentionGraph
-                creativeKey={found.creative_key}
-                scope={new URLSearchParams(scopeKey)}
-                videoRef={videoRef}
-              />
-            </div>
-          </div>
-          <div className="detail-side">
-            <div className="card" style={{ margin: 0 }}>
-              <h4 style={{ marginTop: 0 }}>Performance</h4>
-              {kpiRow("Spend", `$${String(m.spend ?? "—")}`)}
-              {kpiRow("CPM", `$${String(m.cpm ?? "—")}`)}
-              {kpiRow("VTR (Completed)", String(m.vtr ?? "—"))}
-              {kpiRow("Play Rate", String(m.view_rate ?? "—"))}
-              {kpiRow("CTR", String(m.ctr ?? "—"))}
-              {kpiRow("CPA", `$${String(m.cpa ?? "—")}`)}
-              {kpiRow("ROAS", String(m.roas ?? "—"))}
-              <div className="muted" style={{ fontSize: 13 }}>
-                Campaigns: {(found.campaigns ?? []).join(", ") || "—"} ·{" "}
-                <a
-                  href="#"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    void loadBenchmark();
-                  }}
-                >
-                  Vs Benchmark
-                </a>
-                <span>{benchOut}</span>
-              </div>
-            </div>
-            <div className="card" style={{ margin: 0 }}>
-              <h4 style={{ marginTop: 0 }}>Creative Intelligence</h4>
-              {intelRow("Hook", a.hook_type ?? "—")}
-              {intelRow("Hook Modality (Visual/Spoken/Text)", a.hook_modality ?? "Unknown")}
-              {intelRow("Creator Vs Branded", a.creator_vs_branded ?? "—")}
-              {intelRow("Edit Style", a.edit_style ?? "—")}
-              {intelRow("Duration", `${String(a.duration_s ?? found.duration_s ?? "—")}s`)}
-              {intelRow("Audio Timings", audioTimingTxt(a))}
-              {intelRow("Brand First Mentioned (Audio)", brandAudioTxt(a))}
-              {intelRow(
-                "Brand Appearance",
-                String(
-                  a.brand_seconds && a.brand_seconds.length
-                    ? `${a.brand_seconds[0].start_s}s`
-                    : "—",
-                ),
-              )}
-              {intelRow(
-                "Product Appearance",
-                String(
-                  a.product_seconds && a.product_seconds.length
-                    ? `${a.product_seconds[0].start_s}s`
-                    : "—",
-                ),
-              )}
-              {intelRow("CTA", a.cta ?? ((a.structure ?? {}).cta ? "Set" : "—"))}
-              {intelRow("Voiceover", a.voiceover ?? ((a.structure ?? {}).voiceover ? "Set" : "—"))}
-              {intelRow("Supers", supersTxt(a))}
-              {intelRow(
-                "Editing Pace",
-                a.pace_cuts_per_min !== null && a.pace_cuts_per_min !== undefined
-                  ? `${String(a.pace_cuts_per_min)} cuts/min`
-                  : "—",
-              )}
-            </div>
-            {diagCard ? (
-              <div className="card" style={{ margin: 0 }}>
-                <h4 style={{ marginTop: 0 }}>Analyst Diagnostics</h4>
-                {(diagCard.layers ?? []).map((l) => (
-                  <div
-                    key={l.layer ?? ""}
-                    style={{ display: "flex", justifyContent: "space-between", fontSize: 14, padding: "3px 0" }}
-                  >
-                    <span className="muted" title={l.question ?? ""}>
-                      {l.layer ?? "—"}
-                    </span>
-                    <strong>{l.status ?? "Unknown"}</strong>
-                  </div>
-                ))}
-                {diagCard.finding ? (
-                  <>
-                    {intelRow("Signal", diagCard.finding.primary_signal ?? "—")}
-                    {intelRow("Diagnosis", diagCard.finding.diagnosis ?? "—")}
-                    {intelRow(
-                      "Iteration",
-                      diagCard.finding.recommended_iteration ?? "—",
-                    )}
-                    {intelRow(
-                      "Preserve / Change",
-                      `${diagCard.finding.element_to_preserve ?? "—"} / ${diagCard.finding.element_to_change ?? "—"}`,
-                    )}
-                    {intelRow(
-                      "Confidence",
-                      `${diagCard.finding.confidence_level ?? "—"} (Priority ${diagCard.finding.priority ?? "—"})`,
-                    )}
-                  </>
-                ) : (
-                  <div className="muted" style={{ fontSize: 13 }}>
-                    No Finding In This Scope — Insufficient Evidence, Not A Verdict.
-                  </div>
-                )}
-              </div>
-            ) : null}
-          </div>
-        </div>
-      </div>
-    );
+  const tests = useMemo(() => [
+    { icon: "spark", title: "Test Creator vs. Branded Intros", body: "Compare performance of creator-led vs. branded openings." },
+    { icon: "play", title: "Try Shorter Video Lengths", body: "Test 15s vs. 30s videos to validate impact on CTR and ROAS." },
+    { icon: "users", title: "Experiment With New Hook Types", body: "Test problem/solution vs. testimonial hooks for top campaigns." },
+  ], []);
+
+  const toggle = (key: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  const allChecked = rows.length > 0 && rows.every((r) => selected.has(r.creative_key));
+
+  const onExport = async () => {
+    const keys = rows.map((r) => r.creative_key);
+    if (!keys.length) {
+      setBanner("Nothing To Export For The Current Filters.");
+      return;
+    }
+    setExportBusy(true);
+    setBanner("");
+    try {
+      const res = await fetch("/api/exports/creatives", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ creative_keys: keys }),
+      });
+      if (!res.ok) throw new Error("Export Failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "creatives.csv";
+      a.click();
+      URL.revokeObjectURL(url);
+      setBanner(`Exported ${keys.length} Creative${keys.length === 1 ? "" : "s"}.`);
+    } catch (e) {
+      setBanner(e instanceof Error ? e.message : "Export Failed");
+    } finally {
+      setExportBusy(false);
+    }
   };
 
   return (
     <>
-      <h1 className="page-title">Creatives</h1>
-      <p className="page-sub">Scan The Work First, Metrics Second. Select Any Creative For The Full Review Workspace.</p>
-      <div className="card">
-        <button type="button" className="action" onClick={() => void runPipeline()}>
-          Run Pipeline On Selected
-        </button>
-        <label style={{ fontSize: 13, marginLeft: 8 }}>
-          Brand Terms (Optional, Comma-Separated){" "}
-          <input
-            type="text"
-            aria-label="Brand Terms (Optional, Comma-Separated)"
-            placeholder="e.g. foap, shop now"
-            style={{ maxWidth: 220 }}
-            value={brandTerms}
-            onChange={(e) => setBrandTerms(e.target.value)}
-          />
-        </label>
-        <button type="button" className="action" onClick={() => void verifySelected()}>
-          Mark HUMAN-VERIFIED
-        </button>
-        <span className="muted">Manual Annotate: Edit Hook Type / Format, Then Save.</span>
-        {actionStatus && (
-          <div className="muted" role="status" style={{ marginTop: 6 }}>
-            {actionStatus}
-          </div>
-        )}
-        <div style={{ marginTop: 10 }}>
-          <h4>Media For Selected Creative</h4>
-          <div className="ask-row">
-            <input
-              type="file"
-              ref={mediaFileRef}
-              accept="video/*,image/*,audio/*"
-              aria-label="Creative Media File"
-            />
-            <button type="button" className="action" onClick={() => void uploadMedia()}>
-              Upload Media
+      <PageHeader
+        title="Creatives"
+        sub="Explore top performing creatives, analyze what works, and get AI-powered recommendations."
+        actions={(
+          <>
+            <button type="button" className="link-teal" onClick={clearFilters}
+              style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <Icon name="reset" size={15} /> Reset Filters
             </button>
-          </div>
-          <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-            Stored Locally, Linked As The Creative Preview And Used By Live Analysis.{" "}
-            <span>{mediaStatus}</span>
-          </div>
-        </div>
-      </div>
-      <div className="card">
-        <h3>Creative View</h3>
-        <div id="creative-detail">{renderDetail()}</div>
-      </div>
-      {error ? (
-        <div className="card">
-          <p className="muted">{error}</p>
-        </div>
-      ) : rows === null ? (
-        <p className="muted">Loading Creatives…</p>
-      ) : (
-        <div id="library" className="creative-grid">
-          {kept.length === 0 ? (
-            <div className="empty-state">No Creatives Match The Current Filters.</div>
+            <button type="button" className="btn-primary" onClick={() => setApplied((n) => n + 1)}>
+              Apply Filters
+            </button>
+          </>
+        )}
+      />
+      <FilterPanel
+        creative
+        actions="none"
+        trailing={(
+          <>
+            <div className="field">
+              <label htmlFor="cr-length">Video Length</label>
+              <select id="cr-length" value={length} onChange={(e) => setLength(e.target.value as LengthKey)}>
+                <option value="all">All Lengths</option>
+                <option value="short">Under 15s</option>
+                <option value="sweet">15–30s</option>
+                <option value="long">Over 30s</option>
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="cr-bench">Benchmark</label>
+              <select id="cr-bench" value={benchmark} onChange={(e) => setBenchmark(e.target.value)}>
+                <option>Industry Benchmark</option>
+                <option>Top Performer</option>
+              </select>
+            </div>
+          </>
+        )}
+      />
+      {banner ? <p className="panel-sub" role="status" style={{ margin: "12px 0 0" }}>{banner}</p> : null}
+      <div className="main-rail" style={{ marginTop: 16 }}>
+        <div className="rail-stack">
+          {compare ? (
+            <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(4,minmax(0,1fr))" }}>
+              <div className="kpi-card">
+                <span className="kpi-ico" style={{ background: "#DFF5F1", color: "#009485" }}>
+                  <Icon name="play" size={22} />
+                </span>
+                <div>
+                  <p className="kpi-label">Total Creatives</p>
+                  <p className="kpi-value">{fmtCompact(rows.length)}</p>
+                </div>
+              </div>
+              <KpiCard label="Total Impressions" display={fmtCompact(num(compare.metrics.impressions?.current))}
+                icon="bars" tint="#E7F1FB" metricLabel="Impressions" compare={compare} />
+              <KpiCard label="Total Clicks" display={fmtCompact(num(compare.metrics.clicks?.current))}
+                icon="click" tint="#E7F1FB" metricLabel="Clicks" compare={compare} />
+              <KpiCard label="Average ROAS" display={`${num(compare.metrics.roas?.current).toFixed(1)}x`}
+                icon="users" tint="#DFF5F1" metricLabel="ROAS" compare={compare} />
+            </div>
           ) : (
-            kept.map((r) => {
-              const a = r.annotation ?? {};
-              const m = r.metrics ?? {};
-              const verified = a.status === "human_verified";
-              const kval = m[kpiKey];
-              const ktxt =
-                kval === null || kval === undefined || kval === ""
-                  ? "—"
-                  : MONEY_KEYS.includes(kpiKey)
-                    ? `$${kval}`
-                    : String(kval);
-              const prev = pickSource(a);
-              const hookVal = edits[r.creative_key]?.hook ?? a.hook_type ?? HOOK_OPTIONS[0];
-              const fmtVal = edits[r.creative_key]?.format ?? a.creator_vs_branded ?? FORMAT_OPTIONS[0];
-              const hookShown = HOOK_OPTIONS.includes(hookVal) ? hookVal : HOOK_OPTIONS[0];
-              const fmtShown = FORMAT_OPTIONS.includes(fmtVal) ? fmtVal : FORMAT_OPTIONS[0];
-              return (
-                <div
-                  key={r.creative_key}
-                  className={`creative-card${selected === r.creative_key ? " selected" : ""}`}
-                >
-                  <div className="media">
-                    {prev ? (
-                      <MediaPreview
-                        src={prev}
-                        creativeKey={r.creative_key}
-                        mutedPreview
-                      />
-                    ) : (
-                      `${a.hook_type ?? "Untagged Hook"} · ${String(a.duration_s ?? r.duration_s ?? "—")}s`
-                    )}
+            <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(4,minmax(0,1fr))" }}>
+              {[0, 1, 2, 3].map((i) => <Skeleton key={i} height={118} />)}
+            </div>
+          )}
+          <Panel
+            title="Top Performing Creatives"
+            action={<Link className="link-teal" to="/creatives">See All</Link>}
+          >
+            {creatives.data ? (
+              topCards.length ? (
+                <div className="creative-cards">
+                  {topCards.map((c) => {
+                    const s = secondsOf(c);
+                    const badge = c.annotation?.creator_vs_branded
+                      ? c.annotation.creator_vs_branded[0].toUpperCase() + c.annotation.creator_vs_branded.slice(1)
+                      : (c.format ?? "Video").replace(/ video$/i, "");
+                    return (
+                      <div className="creative-card" key={c.creative_key}>
+                        <div className="creative-thumb-lg">
+                          <CreativeThumb seed={c.creative_key} label={c.name || c.creative_key} />
+                          <span className="creative-badge">{badge}</span>
+                          {s ? <span className="thumb-dur">0:{String(s).padStart(2, "0")}</span> : null}
+                        </div>
+                        <p className="creative-name">{c.name || c.creative_key}</p>
+                        <div className="creative-stats">
+                          <span><Icon name="play" size={12} /> {fmtCompact(num(c.metrics.impressions))}</span>
+                          <span><Icon name="click" size={12} /> {c.metrics.ctr == null ? "—" : `${(c.metrics.ctr * 100).toFixed(1)}%`}</span>
+                          <span><Icon name="coin" size={12} /> {c.metrics.roas == null ? "—" : `${c.metrics.roas.toFixed(1)}x`}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : <EmptyState text="No creatives in the current scope." />
+            ) : <Skeleton height={190} />}
+          </Panel>
+          <Panel
+            title={`All Creatives (${fmtCompact(rows.length)})`}
+            action={(
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <label htmlFor="cr-sort" className="panel-sub">Sort By</label>
+                <select id="cr-sort" value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
+                  {SORTS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+                </select>
+                <div role="group" aria-label="Table layout" style={{ display: "flex", gap: 4 }}>
+                  <button type="button" className="icon-btn" aria-pressed={view === "list"} aria-label="List view"
+                    style={{ width: 32, height: 32, background: view === "list" ? "#E7F1FB" : undefined }}
+                    onClick={() => setView("list")}>
+                    <Icon name="list" size={16} />
+                  </button>
+                  <button type="button" className="icon-btn" aria-pressed={view === "grid"} aria-label="Grid view"
+                    style={{ width: 32, height: 32, background: view === "grid" ? "#E7F1FB" : undefined }}
+                    onClick={() => setView("grid")}>
+                    <Icon name="grid" size={16} />
+                  </button>
+                </div>
+                <button type="button" className="btn-outline" disabled={exportBusy} onClick={() => void onExport()}>
+                  <Icon name="download" size={15} /> {exportBusy ? "Exporting…" : "Export"}
+                </button>
+              </div>
+            )}
+          >
+            {creatives.data ? (
+              rows.length ? (
+                view === "list" ? (
+                  <div className="tbl-wrap">
+                    <table className="tbl">
+                      <thead>
+                        <tr>
+                          <th scope="col">
+                            <input type="checkbox" aria-label="Select all creatives" checked={allChecked}
+                              onChange={() => setSelected(allChecked ? new Set() : new Set(rows.map((r) => r.creative_key)))} />
+                          </th>
+                          <th scope="col">Creative</th>
+                          <th scope="col">Campaign</th>
+                          <th scope="col">Format</th>
+                          <th scope="col">Hook Type</th>
+                          <th scope="col">Length</th>
+                          <th scope="col">Platform</th>
+                          <th scope="col" className="num">Impressions</th>
+                          <th scope="col" className="num">CTR</th>
+                          <th scope="col" className="num">ROAS</th>
+                          <th scope="col">Retention</th>
+                          <th scope="col">Performance</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.map((c) => {
+                          const s = secondsOf(c);
+                          const perf = perfLabel(c.metrics.roas, roasBase);
+                          return (
+                            <tr key={c.creative_key}>
+                              <td>
+                                <input type="checkbox" aria-label={`Select ${c.name || c.creative_key}`}
+                                  checked={selected.has(c.creative_key)} onChange={() => toggle(c.creative_key)} />
+                              </td>
+                              <td>
+                                <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                                  <CreativeThumb seed={c.creative_key} duration={s || null} label={c.name || c.creative_key} />
+                                  <button
+                                    type="button"
+                                    className="link-teal cell-main"
+                                    aria-expanded={expandedKey === c.creative_key}
+                                    onClick={() => setExpandedKey((cur) => (cur === c.creative_key ? null : c.creative_key))}
+                                  >
+                                    {c.name || c.creative_key}
+                                  </button>
+                                </span>
+                              </td>
+                              <td>{(c.campaigns ?? [])[0] ?? "—"}</td>
+                              <td>{c.format ?? "—"}</td>
+                              <td>{shortHook(c.annotation?.hook_type)}</td>
+                              <td>{s ? `${s}s` : "—"}</td>
+                              <td>{platformLabel(c.platform)}</td>
+                              <td className="num">{fmtCompact(num(c.metrics.impressions))}</td>
+                              <td className="num">{c.metrics.ctr == null ? "—" : `${(c.metrics.ctr * 100).toFixed(1)}%`}</td>
+                              <td className="num">{c.metrics.roas == null ? "—" : `${c.metrics.roas.toFixed(1)}x`}</td>
+                              <td><RetentionSpark creativeKey={c.creative_key} /></td>
+                              <td><span className="badge-demo" style={{ color: perf.tone }}>{perf.text}</span></td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
                   </div>
-                  <div className="body">
-                    <div className="title">{r.name || r.creative_key}</div>
-                    <span className={verified ? "verified" : "unverified"}>
-                      {verified ? "HUMAN-VERIFIED" : "Auto"}
-                    </span>
-                    <span className="muted" style={{ fontSize: 13 }}>
-                      {r.platform ?? "—"} · {(r.campaigns ?? []).join(", ") || "—"} ·{" "}
-                      {a.creator_vs_branded ?? "—"}
-                    </span>
-                    <span style={{ fontSize: 13 }}>
-                      <strong>{kpiLabel(kpiKey)}</strong> {ktxt} · CPA {kpiText(m.cpa, true)}
-                    </span>
-                    <label style={{ fontSize: 13 }}>
-                      <input
-                        type="radio"
-                        name="sel"
-                        value={r.creative_key}
-                        checked={selected === r.creative_key}
-                        onChange={() => {
-                          setSelected(r.creative_key);
-                          setBenchOut("");
-                        }}
-                        aria-label={`Select ${r.name || r.creative_key}`}
-                      />{" "}
-                      Select
-                    </label>
-                    <label style={{ fontSize: 13 }}>
-                      Hook{" "}
-                      <select
-                        aria-label={`Hook Type For ${r.name || r.creative_key}`}
-                        value={hookShown}
-                        onChange={(e) =>
-                          setEdits((prevEdits) => ({
-                            ...prevEdits,
-                            [r.creative_key]: {
-                              hook: e.target.value,
-                              format:
-                                prevEdits[r.creative_key]?.format ?? fmtShown,
-                            },
-                          }))
-                        }
-                      >
-                        {HOOK_OPTIONS.map((h) => (
-                          <option key={h} value={h}>
-                            {kpiLabel(h)}
-                          </option>
-                        ))}
-                      </select>
-                    </label>{" "}
-                    <label style={{ fontSize: 13 }}>
-                      Format{" "}
-                      <select
-                        aria-label={`Format For ${r.name || r.creative_key}`}
-                        value={fmtShown}
-                        onChange={(e) =>
-                          setEdits((prevEdits) => ({
-                            ...prevEdits,
-                            [r.creative_key]: {
-                              hook: prevEdits[r.creative_key]?.hook ?? hookShown,
-                              format: e.target.value,
-                            },
-                          }))
-                        }
-                      >
-                        {FORMAT_OPTIONS.map((h) => (
-                          <option key={h} value={h}>
-                            {kpiLabel(h)}
-                          </option>
-                        ))}
-                      </select>
-                    </label>{" "}
-                    <button
-                      type="button"
-                      className="action save"
-                      onClick={() => void saveAnnotation(r.creative_key, hookShown, fmtShown)}
-                    >
-                      Save Annotation
-                    </button>
+                ) : (
+                  <div className="creative-cards">
+                    {rows.map((c) => {
+                      const s = secondsOf(c);
+                      return (
+                        <div className="creative-card" key={c.creative_key}>
+                          <div className="creative-thumb-lg">
+                            <CreativeThumb seed={c.creative_key} label={c.name || c.creative_key} />
+                            {s ? <span className="thumb-dur">0:{String(s).padStart(2, "0")}</span> : null}
+                          </div>
+                          <p className="creative-name">{c.name || c.creative_key}</p>
+                          <div className="creative-stats">
+                            <span>{fmtCompact(num(c.metrics.impressions))}</span>
+                            <span>{c.metrics.ctr == null ? "—" : `${(c.metrics.ctr * 100).toFixed(1)}%`}</span>
+                            <span>{c.metrics.roas == null ? "—" : `${c.metrics.roas.toFixed(1)}x`}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )
+              ) : <EmptyState text="No creatives match the current filters." />
+            ) : creatives.error ? (
+              <EmptyState text={creatives.error} />
+            ) : <Skeleton height={220} />}
+          </Panel>
+          {expandedKey && rows.find((r) => r.creative_key === expandedKey) ? (
+            <Panel title={rows.find((r) => r.creative_key === expandedKey)?.name || expandedKey}>
+              <CreativeDetail datum={rows.find((r) => r.creative_key === expandedKey) as CreativeRowDatum} />
+            </Panel>
+          ) : null}
+        </div>
+        <div className="rail-stack">
+          <Panel title="Top Learnings" action={<Link className="link-teal" to="/insights">See All</Link>}>
+            {hooks.data && modes.data ? (
+              learnings.length ? (
+                <div>
+                  {learnings.map((l) => (
+                    <div className="insight" key={l.title}>
+                      <span className="insight-ico" style={{ background: "#DFF5F1" }}>
+                        <Icon name={l.icon} size={20} />
+                      </span>
+                      <div>
+                        <h4>{l.title}</h4>
+                        <p>{l.body}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : <EmptyState text="Not enough data for learnings yet." />
+            ) : <Skeleton height={220} />}
+          </Panel>
+          <Panel title="Recommended Tests" action={<Link className="link-teal" to="/insights">See All</Link>}>
+            <div>
+              {tests.map((t) => (
+                <div className="insight" key={t.title}>
+                  <span className="insight-ico" style={{ background: "#E7F1FB" }}>
+                    <Icon name={t.icon} size={20} />
+                  </span>
+                  <div>
+                    <h4>{t.title}</h4>
+                    <p>{t.body}</p>
                   </div>
                 </div>
-              );
-            })
-          )}
+              ))}
+            </div>
+          </Panel>
         </div>
-      )}
+      </div>
     </>
   );
 }

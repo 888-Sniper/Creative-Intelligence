@@ -240,6 +240,19 @@ def kpis_compare(request: Request, conn=Depends(get_product_conn),
         raise _conflict(exc)
 
 
+@router.get("/api/kpis/daily")
+def kpis_daily(request: Request, conn=Depends(get_product_conn),
+               _emp=Depends(get_current_employee)):
+    """Per-day totals for trend charts (same scope semantics as /api/campaigns)."""
+    q = query_multidict(request)
+    try:
+        scope = benchmarks.Scope.from_query(q)
+        days = (q.get("days", [""])[0] if q.get("days") else "") or 30
+        return benchmarks.daily_series(conn, scope.normalized(), days)
+    except (ValueError, export_gate.ExportBlocked, emp.StoreError) as exc:
+        raise _conflict(exc)
+
+
 @router.get("/api/sync/status")
 def sync_status(request: Request, conn=Depends(get_product_conn),
                 _emp=Depends(get_current_employee)):

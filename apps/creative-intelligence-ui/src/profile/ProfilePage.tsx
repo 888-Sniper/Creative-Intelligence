@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "@/api/client";
+import { Icon } from "@/components/icons";
+import { EmptyState, PageHeader, Panel } from "@/components/product";
 import type { MeResponse, PublicEmployee } from "@/types/auth";
 
 interface ProfileResponse {
@@ -158,94 +160,197 @@ export function ProfilePage() {
     }
   };
 
+  const activity = employee ? [
+    { icon: "clock", label: "Last signed in", value: employee.last_login_at || "—" },
+    { icon: "check", label: "Access approved", value: employee.approved_at || "—" },
+    { icon: "user", label: "Account created", value: employee.created_at || "—" },
+  ] : [];
+
   return (
     <>
-      <h1 className="page-title">Profile</h1>
-      <p className="page-sub">Your Employee Profile. Changes Are Saved To Your Account Immediately.</p>
+      <PageHeader
+        title="Profile"
+        sub="Your employee profile. Changes are saved to your account immediately."
+      />
       {loading && <p className="muted">Loading Profile…</p>}
       {!loading && loadError && <p className="muted">{loadError}</p>}
       {!loading && !loadError && !employee && <p className="muted">Signed Out.</p>}
       {!loading && !loadError && employee && (
         <>
-          <div className="card">
-            <h3>Profile</h3>
-            <div className="acct-row">
-              <span>
-                <ProfileAvatar employee={employee} />
-              </span>
+          <Panel title="Profile Card" sub="How you appear across the workspace.">
+            <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+              <ProfileAvatar employee={employee} />
               <div>
-                <strong>{displayName(employee)}</strong>
-                <br />
-                <span className="muted">{employee.email}</span>
-                <br />
-                <span className="muted">
-                  {employee.role} · {employee.status}
-                </span>
+                <p style={{ margin: 0, fontSize: 19, fontWeight: 800, color: "var(--shell-navy)" }}>
+                  {displayName(employee)}
+                </p>
+                <p className="panel-sub" style={{ marginTop: 2 }}>{employee.email}</p>
+                <p className="panel-sub" style={{ marginTop: 4 }}>
+                  {`${employee.role} · ${employee.status}`}
+                </p>
+                {employee.provider ? (
+                  <p className="panel-sub" style={{ marginTop: 2 }}>
+                    Signed in via {employee.provider}
+                  </p>
+                ) : null}
               </div>
             </div>
-            <div style={{ margin: "12px 0" }}>
-              <label>
-                First Name
+          </Panel>
+
+          <div className="section-gap" />
+          <div className="cols-2">
+            <Panel title="Personal Information" sub="Name and avatar for your account.">
+              <div className="filter-grid" style={{ gridTemplateColumns: "1fr 1fr", marginTop: 0 }}>
+                <div className="field">
+                  <label htmlFor="p-first">First Name</label>
+                  <input
+                    id="p-first"
+                    type="text"
+                    value={first}
+                    onChange={(e) => setFirst(e.target.value)}
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="p-last">Last Name</label>
+                  <input
+                    id="p-last"
+                    type="text"
+                    value={last}
+                    onChange={(e) => setLast(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="field" style={{ marginTop: 12 }}>
+                <label htmlFor="p-avatar">Avatar URL (Optional)</label>
                 <input
-                  type="text"
-                  value={first}
-                  onChange={(e) => setFirst(e.target.value)}
-                  style={{ width: 200 }}
-                />
-              </label>
-              <label>
-                Last Name
-                <input
-                  type="text"
-                  value={last}
-                  onChange={(e) => setLast(e.target.value)}
-                  style={{ width: 200 }}
-                />
-              </label>
-            </div>
-            <div style={{ margin: "12px 0" }}>
-              <label>
-                Avatar URL (Optional)
-                <input
+                  id="p-avatar"
                   type="text"
                   value={avatarUrl}
                   onChange={(e) => setAvatarUrl(e.target.value)}
                   placeholder="avatar image link or blank"
-                  style={{ width: 320 }}
                 />
-              </label>
-              <span className="muted" style={{ fontSize: 12 }}>
-                …Or Upload An Image (JPEG/PNG/WebP, Up To 2 MB):
-              </span>
+              </div>
+              <p className="panel-sub" style={{ marginTop: 10 }}>
+                …Or upload an image (JPEG/PNG/WebP, up to 2 MB):
+              </p>
               <input
                 ref={fileRef}
                 type="file"
                 accept=".jpg,.jpeg,.png,.webp"
                 aria-label="Avatar Image File"
               />
-            </div>
-            <div>
-              <button type="button" className="action" onClick={() => void save()}>
-                Save Profile
-              </button>
-              <button type="button" className="action" onClick={() => void removeAvatar()}>
-                Remove Avatar
-              </button>
-              <span className="muted" role="status">
-                {status}
-              </span>
-            </div>
+              <div className="chip-row" style={{ marginTop: 14 }}>
+                <button type="button" className="btn-primary" onClick={() => void save()}>
+                  Save Profile
+                </button>
+                <button type="button" className="btn-outline" onClick={() => void removeAvatar()}>
+                  Remove Avatar
+                </button>
+                <span className="panel-sub" role="status" style={{ margin: 0 }}>
+                  {status}
+                </span>
+              </div>
+            </Panel>
+            <Panel title="Workspace Information" sub="Identity details managed by your admin.">
+              <dl className="detail-list">
+                <div>
+                  <dt>Employee ID</dt>
+                  <dd>{employee.id || "—"}</dd>
+                </div>
+                <div>
+                  <dt>Work Email</dt>
+                  <dd>{employee.email ? `${employee.email} (verified)` : "—"}</dd>
+                </div>
+                <div>
+                  <dt>Role</dt>
+                  <dd style={{ textTransform: "capitalize" }}>{employee.role || "—"}</dd>
+                </div>
+                <div>
+                  <dt>Status</dt>
+                  <dd style={{ textTransform: "capitalize" }}>{employee.status || "—"}</dd>
+                </div>
+                <div>
+                  <dt>Member Since</dt>
+                  <dd>{employee.created_at || "—"}</dd>
+                </div>
+                <div>
+                  <dt>Last Login</dt>
+                  <dd>{employee.last_login_at || "—"}</dd>
+                </div>
+              </dl>
+            </Panel>
           </div>
-          <div className="card">
-            <h3>Sessions</h3>
-            <div>
-              <button type="button" className="action" onClick={() => void revokeAll()}>
-                Log Out Everywhere
-              </button>
-              <span className="muted" role="status">
-                {sessionStatus}
-              </span>
-            </div>
+
+          <div className="section-gap" />
+          <div className="cols-2">
+            <Panel title="Connected Accounts" sub="Ways you can sign in.">
+              <div className="insight">
+                <span className="insight-ico" style={{ background: "var(--shell-blue-soft)" }}>
+                  <Icon name="user" size={18} />
+                </span>
+                <div style={{ flex: 1 }}>
+                  <h4>Work Email</h4>
+                  <p>{employee.email} — verified identity, always available for sign-in.</p>
+                </div>
+                <span className="pill pill-ok">Connected</span>
+              </div>
+              {employee.provider ? (
+                <div className="insight">
+                  <span className="insight-ico" style={{ background: "var(--shell-teal-soft)" }}>
+                    <Icon name="check" size={18} />
+                  </span>
+                  <div style={{ flex: 1 }}>
+                    <h4 style={{ textTransform: "capitalize" }}>{employee.provider} SSO</h4>
+                    <p>Single sign-on via {employee.provider} is linked to this account.</p>
+                  </div>
+                  <span className="pill pill-ok">Connected</span>
+                </div>
+              ) : null}
+            </Panel>
+            <Panel title="Security" sub="Protect every session on every device.">
+              <p className="panel-sub" style={{ marginTop: 0 }}>
+                Signing out everywhere revokes all sessions immediately — you will need to sign in again on each device.
+              </p>
+              <div className="chip-row" style={{ marginTop: 12 }}>
+                <button type="button" className="btn-outline" onClick={() => void revokeAll()}>
+                  Log Out Everywhere
+                </button>
+                <span className="panel-sub" role="status" style={{ margin: 0 }}>
+                  {sessionStatus}
+                </span>
+              </div>
+            </Panel>
+          </div>
+
+          <div className="section-gap" />
+          <div className="cols-2">
+            <Panel title="Notifications" sub="Choose what you want to be notified about.">
+              <p className="panel-sub" style={{ marginTop: 0 }}>
+                Email and in-app notification preferences live in Settings and apply to this account.
+              </p>
+              <div style={{ marginTop: 12 }}>
+                <a className="btn-soft" href="/settings">Manage In Settings</a>
+              </div>
+            </Panel>
+            <Panel title="Recent Activity" sub="Latest account events.">
+              {activity.every((a) => a.value === "—") ? (
+                <EmptyState text="No recent activity yet." />
+              ) : (
+                <div>
+                  {activity.map((a) => (
+                    <div className="insight" key={a.label}>
+                      <span className="insight-ico" style={{ background: "var(--shell-bg)" }}>
+                        <Icon name={a.icon} size={18} />
+                      </span>
+                      <div>
+                        <h4>{a.label}</h4>
+                        <p>{a.value}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Panel>
           </div>
         </>
       )}

@@ -88,7 +88,7 @@ def test_demo_seed_loads_once_on_fresh_database(tmp_path):
 
 
 def test_demo_seed_never_overwrites_existing_rows(tmp_path):
-    from ci_backend.actions import load_fixtures
+    from ci_backend.actions import load_demo_dataset
 
     db = str(tmp_path / "demo.db")
     settings = _local_settings(tmp_path, demo_seed=True)
@@ -101,7 +101,7 @@ def test_demo_seed_never_overwrites_existing_rows(tmp_path):
         conn.commit()
     # A second first-boot-style load inserts nothing new (ingest
     # upserts) and the sentinel row survives: no duplication, no wipe.
-    assert load_fixtures(db) == 0
+    assert load_demo_dataset(db) == 0
     with sqlite3.connect(db) as conn:
         assert (
             conn.execute(

@@ -1,13 +1,17 @@
-import { createBrowserRouter } from "react-router-dom";
-import { AppLayout } from "@/layouts/AppLayout";
+import { createBrowserRouter, Navigate } from "react-router-dom";
+import { AppShell } from "@/layouts/AppShell";
 import { AuthGate } from "@/auth/AuthGate";
-import { OverviewPage } from "@/pages/OverviewPage";
+import { FilterProvider } from "@/state/FilterContext";
+import { DashboardPage } from "@/pages/DashboardPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { CampaignsPage } from "@/pages/CampaignsPage";
 import { CreativesPage } from "@/pages/CreativesPage";
 import { ComparePage } from "@/pages/ComparePage";
 import { AnalystPage } from "@/pages/AnalystPage";
 import { BenchmarksPage } from "@/pages/BenchmarksPage";
+import { InsightsPage } from "@/pages/InsightsPage";
+import { WorkbookPage } from "@/pages/WorkbookPage";
+import { AskPage } from "@/pages/AskPage";
 import { ReportsPage } from "@/pages/ReportsPage";
 import { ProfilePage } from "@/profile/ProfilePage";
 import { AdminEmployeesPage } from "@/admin/AdminEmployeesPage";
@@ -35,7 +39,11 @@ function AnalystRoute() {
  *  conversations, filters, drafts) can survive an account switch. */
 function KeyedLayout() {
   const { me } = useAuth();
-  return <AppLayout key={me?.employee?.id ?? "signed-out"} />;
+  return (
+    <FilterProvider>
+      <AppShell key={me?.employee?.id ?? "signed-out"} />
+    </FilterProvider>
+  );
 }
 
 export const router = createBrowserRouter([
@@ -46,13 +54,17 @@ export const router = createBrowserRouter([
       </AuthGate>
     ),
     children: [
-      { index: true, element: <OverviewPage /> },
+      { index: true, element: <DashboardPage /> },
+      { path: "dashboard", element: <Navigate to="/" replace /> },
       { path: "campaigns", element: <CampaignsPage /> },
       { path: "creatives", element: <CreativesPage /> },
       { path: "compare", element: <ComparePage /> },
       { path: "analyst", element: <AnalystRoute /> },
       { path: "benchmarks", element: <BenchmarksPage /> },
+      { path: "insights", element: <InsightsPage /> },
       { path: "reports", element: <ReportsPage /> },
+      { path: "workbook", element: <WorkbookPage /> },
+      { path: "ask", element: <AskPage /> },
       { path: "profile", element: <ProfilePage /> },
       { path: "settings", element: <SettingsPage /> },
       {

@@ -81,8 +81,8 @@ def maybe_seed_demo(db_path: str, settings, fresh: bool) -> int:
     """
     if not settings.demo_seed or not fresh:
         return 0
-    from ci_backend.actions import load_fixtures
-    return load_fixtures(db_path)
+    from ci_backend.actions import load_demo_dataset
+    return load_demo_dataset(db_path)
 
 
 def main() -> None:

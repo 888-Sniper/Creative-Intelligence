@@ -1,6 +1,18 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api, scopedPath } from "@/api/client";
 import { useFilters } from "@/state/FilterContext";
+import { Icon } from "@/components/icons";
+import { TrendChart } from "@/components/charts";
+import {
+  CreativeThumb,
+  EmptyState,
+  PageHeader,
+  Panel,
+  Skeleton,
+  fmtMoney,
+  platformLabel,
+  useScopedApi,
+} from "@/components/product";
 
 interface CompareAnnotation {
   hook_type?: string | null;
@@ -77,44 +89,52 @@ interface PeriodResponse {
   scope?: string;
 }
 
-const CREATIVE_RANKS = ["cpa", "cpm", "vtr", "ctr", "cpc", "roas"];
-const CAMPAIGN_RANKS = ["cpa", "cpm", "ctr", "vtr", "roas"];
-const CAMPAIGN_KPIS = [
-  "spend",
-  "impressions",
-  "clicks",
-  "conversions",
-  "cpm",
-  "vtr",
-  "view_rate",
-  "ctr",
-  "cpa",
-  "roas",
-];
-const PERIOD_KPIS = [
-  "spend",
-  "impressions",
-  "clicks",
-  "conversions",
-  "cpm",
-  "vtr",
-  "view_rate",
-  "ctr",
-  "cpc",
-  "cpa",
-  "roas",
-];
-const MONEY_METRICS = new Set(["spend", "cpm", "cpc", "cpa"]);
-
-/** Legacy kpi(): missing stays missing, money gets a $ prefix. */
-function fmtKpi(value: unknown, money: boolean): string {
-  if (value === null || value === undefined) return "—";
-  return (money ? "$" : "") + String(value);
+interface DayPoint {
+  date: string;
+  impressions: number;
+  clicks: number;
+  spend: number;
+  conversions: number;
+  revenue: number;
 }
 
-function fmtCell(value: unknown): string {
-  if (value === null || value === undefined) return "—";
-  return String(value);
+interface CreativeMeta {
+  creative_key: string;
+  name?: string;
+  platform?: string;
+  campaigns?: string[];
+  format?: string;
+  duration_s?: number | null;
+  annotation?: {
+    hook_type?: string | null;
+    duration_s?: number | null;
+    creator_vs_branded?: string | null;
+  } | null;
+}
+
+const CREATIVE_RANKS = ["cpa", "cpm", "vtr", "ctr", "cpc", "roas"];
+const CAMPAIGN_RANKS = ["cpa", "cpm", "ctr", "vtr", "roas"];
+const PERIOD_KPIS = ["spend", "impressions", "clicks", "conversions", "cpm", "vtr", "view_rate", "ctr", "cpc", "cpa", "roas"];
+const CARD_KPIS = ["cpm", "ctr", "vtr", "cpa", "roas"] as const;
+const DIFF_KPIS = ["cpm", "ctr", "vtr", "cpa", "roas"] as const;
+const HIGHER_BETTER = new Set(["ctr", "vtr", "roas", "view_rate"]);
+const COLORS = ["#2F6FBE", "#0E9F6E", "#7C6BD6", "#E8734A"];
+
+function num(v: unknown): number {
+  const n = Number(v ?? 0);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function fmtPct(v: number | null | undefined): string {
+  if (v == null || !Number.isFinite(v)) return "—";
+  return `${(v > 1 ? v : v * 100).toFixed(1)}%`;
+}
+
+function fmtCard(kpi: (typeof CARD_KPIS)[number], v: number | null | undefined): string {
+  if (v == null || !Number.isFinite(v)) return "—";
+  if (kpi === "cpm" || kpi === "cpa") return fmtMoney(v);
+  if (kpi === "roas") return `${v.toFixed(1)}x`;
+  return fmtPct(v);
 }
 
 function sideOf(data: CompareResponse, key: string): CreativeSide {
@@ -123,23 +143,75 @@ function sideOf(data: CompareResponse, key: string): CreativeSide {
   return {};
 }
 
+function GroupedBars({ series, metric }: {
+  series: Array<{ label: string; color: string; values: Record<string, number | null> }>;
+  metric: string;
+}) {
+  const vals = series.map((s) => s.values[metric]).filter((v): v is number => v != null && Number.isFinite(v));
+  const max = Math.max(1, ...vals);
+  const W = 560, H = 190, PL = 8, PB = 22, PT = 10;
+  const n = series.length || 1;
+  const slot = (W - PL - 8) / 5;
+  const bw = Math.min(34, (slot - 14) / n);
+  const y = (v: number) => PT + (H - PT - PB) * (1 - v / max);
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }} role="img" aria-label={`${kpiLabel(metric)} comparison chart`}>
+      {[0.25, 0.5, 0.75, 1].map((f) => (
+        <line key={f} x1={PL} x2={W - 8} y1={y(max * f)} y2={y(max * f)} stroke="#E3EAF3" strokeWidth={1} />
+      ))}
+      {DIFF_KPIS.map((m, mi) => (
+        <g key={m}>
+          {series.map((s, si) => {
+            const v = s.values[m];
+            const x = PL + mi * slot + 7 + si * bw;
+            return v == null ? null : (
+              <rect key={s.label} x={x} y={y(v)} width={Math.max(3, bw - 3)} height={Math.max(1, H - PB - y(v))}
+                rx={3} fill={metric === m ? s.color : "#D7E1EC"} opacity={metric === m ? 1 : 0.85} />
+            );
+          })}
+          <text x={PL + mi * slot + 7 + ((series.length * bw) / 2)} y={H - 6} textAnchor="middle" fontSize={10.5} fill="#8CA0B5">
+            {kpiLabel(m)}
+          </text>
+        </g>
+      ))}
+    </svg>
+  );
+}
+
+interface ItemView {
+  key: string;
+  title: string;
+  sub: string;
+  meta: string;
+  thumbSeed: string;
+  duration: number | null;
+  values: Record<string, number | null>;
+}
+
+const TEST_IDEAS: Record<string, (name: string) => { title: string; body: string }> = {
+  ctr: (n) => ({ title: `Test ${n} With a Stronger Hook`, body: "Try a problem/solution hook and measure lift in CTR and ROAS." }),
+  vtr: (n) => ({ title: `Shorten ${n} to 15 Seconds`, body: "Test a tighter edit to improve VTR while keeping key messaging." }),
+  cpa: (n) => ({ title: `Refine Targeting for ${n}`, body: "Narrow the audience to lower CPA while protecting volume." }),
+  cpm: (n) => ({ title: `Refresh Creative for ${n}`, body: "New opening visuals can lower CPMs by reducing fatigue." }),
+  roas: (n) => ({ title: `Scale ${n} Carefully`, body: "Increase budget in steps and watch ROAS stability." }),
+};
+
 export function ComparePage() {
   const { scope } = useFilters();
-
-  const [keyA, setKeyA] = useState("");
-  const [keyB, setKeyB] = useState("");
-  const [keyExtra, setKeyExtra] = useState("");
-  const [creativeRank, setCreativeRank] = useState("cpa");
-  const [creativeKeys, setCreativeKeys] = useState<string[]>([]);
-  const [creativeData, setCreativeData] = useState<CompareResponse | null>(null);
-  const [creativeLoading, setCreativeLoading] = useState(false);
-  const [creativeError, setCreativeError] = useState("");
-
-  const [campaignInput, setCampaignInput] = useState("");
-  const [campaignRank, setCampaignRank] = useState("cpa");
+  const [mode, setMode] = useState<"campaigns" | "creatives">("campaigns");
+  const [picked, setPicked] = useState<string[]>([]);
+  const [campaignRank, setCampaignRank] = useState("roas");
+  const [creativeRank, setCreativeRank] = useState("roas");
   const [campaignData, setCampaignData] = useState<CampaignCompareResponse | null>(null);
-  const [campaignLoading, setCampaignLoading] = useState(false);
-  const [campaignError, setCampaignError] = useState("");
+  const [creativeData, setCreativeData] = useState<CompareResponse | null>(null);
+  const [creativeKeys, setCreativeKeys] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [perfMetric, setPerfMetric] = useState("roas");
+  const [barMetric, setBarMetric] = useState("ctr");
+  const [baseName, setBaseName] = useState("");
+  const [dailyMap, setDailyMap] = useState<Record<string, DayPoint[]>>({});
+  const [retMap, setRetMap] = useState<Record<string, Array<[number, number]>>>({});
 
   const [aFrom, setAFrom] = useState("");
   const [aTo, setATo] = useState("");
@@ -149,55 +221,67 @@ export function ComparePage() {
   const [periodLoading, setPeriodLoading] = useState(false);
   const [periodError, setPeriodError] = useState("");
 
-  async function compareCreatives(): Promise<void> {
-    const keys = [keyA.trim(), keyB.trim(), ...keyExtra.split(",").map((s) => s.trim()).filter(Boolean)];
-    const seen = [...new Set(keys.filter(Boolean))].slice(0, 6);
-    if (seen.length < 2) {
-      setCreativeData(null);
-      setCreativeKeys([]);
-      setCreativeError("Enter At Least Two Creative Keys (Up To Six).");
+  const campaignOptions = useScopedApi<Record<string, Record<string, number>>>("/api/campaigns");
+  const creativeOptions = useScopedApi<CreativeMeta[]>("/api/creatives");
+
+  const rank = mode === "campaigns" ? campaignRank : creativeRank;
+  const activeKeys = mode === "campaigns"
+    ? (campaignData?.ranking ?? picked).slice(0, 4)
+    : creativeKeys.slice(0, 4);
+
+  async function runCampaigns(list: string[], rankBy: string): Promise<void> {
+    const names = [...new Set(list.filter(Boolean))].slice(0, 4);
+    if (names.length < 2) {
+      setCampaignData(null);
+      setError("Select At Least Two Campaigns To Compare.");
       return;
     }
-    setCreativeLoading(true);
-    setCreativeError("");
+    setLoading(true);
+    setError("");
     try {
       const params = new URLSearchParams();
-      seen.forEach((k) => params.append("key", k));
-      params.set("rank_by", creativeRank);
-      const r = await api<CompareResponse>("GET", scopedPath(`/api/compare?${params.toString()}`, scope));
-      // Display the backend ranking order, never the entered key order:
-      // columns and the winner both follow the selected rank_by.
-      const ranked = Array.isArray(r.ranking) ? r.ranking : [];
-      const sameSet =
-        ranked.length === seen.length && ranked.every((k) => seen.includes(k));
-      setCreativeKeys(sameSet ? ranked : seen);
-      setCreativeData(r);
-    } catch (e) {
+      params.set("rank_by", rankBy);
+      params.set("campaigns", names.join(","));
+      const r = await api<CampaignCompareResponse>(
+        "GET", scopedPath(`/api/compare/campaigns?${params.toString()}`, scope),
+      );
+      setCampaignData(r);
       setCreativeData(null);
-      setCreativeError(e instanceof Error ? e.message : "Request Failed");
+      setBaseName(r.winner ?? r.ranking[0] ?? "");
+    } catch (e) {
+      setCampaignData(null);
+      setError(e instanceof Error ? e.message : "Request Failed");
     } finally {
-      setCreativeLoading(false);
+      setLoading(false);
     }
   }
 
-  async function compareCampaigns(): Promise<void> {
-    setCampaignLoading(true);
-    setCampaignError("");
+  async function runCreatives(keys: string[], rankBy: string): Promise<void> {
+    const seen = [...new Set(keys.filter(Boolean))].slice(0, 4);
+    if (seen.length < 2) {
+      setCreativeData(null);
+      setCreativeKeys([]);
+      setError("Select At Least Two Creatives To Compare.");
+      return;
+    }
+    setLoading(true);
+    setError("");
     try {
       const params = new URLSearchParams();
-      params.set("rank_by", campaignRank);
-      const list = campaignInput.trim();
-      if (list) params.set("campaigns", list);
-      const r = await api<CampaignCompareResponse>(
-        "GET",
-        scopedPath(`/api/compare/campaigns?${params.toString()}`, scope),
-      );
-      setCampaignData(r);
-    } catch (e) {
+      seen.forEach((k) => params.append("key", k));
+      params.set("rank_by", rankBy);
+      const r = await api<CompareResponse>("GET", scopedPath(`/api/compare?${params.toString()}`, scope));
+      const ranked = Array.isArray(r.ranking) ? r.ranking : [];
+      const sameSet = ranked.length === seen.length && ranked.every((k) => seen.includes(k));
+      setCreativeKeys(sameSet ? ranked : seen);
+      setCreativeData(r);
       setCampaignData(null);
-      setCampaignError(e instanceof Error ? e.message : "Request Failed");
+      setBaseName(r.winner ?? (sameSet ? ranked[0] : seen[0]) ?? "");
+    } catch (e) {
+      setCreativeData(null);
+      setError(e instanceof Error ? e.message : "Request Failed");
     } finally {
-      setCampaignLoading(false);
+      setLoading(false);
     }
   }
 
@@ -211,8 +295,7 @@ export function ComparePage() {
     try {
       const params = new URLSearchParams({ a_from: aFrom, a_to: aTo, b_from: bFrom, b_to: bTo });
       const r = await api<PeriodResponse>(
-        "GET",
-        scopedPath(`/api/compare/periods?${params.toString()}`, scope),
+        "GET", scopedPath(`/api/compare/periods?${params.toString()}`, scope),
       );
       setPeriodData(r);
     } catch (e) {
@@ -223,299 +306,543 @@ export function ComparePage() {
     }
   }
 
-  // One winner, controlled by the selected rank_by: the backend pins
-  // why.top to the rank winner, and this page reads winner everywhere.
-  const creativeWinner = creativeData?.winner ?? null;
-  const creativeRankBy = creativeData?.rank_by ?? creativeRank;
-  const creativeHead = creativeWinner
-    ? creativeKeys.length > 2
-      ? `${creativeWinner} Leads The Comparison`
-      : `Why ${creativeWinner} Won`
-    : "Insufficient Data / No Winner";
-  const creativeRankLine = creativeData?.winner
-    ? `Winner By ${kpiLabel(creativeRankBy)}: ${creativeData.winner} — order: ${creativeKeys.join(" · ")}`
-    : "No Winner: The Selected KPI Is Unmeasurable For Every Side.";
+  // Auto-run once the option lists arrive: top 4 campaigns by spend.
+  const [booted, setBooted] = useState(false);
+  useEffect(() => {
+    if (booted || !campaignOptions.data || !creativeOptions.data) return;
+    setBooted(true);
+    const top = Object.entries(campaignOptions.data)
+      .sort((a, b) => num(b[1].spend) - num(a[1].spend))
+      .slice(0, 4)
+      .map(([n]) => n);
+    setPicked(top);
+    void runCampaigns(top, "roas");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [booted, campaignOptions.data, creativeOptions.data]);
 
-  const campaignWinner = campaignData?.winner ?? null;
-  const campaignRankBy = campaignData?.rank_by ?? campaignRank;
-  const campaignRankLine = campaignWinner
-    ? `Winner By ${kpiLabel(campaignRankBy)}: ${campaignWinner}`
-    : "No Winner: The Selected KPI Is Unmeasurable For Every Campaign.";
+  // Per-campaign daily series for Performance Over Time.
+  useEffect(() => {
+    if (mode !== "campaigns" || !campaignData) return;
+    const names = (campaignData.ranking ?? []).slice(0, 4);
+    let live = true;
+    void (async () => {
+      const out: Record<string, DayPoint[]> = {};
+      for (const name of names) {
+        try {
+          const params = new URLSearchParams(scope);
+          params.delete("campaign");
+          params.set("campaign", name);
+          params.set("days", "30");
+          const r = await api<{ days: DayPoint[] }>("GET", `/api/kpis/daily?${params.toString()}`);
+          out[name] = r.days ?? [];
+        } catch {
+          out[name] = [];
+        }
+      }
+      if (live) setDailyMap(out);
+    })();
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, campaignData]);
+
+  // Retention curves for creative mode.
+  useEffect(() => {
+    if (mode !== "creatives" || !creativeData) return;
+    const keys = creativeKeys.slice(0, 4);
+    let live = true;
+    void (async () => {
+      const out: Record<string, Array<[number, number]>> = {};
+      for (const key of keys) {
+        try {
+          const r = await api<{ points: Array<{ t: number; p: number }> }>(
+            "GET", `/api/retention/curve?creative_key=${encodeURIComponent(key)}`,
+          );
+          out[key] = (r.points ?? []).map((p) => [num(p.t), num(p.p)] as [number, number]);
+        } catch {
+          out[key] = [];
+        }
+      }
+      if (live) setRetMap(out);
+    })();
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, creativeData, creativeKeys]);
+
+  const metaByKey = useMemo(() => {
+    const m: Record<string, CreativeMeta> = {};
+    for (const c of creativeOptions.data ?? []) m[c.creative_key] = c;
+    return m;
+  }, [creativeOptions.data]);
+
+  const firstCreativeByCampaign = useMemo(() => {
+    const m: Record<string, CreativeMeta> = {};
+    for (const c of creativeOptions.data ?? []) {
+      for (const camp of c.campaigns ?? []) {
+        if (!m[camp]) m[camp] = c;
+      }
+    }
+    return m;
+  }, [creativeOptions.data]);
+
+  const items: ItemView[] = useMemo(() => {
+    if (mode === "campaigns") {
+      if (!campaignData) return [];
+      return (campaignData.ranking ?? []).slice(0, 4).map((name) => {
+        const k = campaignData.kpis[name] ?? {};
+        const rep = firstCreativeByCampaign[name];
+        const days = Object.values(dailyMap).flat();
+        const dates = days.map((d) => d.date).sort();
+        return {
+          key: name,
+          title: name,
+          sub: rep?.name ?? "Top Creative",
+          meta: `${platformLabel(rep?.platform)} · ${dates.length ? `${dates[0].slice(5)} – ${dates[dates.length - 1].slice(5)}` : "Last 30 Days"}`,
+          thumbSeed: rep?.creative_key ?? name,
+          duration: rep?.annotation?.duration_s ?? rep?.duration_s ?? null,
+          values: { cpm: k.cpm ?? null, ctr: k.ctr ?? null, vtr: k.vtr ?? null, cpa: k.cpa ?? null, roas: k.roas ?? null },
+        };
+      });
+    }
+    if (!creativeData) return [];
+    return creativeKeys.slice(0, 4).map((key) => {
+      const d = sideOf(creativeData, key);
+      const meta = metaByKey[key];
+      return {
+        key,
+        title: meta?.name || key,
+        sub: (meta?.campaigns ?? [])[0] ?? "Unassigned",
+        meta: `${platformLabel(meta?.platform)} · ${meta?.format ?? "Video"}`,
+        thumbSeed: key,
+        duration: meta?.annotation?.duration_s ?? meta?.duration_s ?? null,
+        values: { cpm: d.cpm ?? null, ctr: d.ctr ?? null, vtr: d.vtr ?? null, cpa: d.cpa ?? null, roas: d.roas ?? null },
+      };
+    });
+  }, [mode, campaignData, creativeData, creativeKeys, firstCreativeByCampaign, metaByKey, dailyMap]);
+
+  const trendSeries = useMemo(() => {
+    if (mode !== "campaigns") return [];
+    const names = (campaignData?.ranking ?? []).slice(0, 4);
+    return names.map((name, i) => ({
+      label: name.length > 18 ? `${name.slice(0, 17)}…` : name,
+      color: COLORS[i % COLORS.length],
+      soft: "#E4EAF7",
+      points: (dailyMap[name] ?? []).map((p) => {
+        if (perfMetric === "roas") return p.spend ? p.revenue / p.spend : 0;
+        if (perfMetric === "ctr") return p.impressions ? (p.clicks / p.impressions) * 100 : 0;
+        if (perfMetric === "cpa") return p.conversions ? p.spend / p.conversions : 0;
+        if (perfMetric === "cpm") return p.impressions ? (p.spend / p.impressions) * 1000 : 0;
+        return num((p as unknown as Record<string, number>)[perfMetric]);
+      }),
+    }));
+  }, [mode, campaignData, dailyMap, perfMetric]);
+
+  const trendLabels = useMemo(() => {
+    const names = (campaignData?.ranking ?? []).slice(0, 4);
+    const first = names.map((n) => dailyMap[n] ?? []).find((d) => d.length);
+    return (first ?? []).map((p) => p.date.slice(5));
+  }, [campaignData, dailyMap]);
+
+  const diffs = useMemo(() => {
+    const base = items.find((i) => i.key === baseName) ?? items[0];
+    if (!base) return [];
+    return items
+      .filter((i) => i.key !== base.key)
+      .map((i) => {
+        const rows = DIFF_KPIS.map((k) => {
+          const a = i.values[k];
+          const b = base.values[k];
+          if (a == null || b == null || !b) return null;
+          const pct = ((a - b) / Math.abs(b)) * 100;
+          const good = HIGHER_BETTER.has(k) ? pct >= 0 : pct <= 0;
+          const dir = pct > 0.5 ? "↑" : pct < -0.5 ? "↓" : "→";
+          return {
+            kpi: k,
+            pct,
+            dir,
+            good,
+            text: `${i.title} is ${Math.abs(pct).toFixed(0)}% ${pct >= 0 ? "higher" : "lower"} than ${base.title}`,
+          };
+        }).filter((r): r is NonNullable<typeof r> => r !== null);
+        return { item: i, rows };
+      });
+  }, [items, baseName]);
+
+  const takeaways = useMemo(() => {
+    const data = mode === "campaigns" ? campaignData : creativeData;
+    const out: string[] = [];
+    if (data?.why?.top) out.push(data.why.top);
+    for (const d of data?.why?.differences ?? []) {
+      if (out.length >= 4) break;
+      if (!out.includes(d)) out.push(d);
+    }
+    return out.slice(0, 4);
+  }, [mode, campaignData, creativeData]);
+
+  const tests = useMemo(() => {
+    const base = items.find((i) => i.key === baseName) ?? items[0];
+    if (!base) return [];
+    return items
+      .filter((i) => i.key !== base.key)
+      .slice(0, 4)
+      .map((i, idx) => {
+        let worst: (typeof DIFF_KPIS)[number] = "ctr";
+        let worstRatio = Infinity;
+        for (const k of DIFF_KPIS) {
+          const a = i.values[k];
+          const b = base.values[k];
+          if (a == null || b == null || !a || !b) continue;
+          const ratio = HIGHER_BETTER.has(k) ? a / b : b / a;
+          if (ratio < worstRatio) {
+            worstRatio = ratio;
+            worst = k;
+          }
+        }
+        const idea = TEST_IDEAS[worst](i.title);
+        return { n: idx + 1, color: COLORS[idx % COLORS.length], ...idea };
+      });
+  }, [items, baseName]);
+
+  const attributes = useMemo(() => {
+    if (mode === "creatives" && creativeData?.attributes?.length) {
+      return creativeData.attributes;
+    }
+    const rows: AttributeRow[] = [
+      { attribute: "Hook Type", values: {} },
+      { attribute: "Duration", values: {} },
+      { attribute: "Creator vs Branded", values: {} },
+      { attribute: "Format", values: {} },
+      { attribute: "Platform", values: {} },
+    ];
+    for (const item of items) {
+      const rep = mode === "campaigns" ? firstCreativeByCampaign[item.key] : metaByKey[item.key];
+      const vals = [rep?.annotation?.hook_type?.replace(/_/g, " ") ?? "—",
+        rep?.annotation?.duration_s ?? rep?.duration_s ? `${rep?.annotation?.duration_s ?? rep?.duration_s}s` : "—",
+        rep?.annotation?.creator_vs_branded ?? "—",
+        rep?.format ?? "—",
+        platformLabel(rep?.platform)];
+      rows.forEach((r, i) => {
+        r.values = { ...(r.values ?? {}), [item.key]: vals[i] };
+      });
+    }
+    return rows;
+  }, [mode, creativeData, items, firstCreativeByCampaign, metaByKey]);
+
+  const addOption = (v: string) => {
+    if (!v || picked.includes(v) || picked.length >= 4) return;
+    setPicked((p) => [...p, v]);
+  };
+  const removeOption = (v: string) => setPicked((p) => p.filter((x) => x !== v));
+
+  const apply = () => {
+    if (mode === "campaigns") void runCampaigns(picked, campaignRank);
+    else void runCreatives(picked, creativeRank);
+  };
+
+  const switchMode = (m: "campaigns" | "creatives") => {
+    setMode(m);
+    setPicked([]);
+    setCampaignData(null);
+    setCreativeData(null);
+    setError("");
+  };
+
+  const options = mode === "campaigns"
+    ? Object.keys(campaignOptions.data ?? {})
+    : (creativeOptions.data ?? []).map((c) => c.creative_key);
+  const optionLabel = (v: string) => {
+    if (mode === "campaigns") return v;
+    return metaByKey[v]?.name || v;
+  };
+
+  const barSeries = items.map((item, i) => ({
+    label: item.title,
+    color: COLORS[i % COLORS.length],
+    values: item.values,
+  }));
 
   return (
     <>
-      <h1 className="page-title">Compare</h1>
-      <p className="page-sub">Two Modes: Creatives Side-By-Side, Or Campaigns Ranked With Why-Analysis.</p>
-
-      <div className="card">
-        <label>
-          Creative A <input placeholder="creative A key" value={keyA} onChange={(e) => setKeyA(e.target.value)} />
-        </label>{" "}
-        <label>
-          Creative B <input placeholder="creative B key" value={keyB} onChange={(e) => setKeyB(e.target.value)} />
-        </label>{" "}
-        <label>
-          More Creatives{" "}
-          <input
-            placeholder="more keys, comma-separated (up to 4 more)"
-            style={{ width: "60%" }}
-            value={keyExtra}
-            onChange={(e) => setKeyExtra(e.target.value)}
-          />
-        </label>{" "}
-        <label>
-          Rank By{" "}
-          <select aria-label="Rank Creatives By" value={creativeRank} onChange={(e) => setCreativeRank(e.target.value)}>
-            {CREATIVE_RANKS.map((r) => (
-              <option key={r} value={r}>
-                {kpiLabel(r)}
-              </option>
-            ))}
-          </select>
-        </label>{" "}
-        <button className="action" onClick={() => void compareCreatives()}>
-          Compare Creatives
-        </button>
-        <div className="muted" style={{ fontSize: 12 }}>
-          GET /api/compare — 2 To 6 Creatives, Side By Side With Per-Metric Leaders. Every Side Is Computed Over
-          The Current Top Filter Bar Scope.
+      <PageHeader
+        title="Compare"
+        sub="Compare campaigns or creatives side by side to find what drives the best performance."
+      />
+      <Panel title="Comparison Setup">
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,2fr) minmax(0,1fr) auto", gap: 16, alignItems: "end" }}>
+          <div className="field">
+            <label htmlFor="cmp-mode">Compare By</label>
+            <select id="cmp-mode" value={mode} onChange={(e) => switchMode(e.target.value as typeof mode)}>
+              <option value="campaigns">Campaigns</option>
+              <option value="creatives">Creatives</option>
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="cmp-add">{mode === "campaigns" ? "Select Campaigns" : "Select Creatives"}</label>
+            <div className="chip-row" style={{ marginBottom: 8 }}>
+              {picked.map((p, i) => (
+                <span key={p} className="chip" style={{ cursor: "default" }}>
+                  <i style={{ width: 8, height: 8, borderRadius: "50%", background: COLORS[i % COLORS.length] }} />
+                  {optionLabel(p)}
+                  <button type="button" aria-label={`Remove ${optionLabel(p)}`} onClick={() => removeOption(p)}
+                    style={{ background: "none", border: 0, cursor: "pointer", display: "inline-flex", color: "inherit" }}>
+                    <Icon name="x" size={12} />
+                  </button>
+                </span>
+              ))}
+              {picked.length === 0 ? <span className="panel-sub">Nothing selected yet.</span> : null}
+            </div>
+            <select id="cmp-add" value="" onChange={(e) => { addOption(e.target.value); e.target.value = ""; }}>
+              <option value="">{mode === "campaigns" ? "Add a campaign…" : "Add a creative…"}</option>
+              {options.filter((o) => !picked.includes(o)).map((o) => (
+                <option key={o} value={o}>{optionLabel(o)}</option>
+              ))}
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="cmp-rank">Rank By KPI</label>
+            <select
+              id="cmp-rank"
+              value={rank}
+              onChange={(e) => (mode === "campaigns" ? setCampaignRank(e.target.value) : setCreativeRank(e.target.value))}
+            >
+              {(mode === "campaigns" ? CAMPAIGN_RANKS : CREATIVE_RANKS).map((r) => (
+                <option key={r} value={r}>{kpiLabel(r)}</option>
+              ))}
+            </select>
+          </div>
+          <button type="button" className="btn-primary" disabled={loading} onClick={apply}>
+            {loading ? <span className="spinner" aria-hidden="true" /> : null}
+            {loading ? "Comparing…" : "Apply Comparison"}
+          </button>
         </div>
-      </div>
-
-      <div className="card">
-        <h3>Campaign Compare</h3>
-        <label>
-          Campaigns{" "}
-          <input
-            placeholder="campaigns, comma-separated (blank = all)"
-            style={{ width: "60%" }}
-            value={campaignInput}
-            onChange={(e) => setCampaignInput(e.target.value)}
-          />
-        </label>{" "}
-        <label>
-          Rank By{" "}
-          <select aria-label="Rank Campaigns By" value={campaignRank} onChange={(e) => setCampaignRank(e.target.value)}>
-            {CAMPAIGN_RANKS.map((r) => (
-              <option key={r} value={r}>
-                {kpiLabel(r)}
-              </option>
-            ))}
-          </select>
-        </label>{" "}
-        <button className="action" onClick={() => void compareCampaigns()}>
-          Compare Campaigns
-        </button>
-        <div className="muted" style={{ fontSize: 12 }}>
-          GET /api/compare/campaigns — Full KPI Set Plus Why-Analysis.
+      </Panel>
+      {error ? <p className="panel-sub" role="alert" style={{ margin: "12px 0 0" }}>{error}</p> : null}
+      {loading && !items.length ? (
+        <div className="cmp-grid" style={{ marginTop: 16 }}>
+          {[0, 1, 2, 3].map((i) => <Skeleton key={i} height={300} />)}
         </div>
-      </div>
-
-      <div id="cmp-out">
-        {creativeLoading ? <p className="muted">Loading…</p> : null}
-        {creativeError && !creativeLoading ? <p className="muted">{creativeError}</p> : null}
-        {creativeData && !creativeLoading ? (
-          <>
-            <div className="cmp-grid">
-              {creativeKeys.map((key) => {
-                const d = sideOf(creativeData, key);
-                const ann = d.annotation ?? {};
-                return (
-                  <div className="card" key={key}>
-                    <h3>
-                      {key || "(empty)"}
-                      {creativeWinner === key && key ? " (top)" : ""}
-                    </h3>
-                    <div className="muted" style={{ fontSize: 12 }}>
-                      Scope: {creativeData.scope ?? "All data"} — KPIs Computed Over Scoped Rows Only
-                    </div>
-                    <table>
-                      <tbody>
-                        {(["spend", "impressions", "clicks", "conversions", "cpm", "vtr", "view_rate", "ctr", "cpc", "cpa", "roas"] as const).map(
-                          (m) => (
-                            <tr key={m}>
-                              <th scope="row">{kpiLabel(m)}</th>
-                              <td>{fmtKpi(d[m], MONEY_METRICS.has(m))}</td>
-                            </tr>
-                          ),
-                        )}
-                        <tr>
-                          <th scope="row">Hook</th>
-                          <td>{ann.hook_type ?? "—"}</td>
-                        </tr>
-                        <tr>
-                          <th scope="row">Format</th>
-                          <td>{ann.creator_vs_branded ?? "—"}</td>
-                        </tr>
-                        <tr>
-                          <th scope="row">Edit Style</th>
-                          <td>{ann.edit_style ?? "—"}</td>
-                        </tr>
-                        <tr>
-                          <th scope="row">Status</th>
-                          <td>{ann.status ?? "—"}</td>
-                        </tr>
-                      </tbody>
-                    </table>
+      ) : null}
+      {items.length ? (
+        <>
+          <div className="cmp-grid" style={{ marginTop: 16 }}>
+            {items.map((item, i) => (
+              <div className="cmp-card" key={item.key} style={{ borderTop: `4px solid ${COLORS[i % COLORS.length]}` }}>
+                <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 10 }}>
+                  <CreativeThumb seed={item.thumbSeed} duration={item.duration} label={item.title} />
+                  <div>
+                    <h4 style={{ margin: 0, fontSize: 15 }}>{item.title}</h4>
+                    <p className="panel-sub" style={{ margin: "2px 0" }}>{item.sub}</p>
+                    <p className="panel-sub" style={{ margin: 0 }}>{item.meta}</p>
                   </div>
-                );
-              })}
-            </div>
-            <div className="insight-panel">
-              <h4>{creativeHead}</h4>
-              <p className="muted" style={{ fontSize: 12 }}>
-                Scope: {creativeData.scope ?? "All data"} · Ranked By {kpiLabel(creativeRankBy)}
-              </p>
-              <p>{creativeRankLine}</p>
-              <ul className="plain">
-                {(creativeData.why?.differences ?? []).map((d) => (
-                  <li key={d}>{d}</li>
+                </div>
+                <table className="tbl">
+                  <tbody>
+                    {CARD_KPIS.map((k) => (
+                      <tr key={k}>
+                        <th scope="row" style={{ border: 0, padding: "5px 0" }}>{kpiLabel(k)}</th>
+                        <td className="num" style={{ border: 0, padding: "5px 0", fontWeight: 700 }}>{fmtCard(k, item.values[k])}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1.2fr) minmax(0,1fr) minmax(0,1fr)", gap: 16, marginTop: 16 }}>
+            <Panel
+              title={mode === "campaigns" ? "Performance Over Time" : "Retention Curves"}
+              action={mode === "campaigns" ? (
+                <select aria-label="Trend metric" value={perfMetric} onChange={(e) => setPerfMetric(e.target.value)}>
+                  {["roas", "ctr", "cpa", "cpm", "spend"].map((m) => <option key={m} value={m}>{kpiLabel(m)}</option>)}
+                </select>
+              ) : undefined}
+            >
+              {mode === "campaigns" ? (
+                trendSeries.some((s) => s.points.length) ? (
+                  <>
+                    <TrendChart series={trendSeries} labels={trendLabels} />
+                    <div className="legend">
+                      {trendSeries.map((s) => (
+                        <span key={s.label}><i style={{ background: s.color }} />{s.label}</span>
+                      ))}
+                    </div>
+                  </>
+                ) : <EmptyState text="No daily data for the selected campaigns." />
+              ) : (
+                <TrendChart
+                  series={activeKeys.map((k, i) => ({
+                    label: optionLabel(k),
+                    color: COLORS[i % COLORS.length],
+                    soft: "#E4EAF7",
+                    points: (retMap[k] ?? []).map((p) => p[1]),
+                  }))}
+                  labels={(retMap[activeKeys[0]] ?? []).map((p) => `${Math.round(p[0])}s`)}
+                />
+              )}
+            </Panel>
+            <Panel
+              title="KPI Comparison"
+              action={(
+                <select aria-label="Comparison metric" value={barMetric} onChange={(e) => setBarMetric(e.target.value)}>
+                  {DIFF_KPIS.map((m) => <option key={m} value={m}>{kpiLabel(m)}</option>)}
+                </select>
+              )}
+            >
+              <GroupedBars series={barSeries} metric={barMetric} />
+              <div className="legend">
+                {barSeries.map((s) => (
+                  <span key={s.label}><i style={{ background: s.color }} />{s.label.length > 16 ? `${s.label.slice(0, 15)}…` : s.label}</span>
                 ))}
-                {(creativeData.why?.differences ?? []).length === 0 ? <li>—</li> : null}
-              </ul>
-            </div>
-            {(creativeData.attributes ?? []).length > 0 ? (
-              <div className="card">
-                <h4>Attributes Side-By-Side</h4>
-                <table>
+              </div>
+            </Panel>
+            <Panel
+              title="Difference Summary"
+              action={(
+                <select aria-label="Comparison baseline" value={baseName} onChange={(e) => setBaseName(e.target.value)}>
+                  {items.map((i) => <option key={i.key} value={i.key}>vs. {i.title}</option>)}
+                </select>
+              )}
+            >
+              {diffs.length ? (
+                <div style={{ display: "grid", gap: 10 }}>
+                  {diffs.map((d) => (
+                    <div key={d.item.key}>
+                      {(["cpm", "ctr", "vtr", "cpa", "roas"] as const).map((k) => {
+                        const r = d.rows.find((x) => x.kpi === k);
+                        if (!r) return null;
+                        return (
+                          <div key={k} style={{ display: "flex", gap: 8, alignItems: "baseline", padding: "4px 0" }}>
+                            <span className="panel-sub" style={{ width: 44 }}>{kpiLabel(k)}</span>
+                            <strong style={{ color: r.good ? "#0E7C5B" : "#C2410C", minWidth: 52 }}>
+                              {r.dir} {Math.abs(r.pct).toFixed(0)}%
+                            </strong>
+                            <span className="panel-sub">{r.text}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ))}
+                </div>
+              ) : <EmptyState text="Select a baseline to compare differences." />}
+            </Panel>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1.2fr) minmax(0,1fr) minmax(0,1fr)", gap: 16, marginTop: 16 }}>
+            <Panel title="Creative Attributes Comparison">
+              <div className="tbl-wrap">
+                <table className="tbl">
                   <thead>
                     <tr>
-                      <th>Attribute</th>
-                      {creativeKeys.map((k) => (
-                        <th key={k}>{k || "(empty)"}</th>
-                      ))}
+                      <th scope="col">Attribute</th>
+                      {items.map((i) => <th scope="col" key={i.key}>{i.title}</th>)}
                     </tr>
                   </thead>
                   <tbody>
-                    {(creativeData.attributes ?? []).map((row) => (
+                    {attributes.map((row) => (
                       <tr key={row.attribute}>
                         <th scope="row">{row.attribute}</th>
-                        {creativeKeys.map((k) => (
-                          <td key={k}>{fmtCell(row.values?.[k])}</td>
+                        {items.map((i) => (
+                          <td key={i.key}>{String(row.values?.[i.key] ?? "—")}</td>
                         ))}
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-            ) : null}
-          </>
-        ) : null}
-      </div>
-
-      <div id="cmp-camp-out">
-        {campaignLoading ? <p className="muted">Loading…</p> : null}
-        {campaignError && !campaignLoading ? <p className="muted">{campaignError}</p> : null}
-        {campaignData && !campaignLoading ? (
-          <div className="card">
-            <h4>Ranked By {kpiLabel(campaignData.rank_by ?? "")}</h4>
-            <p className="muted" style={{ fontSize: 12 }}>
-              Scope: {campaignData.scope ?? "All data"}
-            </p>
-            <p>{campaignRankLine}</p>
-            <table>
-              <thead>
-                <tr>
-                  <th>Campaign</th>
-                  {CAMPAIGN_KPIS.map((k) => (
-                    <th key={k}>{kpiLabel(k)}</th>
+            </Panel>
+            <Panel title="Key Takeaways">
+              {takeaways.length ? (
+                <div>
+                  {takeaways.map((t) => (
+                    <div className="insight" key={t}>
+                      <span className="insight-ico" style={{ background: "#DFF5F1" }}>
+                        <Icon name="check" size={18} />
+                      </span>
+                      <div><p style={{ color: "var(--shell-navy)" }}>{t}</p></div>
+                    </div>
                   ))}
-                </tr>
-              </thead>
-              <tbody>
-                {(campaignData.ranking ?? []).map((c, i) => (
-                  <tr key={c} className={i === 0 && campaignWinner ? "row-top" : undefined}>
-                    <td>
-                      {c}
-                      {i === 0 && campaignWinner ? " (top)" : ""}
-                    </td>
-                    {CAMPAIGN_KPIS.map((k) => (
-                      <td key={k}>{fmtCell(campaignData.kpis[c]?.[k])}</td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <div className="insight-panel">
-              <h4>{campaignWinner ? `Why ${campaignWinner} Won` : "Insufficient Data / No Winner"}</h4>
-              <ul className="plain">
-                {(campaignData.why?.differences ?? []).map((d) => (
-                  <li key={d}>{d}</li>
-                ))}
-                {(campaignData.why?.differences ?? []).length === 0 ? <li>—</li> : null}
-              </ul>
-            </div>
+                </div>
+              ) : <EmptyState text="Run a comparison to generate takeaways." />}
+            </Panel>
+            <Panel title="Recommended Next Tests">
+              {tests.length ? (
+                <div>
+                  {tests.map((t) => (
+                    <div className="insight" key={t.title}>
+                      <span className="insight-ico" style={{ background: t.color, color: "#fff", fontWeight: 800 }}>
+                        {t.n}
+                      </span>
+                      <div>
+                        <h4>{t.title}</h4>
+                        <p>{t.body}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : <EmptyState text="Run a comparison to generate test ideas." />}
+            </Panel>
           </div>
-        ) : null}
-      </div>
-
-      <div className="card">
-        <h3>Period Comparison</h3>
-        <div className="muted" style={{ fontSize: 12 }}>
-          Period A Vs Period B Over The Identical Scoped Population (GET /api/compare/periods Follows The Top
-          Filter Bar, Except Its Own Dates).
+        </>
+      ) : !loading ? (
+        <Panel title="No Comparison Yet">
+          <EmptyState text="Select two to four campaigns or creatives, then Apply Comparison." />
+        </Panel>
+      ) : null}
+      <Panel title="Period Comparison" sub="Period A vs Period B over the identical scoped population.">
+        <div className="filter-grid" style={{ gridTemplateColumns: "repeat(4,minmax(0,1fr))" }}>
+          <div className="field">
+            <label htmlFor="cp-afrom">A From</label>
+            <input id="cp-afrom" type="date" value={aFrom} onChange={(e) => setAFrom(e.target.value)} />
+          </div>
+          <div className="field">
+            <label htmlFor="cp-ato">A To</label>
+            <input id="cp-ato" type="date" value={aTo} onChange={(e) => setATo(e.target.value)} />
+          </div>
+          <div className="field">
+            <label htmlFor="cp-bfrom">B From</label>
+            <input id="cp-bfrom" type="date" value={bFrom} onChange={(e) => setBFrom(e.target.value)} />
+          </div>
+          <div className="field">
+            <label htmlFor="cp-bto">B To</label>
+            <input id="cp-bto" type="date" value={bTo} onChange={(e) => setBTo(e.target.value)} />
+          </div>
         </div>
-        <div className="filter-grid">
-          <label>
-            A From
-            <input type="date" aria-label="A From" value={aFrom} onChange={(e) => setAFrom(e.target.value)} />
-          </label>
-          <label>
-            A To
-            <input type="date" aria-label="A To" value={aTo} onChange={(e) => setATo(e.target.value)} />
-          </label>
-          <label>
-            B From
-            <input type="date" aria-label="B From" value={bFrom} onChange={(e) => setBFrom(e.target.value)} />
-          </label>
-          <label>
-            B To
-            <input type="date" aria-label="B To" value={bTo} onChange={(e) => setBTo(e.target.value)} />
-          </label>
-        </div>
-        <div style={{ marginTop: 8 }}>
-          <button className="action" onClick={() => void comparePeriods()}>
-            Compare Periods
+        <div className="filter-actions">
+          <button type="button" className="btn-primary" disabled={periodLoading} onClick={() => void comparePeriods()}>
+            {periodLoading ? <span className="spinner" aria-hidden="true" /> : null}
+            {periodLoading ? "Comparing…" : "Compare Periods"}
           </button>
         </div>
-        <div id="per-out" className="muted" style={{ marginTop: 8 }}>
-          {periodLoading ? <p className="muted">Loading…</p> : null}
-          {periodError && !periodLoading ? <p className="muted">{periodError}</p> : null}
+        <div style={{ marginTop: 8 }}>
+          {periodLoading ? <Skeleton height={120} /> : null}
+          {periodError && !periodLoading ? <EmptyState text={periodError} /> : null}
           {periodData && !periodLoading ? (
-            <>
-              <p className="muted" style={{ fontSize: 12 }}>
-                Scope: {periodData.scope ?? "All data"}
-              </p>
-              <table>
+            <div className="tbl-wrap">
+              <table className="tbl">
                 <thead>
                   <tr>
-                    <th>KPI</th>
-                    <th>
-                      {periodData.a.label} ({periodData.a.from}..{periodData.a.to}, n={periodData.a.n_ads})
-                    </th>
-                    <th>
-                      {periodData.b.label} ({periodData.b.from}..{periodData.b.to}, n={periodData.b.n_ads})
-                    </th>
-                    <th>B−A</th>
+                    <th scope="col">KPI</th>
+                    <th scope="col">{periodData.a.label} ({periodData.a.from}…{periodData.a.to}, n={periodData.a.n_ads})</th>
+                    <th scope="col">{periodData.b.label} ({periodData.b.from}…{periodData.b.to}, n={periodData.b.n_ads})</th>
+                    <th scope="col" className="num">B−A</th>
                   </tr>
                 </thead>
                 <tbody>
                   {PERIOD_KPIS.map((m) => (
                     <tr key={m}>
-                      <td>{kpiLabel(m)}</td>
-                      <td>{fmtCell(periodData.a.kpis[m])}</td>
-                      <td>{fmtCell(periodData.b.kpis[m])}</td>
-                      <td>{fmtCell(periodData.delta[m])}</td>
+                      <th scope="row">{kpiLabel(m)}</th>
+                      <td>{String(periodData.a.kpis[m] ?? "—")}</td>
+                      <td>{String(periodData.b.kpis[m] ?? "—")}</td>
+                      <td className="num">{String(periodData.delta[m] ?? "—")}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-            </>
+            </div>
           ) : !periodLoading && !periodError ? (
-            "—"
+            <EmptyState text="Fill all four period dates, then Compare Periods." />
           ) : null}
         </div>
-      </div>
+      </Panel>
     </>
   );
 }
+

@@ -13,7 +13,11 @@ test.describe("kpi period comparison", () => {
   }) => {
     const seeds = readSeeds();
     await loginAs(context, page, seeds.kpi, "/");
-    await expect(page.getByText("45,000")).toBeVisible();
+    // KPI values also appear in the campaign table: scope card
+    // assertions to the KPI grid so table twins cannot violate
+    // strict mode depending on load timing.
+    const kpis = page.locator(".kpi-grid");
+    await expect(kpis.getByText("45.0K")).toBeVisible();
 
     // Default dataset extent has an empty previous window: honest
     // no-comparison state, no trend arrows anywhere.
@@ -21,15 +25,18 @@ test.describe("kpi period comparison", () => {
       page.getByRole("button", { name: "Explain Comparison Period" }),
     ).toHaveCount(0);
 
-    // Selecting a real range recalculates both periods.
+    // Selecting a real range recalculates both periods (explicit Apply).
     await page.getByLabel("From date").fill("2024-01-01");
     await page.getByLabel("To date").fill("2024-01-07");
-    await expect(page.getByText("25,000")).toBeVisible();
-    // Both weekly windows are in scope: impressions and CPA each +25%.
+    await page.getByRole("button", { name: "Apply Filters" }).click();
+    await expect(kpis.getByText("25.0K")).toBeVisible();
+    // Both weekly windows are in scope: impressions +25%, clicks and
+    // spend +50% each (the reskinned card set has no CPA card).
     await expect(
       page.getByRole("button", { name: "Explain Comparison Period" }),
     ).not.toHaveCount(0);
-    await expect(page.getByText("+25%", { exact: true })).toHaveCount(2);
+    await expect(kpis.getByText("+25%", { exact: true })).toHaveCount(1);
+    await expect(kpis.getByText("+50%", { exact: true })).toHaveCount(2);
 
     // Hover opens the tooltip with the exact previous range.
     const info = page
@@ -60,15 +67,18 @@ test.describe("kpi period comparison", () => {
 
     // Same non-date filter applies to both windows (TikTok only:
     // 12500 vs 10000 is still +25%, not diluted by Meta rows).
-    await page.locator(".filter-bar").getByLabel("Platform").selectOption("tiktok");
-    await expect(page.getByText("12,500")).toBeVisible();
-    await expect(page.getByText("+25%", { exact: true })).toHaveCount(2);
+    await page.getByRole("region", { name: "Filters" }).getByLabel("Platform").selectOption("TikTok");
+    await page.getByRole("button", { name: "Apply Filters" }).click();
+    await expect(kpis.getByText("12.5K")).toBeVisible();
+    await expect(kpis.getByText("+25%", { exact: true })).toHaveCount(1);
 
-    // An exact Date pins a one-day current period (Jan 5 here, whose
+    // A one-day range pins a one-day current period (Jan 5 here, whose
     // previous day has no rows): graceful no-comparison state.
-    await page.getByRole("button", { name: "Clear Filters" }).click();
-    await page.locator(".filter-bar").getByLabel("Date", { exact: true }).fill("2024-01-05");
-    await expect(page.getByText("12,500")).toBeVisible();
+    await page.getByRole("button", { name: "Reset Filters" }).click();
+    await page.getByLabel("From date").fill("2024-01-05");
+    await page.getByLabel("To date").fill("2024-01-05");
+    await page.getByRole("button", { name: "Apply Filters" }).click();
+    await expect(kpis.getByText("12.5K")).toBeVisible();
     await expect(
       page.getByRole("button", { name: "Explain Comparison Period" }),
     ).toHaveCount(0);
@@ -85,8 +95,10 @@ test.describe("kpi period comparison", () => {
     await loginAs(context, page, seeds.kpi, "/");
     await page.getByLabel("From date").fill("2024-01-01");
     await page.getByLabel("To date").fill("2024-01-07");
-    await expect(page.getByText("25,000")).toBeVisible();
-    await expect(page.getByText("+25%", { exact: true }).first()).toBeVisible();
+    await page.getByRole("button", { name: "Apply Filters" }).click();
+    const kpis = page.locator(".kpi-grid");
+    await expect(kpis.getByText("25.0K")).toBeVisible();
+    await expect(kpis.getByText("+25%", { exact: true }).first()).toBeVisible();
     await page
       .getByRole("button", { name: "Explain Comparison Period" })
       .first()

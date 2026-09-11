@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useAuth } from "@/auth/AuthProvider";
 
 const PROVIDERS = [
@@ -7,71 +8,55 @@ const PROVIDERS = [
   { id: "github", label: "Continue With GitHub" },
 ] as const;
 
+function ProviderMark({ provider }: { provider: string }) {
+  if (provider === "google") {
+    return (
+      <svg width={20} height={20} viewBox="0 0 24 24" aria-hidden="true">
+        <path fill="#4285F4" d="M23.5 12.3c0-.9-.1-1.8-.2-2.6H12v5h6.5c-.3 1.4-1.1 2.6-2.3 3.4v2.8h3.7c2.2-2 3.6-5 3.6-8.6Z" />
+        <path fill="#34A853" d="M12 24c3.2 0 6-1.1 8-2.9l-3.7-2.8c-1 .7-2.4 1.2-4.3 1.2-3.3 0-6-2.2-7-5.2H1.1v2.9C3.1 21.5 7.3 24 12 24Z" />
+        <path fill="#FBBC05" d="M5 14.3c-.2-.7-.4-1.5-.4-2.3s.1-1.6.4-2.3V6.8H1.1A12 12 0 0 0 0 12c0 1.9.5 3.7 1.1 5.2L5 14.3Z" />
+        <path fill="#EA4335" d="M12 4.7c1.8 0 3.3.6 4.6 1.8l3.3-3.3C17.9 1.2 15.2 0 12 0 7.3 0 3.1 2.5 1.1 6.8L5 9.7c1-3 3.7-5 7-5Z" />
+      </svg>
+    );
+  }
+  if (provider === "microsoft") {
+    return (
+      <svg width={20} height={20} viewBox="0 0 24 24" aria-hidden="true">
+        <rect x={1.5} y={1.5} width={10} height={10} fill="#F25022" />
+        <rect x={12.5} y={1.5} width={10} height={10} fill="#7FBA00" />
+        <rect x={1.5} y={12.5} width={10} height={10} fill="#00A4EF" />
+        <rect x={12.5} y={12.5} width={10} height={10} fill="#FFB900" />
+      </svg>
+    );
+  }
+  return null;
+}
+
 // The employee login shows Google + Microsoft only. Apple/GitHub stay
 // supported backend-side (WorkOS/providers untouched) but are hidden
 // from this internal login UI — no documented Foap-employee use.
 const EMPLOYEE_PROVIDERS = ["google", "microsoft"] as const;
 
-function ProviderIcon({ provider }: { provider: string }) {
-  if (provider === "google") {
-    return (
-      <svg
-        aria-hidden="true"
-        width="20"
-        height="20"
-        viewBox="0 0 24 24"
-        focusable="false"
-      >
-        <path fill="#4285F4" d="M21.6 12.23c0-.79-.07-1.55-.2-2.28H12v4.31h5.37a4.59 4.59 0 0 1-1.99 3.01v2.5h3.22c1.89-1.74 3-4.3 3-7.54Z" />
-        <path fill="#34A853" d="M12 22c2.7 0 4.97-.89 6.62-2.42l-3.22-2.5c-.9.6-2.04.96-3.4.96-2.6 0-4.8-1.76-5.59-4.12H3.08v2.58A10 10 0 0 0 12 22Z" />
-        <path fill="#FBBC05" d="M6.41 13.92A6 6 0 0 1 6.1 12c0-.67.11-1.32.31-1.92V7.5H3.08A10 10 0 0 0 2 12c0 1.61.39 3.13 1.08 4.5l3.33-2.58Z" />
-        <path fill="#EA4335" d="M12 5.96c1.47 0 2.78.51 3.82 1.49l2.86-2.86C16.96 2.98 14.7 2 12 2a10 10 0 0 0-8.92 5.5l3.33 2.58C7.2 7.72 9.4 5.96 12 5.96Z" />
-      </svg>
-    );
-  }
-
-  if (provider === "microsoft") {
-    return (
-      <svg
-        aria-hidden="true"
-        width="20"
-        height="20"
-        viewBox="0 0 24 24"
-        focusable="false"
-      >
-        <path fill="#F25022" d="M2 2h9v9H2z" />
-        <path fill="#7FBA00" d="M13 2h9v9h-9z" />
-        <path fill="#00A4EF" d="M2 13h9v9H2z" />
-        <path fill="#FFB900" d="M13 13h9v9h-9z" />
-      </svg>
-    );
-  }
-
-  return null;
-}
-
 /** One OAuth provider button. Redirects to WorkOS; secrets never touch
  *  the browser (item 8). */
 export function OAuthButton({ provider, label }: { provider: string; label?: string }) {
   const { authenticating, oauthStart } = useAuth();
+  const [starting, setStarting] = useState(false);
+  const busy = starting || authenticating;
   return (
     <button
       type="button"
-      className="auth-btn"
-      disabled={authenticating}
-      onClick={() => void oauthStart(provider)}
+      className="auth-btn oauth-btn"
+      disabled={busy}
+      aria-busy={busy}
+      onClick={() => {
+        if (busy) return;
+        setStarting(true);
+        void oauthStart(provider).finally(() => setStarting(false));
+      }}
     >
-      <span
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: "10px",
-        }}
-      >
-        <ProviderIcon provider={provider} />
-        <span>{label ?? `Continue with ${provider}`}</span>
-      </span>
+      {busy ? <span className="spinner dark" aria-hidden="true" /> : <ProviderMark provider={provider} />}
+      <span>{starting ? "Connecting…" : (label ?? `Continue With ${provider}`)}</span>
     </button>
   );
 }

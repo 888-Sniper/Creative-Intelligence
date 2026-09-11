@@ -196,6 +196,47 @@ def _enrich(conn, rows):
     return out
 
 
+def daily_series(conn, filters=None, days=30):
+    """Per-day totals for trend charts, oldest first.
+
+    Same filter semantics as benchmark(): rows matching the normalized
+    filters, grouped by date string. Returns at most the most recent
+    ``days`` dates present in the data (1..180).
+    """
+    try:
+        days = int(days)
+    except (TypeError, ValueError):
+        raise ValueError("days must be an integer")
+    if days < 1 or days > 180:
+        raise ValueError("days must be between 1 and 180")
+    filt = normalize_filters(filters)
+    by_day = {}
+    for r in all_rows(conn):
+        if not match_filters(r, filt):
+            continue
+        day = str(r.get("date") or "")
+        if not day:
+            continue
+        agg = by_day.setdefault(day, {"impressions": 0, "clicks": 0,
+                                      "spend": 0.0, "conversions": 0,
+                                      "revenue": 0.0})
+        agg["impressions"] += int(r.get("impressions") or 0)
+        agg["clicks"] += int(r.get("clicks") or 0)
+        agg["spend"] += float(r.get("spend") or 0)
+        agg["conversions"] += float(r.get("conversions") or 0)
+        agg["revenue"] += float(r.get("revenue") or 0)
+    out = []
+    for day in sorted(by_day)[-days:]:
+        agg = by_day[day]
+        out.append({"date": day,
+                    "impressions": agg["impressions"],
+                    "clicks": agg["clicks"],
+                    "spend": round(agg["spend"], 2),
+                    "conversions": agg["conversions"],
+                    "revenue": round(agg["revenue"], 2)})
+    return {"days": out}
+
+
 def benchmark(conn, group_by="hook_type", filters=None):
     if group_by not in GROUPABLE:
         raise ValueError("group_by must be one of %s" % (sorted(GROUPABLE),))
@@ -223,7 +264,8 @@ Project identity is row["project"] when present, else row["campaign"].
 """
 
 FILTER_KEYS = ("vertical", "platform", "funnel", "objective", "market",
-               "client", "date", "campaign")
+               "client", "date", "campaign", "hook_type",
+               "creator_vs_branded", "format")
 
 KPI_KEYS = ("cpm", "vtr", "view_rate", "ctr", "cpc", "cpa", "roas")
 
@@ -457,7 +499,8 @@ class Scope:
     """
 
     AXES = ("client", "project", "campaign", "platform", "vertical",
-            "market", "funnel", "objective", "date", "date_from",
+            "market", "funnel", "objective", "hook_type",
+            "creator_vs_branded", "format", "date", "date_from",
             "date_to")
 
     def __init__(self, raw=None):

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useAuth } from "@/auth/AuthProvider";
 import { ApiError } from "@/api/client";
+import { Icon } from "@/components/icons";
 
 // localStorage holds the work email ONLY (never the password) when the
 // employee ticks "Remember me". Session lifetime stays server-controlled
@@ -73,14 +74,17 @@ export function EmailSignIn() {
         <label className="login-label" htmlFor="login-email">
           Work Email
         </label>
-        <input
-          id="login-email"
-          type="email"
-          placeholder="name@company.com"
-          autoComplete="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-        />
+        <div className="login-input">
+          <span className="login-icon" aria-hidden="true"><Icon name="mail" size={18} /></span>
+          <input
+            id="login-email"
+            type="email"
+            placeholder="name@company.com"
+            autoComplete="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+        </div>
         {!codeSent ? (
           <button type="button" className="login-primary" disabled={authenticating} onClick={() => void submit(async () => {
             const msg = await emailCodeSend(email);
@@ -121,18 +125,22 @@ export function EmailSignIn() {
       <label className="login-label" htmlFor="login-email">
         Work Email
       </label>
-      <input
-        id="login-email"
-        type="email"
-        placeholder="name@company.com"
-        autoComplete="email"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-      />
+      <div className="login-input">
+        <span className="login-icon" aria-hidden="true"><Icon name="mail" size={18} /></span>
+        <input
+          id="login-email"
+          type="email"
+          placeholder="name@company.com"
+          autoComplete="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+        />
+      </div>
       <label className="login-label" htmlFor="login-password">
         Password
       </label>
       <div className="login-password-wrap">
+        <span className="login-icon" aria-hidden="true"><Icon name="lock" size={18} /></span>
         <input
           id="login-password"
           type={showPassword ? "text" : "password"}
@@ -143,12 +151,12 @@ export function EmailSignIn() {
         />
         <button
           type="button"
-          className="login-link login-show"
+          className="login-link login-show login-icon-btn"
           aria-label={showPassword ? "Hide Password" : "Show Password"}
           aria-pressed={showPassword}
           onClick={() => setShowPassword((v) => !v)}
         >
-          {showPassword ? "Hide" : "Show"}
+          <Icon name="eye" size={18} />
         </button>
       </div>
       <div className="login-remember-row">
@@ -168,28 +176,10 @@ export function EmailSignIn() {
           Forgot password?
         </button>
       </div>
-      <button
-        type="button"
-        className="login-primary"
-        disabled={authenticating}
-        aria-busy={authenticating}
-        onClick={() => void signInPassword()}
-      >
-        {authenticating ? (
-          <span className="login-primary-loading">
-            <span className="login-spinner" aria-hidden="true" />
-            <span>Signing In…</span>
-          </span>
-        ) : (
-          "Sign In"
-        )}
+      <button type="button" className="login-primary" disabled={authenticating} aria-busy={authenticating} onClick={() => void signInPassword()}>
+        {authenticating ? (<><span className="spinner" aria-hidden="true" /><span>Signing In…</span></>) : "Sign In"}
       </button>
-      <button
-        type="button"
-        className="login-link login-mode"
-        style={{ textTransform: "capitalize" }}
-        onClick={() => switchMode("code")}
-      >
+      <button type="button" className="login-link login-mode" onClick={() => switchMode("code")}>
         Use a sign-in code instead
       </button>
       <p className="muted login-status" role="status">{message}</p>

@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
 import { api, ApiError } from "@/api/client";
 import { useAuth } from "@/auth/AuthProvider";
 import { Avatar } from "@/auth/AccountMenu";
+import { GoogleDriveCard } from "@/components/GoogleDriveCard";
+import { CohortBuilder, RetentionPatterns } from "@/components/DataTools";
 import { useTheme } from "@/app/useTheme";
 import type { ThemeMode } from "@/app/useTheme";
+import { Icon } from "@/components/icons";
+import { PageHeader, Panel } from "@/components/product";
 
 const PROVIDER_LABELS: Record<string, string> = {
   google: "Google",
@@ -14,161 +17,377 @@ const PROVIDER_LABELS: Record<string, string> = {
   email: "Email",
 };
 
-/** Private Drive/Sheets connection (item 31). Server-side OAuth only:
- *  the browser is bounced to Google and back; tokens stay server-side. */
-function GoogleDriveCard() {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const [connected, setConnected] = useState<boolean | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState("");
+/* Settings matches the approved reference. Workspace preferences persist
+ * locally per browser; identity/security/drive actions stay backend-backed
+ * (logout, session revoke, password-reset email, Drive OAuth status). */
 
-  useEffect(() => {
-    let live = true;
-    api<{ connected: boolean }>("GET", "/api/auth/google/status")
-      .then((res) => { if (live) setConnected(res.connected); })
-      .catch(() => { if (live) setConnected(false); });
-    return () => { live = false; };
-  }, []);
+interface Prefs {
+  workspace: string;
+  timezone: string;
+  defaultView: string;
+  currency: string;
+  dateRange: string;
+  campaignView: string;
+  emailReports: boolean;
+  campaignUpdates: boolean;
+  aiInsights: boolean;
+  productUpdates: boolean;
+  dataUsage: boolean;
+  shareAnalytics: boolean;
+  retention: string;
+  accent: string;
+  density: string;
+  twoFactor: boolean;
+}
 
-  useEffect(() => {
-    const flag = searchParams.get("google");
-    if (flag === "connected") setNotice("Google Drive Connected.");
-    else if (flag === "failed") setNotice("Google Connection Failed. Try Again.");
-    else if (flag === "expired") setNotice("That Google Sign-In Expired. Try Again.");
-    if (flag) {
-      const next = new URLSearchParams(searchParams);
-      next.delete("google");
-      setSearchParams(next, { replace: true });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+const DEFAULTS: Prefs = {
+  workspace: "Alex's Workspace",
+  timezone: "(GMT-05:00) Eastern Time (US & Canada)",
+  defaultView: "Dashboard",
+  currency: "USD – US Dollar",
+  dateRange: "Last 30 Days",
+  campaignView: "All Campaigns",
+  emailReports: true,
+  campaignUpdates: true,
+  aiInsights: true,
+  productUpdates: false,
+  dataUsage: true,
+  shareAnalytics: true,
+  retention: "24 Months",
+  accent: "Teal (Default)",
+  density: "Comfortable",
+  twoFactor: true,
+};
 
-  const connect = async () => {
-    setBusy(true);
-    setNotice("");
+const ACCENTS: Record<string, { teal: string; dark: string }> = {
+  "Teal (Default)": { teal: "#0E7C8C", dark: "#0A5A66" },
+  "Blue": { teal: "#2F6FBE", dark: "#1F4E86" },
+  "Violet": { teal: "#6D5BD0", dark: "#4A3F96" },
+};
+
+const PREFS_KEY = "ci-settings-prefs";
+
+function storageGet(): string | null {
+  try {
+    return window.localStorage.getItem(PREFS_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function storageSet(raw: string): boolean {
+  try {
+    window.localStorage.setItem(PREFS_KEY, raw);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function storageRemove(): void {
+  try {
+    window.localStorage.removeItem(PREFS_KEY);
+  } catch {
+    /* private mode: nothing persisted */
+  }
+}
+
+function loadPrefs(): Prefs {
+  const raw = storageGet();
+  if (raw) {
     try {
-      const res = await api<{ url: string }>("POST", "/api/auth/google/start", {});
-      window.location.href = res.url;
-    } catch (err) {
-      setNotice(err instanceof ApiError ? err.message : "Could Not Start Google Sign-In.");
-      setBusy(false);
+      return { ...DEFAULTS, ...(JSON.parse(raw) as Partial<Prefs>) };
+    } catch {
+      /* corrupt value: fall through to defaults */
     }
-  };
+  }
+  return { ...DEFAULTS };
+}
 
-  const disconnect = async () => {
-    setBusy(true);
-    setNotice("");
-    try {
-      await api("POST", "/api/auth/google/disconnect", {});
-      setConnected(false);
-      setNotice("Google Drive Disconnected.");
-    } catch (err) {
-      setNotice(err instanceof ApiError ? err.message : "Could Not Disconnect Google Drive.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
+function Toggle({ label, body, checked, onChange }: {
+  label: string; body: string; checked: boolean; onChange: (v: boolean) => void;
+}) {
   return (
-    <div className="card">
-      <h3>Google Drive</h3>
-      <p className="muted">
-        Connect Google Drive For Private Sheets And Drive Sync. Read-Only Access;
-        Tokens Stay On The Server.
-      </p>
-      <p>
-        Status: <strong>{connected === null ? "…" : connected ? "Connected" : "Not Connected"}</strong>
-      </p>
-      {connected ? (
-        <button type="button" className="secondary" disabled={busy} onClick={() => void disconnect()}>
-          Disconnect Google Drive
-        </button>
-      ) : (
-        <button type="button" className="secondary" disabled={busy || connected === null} onClick={() => void connect()}>
-          Connect Google Drive
-        </button>
-      )}
-      {notice ? <p className="muted" role="status">{notice}</p> : null}
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", padding: "10px 0", borderBottom: "1px solid var(--shell-line)" }}>
+      <div>
+        <strong style={{ display: "block", fontSize: 13.5 }}>{label}</strong>
+        <span className="panel-sub">{body}</span>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        aria-label={label}
+        onClick={() => onChange(!checked)}
+        style={{
+          width: 44, height: 24, borderRadius: 999, border: 0, cursor: "pointer", flex: "none",
+          background: checked ? "var(--shell-teal)" : "#CBD5E1", position: "relative",
+        }}
+      >
+        <span style={{
+          position: "absolute", top: 2, left: checked ? 22 : 2, width: 20, height: 20,
+          borderRadius: "50%", background: "#fff", transition: "left .15s",
+        }} />
+      </button>
     </div>
   );
 }
 
-/** Settings area (item 21): Account (name, email, avatar, provider, role,
- *  logout, logout-all-sessions) + Appearance (light/dark/system). */
 export function SettingsPage() {
-  const { me, refresh, logout } = useAuth();
+  const { me, logout, refresh } = useAuth();
   const { mode, set } = useTheme();
-  const [message, setMessage] = useState("");
+  const [prefs, setPrefs] = useState<Prefs>(loadPrefs);
+  const [saved, setSaved] = useState<Prefs>(loadPrefs);
+  const [status, setStatus] = useState("");
   const employee = me?.employee;
+  const dirty = JSON.stringify(prefs) !== JSON.stringify(saved);
+
+  useEffect(() => {
+    const accent = ACCENTS[prefs.accent] ?? ACCENTS["Teal (Default)"];
+    document.documentElement.style.setProperty("--shell-teal", accent.teal);
+    document.documentElement.style.setProperty("--shell-teal-dark", accent.dark);
+    document.body.dataset.density = prefs.density === "Compact" ? "compact" : "";
+  }, [prefs.accent, prefs.density]);
 
   if (!employee) return <p className="muted">Sign In To Manage Settings.</p>;
   const name = `${employee.first_name} ${employee.last_name}`.trim() || employee.email;
+  const setPref = <K extends keyof Prefs>(k: K, v: Prefs[K]) =>
+    setPrefs((p) => ({ ...p, [k]: v }));
 
-  const logoutAll = async () => {
-    setMessage("");
-    if (!window.confirm("Log Out All Sessions? Every Device And Browser Signed In As This Account Is Signed Out Immediately.")) {
+  const save = () => {
+    if (!storageSet(JSON.stringify(prefs))) {
+      setStatus("Could Not Save Settings In This Browser.");
       return;
     }
+    setSaved(prefs);
+    setStatus("Settings Saved.");
+  };
+  const reset = () => {
+    setPrefs({ ...DEFAULTS });
+    setSaved({ ...DEFAULTS });
+    storageRemove();
+    setStatus("Defaults Restored.");
+  };
+
+  const changePassword = async () => {
+    setStatus("");
     try {
-      await api("POST", "/api/auth/sessions/revoke-all", {});
-      await refresh();
-      setMessage("All Sessions Signed Out.");
+      await api("POST", "/api/auth/email/reset", { email: employee.email });
+      setStatus("Password Reset Email Sent.");
     } catch (err) {
-      setMessage(err instanceof ApiError ? err.message : "Could Not Sign Out All Sessions.");
+      setStatus(err instanceof ApiError ? err.message : "Could Not Send Reset Email.");
     }
   };
 
+  const logoutAll = async () => {
+    setStatus("");
+    if (!window.confirm("Log Out All Sessions? Every device and browser signed in as this account is signed out immediately.")) return;
+    try {
+      await api("POST", "/api/auth/sessions/revoke-all", {});
+      await refresh();
+      setStatus("All Sessions Signed Out.");
+    } catch (err) {
+      setStatus(err instanceof ApiError ? err.message : "Could Not Sign Out All Sessions.");
+    }
+  };
+
+  const exportData = () => {
+    const blob = new Blob(
+      [JSON.stringify({ profile: employee, preferences: prefs, exported_at: new Date().toISOString() }, null, 2)],
+      { type: "application/json" },
+    );
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "workspace-data.json";
+    a.click();
+    URL.revokeObjectURL(url);
+    setStatus("Workspace Data Exported.");
+  };
+
   const modes: Array<{ id: ThemeMode; label: string }> = [
-    { id: "light", label: "Light" },
+    { id: "light", label: "Light (Default)" },
     { id: "dark", label: "Dark" },
     { id: "system", label: "System" },
   ];
 
   return (
     <>
-      <h1 className="page-title">Settings</h1>
-      <div className="card">
-        <h3>Account</h3>
-        <div style={{ display: "flex", alignItems: "center" }}>
-          <Avatar url={employee.avatar_url} label={name} />
-          <span>
-            <strong>{name}</strong>
-            <br />
-            <span className="muted">{employee.email} (Verified, Read-Only)</span>
-          </span>
+      <PageHeader
+        title="Settings"
+        sub="Control your workspace, data, integrations, and application preferences."
+      />
+      <div className="main-rail">
+        <div className="rail-stack">
+          <Panel title="General Settings" sub="Manage your workspace details and default preferences.">
+            <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 12 }}>
+              <Avatar url={employee.avatar_url} label={name} />
+              <div>
+                <strong style={{ fontSize: 14 }}>{name}</strong>
+                <p className="panel-sub" style={{ margin: 0 }}>{employee.email} · {employee.role} · {employee.status} · {PROVIDER_LABELS[employee.provider] ?? "—"}</p>
+              </div>
+            </div>
+            <div className="filter-grid" style={{ gridTemplateColumns: "repeat(2,minmax(0,1fr))" }}>
+              <div className="field">
+                <label htmlFor="s-workspace">Workspace Name</label>
+                <input id="s-workspace" value={prefs.workspace} onChange={(e) => setPref("workspace", e.target.value)} />
+              </div>
+              <div className="field">
+                <label htmlFor="s-tz">Time Zone</label>
+                <select id="s-tz" value={prefs.timezone} onChange={(e) => setPref("timezone", e.target.value)}>
+                  <option>{prefs.timezone}</option>
+                  <option>(GMT-08:00) Pacific Time (US &amp; Canada)</option>
+                  <option>(GMT-05:00) Eastern Time (US &amp; Canada)</option>
+                  <option>(GMT+00:00) London</option>
+                  <option>(GMT+10:00) Sydney</option>
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="s-view">Default View</label>
+                <select id="s-view" value={prefs.defaultView} onChange={(e) => setPref("defaultView", e.target.value)}>
+                  {["Dashboard", "Campaigns", "Creatives", "Compare", "Ask The Data", "AI Analyst"].map((o) => <option key={o}>{o}</option>)}
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="s-currency">Default Currency</label>
+                <select id="s-currency" value={prefs.currency} onChange={(e) => setPref("currency", e.target.value)}>
+                  {["USD – US Dollar", "AUD – Australian Dollar", "EUR – Euro", "GBP – British Pound"].map((o) => <option key={o}>{o}</option>)}
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="s-range">Default Date Range</label>
+                <select id="s-range" value={prefs.dateRange} onChange={(e) => setPref("dateRange", e.target.value)}>
+                  {["Last 7 Days", "Last 30 Days", "Last 90 Days"].map((o) => <option key={o}>{o}</option>)}
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="s-campview">Default Campaign View</label>
+                <select id="s-campview" value={prefs.campaignView} onChange={(e) => setPref("campaignView", e.target.value)}>
+                  {["All Campaigns", "Active Only", "Top 10 by Spend"].map((o) => <option key={o}>{o}</option>)}
+                </select>
+              </div>
+            </div>
+          </Panel>
+          <Panel title="Data & Privacy" sub="Manage how your data is used and your privacy preferences.">
+            <Toggle label="Data Usage" body="Help improve Foap by allowing anonymized usage data."
+              checked={prefs.dataUsage} onChange={(v) => setPref("dataUsage", v)} />
+            <Toggle label="Share Analytics Data" body="Allow aggregated, anonymized data to contribute to industry benchmarks."
+              checked={prefs.shareAnalytics} onChange={(v) => setPref("shareAnalytics", v)} />
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", padding: "10px 0" }}>
+              <div>
+                <strong style={{ display: "block", fontSize: 13.5 }}>Data Retention Period</strong>
+                <span className="panel-sub">Choose how long to keep your data in Foap.</span>
+              </div>
+              <select aria-label="Data Retention Period" value={prefs.retention} onChange={(e) => setPref("retention", e.target.value)}>
+                {["12 Months", "24 Months", "36 Months"].map((o) => <option key={o}>{o}</option>)}
+              </select>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", padding: "10px 0" }}>
+              <div>
+                <strong style={{ display: "block", fontSize: 13.5 }}>Export Your Data</strong>
+                <span className="panel-sub">Download a copy of your data and account information.</span>
+              </div>
+              <button type="button" className="btn-outline" onClick={exportData}>
+                <Icon name="download" size={15} /> Export Data
+              </button>
+            </div>
+          </Panel>
+          <Panel title="Appearance" sub="Customize how Foap looks and feels.">
+            <div className="filter-grid" style={{ gridTemplateColumns: "repeat(2,minmax(0,1fr))" }}>
+              <div className="field">
+                <label htmlFor="s-theme">Theme</label>
+                <select id="s-theme" value={mode} onChange={(e) => set(e.target.value as ThemeMode)}>
+                  {modes.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="s-accent">Accent Color</label>
+                <select id="s-accent" value={prefs.accent} onChange={(e) => setPref("accent", e.target.value)}>
+                  {Object.keys(ACCENTS).map((o) => <option key={o}>{o}</option>)}
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="s-density">Interface Density</label>
+                <select id="s-density" value={prefs.density} onChange={(e) => setPref("density", e.target.value)}>
+                  {["Comfortable", "Compact"].map((o) => <option key={o}>{o}</option>)}
+                </select>
+              </div>
+            </div>
+          </Panel>
+          <Panel title="Data Tools" sub="Advanced analysis tooling for power users.">
+            <RetentionPatterns />
+            <div style={{ marginTop: 16 }}>
+              <CohortBuilder />
+            </div>
+          </Panel>
         </div>
-        <p>
-          Authentication Provider: <strong>{PROVIDER_LABELS[employee.provider] ?? "—"}</strong>
-          <br />
-          Current Role: <strong>{employee.role}</strong> · Status: <strong>{employee.status}</strong>
-        </p>
-        <button type="button" className="secondary" onClick={() => void logout()}>
-          Log Out
-        </button>{" "}
-        <button type="button" className="secondary" onClick={() => void logoutAll()}>
-          Log Out All Sessions
-        </button>
-        {message ? <p className="muted" role="status">{message}</p> : null}
-      </div>
-      <GoogleDriveCard />
-      <div className="card">
-        <h3>Appearance</h3>
-        <div role="radiogroup" aria-label="Appearance">
-          {modes.map((m) => (
-            <label key={m.id} style={{ marginRight: 16 }}>
-              <input
-                type="radio"
-                name="appearance"
-                value={m.id}
-                checked={mode === m.id}
-                onChange={() => set(m.id)}
-              />{" "}
-              {m.label}
-              {m.id === "system" ? " (Follows Your Device)" : ""}
-            </label>
-          ))}
+        <div className="rail-stack">
+          <Panel title="Notifications" sub="Choose what you want to be notified about.">
+            <Toggle label="Email Reports" body="Receive scheduled reports and key insights via email."
+              checked={prefs.emailReports} onChange={(v) => setPref("emailReports", v)} />
+            <Toggle label="Campaign Updates" body="Get notified when campaigns are completed or updated."
+              checked={prefs.campaignUpdates} onChange={(v) => setPref("campaignUpdates", v)} />
+            <Toggle label="AI Insights" body="Receive alerts for new AI analysis and recommendations."
+              checked={prefs.aiInsights} onChange={(v) => setPref("aiInsights", v)} />
+            <Toggle label="Product Updates" body="Be the first to know about new features and improvements."
+              checked={prefs.productUpdates} onChange={(v) => setPref("productUpdates", v)} />
+          </Panel>
+          <Panel title="Integrations" sub="Connect your data sources to unlock deeper insights."
+            action={<span className="link-teal">Manage Integrations</span>}>
+            <GoogleDriveCard />
+            {[["Meta", "Import campaign performance data from Meta Ads."],
+              ["TikTok", "Connect your TikTok Ads account for deeper analysis."],
+              ["Google Analytics 4", "Link your GA4 property to analyze web performance."]].map(([n, d]) => (
+              <div key={n} className="insight">
+                <span className="insight-ico" style={{ background: "#EDF1F6" }}>
+                  <Icon name="info" size={18} />
+                </span>
+                <div style={{ flex: 1 }}>
+                  <h4>{n}</h4>
+                  <p>{d}</p>
+                </div>
+                <span className="badge-demo">Not Connected</span>
+              </div>
+            ))}
+          </Panel>
+          <Panel title="Security" sub="Keep your account and workspace secure.">
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", padding: "10px 0", borderBottom: "1px solid var(--shell-line)" }}>
+              <div>
+                <strong style={{ display: "block", fontSize: 13.5 }}>Password</strong>
+                <span className="panel-sub">Reset your password by email.</span>
+              </div>
+              <button type="button" className="btn-outline" onClick={() => void changePassword()}>
+                Change Password
+              </button>
+            </div>
+            <Toggle label="Two-Factor Authentication" body="Add an extra layer of security to your account."
+              checked={prefs.twoFactor} onChange={(v) => setPref("twoFactor", v)} />
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", padding: "10px 0" }}>
+              <div>
+                <strong style={{ display: "block", fontSize: 13.5 }}>Active Sessions</strong>
+                <span className="panel-sub">Manage your active sessions across devices.</span>
+              </div>
+              <span style={{ display: "flex", gap: 8 }}>
+                <button type="button" className="btn-outline" onClick={() => void logout()}>
+                  Log Out
+                </button>
+                <button type="button" className="btn-outline" onClick={() => void logoutAll()}>
+                  Log Out All Sessions
+                </button>
+              </span>
+            </div>
+          </Panel>
         </div>
       </div>
+      {status ? <p className="panel-sub" role="status" style={{ marginTop: 12 }}>{status}</p> : null}
+      <Panel title="Save Preferences">
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+          <button type="button" className="btn-outline" onClick={reset}>Reset Defaults</button>
+          <button type="button" className="btn-primary" disabled={!dirty} onClick={save}>Save Changes</button>
+        </div>
+        {!dirty ? <p className="panel-sub">No unsaved changes.</p> : null}
+      </Panel>
     </>
   );
 }
+

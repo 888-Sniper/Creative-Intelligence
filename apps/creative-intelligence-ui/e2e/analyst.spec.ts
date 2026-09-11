@@ -10,7 +10,9 @@ test.describe("analyst journey", () => {
     await loginAs(context, page, seeds.employee, "/analyst");
     await expect(page.getByRole("link", { name: "Analyst" })).toBeVisible();
     await expect(page.getByLabel("Ask Foap Analyst")).toBeVisible();
-    const controls = page.locator(".analyst-controls");
+    const controls = page.locator(".panel", {
+      has: page.getByRole("heading", { name: "Analyst Controls" }),
+    });
     await expect(controls.getByLabel("Objective")).toBeVisible();
     await expect(controls.getByLabel("Language")).toBeVisible();
     await expect(
@@ -23,7 +25,7 @@ test.describe("analyst journey", () => {
       page.getByRole("button", { name: "Report XLSX" }),
     ).toBeVisible();
     await expect(
-      page.getByRole("link", { name: "Blank Workbook" }),
+      page.getByRole("main").getByRole("link", { name: "Blank Workbook" }),
     ).toHaveAttribute("href", "/api/analyst/workbook");
   });
 });

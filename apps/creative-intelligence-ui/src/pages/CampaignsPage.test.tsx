@@ -4,54 +4,37 @@ import { MemoryRouter } from "react-router-dom";
 import { CampaignsPage } from "@/pages/CampaignsPage";
 import { FilterProvider } from "@/state/FilterContext";
 
+const comparePayload = {
+  current_period: { start: "2026-06-01", end: "2026-08-29" },
+  previous_period: { start: "2026-03-01", end: "2026-05-30" },
+  comparison: "90d vs prior 90d",
+  metrics: {
+    impressions: { state: "up", direction: "up", sentiment: "good", percent_change: 24, current: 125400000, previous: 101000000, abs_change: 24400000 },
+    clicks: { state: "up", direction: "up", sentiment: "good", percent_change: 32, current: 1800000, previous: 1360000, abs_change: 440000 },
+    spend: { state: "up", direction: "up", sentiment: "neutral", percent_change: 12, current: 412600, previous: 368000, abs_change: 44600 },
+    roas: { state: "up", direction: "up", sentiment: "good", percent_change: 28, current: 3.6, previous: 2.8, abs_change: 0.8 },
+  },
+};
+
 const campaigns = {
-  Alpha: { n_ads: 4, spend: 120.5, ctr: 0.02, cpc: 1.5, cpa: 12.5 },
-  Beta: { n_ads: 2, spend: 40, ctr: 0.05, cpc: 0.8, cpa: 6.0 },
+  Alpha: { spend: 120.5, impressions: 1000, clicks: 20, conversions: 8, revenue: 168, ctr: 0.02, cpc: 6.0, cpa: 15.06, roas: 1.4, campaigns: 1 },
+  Beta: { spend: 40, impressions: 500, clicks: 10, conversions: 2, revenue: 40, ctr: 0.02, cpc: 4.0, cpa: 20.0, roas: 1.0, campaigns: 1 },
 };
 
-const creatives = [
-  {
-    creative_key: "c1",
-    name: "Winner One",
-    platform: "meta",
-    duration_s: 15,
-    campaigns: ["Alpha"],
-    metrics: { spend: 80, cpa: 5.0, ctr: 0.04, roas: 2.1 },
-    annotation: { hook_type: "question", creator_vs_branded: "creator", duration_s: 15 },
-  },
-  {
-    creative_key: "c2",
-    name: "Trailer Two",
-    platform: "meta",
-    duration_s: 20,
-    campaigns: ["Alpha"],
-    metrics: { spend: 40, cpa: 20.0, ctr: 0.01, roas: 0.5 },
-    annotation: { hook_type: "question", creator_vs_branded: "branded", duration_s: 20 },
-  },
-];
-
-const bench = {
-  Alpha: {
-    spend: 120.5, impressions: 1000, clicks: 20, conversions: 8,
-    cpm: 5.0, vtr: 0.3, ctr: 0.02, cpc: 1.5, cpa: 12.5, roas: 1.4,
-  },
-};
-
-const reco = {
-  campaign: "Alpha",
-  rank_by: "cpa",
-  notice: "",
-  sections: [
-    { title: "Scale", bullets: [{ text: "Scale: c1 — lowest CPA." }] },
-  ],
+const detail = {
+  name: "Alpha",
+  totals: { spend: 120.5, impressions: 1000, clicks: 20, conversions: 8, revenue: 168, ctr: 0.02, cpc: 6.0, cpa: 15.06, roas: 1.4 },
+  top_creatives: [],
+  recommendations: ["Scale Alpha while CPA holds."],
 };
 
 function fetchFor(full: Record<string, unknown>) {
   return vi.fn(async (input: string | URL | Request) => {
     const url = String(input);
-    if (url.startsWith("/api/campaigns/recommendations")) return Response.json(full.reco);
-    if (url.startsWith("/api/benchmarks")) return Response.json(full.bench);
-    if (url.startsWith("/api/creatives")) return Response.json(full.creatives);
+    if (url.startsWith("/api/campaigns/Alpha")) return Response.json(full.detail);
+    if (url.startsWith("/api/kpis/compare")) return Response.json(full.comparePayload);
+    if (url.startsWith("/api/kpis/daily")) return Response.json({ days: [] });
+    if (url.startsWith("/api/benchmarks")) return Response.json({});
     if (url.startsWith("/api/campaigns")) return Response.json(full.campaigns);
     return Response.json({});
   }) as unknown as typeof fetch;
@@ -73,22 +56,26 @@ describe("CampaignsPage", () => {
     vi.restoreAllMocks();
   });
 
-  it("renders the campaign list with mocked data", async () => {
-    window.fetch = fetchFor({ campaigns, creatives: [], bench: {}, reco });
+  it("renders the campaign table with mocked data", async () => {
+    window.fetch = fetchFor({ campaigns, comparePayload, detail });
     renderPage();
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Alpha" })).toBeDefined();
+      expect(screen.getByText("All Campaigns (2)")).toBeDefined();
     });
-    expect(screen.getByRole("button", { name: "Beta" })).toBeDefined();
-    expect(screen.getByText("$120.5")).toBeDefined();
+    expect(screen.getAllByText("Alpha").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Beta").length).toBeGreaterThan(0);
+    expect(screen.getByText("$121")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Apply Filters" })).toBeDefined();
+    expect(screen.getByLabelText("Search campaigns")).toBeDefined();
+    expect(screen.getByText("Total Campaigns")).toBeDefined();
   });
 
-  it("shows a loading state before data arrives", () => {
+  it("shows skeletons while loading", () => {
     window.fetch = vi.fn(
       () => new Promise<Response>(() => {}),
     ) as unknown as typeof fetch;
-    renderPage();
-    expect(screen.getByText("Loading Campaigns…")).toBeDefined();
+    const { container } = renderPage();
+    expect(container.querySelector(".skel")).not.toBeNull();
   });
 
   it("renders list errors", async () => {
@@ -101,21 +88,16 @@ describe("CampaignsPage", () => {
     });
   });
 
-  it("opens campaign detail with best/watch, ranking and recommendations", async () => {
-    window.fetch = fetchFor({ campaigns, creatives, bench, reco });
+  it("opens campaign details with totals and recommendations", async () => {
+    window.fetch = fetchFor({ campaigns, comparePayload, detail });
     renderPage();
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Alpha" })).toBeDefined();
+      expect(screen.getByText("All Campaigns (2)")).toBeDefined();
     });
-    fireEvent.click(screen.getByRole("button", { name: "Alpha" }));
+    fireEvent.click(screen.getByRole("button", { name: "Details for Alpha" }));
     await waitFor(() => {
-      expect(screen.getByText("Best")).toBeDefined();
+      expect(screen.getByText("Top Creatives")).toBeDefined();
     });
-    expect(screen.getByText("Watch")).toBeDefined();
-    expect(screen.getByText("Campaign Totals (Scoped)")).toBeDefined();
-    expect(screen.getByText("Creatives Ranked By CPA")).toBeDefined();
-    expect(screen.getByText("Creative Learning")).toBeDefined();
-    expect(screen.getByText("Scale: c1 — lowest CPA.")).toBeDefined();
-    expect(screen.getByText(/question Hooks Lead 2 Of 2 Creatives Here/)).toBeDefined();
+    expect(screen.getByText("Scale Alpha while CPA holds.")).toBeDefined();
   });
 });

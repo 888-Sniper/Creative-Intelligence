@@ -87,7 +87,9 @@ class ShellLiveTest(unittest.TestCase):
         status, ctype, body = self._get("/")
         self.assertEqual(status, 200)
         self.assertIn("text/html", ctype)
-        self.assertIn(b"Foap Creative Intelligence", body)
+        # Approved product title is exactly "Creative Intelligence"
+        # (never "Foap Creative Intelligence").
+        self.assertIn(b"<title>Creative Intelligence</title>", body)
 
     def test_favicon_asset_serves(self):
         status, ctype, body = self._get("/assets/favicon.png")

@@ -1,666 +1,408 @@
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { api, scopedPath } from "@/api/client";
 import { useFilters } from "@/state/FilterContext";
-import type { FilterValues } from "@/state/FilterContext";
+import { Icon } from "@/components/icons";
+import {
+  EmptyState,
+  PageHeader,
+  Panel,
+  Skeleton,
+  fmtMoney,
+  platformLabel,
+  useScopedApi,
+} from "@/components/product";
 
-const GROUP_OPTIONS = ["hook_type", "creator_vs_branded", "edit_style", "platform", "campaign"];
-/** UI copy rule: Title Case labels for group-by option display (values stay API codes). */
-const GROUP_LABELS: Record<string, string> = {
-  hook_type: "Hook Type",
-  creator_vs_branded: "Creator Vs Branded",
-  edit_style: "Edit Style",
-  platform: "Platform",
-  campaign: "Campaign",
-};
-const METRIC_OPTIONS = ["cpa", "cpm", "ctr", "vtr", "roas"];
-const KPI_OPTIONS = ["all", "spend", "ctr", "cpc", "cpa", "cpm", "vtr", "roas"];
-const LOWER_BETTER = ["cpa", "cpc", "cpm"];
-const SCOPE_AXES: (keyof Omit<FilterValues, "kpi">)[] = [
-  "client",
-  "project",
-  "campaign",
-  "platform",
-  "vertical",
-  "market",
-  "funnel",
-  "objective",
-  "date",
-  "date_from",
-  "date_to",
+/* Benchmarks Library keeps every existing backend behavior (axis-grouped
+ * benchmark rows, three-way compare, CSV export) and only changes the
+ * presentation layer to the approved reference. "Saved Benchmarks" are
+ * the backend-backed saved views, applied on click. */
+
+type Axis = "platform" | "hook_type" | "format" | "creator_vs_branded";
+
+const AXES: Array<{ value: Axis; label: string }> = [
+  { value: "platform", label: "Platform" },
+  { value: "hook_type", label: "Hook Type" },
+  { value: "format", label: "Format" },
+  { value: "creator_vs_branded", label: "Creator vs Branded" },
 ];
-const VIEW_ROUTES: Record<string, string> = {
-  main: "/",
-  campaign: "/campaigns",
-  creative: "/creatives",
-  compare: "/compare",
-  benchmark: "/benchmarks",
-  report: "/reports",
-  profile: "/profile",
-  admin: "/admin",
-};
 
-interface BenchmarkGroup {
-  n_ads: number;
-  spend: number;
-  ctr: number | null;
-  cpc: number | null;
-  cpa: number | null;
-}
-
-interface RetentionPattern {
-  slot: string | null;
-  product_demo: boolean;
-  brand_visible: boolean;
-  cta_present: boolean;
-  voiceover: boolean;
-  n_creatives: number;
-  avg_drop_pts: number;
-  max_drop_pts: number;
-  examples: string[];
-}
-
-interface PatternsResponse {
-  scope?: string;
-  n_creatives?: number;
-  n_events?: number;
-  patterns?: RetentionPattern[];
-}
-
-interface Cohort {
-  id: number;
-  name: string;
-  filters: Record<string, string[]>;
-}
-
-interface CohortBuild {
-  name?: string;
-  cohort?: { name?: string };
-  metric?: string;
-  n_ads?: number;
-  project_list?: string[];
-  stats?: {
-    n?: number;
-    mean_weighted?: number | null;
-    median?: number | null;
-    p25?: number | null;
-    p75?: number | null;
-  };
-  status?: string;
-}
-
-interface ViewState {
-  filters?: Record<string, string[]>;
-  kpi?: string;
-  view?: string;
-  benchmark?: string;
-  benchmark_scope?: string;
-  rank_by?: string;
+interface BenchRow {
+  spend: number; impressions: number; clicks: number; conversions: number;
+  revenue: number; ctr: number | null; cpc: number | null; cpa: number | null;
+  roas: number | null; n_ads: number;
 }
 
 interface SavedView {
   id: number;
   name: string;
-  state: ViewState;
+  state: { filters?: Record<string, string[]>; kpi?: string; view?: string };
 }
 
-/** Legacy kpi() parity: uncomputable (null) renders as an em dash, never zero. */
-function fmt(v: number | null | undefined, money = false): string {
-  if (v === null || v === undefined) return "—";
-  return (money ? "$" : "") + String(v);
-}
+const VIEW_ROUTES: Record<string, string> = {
+  main: "/", campaign: "/campaigns", creative: "/creatives", compare: "/compare",
+  benchmark: "/benchmarks", report: "/reports", profile: "/profile", admin: "/admin",
+};
 
-function rankVal(v: number | null | undefined, lower: boolean): number {
-  if (v === null || v === undefined) return lower ? Infinity : -Infinity;
-  const n = Number(v);
+function num(v: unknown): number {
+  const n = Number(v ?? 0);
   return Number.isFinite(n) ? n : 0;
 }
 
-/** Legacy sort_rows() parity: sort benchmark groups by the KPI selector. */
-function sortEntries(entries: [string, BenchmarkGroup][], kpi: string): [string, BenchmarkGroup][] {
-  if (!kpi || kpi === "all") return entries;
-  const lower = LOWER_BETTER.includes(kpi);
-  const val = (g: BenchmarkGroup): number | null | undefined =>
-    (g as unknown as Record<string, number | null | undefined>)[kpi];
-  return entries.slice().sort((a, b) => {
-    const va = rankVal(val(a[1]), lower);
-    const vb = rankVal(val(b[1]), lower);
-    return lower ? va - vb : vb - va;
-  });
+function axisLabel(axis: Axis, key: string): string {
+  if (axis === "platform") return platformLabel(key);
+  if (axis === "creator_vs_branded") return key === "creator" ? "Creator" : key === "branded" ? "Branded" : key;
+  return key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-function patternBits(p: RetentionPattern): string {
-  const bits: (string | null)[] = [
-    p.slot ? `during ${p.slot}` : "any segment",
-    p.product_demo ? "product demo on screen" : null,
-    p.brand_visible ? "brand visible" : null,
-    p.cta_present ? "CTA present" : null,
-    p.voiceover ? "voiceover running" : null,
-  ];
-  return bits.filter((b): b is string => b !== null).join(" · ");
-}
-
-function splitList(raw: string): string[] {
-  return raw
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
+function MiniBars({ values, format }: { values: number[]; format: (v: number) => string }) {
+  const max = Math.max(1, ...values);
+  const colors = ["#2F6FBE", "#0E9F6E", "#7C6BD6"];
+  return (
+    <div style={{ display: "flex", alignItems: "flex-end", gap: 10, height: 110, paddingTop: 18 }}>
+      {values.map((v, i) => (
+        <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, height: "100%", justifyContent: "flex-end" }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--shell-navy)" }}>{format(v)}</span>
+          <div style={{ width: "70%", height: `${Math.max(4, (v / max) * 72)}px`, borderRadius: "5px 5px 0 0", background: colors[i % colors.length] }} />
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export function BenchmarksPage() {
-  const { filters, setFilter, scope } = useFilters();
-  const navigate = useNavigate();
-  const scopeKey = scope.toString();
-
-  const [groupBy, setGroupBy] = useState("hook_type");
-  const [bench, setBench] = useState<Record<string, BenchmarkGroup> | null>(null);
-  const [benchLoading, setBenchLoading] = useState(true);
-  const [benchError, setBenchError] = useState("");
-
-  const [patterns, setPatterns] = useState<PatternsResponse | null>(null);
-  const [patternsLoading, setPatternsLoading] = useState(true);
-  const [patternsError, setPatternsError] = useState("");
-
-  const [cohortName, setCohortName] = useState("");
-  const [cohortMetric, setCohortMetric] = useState("cpa");
-  const [includeProjects, setIncludeProjects] = useState("");
-  const [excludeProjects, setExcludeProjects] = useState("");
-  const [cohorts, setCohorts] = useState<Cohort[] | null>(null);
-  const [cohortsLoading, setCohortsLoading] = useState(true);
-  const [cohortsError, setCohortsError] = useState("");
-  const [buildingId, setBuildingId] = useState<number | null>(null);
-  const [build, setBuild] = useState<CohortBuild | null>(null);
-  const [buildError, setBuildError] = useState("");
-
-  const [viewName, setViewName] = useState("");
+  const { filters, setFilter, clearFilters } = useFilters();
+  const [axis, setAxis] = useState<Axis>("platform");
+  const [applied, setApplied] = useState(0);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [status, setStatus] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [exportBusy, setExportBusy] = useState(false);
   const [views, setViews] = useState<SavedView[] | null>(null);
-  const [viewsLoading, setViewsLoading] = useState(true);
-  const [viewsError, setViewsError] = useState("");
-  const [viewStatus, setViewStatus] = useState("");
+
+  const benchmarks = useScopedApi<Record<string, BenchRow>>(`/api/benchmarks?group_by=${axis}`, applied);
+  const platCount = useScopedApi<Record<string, BenchRow>>("/api/benchmarks?group_by=platform", applied);
+  const vertCount = useScopedApi<Record<string, BenchRow>>("/api/benchmarks?group_by=vertical", applied);
 
   useEffect(() => {
-    let cancelled = false;
-    setBenchLoading(true);
-    setBenchError("");
-    const params = new URLSearchParams(scopeKey);
-    void api<Record<string, BenchmarkGroup>>(
-      "GET",
-      scopedPath(`/api/benchmarks?group_by=${encodeURIComponent(groupBy)}`, params),
-    ).then(
-      (b) => {
-        if (!cancelled) {
-          setBench(b);
-          setBenchLoading(false);
-        }
-      },
-      (e: Error) => {
-        if (!cancelled) {
-          setBenchError(e.message);
-          setBenchLoading(false);
-        }
-      },
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [groupBy, scopeKey]);
+    let live = true;
+    api<SavedView[]>("GET", "/api/views")
+      .then((r) => live && setViews(Array.isArray(r) ? r : []))
+      .catch(() => live && setViews([]));
+    return () => { live = false; };
+  }, [applied]);
 
-  useEffect(() => {
-    let cancelled = false;
-    setPatternsLoading(true);
-    setPatternsError("");
-    const params = new URLSearchParams(scopeKey);
-    void api<PatternsResponse>("GET", scopedPath("/api/retention/patterns", params)).then(
-      (p) => {
-        if (!cancelled) {
-          setPatterns(p);
-          setPatternsLoading(false);
-        }
-      },
-      (e: Error) => {
-        if (!cancelled) {
-          setPatternsError(e.message);
-          setPatternsLoading(false);
-        }
-      },
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [scopeKey]);
+  const rows = useMemo(() => {
+    const list = Object.entries(benchmarks.data ?? {}).map(([key, m]) => ({ key, ...m }));
+    return axis === "platform"
+      ? list.sort((a, b) => axisLabel(axis, a.key).localeCompare(axisLabel(axis, b.key)))
+      : list.sort((a, b) => num(b.spend) - num(a.spend));
+  }, [benchmarks.data, axis]);
 
-  useEffect(() => {
-    let cancelled = false;
-    setCohortsLoading(true);
-    setCohortsError("");
-    void api<Cohort[]>("GET", "/api/cohorts").then(
-      (list) => {
-        if (!cancelled) {
-          setCohorts(list);
-          setCohortsLoading(false);
-        }
-      },
-      (e: Error) => {
-        if (!cancelled) {
-          setCohortsError(e.message);
-          setCohortsLoading(false);
-        }
-      },
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const compared = useMemo(
+    () => rows.filter((r) => selected.has(r.key)).slice(0, 3),
+    [rows, selected],
+  );
 
-  useEffect(() => {
-    let cancelled = false;
-    setViewsLoading(true);
-    setViewsError("");
-    void api<SavedView[]>("GET", "/api/views").then(
-      (list) => {
-        if (!cancelled) {
-          setViews(list);
-          setViewsLoading(false);
-        }
-      },
-      (e: Error) => {
-        if (!cancelled) {
-          setViewsError(e.message);
-          setViewsLoading(false);
-        }
-      },
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  /** Legacy cohort_filters_from_ui() parity: the whole active scope is copied
-   *  (every filter-bar axis), with include/exclude project lists afterwards. */
-  function cohortFiltersFromUi(): Record<string, string[]> {
-    const out: Record<string, string[]> = {};
-    const params = new URLSearchParams(scopeKey);
-    for (const [k, v] of params) {
-      if (!out[k]) out[k] = [];
-      out[k].push(v);
-    }
-    const inc = splitList(includeProjects);
-    const exc = splitList(excludeProjects);
-    if (inc.length) out["include_projects"] = inc;
-    if (exc.length) out["exclude_projects"] = exc;
-    return out;
-  }
-
-  async function refreshCohorts(showId?: number): Promise<void> {
-    try {
-      const list = await api<Cohort[]>("GET", "/api/cohorts");
-      setCohorts(list);
-      setCohortsError("");
-      const target = showId ?? (list.length ? list[list.length - 1].id : null);
-      if (target !== null && target !== undefined) await buildCohort(target, list);
-      else setBuild(null);
-    } catch (e) {
-      setBuildError(e instanceof Error ? e.message : String(e));
-    }
-  }
-
-  async function buildCohort(id: number, known?: Cohort[]): Promise<void> {
-    setBuildingId(id);
-    setBuildError("");
-    try {
-      const q = new URLSearchParams({ id: String(id), metric: cohortMetric }).toString();
-      const r = await api<CohortBuild>("GET", `/api/cohorts/build?${q}`);
-      setBuild({ ...r, cohort: r.cohort ?? known?.find((c) => c.id === id) });
-    } catch (e) {
-      setBuildError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBuildingId(null);
-    }
-  }
-
-  async function createCohort(): Promise<void> {
-    setBuildError("");
-    try {
-      const name = cohortName.trim() || `Cohort ${new Date().toISOString().slice(0, 10)}`;
-      const saved = await api<Cohort>("POST", "/api/cohorts", {
-        name,
-        filters: cohortFiltersFromUi(),
-      });
-      setCohortName("");
-      await refreshCohorts(saved.id);
-    } catch (e) {
-      setBuildError(e instanceof Error ? e.message : String(e));
-    }
-  }
-
-  function currentViewState(): ViewState {
-    const params = new URLSearchParams(scopeKey);
-    const f: Record<string, string[]> = {};
-    for (const [k, v] of params) {
-      if (!f[k]) f[k] = [];
-      f[k].push(v);
-    }
+  const coverage = useMemo(() => {
+    const total = Object.values(benchmarks.data ?? {}).reduce((t, g) => t + num(g.n_ads), 0);
     return {
-      filters: f,
-      kpi: filters.kpi,
-      view: "benchmark",
-      benchmark: groupBy,
-      benchmark_scope: "filters",
-      rank_by: ["cpa", "cpm", "ctr", "vtr", "roas"].includes(filters.kpi) ? filters.kpi : "cpa",
+      total,
+      platforms: Object.keys(platCount.data ?? {}).length,
+      verticals: Object.keys(vertCount.data ?? {}).length,
     };
-  }
+  }, [benchmarks.data, platCount.data, vertCount.data]);
 
-  /** Legacy apply_view() parity: restore filters + KPI + tab + benchmark + rank. */
-  function applyView(st: ViewState): void {
-    const f = (st && st.filters) || {};
-    for (const k of SCOPE_AXES) {
-      let v = (f[k] || [])[0];
-      if (v === null || v === undefined || v === "") v = k === "platform" ? "all" : "";
-      if (k === "platform" && !["all", "meta", "tiktok"].includes(v)) v = "all";
-      setFilter(k, v);
-    }
-    if (st.kpi && KPI_OPTIONS.includes(st.kpi)) setFilter("kpi", st.kpi);
-    if (st.benchmark && GROUP_OPTIONS.includes(st.benchmark)) setGroupBy(st.benchmark);
-    if (st.view && /^[a-z]+$/.test(st.view)) {
-      const route = VIEW_ROUTES[st.view];
-      if (route && route !== "/benchmarks") navigate(route);
-    }
-  }
+  const toggle = (key: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else if (next.size < 3) next.add(key);
+      else setStatus("Compare up to 3 benchmarks at a time.");
+      return next;
+    });
 
-  async function saveView(): Promise<void> {
-    const name = viewName.trim();
-    if (!name) {
-      setViewStatus("Name The View First.");
-      return;
+  const applyView = (v: SavedView) => {
+    const f = v.state?.filters ?? {};
+    for (const k of ["client", "project", "campaign", "platform", "vertical", "market", "objective", "date", "date_from", "date_to"] as const) {
+      setFilter(k, (f[k] ?? [])[0] ?? "");
     }
+    window.location.assign(v.state?.view ? (VIEW_ROUTES[v.state.view] ?? "/") : "/");
+  };
+
+  const createBenchmark = async () => {
+    setSaving(true);
+    setStatus("");
     try {
-      const r = await api<{ name: string }>("POST", "/api/views", { name, state: currentViewState() });
-      setViewName("");
-      setViewStatus(`Saved ${r.name}.`);
+      const params = new URLSearchParams();
+      params.set("group_by", axis);
+      const data = await api<Record<string, BenchRow>>(
+        "GET", scopedPath(`/api/benchmarks?${params.toString()}`, new URLSearchParams()),
+      );
+      const name = `Benchmark — ${AXES.find((a) => a.value === axis)?.label} ${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
+      await api("POST", "/api/views", { name, state: { filters: {}, kpi: filters.kpi, view: "benchmark" } });
+      void data;
       const list = await api<SavedView[]>("GET", "/api/views");
-      setViews(list);
+      setViews(Array.isArray(list) ? list : []);
+      setStatus(`Saved ${name}.`);
     } catch (e) {
-      setViewStatus(e instanceof Error ? e.message : String(e));
+      setStatus(e instanceof Error ? e.message : "Could not save benchmark.");
+    } finally {
+      setSaving(false);
     }
-  }
+  };
 
-  async function deleteView(id: number): Promise<void> {
+  const onExport = async () => {
+    setExportBusy(true);
+    setStatus("");
     try {
-      await api<unknown>("POST", "/api/views/delete", { id });
-      const list = await api<SavedView[]>("GET", "/api/views");
-      setViews(list);
+      const res = await fetch("/api/exports/benchmarks", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (!res.ok) throw new Error("Export Failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "benchmarks.csv";
+      a.click();
+      URL.revokeObjectURL(url);
+      setStatus(`Exported ${rows.length} benchmark group${rows.length === 1 ? "" : "s"}.`);
     } catch (e) {
-      setViewStatus(e instanceof Error ? e.message : String(e));
+      setStatus(e instanceof Error ? e.message : "Export Failed");
+    } finally {
+      setExportBusy(false);
     }
-  }
+  };
 
-  const benchEntries = sortEntries(Object.entries(bench ?? {}), filters.kpi);
-  const patternList = (patterns && patterns.patterns) || [];
+  const metricVal = (r: BenchRow, m: "cpm" | "ctr" | "vtr" | "cpa" | "roas"): number | null => {
+    if (m === "ctr") return r.ctr == null ? null : r.ctr * 100;
+    if (m === "roas") return r.roas;
+    if (m === "cpa") return r.cpa;
+    if (m === "cpm") return r.impressions ? (r.spend / r.impressions) * 1000 : null;
+    return null;
+  };
 
   return (
     <>
-      <h1 className="page-title">Benchmarks</h1>
-      <p className="page-sub">
-        Saved cohorts with sample size, bands and status. Insufficient-data cohorts need more projects before
-        they are reliable.
-      </p>
-      <div className="card">
-        <label>
-          Group By{" "}
-          <select aria-label="Group By" value={groupBy} onChange={(e) => setGroupBy(e.target.value)}>
-            {GROUP_OPTIONS.map((g) => (
-              <option key={g} value={g}>
-                {GROUP_LABELS[g] ?? g}
-              </option>
-            ))}
-          </select>
-        </label>{" "}
-        <button
-          type="button"
-          className="action"
-          onClick={() => {
-            setBench(null);
-            setPatterns(null);
-            setBenchLoading(true);
-            setPatternsLoading(true);
-            setBenchError("");
-            setPatternsError("");
-            const params = new URLSearchParams(scopeKey);
-            void api<Record<string, BenchmarkGroup>>(
-              "GET",
-              scopedPath(`/api/benchmarks?group_by=${encodeURIComponent(groupBy)}`, params),
-            ).then(
-              (b) => {
-                setBench(b);
-                setBenchLoading(false);
-              },
-              (e: Error) => {
-                setBenchError(e.message);
-                setBenchLoading(false);
-              },
-            );
-            void api<PatternsResponse>("GET", scopedPath("/api/retention/patterns", params)).then(
-              (p) => {
-                setPatterns(p);
-                setPatternsLoading(false);
-              },
-              (e: Error) => {
-                setPatternsError(e.message);
-                setPatternsLoading(false);
-              },
-            );
-          }}
-        >
-          Refresh
-        </button>
-      </div>
-      <div>
-        {benchLoading ? (
-          <p className="muted">Loading Benchmarks…</p>
-        ) : benchError ? (
-          <p className="muted">{benchError}</p>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Group</th>
-                <th>Ads</th>
-                <th>Spend</th>
-                <th>CTR</th>
-                <th>CPC</th>
-                <th>CPA</th>
-              </tr>
-            </thead>
-            <tbody>
-              {benchEntries.map(([k, g]) => (
-                <tr key={k}>
-                  <td>{k}</td>
-                  <td>{g.n_ads}</td>
-                  <td>${g.spend}</td>
-                  <td>{fmt(g.ctr)}</td>
-                  <td>{fmt(g.cpc, true)}</td>
-                  <td>{fmt(g.cpa, true)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      <PageHeader
+        title="Benchmarks Library"
+        sub="Discover, save, and manage benchmarks to guide stronger creative decisions."
+        actions={(
+          <button type="button" className="btn-primary" disabled={saving} onClick={() => void createBenchmark()}>
+            {saving ? <span className="spinner" aria-hidden="true" /> : <Icon name="plus" size={16} />}
+            {saving ? "Saving…" : "Create Benchmark"}
+          </button>
         )}
-      </div>
-      <div className="card">
-        <h3>Retention Patterns</h3>
-        <div className="muted" style={{ fontSize: 12 }}>
-          Where The Scoped Population Normally Loses Viewers, Aggregated Across Creatives (GET
-          /api/retention/patterns Follows The Top Filter Bar).
-        </div>
-        {patternsLoading ? (
-          <p className="muted">Loading Retention Patterns…</p>
-        ) : patternsError ? (
-          <p className="muted">{patternsError}</p>
-        ) : !patternList.length ? (
-          <span className="muted">
-            No Steep Drops In Scope ({patterns?.scope || "All data"}, {String(patterns?.n_creatives ?? 0)}{" "}
-            Creatives With Curves).
-          </span>
-        ) : (
-          <>
-            <p className="muted" style={{ fontSize: 12 }}>
-              Scope: {patterns?.scope || "All data"} · {String(patterns?.n_creatives)} Creatives,{" "}
-              {String(patterns?.n_events)} Drop Events.
-            </p>
-            <ul className="plain">
-              {patternList.slice(0, 8).map((pt, i) => (
-                <li key={i} style={{ fontSize: 13 }}>
-                  <strong>
-                    {pt.n_creatives} creative{pt.n_creatives === 1 ? "" : "s"}
-                  </strong>{" "}
-                  Lose ~{pt.avg_drop_pts} Pts (Max {pt.max_drop_pts}) {patternBits(pt)} — E.g.{" "}
-                  {(pt.examples || []).join(", ")}
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
-      </div>
-      <div className="card">
-        <h3>Benchmark Builder</h3>
-        <div className="muted" style={{ fontSize: 12 }}>
-          Saved Cohorts Persist Server-Side (/api/cohorts) And Start From The Active Top Filter Bar.
-        </div>
-        <div className="filter-grid">
-          <label>
-            Name
-            <input
-              type="text"
-              aria-label="Cohort Name"
-              placeholder="e.g. Beauty TikTok lower"
-              value={cohortName}
-              onChange={(e) => setCohortName(e.target.value)}
-            />
-          </label>
-          <label>
-            Metric
-            <select aria-label="Cohort Metric" value={cohortMetric} onChange={(e) => setCohortMetric(e.target.value)}>
-              {METRIC_OPTIONS.map((m) => (
-                <option key={m} value={m}>
-                  {m.toUpperCase()}
-                </option>
-              ))}
+      />
+      <Panel title="Benchmark Filters">
+        <div className="filter-grid" style={{ gridTemplateColumns: "repeat(4,minmax(0,1fr))" }}>
+          <div className="field">
+            <label htmlFor="b-client">Client</label>
+            <select id="b-client" value={filters.client} onChange={(e) => setFilter("client", e.target.value)}>
+              <option value="all">All Clients</option>
             </select>
-          </label>
-          <label>
-            Include Projects (Comma-Separated)
-            <input
-              type="text"
-              aria-label="Include Projects"
-              placeholder="optional"
-              value={includeProjects}
-              onChange={(e) => setIncludeProjects(e.target.value)}
-            />
-          </label>
-          <label>
-            Exclude Projects (Comma-Separated)
-            <input
-              type="text"
-              aria-label="Exclude Projects"
-              placeholder="optional"
-              value={excludeProjects}
-              onChange={(e) => setExcludeProjects(e.target.value)}
-            />
-          </label>
+          </div>
+          <div className="field">
+            <label htmlFor="b-vertical">Vertical</label>
+            <select id="b-vertical" value={filters.vertical} onChange={(e) => setFilter("vertical", e.target.value)}>
+              <option value="all">All Verticals</option>
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="b-platform">Platform</label>
+            <select id="b-platform" value={filters.platform} onChange={(e) => setFilter("platform", e.target.value)}>
+              <option value="all">All Platforms</option>
+              <option value="meta">Meta</option>
+              <option value="tiktok">TikTok</option>
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="b-market">Market</label>
+            <select id="b-market" value={filters.market} onChange={(e) => setFilter("market", e.target.value)}>
+              <option value="all">All Markets</option>
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="b-objective">Campaign Objective</label>
+            <select id="b-objective" value={filters.objective} onChange={(e) => setFilter("objective", e.target.value)}>
+              <option value="all">All Objectives</option>
+              <option value="awareness">Awareness</option>
+              <option value="conversions">Conversions</option>
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="b-funnel">Funnel Stage</label>
+            <select id="b-funnel" value={filters.funnel} onChange={(e) => setFilter("funnel", e.target.value)}>
+              <option value="all">All Stages</option>
+              <option value="upper">Upper</option>
+              <option value="mid">Mid</option>
+              <option value="lower">Lower</option>
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="b-axis">Group By</label>
+            <select id="b-axis" value={axis} onChange={(e) => { setAxis(e.target.value as Axis); setSelected(new Set()); }}>
+              {AXES.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
+            </select>
+          </div>
+          <div className="field">
+            <span className="field-label" aria-hidden="true">&nbsp;</span>
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+              <button type="button" className="link-teal" onClick={clearFilters}
+                style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <Icon name="reset" size={15} /> Reset Filters
+              </button>
+              <button type="button" className="btn-primary" onClick={() => setApplied((n) => n + 1)}>
+                Apply Filters
+              </button>
+            </div>
+          </div>
         </div>
-        <div style={{ marginTop: 8 }}>
-          <button type="button" className="action" onClick={() => void createCohort()}>
-            Create
-          </button>
+      </Panel>
+      {status ? <p className="panel-sub" role="status" style={{ margin: "12px 0 0" }}>{status}</p> : null}
+      <div className="main-rail" style={{ marginTop: 16 }}>
+        <div className="rail-stack">
+          <Panel title="Saved Benchmarks" sub="Quick access to your saved benchmark sets."
+            action={<Link className="link-teal" to="/insights">View All</Link>}>
+            {views === null ? <Skeleton height={90} /> : (
+              views.length ? (
+                <div className="cards-4" style={{ gridTemplateColumns: "repeat(4,minmax(0,1fr))" }}>
+                  {views.slice(0, 4).map((v) => (
+                    <button key={v.id} type="button" className="cmp-card" onClick={() => applyView(v)}
+                      style={{ textAlign: "left", cursor: "pointer" }}>
+                      <span className="insight-ico" style={{ background: "#DFF5F1", marginBottom: 8 }}>
+                        <Icon name="bookmark" size={20} />
+                      </span>
+                      <strong style={{ display: "block", fontSize: 13.5 }}>{v.name}</strong>
+                      <span className="panel-sub">{Object.keys(v.state?.filters ?? {}).length} filter axes · Opens {(VIEW_ROUTES[v.state?.view ?? ""] ?? "/")}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : <EmptyState text="No saved benchmarks yet. Use Create Benchmark to save the current setup." />
+            )}
+          </Panel>
+          <Panel
+            title="Benchmark Results"
+            sub="Benchmarks computed from available campaign performance in the current scope."
+            action={(
+              <div style={{ display: "flex", gap: 8 }}>
+                <button type="button" className="btn-outline" disabled={exportBusy} onClick={() => void onExport()}>
+                  <Icon name="download" size={15} /> {exportBusy ? "Exporting…" : "Export"}
+                </button>
+              </div>
+            )}
+          >
+            {benchmarks.data ? (
+              rows.length ? (
+                <div className="tbl-wrap">
+                  <table className="tbl">
+                    <thead>
+                      <tr>
+                        <th scope="col"><input type="checkbox" aria-label="Select all benchmarks"
+                          checked={rows.length > 0 && rows.every((r) => selected.has(r.key))}
+                          onChange={() => setSelected(rows.every((r) => selected.has(r.key)) ? new Set() : new Set(rows.map((r) => r.key)))} /></th>
+                        <th scope="col">Benchmark Name</th>
+                        <th scope="col">Coverage</th>
+                        <th scope="col">Platform</th>
+                        <th scope="col" className="num">CPM</th>
+                        <th scope="col" className="num">CTR</th>
+                        <th scope="col" className="num">CPA</th>
+                        <th scope="col" className="num">ROAS</th>
+                        <th scope="col" className="num">Records</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((r) => (
+                        <tr key={r.key}>
+                          <td>
+                            <input type="checkbox" aria-label={`Select ${axisLabel(axis, r.key)}`}
+                              checked={selected.has(r.key)} onChange={() => toggle(r.key)} />
+                          </td>
+                          <td><span className="cell-main">{axisLabel(axis, r.key)}</span></td>
+                          <td>All {axis === "platform" ? "Verticals" : "Platforms"}</td>
+                          <td>{axis === "platform" ? axisLabel(axis, r.key) : "All Platforms"}</td>
+                          <td className="num">{metricVal(r, "cpm") == null ? "—" : fmtMoney(metricVal(r, "cpm") as number)}</td>
+                          <td className="num">{metricVal(r, "ctr") == null ? "—" : `${(metricVal(r, "ctr") as number).toFixed(1)}%`}</td>
+                          <td className="num">{metricVal(r, "cpa") == null ? "—" : fmtMoney(metricVal(r, "cpa") as number)}</td>
+                          <td className="num">{r.roas == null ? "—" : `${r.roas.toFixed(1)}x`}</td>
+                          <td className="num">{num(r.n_ads).toLocaleString()}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : <EmptyState text="No benchmarks in the current scope." />
+            ) : benchmarks.error ? (
+              <EmptyState text={benchmarks.error} />
+            ) : <Skeleton height={200} />}
+          </Panel>
+          <Panel title="Compare Benchmarks" sub="Select up to 3 benchmarks to compare key metrics."
+            action={selected.size ? (
+              <button type="button" className="link-teal" onClick={() => setSelected(new Set())}>Clear All</button>
+            ) : undefined}>
+            {compared.length >= 2 ? (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: 12 }}>
+                {(["cpm", "ctr", "cpa", "roas"] as const).map((m) => (
+                  <div key={m} className="cmp-card" style={{ padding: 12 }}>
+                    <strong style={{ fontSize: 13 }}>{m.toUpperCase()}</strong>
+                    <MiniBars
+                      values={compared.map((r) => metricVal(r, m) ?? 0)}
+                      format={(v) => (m === "ctr" ? `${v.toFixed(1)}%` : m === "roas" ? `${v.toFixed(1)}x` : fmtMoney(v))}
+                    />
+                    <div className="legend" style={{ justifyContent: "flex-start" }}>
+                      {compared.map((r) => <span key={r.key}>{axisLabel(axis, r.key)}</span>)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : <EmptyState text="Tick at least two benchmark rows above to compare them here." />}
+          </Panel>
         </div>
-        <div style={{ marginTop: 8 }}>
-          {cohortsLoading ? (
-            <p className="muted">Loading Saved Cohorts…</p>
-          ) : cohortsError ? (
-            <p className="muted">{cohortsError}</p>
-          ) : !cohorts || !cohorts.length ? (
-            <span className="muted">No Saved Cohorts Yet.</span>
-          ) : (
-            <ul className="plain">
-              {cohorts.map((b) => (
-                <li key={b.id}>
-                  {b.name} — {JSON.stringify(b.filters || {})}{" "}
-                  <button
-                    type="button"
-                    className="chip"
-                    disabled={buildingId === b.id}
-                    onClick={() => void buildCohort(b.id, cohorts)}
-                  >
-                    {buildingId === b.id ? "Building…" : "Build"}
-                  </button>
-                </li>
-              ))}
+        <div className="rail-stack">
+          <Panel title="Benchmark Insights" sub="Understand the data behind these benchmarks.">
+            <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 10 }}>
+              <span className="insight-ico" style={{ background: "#DFF5F1" }}>
+                <Icon name="bars" size={22} />
+              </span>
+              <div>
+                <p className="panel-sub" style={{ margin: 0 }}>Benchmark Coverage</p>
+                <strong style={{ fontSize: 26 }}>{coverage.total.toLocaleString()}</strong>
+                <p className="panel-sub" style={{ margin: 0 }}>Total Records</p>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <div className="cmp-card" style={{ flex: 1, textAlign: "center" }}>
+                <strong>{coverage.platforms}</strong>
+                <p className="panel-sub" style={{ margin: 0 }}>Platforms</p>
+              </div>
+              <div className="cmp-card" style={{ flex: 1, textAlign: "center" }}>
+                <strong>{coverage.verticals}</strong>
+                <p className="panel-sub" style={{ margin: 0 }}>Verticals</p>
+              </div>
+              <div className="cmp-card" style={{ flex: 1, textAlign: "center" }}>
+                <strong>{AXES.length}</strong>
+                <p className="panel-sub" style={{ margin: 0 }}>Groupings</p>
+              </div>
+            </div>
+          </Panel>
+          <Panel title="Performance Context">
+            <p className="panel-sub">
+              These benchmarks are computed from the campaigns in your current scope — use them as a
+              starting point and consider your unique goals, audience, and creative strategy.
+            </p>
+          </Panel>
+          <Panel title="Tips for Better Benchmarks">
+            <ul className="rec-list">
+              <li>Use relevant filters to narrow the dataset</li>
+              <li>Include multiple platforms for broader insights</li>
+              <li>Compare against similar verticals and objectives</li>
+              <li>Save custom benchmarks for future use</li>
             </ul>
-          )}
-        </div>
-        <div style={{ marginTop: 8 }}>
-          {buildError ? (
-            <p className="muted">{buildError}</p>
-          ) : build ? (
-            <>
-              <h4>
-                Cohort: {build.cohort?.name ?? build.name ?? ""} ({build.metric ?? cohortMetric}) — {build.status ?? ""}
-              </h4>
-              <p className="muted">
-                n={build.stats?.n ?? build.n_ads ?? "—"} · projects={(build.project_list || []).length} · mean=
-                {fmt(build.stats?.mean_weighted)} · median={fmt(build.stats?.median)} · p25={fmt(build.stats?.p25)} ·
-                p75={fmt(build.stats?.p75)}
-              </p>
-            </>
-          ) : null}
-        </div>
-      </div>
-      <div className="card">
-        <h3>Saved Views</h3>
-        <div className="muted" style={{ fontSize: 12 }}>
-          Named snapshots of filters + KPI + tab + benchmark + report rank (GET/POST /api/views). Applying a view
-          restores the exact analysis setup.
-        </div>
-        <div className="ask-row">
-          <input
-            type="text"
-            aria-label="View Name"
-            placeholder="e.g. Beauty Spain TikTok"
-            value={viewName}
-            onChange={(e) => setViewName(e.target.value)}
-          />
-          <button type="button" className="action" onClick={() => void saveView()}>
-            Save Current View
-          </button>
-        </div>
-        <div className="muted" style={{ marginTop: 8 }}>
-          {viewsLoading ? (
-            <p className="muted">Loading Saved Views…</p>
-          ) : viewsError ? (
-            <span className="muted">{viewsError}</span>
-          ) : !views || !views.length ? (
-            <span>No Saved Views Yet.</span>
-          ) : (
-            <ul className="plain">
-              {views.map((v) => (
-                <li key={v.id}>
-                  {v.name}{" "}
-                  <span className="muted" style={{ fontSize: 12 }}>
-                    {JSON.stringify(v.state || {})}
-                  </span>{" "}
-                  <button type="button" className="chip" onClick={() => applyView(v.state || {})}>
-                    Apply
-                  </button>{" "}
-                  <button type="button" className="chip" onClick={() => void deleteView(v.id)}>
-                    Delete
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-        <div className="muted" style={{ fontSize: 12 }}>
-          {viewStatus}
+          </Panel>
         </div>
       </div>
     </>

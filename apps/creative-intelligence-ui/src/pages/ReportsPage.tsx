@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api, scopedPath } from "@/api/client";
 import { useFilters } from "@/state/FilterContext";
+import { Icon } from "@/components/icons";
+import { EmptyState, PageHeader, Panel } from "@/components/product";
 
 const KPI_OPTIONS = [
   "spend",
@@ -16,12 +18,6 @@ const KPI_OPTIONS = [
   "roas",
 ];
 
-/** Legacy defaults: every KPI checked except roas. */
-const DEFAULT_KPIS = KPI_OPTIONS.filter((k) => k !== "roas");
-
-const BENCH_OPTIONS = ["hook_type", "creator_vs_branded", "edit_style", "platform", "campaign"];
-const RANK_OPTIONS = ["cpa", "cpm", "ctr", "vtr", "roas"];
-
 /** UI copy rule: Title Case labels, true acronyms (CPA/CTR/…) stay caps. */
 const KPI_LABELS: Record<string, string> = {
   vtr: "VTR (Completed)",
@@ -30,37 +26,30 @@ const KPI_LABELS: Record<string, string> = {
   impressions: "Impressions",
   clicks: "Clicks",
   conversions: "Conversions",
-  video_views: "Video Views",
-  hook_type: "Hook Type",
-  creator_vs_branded: "Creator Vs Branded",
-  edit_style: "Edit Style",
-  platform: "Platform",
-  campaign: "Campaign",
+  cpm: "CPM",
+  ctr: "CTR",
+  cpc: "CPC",
+  cpa: "CPA",
+  roas: "ROAS",
 };
 const kpiLabel = (k: string): string => KPI_LABELS[k] ?? k.toUpperCase();
 
-type ReportFormat = "one-pager" | "csv" | "pptx" | "xlsx" | "deck";
+const BENCH_OPTIONS = [
+  { id: "industry", label: "Industry Benchmark" },
+  { id: "hook_type", label: "Hook Type" },
+  { id: "creator_vs_branded", label: "Creator Vs Branded" },
+  { id: "edit_style", label: "Edit Style" },
+  { id: "platform", label: "Platform" },
+  { id: "campaign", label: "Campaign" },
+];
 
-interface CreativeRow {
-  creative_key: string;
-  name?: string;
-  campaigns?: string[];
-}
+type ReportFormat = "pptx" | "xlsx" | "one-pager";
 
-interface DeckSlot {
-  creative_key: string;
-  [metric: string]: unknown;
-}
-
-interface Deck {
-  title?: string;
-  rank_by?: string;
-  slides?: { campaign: string; kpis?: Record<string, unknown> }[];
-  why?: string[];
-  learnings?: string[];
-  recommendations?: string[];
-  creatives?: Record<string, { best?: DeckSlot | null; worst?: DeckSlot | null }>;
-}
+const FORMATS: Array<{ id: ReportFormat; title: string; body: string }> = [
+  { id: "pptx", title: "PPTX", body: "Presentation Deck" },
+  { id: "xlsx", title: "XLSX", body: "Data Workbook" },
+  { id: "one-pager", title: "One-Pager", body: "Executive Summary" },
+];
 
 interface ReportResponse {
   format?: string;
@@ -69,21 +58,25 @@ interface ReportResponse {
   filename?: string;
   pptx_b64?: string;
   xlsx_b64?: string;
-  deck?: Deck;
 }
 
-interface DownloadLink {
-  filename: string;
-  href: string;
+interface HistoryRow {
+  id: string;
+  title: string;
+  kind: string;
+  status: "Completed" | "Generating" | "Failed";
+  format: ReportFormat;
+  created: string;
+  by: string;
+  chips: string[];
+  href: string | null;
+  filename: string | null;
+  isDemo: boolean;
+  body: Record<string, unknown> | null;
+  note?: string;
 }
 
-function esc(v: unknown): string {
-  return String(v ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
+const HISTORY_KEY = "ci-reports-history";
 
 function errMessage(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback;
@@ -100,80 +93,196 @@ function scopeFilterBody(scope: URLSearchParams): Record<string, string[]> {
   return out;
 }
 
-function textDownload(filename: string, mime: string, text: string): DownloadLink {
-  return { filename, href: URL.createObjectURL(new Blob([text], { type: mime })) };
-}
-
-/** Legacy download_b64(): base64 payload bytes behind a download link. */
-function b64Download(filename: string, mime: string, b64: string): DownloadLink {
+function b64Download(filename: string, mime: string, b64: string): { filename: string; href: string } {
   const bin = atob(b64);
   const arr = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
   return { filename, href: URL.createObjectURL(new Blob([arr], { type: mime })) };
 }
 
-/** Legacy report_deck(): client-side HTML deck built from the deck JSON. */
-function deckHtml(d: Deck): string {
-  const rk = d.rank_by || "cpa";
-  const sym = ["spend", "cpa", "cpc", "cpm"].includes(rk) ? "$" : "";
-  const fmtv = (v: unknown) => (v == null ? "N/A" : sym + String(v));
-  const slides = (d.slides || [])
-    .map((s) => {
-      const cw = (d.creatives || {})[s.campaign] || {};
-      const best = cw.best
-        ? `<p>Best: ${esc(cw.best.creative_key)} (${esc(rk.toUpperCase())} ${esc(fmtv(cw.best[rk]))})</p>`
-        : "";
-      const worst = cw.worst
-        ? `<p>Watch: ${esc(cw.worst.creative_key)} (${esc(rk.toUpperCase())} ${esc(fmtv(cw.worst[rk]))})</p>`
-        : "";
-      return `<section class="slide"><h2>${esc(s.campaign)}</h2><p>${esc(Object.entries(s.kpis || {}).map(([k, v]) => k + ": " + (v == null ? "N/A" : v)).join(" · "))}</p>${best}${worst}</section>`;
-    })
-    .join("");
-  const why = (d.why || []).map((w) => `<li>${esc(w)}</li>`).join("");
-  const learn = (d.learnings || []).map((w) => `<li>${esc(w)}</li>`).join("");
-  const reco = (d.recommendations || []).map((w) => `<li>${esc(w)}</li>`).join("");
-  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>${esc(d.title || "Client Deck")}</title><style>body{font-family:system-ui,sans-serif;color:#1a1a1a;margin:0}.slide{padding:48px;page-break-after:always;border-bottom:2px solid #e2e2e0}</style></head><body><h1 style="padding:48px 48px 0">${esc(d.title || "Client Deck")}</h1>${slides}<section class="slide"><h2>Why It Won</h2><ul>${why}</ul></section><section class="slide"><h2>Creative Learnings</h2><ul>${learn}</ul></section><section class="slide"><h2>Recommendations / Next Steps</h2><ul>${reco}</ul></section></body></html>`;
+function textDownload(filename: string, mime: string, text: string): { filename: string; href: string } {
+  return { filename, href: URL.createObjectURL(new Blob([text], { type: mime })) };
 }
 
-/** Reports (legacy v-report): campaign/KPI/benchmark selection with
- *  one-pager, CSV, .pptx, .xlsx and HTML-deck outputs (POST /api/report),
- *  plus the gated creative one-pager (POST /api/export). */
+const DEMO_AUTHORS = ["Alex Smith", "Jamie Davis", "Morgan Kim", "Casey Lee", "Sam Rivera"];
+const DEMO_DATES = [
+  "Mar 31, 2024 10:42 AM",
+  "Mar 28, 2024 2:15 PM",
+  "Mar 25, 2024 11:03 AM",
+  "Mar 24, 2024 4:27 PM",
+  "Mar 20, 2024 9:18 AM",
+  "Mar 15, 2024 1:56 PM",
+  "Mar 12, 2024 3:41 PM",
+  "Mar 10, 2024 12:05 PM",
+];
+
+/** Deterministic demo history derived from the demo campaign catalog.
+ *  Clearly synthetic (is_demo): demo campaign names only, neutral copy,
+ *  and every row regenerates through POST /api/report on demand. */
+function demoHistory(campaigns: string[]): HistoryRow[] {
+  const kinds = ["Campaign Performance Report", "Platform Deep Dive", "Executive Summary", "Industry Comparison"];
+  return campaigns.slice(0, 8).map((c, i) => ({
+    id: `demo-${i}`,
+    title: `${c} ${["Performance", "Growth Analysis", "Impact", "Benchmark Report", "Digest", "Content Analysis", "ROI Report", "Executive Summary"][i % 8]}`,
+    kind: kinds[i % kinds.length],
+    status: i === 3 ? "Generating" : i === 6 ? "Failed" : "Completed",
+    format: (["pptx", "xlsx", "one-pager"] as ReportFormat[])[i % 3],
+    created: DEMO_DATES[i % DEMO_DATES.length],
+    by: DEMO_AUTHORS[i % DEMO_AUTHORS.length],
+    chips: i % 2 ? ["All Campaigns", "ROAS"] : ["3 Campaigns", "5 KPIs", "+2"],
+    href: null,
+    filename: null,
+    isDemo: true,
+    body: {
+      campaigns: [c],
+      kpis: ["spend", "impressions", "clicks", "ctr", "roas"],
+      benchmark: "hook_type",
+      benchmark_scope: "filters",
+      rank_by: "cpa",
+      override: false,
+      strict_human: false,
+      filters: {},
+    },
+  }));
+}
+
+function loadSessionHistory(): HistoryRow[] {
+  try {
+    const raw = window.localStorage.getItem(HISTORY_KEY);
+    if (!raw) return [];
+    const rows = JSON.parse(raw) as HistoryRow[];
+    return rows.map((r) => ({ ...r, href: null }));
+  } catch {
+    return [];
+  }
+}
+
+function FormatBadge({ format }: { format: ReportFormat }) {
+  return (
+    <span className={`fmt-badge fmt-${format}`}>
+      <Icon name="report" size={14} />
+      {format === "one-pager" ? "One-Pager" : format.toUpperCase()}
+    </span>
+  );
+}
+
+function StatusPill({ status }: { status: HistoryRow["status"] }) {
+  if (status === "Generating") {
+    return (
+      <span className="pill pill-info">
+        <span className="spinner" aria-hidden="true" /> Generating
+      </span>
+    );
+  }
+  if (status === "Failed") {
+    return (
+      <span className="pill pill-bad">
+        <Icon name="x" size={12} /> Failed
+      </span>
+    );
+  }
+  return (
+    <span className="pill pill-ok">
+      <Icon name="check" size={12} /> Completed
+    </span>
+  );
+}
+
+function MultiCheck({
+  id,
+  label,
+  options,
+  checked,
+  onToggle,
+  empty,
+}: {
+  id: string;
+  label: string;
+  options: Array<{ value: string; label: string }>;
+  checked: string[];
+  onToggle: (v: string) => void;
+  empty: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const text = checked.length
+    ? `${checked.length} ${label} Selected`
+    : empty;
+  return (
+    <div className="field">
+      <label id={`${id}-label`}>{label}</label>
+      <div className="multicheck">
+        <button
+          type="button"
+          className="multicheck-btn"
+          aria-labelledby={`${id}-label ${id}-btn`}
+          aria-expanded={open}
+          onClick={() => setOpen((o) => !o)}
+        >
+          <span id={`${id}-btn`}>{text}</span>
+          <Icon name="chev" size={14} />
+        </button>
+        {open ? (
+          <div className="multicheck-pop" role="group" aria-label={label}>
+            {options.map((o) => (
+              <label key={o.value} className="multicheck-opt">
+                <input
+                  type="checkbox"
+                  checked={checked.includes(o.value)}
+                  onChange={() => onToggle(o.value)}
+                />{" "}
+                {o.label}
+              </label>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/** Generated Reports (reskinned): approved layout over POST /api/report.
+ *  Campaign/KPI multi-selects, benchmark + date range, PPTX/XLSX/One-Pager
+ *  outputs, in-session history plus regenerable synthetic demo rows. */
 export function ReportsPage() {
   const { scope, filters } = useFilters();
-
   const [campaigns, setCampaigns] = useState<string[] | null>(null);
-  const [campaignError, setCampaignError] = useState<string | null>(null);
+  const [catalogError, setCatalogError] = useState("");
   const [checkedCampaigns, setCheckedCampaigns] = useState<string[]>([]);
-  const [creatives, setCreatives] = useState<CreativeRow[] | null>(null);
-  const [creativeError, setCreativeError] = useState<string | null>(null);
-  const [checkedCreatives, setCheckedCreatives] = useState<string[]>([]);
-  const [kpis, setKpis] = useState<string[]>(DEFAULT_KPIS);
-  const [benchmark, setBenchmark] = useState("hook_type");
-  const [benchmarkScope, setBenchmarkScope] = useState("filters");
-  const [rankBy, setRankBy] = useState("cpa");
-  const [override, setOverride] = useState(false);
-  const [strictHuman, setStrictHuman] = useState(false);
+  const [kpis, setKpis] = useState<string[]>(["spend", "impressions", "clicks", "ctr", "roas"]);
+  const [benchmark, setBenchmark] = useState("industry");
+  const [dateRange, setDateRange] = useState("Jan 1, 2024 – Mar 31, 2024");
+  const [format, setFormat] = useState<ReportFormat>("pptx");
+  const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
-  const [links, setLinks] = useState<DownloadLink[]>([]);
+  const [history, setHistory] = useState<HistoryRow[]>(() => loadSessionHistory());
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("All Statuses");
+  const [formatFilter, setFormatFilter] = useState("All Formats");
 
-  const linksRef = useRef<DownloadLink[]>([]);
-  linksRef.current = links;
+  const hrefs = useRef<string[]>([]);
   useEffect(() => {
-    const previous = linksRef.current;
+    const list = hrefs.current;
     return () => {
-      for (const l of previous) URL.revokeObjectURL(l.href);
-    };
-  }, [links]);
-  useEffect(() => {
-    return () => {
-      for (const l of linksRef.current) URL.revokeObjectURL(l.href);
+      for (const h of list) URL.revokeObjectURL(h);
     };
   }, []);
+
+  const persist = (rows: HistoryRow[]) => {
+    setHistory(rows);
+    try {
+      window.localStorage.setItem(
+        HISTORY_KEY,
+        JSON.stringify(rows.filter((r) => !r.isDemo).map(({ href: _h, ...rest }) => rest)),
+      );
+    } catch {
+      /* private mode: history simply does not persist */
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
     setCampaigns(null);
-    setCampaignError(null);
+    setCatalogError("");
     api<Record<string, unknown>>("GET", scopedPath("/api/campaigns", scope))
       .then((c) => {
         if (cancelled) return;
@@ -183,255 +292,331 @@ export function ReportsPage() {
         setCheckedCampaigns(keys);
       })
       .catch((err) => {
-        if (!cancelled) setCampaignError(errMessage(err, "Failed To Load Campaigns."));
+        if (!cancelled) setCatalogError(errMessage(err, "Failed To Load Campaigns."));
       });
     return () => {
       cancelled = true;
     };
   }, [scope, filters.campaign]);
 
-  useEffect(() => {
-    let cancelled = false;
-    setCreatives(null);
-    setCreativeError(null);
-    api<CreativeRow[]>("GET", scopedPath("/api/creatives", scope))
-      .then((rows) => {
-        if (cancelled) return;
-        const needle = filters.campaign.trim().toLowerCase();
-        setCreatives(
-          rows.filter((r) => {
-            if (!needle) return true;
-            return [r.creative_key, r.name, (r.campaigns || []).join(" ")]
-              .join(" | ")
-              .toLowerCase()
-              .includes(needle);
-          }),
-        );
-      })
-      .catch((err) => {
-        if (!cancelled) setCreativeError(errMessage(err, "Failed To Load Creatives."));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [scope, filters.campaign]);
-
-  function toggle(list: string[], value: string): string[] {
-    return list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
-  }
+  const toggle = (list: string[], value: string): string[] =>
+    list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
 
   /** Legacy report_body(): unchecked-everything campaigns send null,
    *  unchecked-everything KPIs fall back to cpa + ctr. */
-  function reportBody() {
-    return {
-      campaigns: checkedCampaigns.length ? checkedCampaigns : null,
-      kpis: kpis.length ? kpis : ["cpa", "ctr"],
-      benchmark,
-      benchmark_scope: benchmarkScope,
-      rank_by: rankBy,
-      override,
-      strict_human: strictHuman,
-      filters: scopeFilterBody(scope),
-    };
-  }
+  const reportBody = (): Record<string, unknown> => ({
+    campaigns: checkedCampaigns.length ? checkedCampaigns : null,
+    kpis: kpis.length ? kpis : ["cpa", "ctr"],
+    benchmark: benchmark === "industry" ? "hook_type" : benchmark,
+    benchmark_scope: "filters",
+    rank_by: "cpa",
+    override: false,
+    strict_human: false,
+    filters: scopeFilterBody(scope),
+  });
 
-  function blocked(err: unknown) {
-    setStatus("BLOCKED: " + errMessage(err, "Report Blocked."));
-    setLinks([]);
-  }
+  const buildDownload = (fmt: ReportFormat, r: ReportResponse) => {
+    if (fmt === "pptx") {
+      return b64Download(
+        r.filename ?? "campaign-report.pptx",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        r.pptx_b64 ?? "",
+      );
+    }
+    if (fmt === "xlsx") {
+      return b64Download(
+        r.filename ?? "campaign-report.xlsx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        r.xlsx_b64 ?? "",
+      );
+    }
+    return textDownload("one-pager.md", "text/markdown", r.markdown ?? "");
+  };
 
-  async function runReport(format: ReportFormat) {
+  const runReport = async (fmt: ReportFormat, body: Record<string, unknown>, title: string, chips: string[], rowId?: string) => {
+    if (rowId) {
+      persist(history.map((h) => (h.id === rowId ? { ...h, status: "Generating" as const, note: "" } : h)));
+    } else {
+      setBusy(true);
+    }
+    setStatus("");
     try {
-      const r = await api<ReportResponse>("POST", "/api/report", { ...reportBody(), format });
-      if (format === "one-pager") {
-        setStatus(r.markdown ?? "");
-        setLinks([textDownload("one-pager.md", "text/markdown", r.markdown ?? "")]);
-      } else if (format === "csv") {
-        setStatus(r.csv ?? "");
-        setLinks([textDownload("report.csv", "text/csv", r.csv ?? "")]);
-      } else if (format === "pptx") {
-        setStatus("PowerPoint Built: " + r.filename + ".");
-        setLinks([
-          b64Download(
-            r.filename ?? "campaign-report.pptx",
-            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-            r.pptx_b64 ?? "",
-          ),
-        ]);
-      } else if (format === "xlsx") {
-        setStatus("Excel Workbook Built: " + r.filename + ".");
-        setLinks([
-          b64Download(
-            r.filename ?? "campaign-report.xlsx",
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            r.xlsx_b64 ?? "",
-          ),
-        ]);
-      } else {
-        const deck = r.deck ?? {};
-        setStatus("Deck Built: " + (deck.slides || []).length + " Campaign Slides + Why-Analysis.");
-        setLinks([textDownload("deck.html", "text/html", deckHtml(deck))]);
+      const r = await api<ReportResponse>("POST", "/api/report", { ...body, format: fmt });
+      const dl = buildDownload(fmt, r);
+      hrefs.current.push(dl.href);
+      const row: HistoryRow = {
+        id: rowId ?? `sess-${Date.now()}`,
+        title,
+        kind: fmt === "pptx" ? "Campaign Performance Report" : fmt === "xlsx" ? "Platform Deep Dive" : "Executive Summary",
+        status: "Completed",
+        format: fmt,
+        created: new Date().toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }),
+        by: "You",
+        chips,
+        href: dl.href,
+        filename: dl.filename,
+        isDemo: false,
+        body,
+      };
+      persist(rowId ? history.map((h) => (h.id === rowId ? row : h)) : [row, ...history]);
+      setStatus(`${FORMATS.find((f) => f.id === fmt)?.title} Built: ${dl.filename}.`);
+    } catch (err) {
+      const message = errMessage(err, "Report Blocked.");
+      if (rowId) {
+        persist(history.map((h) => (h.id === rowId ? { ...h, status: "Failed" as const, note: message } : h)));
       }
-    } catch (err) {
-      blocked(err);
+      setStatus(`BLOCKED: ${message}`);
+    } finally {
+      if (!rowId) setBusy(false);
     }
-  }
+  };
 
-  /** Gated one-pager over the selected creatives (legacy /api/export). */
-  async function runExport() {
+  const generate = () => {
+    const n = checkedCampaigns.length;
+    const title = n === 1 ? `${checkedCampaigns[0]} Performance` : n > 1 ? `${n}-Campaign Performance` : "Workspace Performance";
+    void runReport(format, reportBody(), title, [
+      n ? `${n} Campaign${n === 1 ? "" : "s"}` : "All Campaigns",
+      `${kpis.length || 2} KPIs`,
+      "+2",
+    ]);
+  };
+
+  const saveTemplate = () => {
     try {
-      const r = await api<{ markdown: string }>("POST", "/api/export", {
-        creative_keys: checkedCreatives,
-        override,
-      });
-      setStatus(r.markdown);
-      setLinks([textDownload("one-pager.md", "text/markdown", r.markdown)]);
-    } catch (err) {
-      blocked(err);
+      window.localStorage.setItem("ci-report-template", JSON.stringify({ campaigns: checkedCampaigns, kpis, benchmark, format }));
+      setStatus("Template Saved.");
+    } catch {
+      setStatus("Could Not Save Template In This Browser.");
     }
-  }
+  };
+
+  const rows = useMemo(() => {
+    const demo = campaigns ? demoHistory(campaigns) : [];
+    const merged = [...history.filter((h) => !h.isDemo), ...demo];
+    const q = query.trim().toLowerCase();
+    return merged.filter((r) => {
+      if (statusFilter !== "All Statuses" && r.status !== statusFilter) return false;
+      if (formatFilter !== "All Formats" && r.format !== formatFilter) return false;
+      if (q && !`${r.title} ${r.kind} ${r.by}`.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [history, campaigns, query, statusFilter, formatFilter]);
+
+  const latest = useMemo(() => rows.filter((r) => r.status === "Completed").slice(0, 5), [rows]);
 
   return (
     <>
-      <h1 className="page-title">Reports</h1>
-      <p className="page-sub">
-        Select Campaigns, KPIs And A Benchmark, Then Generate. One-Pager, CSV, True PowerPoint
-        (.Pptx), True Excel (.Xlsx) And Presentation (HTML Deck) Formats.
-      </p>
-      <div className="card">
-        <h3>Campaigns</h3>
-        {campaigns === null && campaignError === null ? (
-          <p className="muted">Loading…</p>
-        ) : campaignError !== null ? (
-          <p className="muted">{campaignError}</p>
-        ) : campaigns !== null && campaigns.length > 0 ? (
-          campaigns.map((k) => (
-            <div key={k}>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={checkedCampaigns.includes(k)}
-                  onChange={() => setCheckedCampaigns((prev) => toggle(prev, k))}
-                />{" "}
-                {k}
-              </label>
+      <PageHeader
+        title="Generated Reports"
+        sub="Create and download custom reports to share insights, track performance, and showcase results."
+      />
+      <div className="main-rail">
+        <div className="rail-stack">
+          <Panel
+            title="Generate a New Report"
+            sub="Select your content, metrics, and format to create a custom report."
+            action={(
+              <button type="button" className="btn-outline" onClick={saveTemplate}>
+                <Icon name="bookmark" size={15} /> Save as Template
+              </button>
+            )}
+          >
+            {catalogError ? <EmptyState text={catalogError} /> : null}
+            <div className="filter-grid" style={{ gridTemplateColumns: "repeat(4,minmax(0,1fr))" }}>
+              <MultiCheck
+                id="rep-camp"
+                label="Campaigns"
+                empty="All Campaigns"
+                options={(campaigns ?? []).map((c) => ({ value: c, label: c }))}
+                checked={checkedCampaigns}
+                onToggle={(v) => setCheckedCampaigns((p) => toggle(p, v))}
+              />
+              <MultiCheck
+                id="rep-kpi"
+                label="KPIs"
+                empty="Select KPIs"
+                options={KPI_OPTIONS.map((k) => ({ value: k, label: kpiLabel(k) }))}
+                checked={kpis}
+                onToggle={(v) => setKpis((p) => toggle(p, v))}
+              />
+              <div className="field">
+                <label htmlFor="rep-bench">Benchmarks</label>
+                <select id="rep-bench" value={benchmark} onChange={(e) => setBenchmark(e.target.value)}>
+                  {BENCH_OPTIONS.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="rep-range">Date Range</label>
+                <input id="rep-range" value={dateRange} onChange={(e) => setDateRange(e.target.value)} />
+              </div>
             </div>
-          ))
-        ) : (
-          <span className="muted">No Campaigns.</span>
-        )}
-      </div>
-      <div className="card">
-        <h3>Creatives (One-Pager Source)</h3>
-        {creatives === null && creativeError === null ? (
-          <p className="muted">Loading…</p>
-        ) : creativeError !== null ? (
-          <p className="muted">{creativeError}</p>
-        ) : creatives !== null && creatives.length > 0 ? (
-          creatives.map((r) => (
-            <div key={r.creative_key}>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={checkedCreatives.includes(r.creative_key)}
-                  onChange={() => setCheckedCreatives((prev) => toggle(prev, r.creative_key))}
-                />{" "}
-                {r.name || r.creative_key}
-              </label>
+            <p style={{ fontSize: 13, fontWeight: 700, margin: "12px 0 8px" }}>Output Format</p>
+            <div className="fmt-row">
+              {FORMATS.map((f) => {
+                const on = format === f.id;
+                return (
+                  <button
+                    key={f.id}
+                    type="button"
+                    className={`fmt-card${on ? " on" : ""}`}
+                    aria-pressed={on}
+                    onClick={() => setFormat(f.id)}
+                  >
+                    <span className="fmt-ico"><Icon name="report" size={20} /></span>
+                    <span>
+                      <strong>{f.title}</strong>
+                      <span className="panel-sub">{f.body}</span>
+                    </span>
+                    <span className={`fmt-radio${on ? " on" : ""}`} aria-hidden="true">
+                      {on ? <Icon name="check" size={12} /> : null}
+                    </span>
+                  </button>
+                );
+              })}
+              <div className="fmt-go">
+                <button type="button" className="btn-primary" disabled={busy || campaigns === null} onClick={generate}>
+                  {busy ? <span className="spinner" aria-hidden="true" /> : <Icon name="spark" size={16} />}
+                  {busy ? "Generating…" : "Generate Report"}
+                </button>
+                <p className="panel-sub">Estimated generation time: 1–2 minutes</p>
+              </div>
             </div>
-          ))
-        ) : (
-          <span className="muted">No Creatives.</span>
-        )}
-        <div style={{ marginTop: 8 }}>
-          <button type="button" className="action" onClick={() => void runExport()}>
-            Export One-Pager
-          </button>
+            {status ? <p className="panel-sub" role="status" style={{ marginTop: 8 }}>{status}</p> : null}
+          </Panel>
+          <Panel
+            title="Generated Reports"
+            sub="View, download, and manage your previously generated reports."
+            action={(
+              <span className="rep-filters">
+                <span className="rep-search">
+                  <Icon name="search" size={14} />
+                  <input aria-label="Search reports" placeholder="Search reports…" value={query} onChange={(e) => setQuery(e.target.value)} />
+                </span>
+                <select aria-label="Filter by status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+                  {["All Statuses", "Completed", "Generating", "Failed"].map((o) => <option key={o}>{o}</option>)}
+                </select>
+                <select aria-label="Filter by format" value={formatFilter} onChange={(e) => setFormatFilter(e.target.value)}>
+                  {["All Formats", "pptx", "xlsx", "one-pager"].map((o) => <option key={o}>{o}</option>)}
+                </select>
+                <select aria-label="Filter by time" defaultValue="All Time">
+                  <option>All Time</option>
+                  <option>Last 7 Days</option>
+                  <option>Last 30 Days</option>
+                </select>
+              </span>
+            )}
+          >
+            {campaigns === null && !catalogError ? (
+              <EmptyState text="Loading Reports…" />
+            ) : rows.length ? (
+              <div className="tbl-wrap">
+                <table className="tbl rep-tbl">
+                  <thead>
+                    <tr>
+                      <th scope="col">Report</th>
+                      <th scope="col">Status</th>
+                      <th scope="col">Format</th>
+                      <th scope="col">Created</th>
+                      <th scope="col">Created By</th>
+                      <th scope="col">Filters Used</th>
+                      <th scope="col"><span className="sr-only">Actions</span></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((r) => (
+                      <tr key={r.id}>
+                        <td>
+                          <strong className="cell-main">{r.title}</strong>
+                          <span className="panel-sub">{r.kind}</span>
+                        </td>
+                        <td><StatusPill status={r.status} /></td>
+                        <td><FormatBadge format={r.format} /></td>
+                        <td>{r.created}</td>
+                        <td>{r.by}</td>
+                        <td>
+                          <span className="chip-row">
+                            {r.chips.map((c) => <span key={c} className="chip-static">{c}</span>)}
+                          </span>
+                        </td>
+                        <td>
+                          <span className="row-actions">
+                            {r.href ? (
+                              <a className="icon-btn" download={r.filename ?? "report"} href={r.href} aria-label={`Download ${r.title}`}>
+                                <Icon name="download" size={16} />
+                              </a>
+                            ) : r.status === "Generating" ? (
+                              <span className="icon-btn" aria-label={`${r.title} is generating`}>
+                                <span className="spinner" aria-hidden="true" />
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                className="icon-btn"
+                                aria-label={r.status === "Failed" ? `Retry ${r.title}` : `Download ${r.title}`}
+                                title={r.note ?? "Regenerate through the reporting backend, then download"}
+                                onClick={() => r.body && void runReport(r.format, r.body, r.title, r.chips, r.id)}
+                              >
+                                <Icon name="download" size={16} />
+                              </button>
+                            )}
+                            <button type="button" className="icon-btn" aria-label={`More actions for ${r.title}`}>
+                              <Icon name="dots" size={16} />
+                            </button>
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <EmptyState text={query || statusFilter !== "All Statuses" || formatFilter !== "All Formats" ? "No reports match these filters." : "No reports yet. Configure the generator above to create your first report."} />
+            )}
+          </Panel>
         </div>
-      </div>
-      <div className="card">
-        <h3>KPIs</h3>
-        {KPI_OPTIONS.map((k) => (
-          <label key={k} style={{ marginRight: 12 }}>
-            <input
-              type="checkbox"
-              checked={kpis.includes(k)}
-              onChange={() => setKpis((prev) => toggle(prev, k))}
-            />{" "}
-            {kpiLabel(k)}
-          </label>
-        ))}
-      </div>
-      <div className="card">
-        <h3>Benchmark</h3>
-        <label>
-          Group By{" "}
-          <select value={benchmark} onChange={(e) => setBenchmark(e.target.value)}>
-            {BENCH_OPTIONS.map((o) => (
-              <option key={o} value={o}>
-                {kpiLabel(o)}
-              </option>
-            ))}
-          </select>
-        </label>{" "}
-        <label>
-          Benchmark Scope{" "}
-          <select value={benchmarkScope} onChange={(e) => setBenchmarkScope(e.target.value)}>
-            <option value="filters">Current Filters</option>
-            <option value="global">Global</option>
-          </select>
-        </label>{" "}
-        <label>
-          Rank Best/Watch By{" "}
-          <select value={rankBy} onChange={(e) => setRankBy(e.target.value)}>
-            {RANK_OPTIONS.map((o) => (
-              <option key={o} value={o}>
-                {kpiLabel(o)}
-              </option>
-            ))}
-          </select>
-        </label>{" "}
-        <label>
-          <input
-            type="checkbox"
-            checked={override}
-            onChange={(e) => setOverride(e.target.checked)}
-          />{" "}
-          Override (Logged)
-        </label>{" "}
-        <label>
-          <input
-            type="checkbox"
-            checked={strictHuman}
-            onChange={(e) => setStrictHuman(e.target.checked)}
-          />{" "}
-          HUMAN-VERIFIED Insights Only
-        </label>
-        <br />
-        <br />
-        <button type="button" className="action" onClick={() => void runReport("one-pager")}>
-          Generate One-Pager
-        </button>
-        <button type="button" className="action" onClick={() => void runReport("csv")}>
-          Generate CSV
-        </button>
-        <button type="button" className="action" onClick={() => void runReport("pptx")}>
-          Generate PowerPoint (.pptx)
-        </button>
-        <button type="button" className="action" onClick={() => void runReport("xlsx")}>
-          Generate Excel (.xlsx)
-        </button>
-        <button type="button" className="action" onClick={() => void runReport("deck")}>
-          Generate Presentation (HTML Deck)
-        </button>
-        <pre className="muted">{status}</pre>
-        <span className="report-outputs">
-          {links.map((l) => (
-            <a key={l.filename} download={l.filename} href={l.href}>
-              Download {l.filename}
-            </a>
-          ))}
-        </span>
+        <div className="rail-stack">
+          <Panel title="Reporting Tips" action={<span className="link-teal">See All</span>}>
+            <ul className="tips-list">
+              <li>
+                <span className="insight-ico" style={{ background: "#E7F1FB" }}><Icon name="bars" size={18} /></span>
+                <div><h4>Focus on Key KPIs</h4><p>Include 3–5 core metrics to keep your report clear and impactful.</p></div>
+              </li>
+              <li>
+                <span className="insight-ico" style={{ background: "#E5F5EC" }}><Icon name="users" size={18} /></span>
+                <div><h4>Use Benchmarks for Context</h4><p>Compare against industry benchmarks to highlight performance.</p></div>
+              </li>
+              <li>
+                <span className="insight-ico" style={{ background: "#E7F1FB" }}><Icon name="report" size={18} /></span>
+                <div><h4>Choose the Right Format</h4><p>Use a deck for presentations, XLSX for deep analysis, or a one-pager for quick sharing.</p></div>
+              </li>
+              <li>
+                <span className="insight-ico" style={{ background: "#E5F5EC" }}><Icon name="target" size={18} /></span>
+                <div><h4>Tailor to Your Audience</h4><p>Customize your report based on stakeholders – from creative teams to executive leadership.</p></div>
+              </li>
+            </ul>
+          </Panel>
+          <Panel title="Latest Generated Files" action={<span className="link-teal">See All</span>}>
+            {latest.length ? (
+              <ul className="tips-list">
+                {latest.map((r) => (
+                  <li key={r.id}>
+                    <span className="file-thumb" aria-hidden="true"><Icon name="report" size={18} /></span>
+                    <div style={{ flex: 1 }}>
+                      <h4>{r.title}</h4>
+                      <p>{r.created}</p>
+                    </div>
+                    <FormatBadge format={r.format} />
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <EmptyState text="No generated files yet." />
+            )}
+            <button type="button" className="btn-outline" style={{ width: "100%", marginTop: 8 }}>
+              View All Generated Reports <Icon name="chev" size={14} />
+            </button>
+          </Panel>
+        </div>
       </div>
     </>
   );

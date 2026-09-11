@@ -9,7 +9,7 @@ test.describe("admin journey", () => {
     // Vitest component tests).
     page.on("dialog", (d) => void d.accept());
     await loginAs(context, page, seeds.admin, "/admin");
-    await expect(page.getByRole("heading", { name: "Admin — Employees" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Admin", exact: true })).toBeVisible();
 
     const email = `e2e-${Date.now()}@foap.test`;
     await page.getByLabel("New employee email").fill(email);
@@ -42,7 +42,7 @@ test.describe("admin journey", () => {
     // gate settles through a loading state first (same strict assertions).
     await loginAs(context, page, seeds.admin, "/", false);
     await expect(page.getByRole("heading", { name: "Welcome Back" })).toBeVisible({ timeout: 20000 });
-    await expect(page.getByRole("link", { name: "Overview" })).toHaveCount(0, { timeout: 15000 });
+    await expect(page.getByRole("link", { name: "Dashboard" })).toHaveCount(0, { timeout: 15000 });
     await expect(page.getByRole("button", { name: /Switch to/ })).toHaveCount(0, { timeout: 15000 });
   });
 
@@ -56,6 +56,7 @@ test.describe("admin journey", () => {
     await expect(page.getByText("Ada L").first()).toBeVisible();
     // Admin tab is gone: authorization follows the new account, not the old.
     await expect(page.getByRole("link", { name: "Admin" })).toHaveCount(0);
-    await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+    // Approved Dashboard greets by daypart: "Good Morning, Ada".
+    await expect(page.getByRole("heading", { name: /Good (Morning|Afternoon|Evening),/ })).toBeVisible();
   });
 });

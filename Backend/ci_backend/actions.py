@@ -509,6 +509,22 @@ def build_creatives_list(conn, q):
         ad_rows = [dict(zip(ad_cols, v)) for v in conn.execute(
             "SELECT * FROM ads WHERE creative_key=?",
             (r["creative_key"],)).fetchall()]
+        # Annotation axes (hook_type, creator_vs_branded) live on the
+        # creative, not the ad rows: stamp them before cohort matching
+        # so those filters constrain instead of hiding everything.
+        ann_row = conn.execute(
+            "SELECT annotation_json FROM annotations WHERE creative_key=?",
+            (r["creative_key"],)).fetchone()
+        if ann_row:
+            import json as _json_ann
+            try:
+                _ann = _json_ann.loads(ann_row[0])
+            except ValueError:
+                _ann = {}
+            for ad in ad_rows:
+                ad.setdefault("hook_type", _ann.get("hook_type", "") or "")
+                ad.setdefault("creator_vs_branded",
+                              _ann.get("creator_vs_branded", "") or "")
         # Cohort-correct metrics: only rows passing the
         # shared scope feed the KPI aggregation (a Spain
         # filter must never show France-blended CPA; a
@@ -531,6 +547,9 @@ def build_creatives_list(conn, q):
         rev = sum(v["revenue"] for v in agg_rows)
         r["campaigns"] = sorted({v["campaign"] for v in agg_rows
                                  if v["campaign"]})
+        # Most common format across the creative's rows ("" when none).
+        _fmts = [v.get("format") or "" for v in agg_rows]
+        r["format"] = max(set(_fmts), key=_fmts.count) if _fmts else ""
         # A14/A15: same pooled contract as benchmarks.kpis_for_rows
         # (currency metadata, mixed-scope money gating,
         # matched-population ROAS, registry vtr/view_rate split).
@@ -753,6 +772,183 @@ def load_fixtures(db_path):
         payload = {"creative_key": key}
         apply_action(conn, "pipeline", payload, prov)
         replay.log(conn, "pipeline", payload)
+    conn.close()
+    return total
+
+
+# ---------------------------------------------------------------------------
+# Synthetic demo dataset (clearly marked source="demo", never real data).
+# ---------------------------------------------------------------------------
+
+_DEMO_CAMPAIGNS = (
+    # name, client, platforms+share, vertical, market, weight, objective
+    ("Spring Skincare Launch", "GlowNaturally",
+     (("meta", 0.55), ("tiktok", 0.45)), "Beauty", "UK", 0.16, "Conversions"),
+    ("Built For Real Life", "Everyday Essentials",
+     (("meta", 0.6), ("tiktok", 0.4)), "Consumer Goods", "Australia", 0.13, "Conversions"),
+    ("Everyday Energy", "VitaWell",
+     (("tiktok", 1.0),), "Wellness", "US", 0.12, "Traffic"),
+    ("Adventure Awaits", "TrailNorth",
+     (("meta", 0.5), ("tiktok", 0.5)), "Travel", "Canada", 0.11, "Conversions"),
+    ("Your Routine Simplified", "WellnessCo",
+     (("meta", 1.0),), "Wellness", "UK", 0.10, "Leads"),
+    ("Better Coffee Mornings", "Morning Brew Co",
+     (("tiktok", 0.6), ("meta", 0.4)), "Food & Beverage", "Australia", 0.10, "Conversions"),
+    ("Move More", "Motion",
+     (("tiktok", 0.55), ("meta", 0.45)), "Fitness", "US", 0.09, "Traffic"),
+    ("Smarter Home Living", "Nook",
+     (("meta", 0.6), ("tiktok", 0.4)), "Technology", "Germany", 0.08, "Conversions"),
+    ("Everyday Style", "Thread",
+     (("meta", 0.5), ("tiktok", 0.5)), "Fashion", "France", 0.06, "Conversions"),
+    ("Discover Something New", "Wander",
+     (("tiktok", 0.6), ("meta", 0.4)), "Travel", "Singapore", 0.05, "Traffic"),
+)
+
+_DEMO_CREATIVES = (
+    # key, display name, campaign, platform, format, secs, hook, modality,
+    # style, creator mode, brand_first_s, product_first_s
+    ("demo-glowskin-01", "Glowing Skin Made Easy", "Spring Skincare Launch",
+     "tiktok", "9:16 Video", 18, "question", "spoken", "ugc", "creator", 3.0, 2.0),
+    ("demo-reallife-01", "Built For Real Life", "Built For Real Life",
+     "meta", "4:5 Video", 25, "story", "spoken", "testimonial", "creator", 5.0, 8.0),
+    ("demo-energy-01", "Morning Routine", "Everyday Energy",
+     "tiktok", "9:16 Video", 15, "demo_open", "visual", "product_demo", "creator", 4.0, 1.5),
+    ("demo-trail-01", "Problem / Solution", "Adventure Awaits",
+     "meta", "16:9 Video", 30, "pattern_interrupt", "visual", "cinematic", "branded", 2.0, 6.0),
+    ("demo-routine-01", "Creator Testimonial", "Your Routine Simplified",
+     "meta", "1:1 Video", 22, "social_proof", "spoken", "talking_head", "creator", 6.0, 4.0),
+    ("demo-coffee-01", "Quick Product Demo", "Better Coffee Mornings",
+     "tiktok", "9:16 Video", 12, "demo_open", "text", "product_demo", "hybrid", 3.5, 1.0),
+    ("demo-move-01", "Three Reasons Why", "Move More",
+     "tiktok", "9:16 Video", 20, "bold_claim", "spoken", "montage", "creator", 5.0, 3.0),
+    ("demo-nook-01", "Before & After", "Smarter Home Living",
+     "meta", "16:9 Video", 28, "pattern_interrupt", "visual", "product_demo", "branded", 4.0, 7.0),
+    ("demo-thread-01", "Everyday Use Case", "Everyday Style",
+     "meta", "4:5 Video", 16, "story", "visual", "ugc", "hybrid", 5.5, 2.5),
+    ("demo-wander-01", "Limited-Time Offer", "Discover Something New",
+     "tiktok", "9:16 Video", 14, "offer", "text", "montage", "creator", 2.5, 2.0),
+)
+
+_DEMO_DAYS = 120
+# Approximate reference-scale totals across the full window.
+_DEMO_TOTALS = {"impressions": 125_400_000, "clicks": 1_800_000,
+                "spend": 412_600.0, "revenue": 1_485_000.0}
+# Linear growth slopes (fraction of start volume per full window) tuned
+# so second-half vs first-half comparisons read roughly: impressions
+# +24%, clicks +32%, spend +12%, revenue +43% (ROAS about +28%).
+_DEMO_RAMPS = {"impressions": 0.545, "clicks": 0.73, "spend": 0.27,
+               "revenue": 0.98}
+# The ramp lifts the window mean by (1 + slope / 2); divide it back out
+# so the totals above are what the backend actually aggregates.
+_DEMO_MEAN = {m: 1.0 + s / 2.0 for m, s in _DEMO_RAMPS.items()}
+
+
+def _demo_annotation(spec):
+    """Valid v0 annotation for a demo creative (human_verified demo labels)."""
+    (key, _name, _camp, _plat, _fmt, secs, hook, modality, style,
+     mode, brand_s, product_s) = spec
+    ann = creative.blank_annotation()
+    ann.update({"hook_type": hook, "hook_modality": modality,
+                "hook_confidence": 0.9, "creator_vs_branded": mode,
+                "creator_confidence": 0.9, "edit_style": style,
+                "edit_confidence": 0.85, "duration_s": float(secs),
+                "pace_cuts_per_min": 8.0, "status": "human_verified",
+                "brand_seconds": [{"start_s": brand_s,
+                                   "end_s": round(brand_s + 2.0, 1)}],
+                "product_seconds": [{"start_s": product_s,
+                                     "end_s": round(product_s + 3.0, 1)}],
+                "logo_seconds": [{"start_s": round(brand_s + 0.5, 1),
+                                  "end_s": round(brand_s + 1.5, 1)}]})
+    hook_end = min(3.0, secs)
+    ann["structure"] = {
+        slot: {"start_s": 0.0, "end_s": hook_end if slot == "hook" else float(secs),
+               "confidence": 0.9}
+        for slot in creative.STRUCTURE_SLOTS}
+    return ann
+
+
+def _demo_retention_points(secs):
+    """Plausible decaying retention curve for a demo creative."""
+    import math as _math
+    steps = 8
+    return [(round(secs * i / (steps - 1), 1),
+             round(100.0 * _math.exp(-2.2 * i / (steps - 1)), 1))
+            for i in range(steps)]
+
+
+def load_demo_dataset(db_path):
+    """Seed the synthetic demo dataset (source="demo").
+
+    Ten campaigns and ten annotated creatives with ~120 days of daily
+    rows ending yesterday, so charts, benchmarks, comparisons and
+    KpiTrend all compute from real seeded rows. Ingest upserts, so a
+    repeated load inserts nothing new; annotations upsert by key.
+    Returns the number of rows inserted on this call.
+    """
+    import csv as _csv
+    import datetime as _dt
+    import io as _io
+    import random as _random
+
+    conn = connect(db_path)
+    prov = providers.Providers()
+    rng = _random.Random(20260911)
+    end = _dt.date.today() - _dt.timedelta(days=1)
+    days = [_dt.date.toordinal(end) - (_DEMO_DAYS - 1 - i)
+            for i in range(_DEMO_DAYS)]
+    day_iso = [_dt.date.fromordinal(o).isoformat() for o in days]
+
+    header = ["Campaign", "Ad Name", "Creative Key", "Client", "Project",
+              "Vertical", "Market", "Objective", "Funnel Stage", "Date",
+              "Spend", "Impressions", "Clicks", "Conversions",
+              "Video Views", "Revenue", "Creative Format", "Campaign Id"]
+    total = 0
+    for platform in ("meta", "tiktok"):
+        buf = _io.StringIO()
+        writer = _csv.writer(buf)
+        writer.writerow(header)
+        for day_i, iso in enumerate(day_iso):
+            t = day_i / (_DEMO_DAYS - 1)
+            for ci, camp in enumerate(_DEMO_CAMPAIGNS):
+                (name, client, plats, vertical, market, weight,
+                 objective) = camp
+                share = dict(plats).get(platform)
+                if not share:
+                    continue
+                impr = (_DEMO_TOTALS["impressions"] * weight * share
+                        / _DEMO_DAYS / _DEMO_MEAN["impressions"]
+                        * (1.0 + _DEMO_RAMPS["impressions"] * t))
+                impr *= 1.0 + rng.uniform(-0.15, 0.15)
+                clicks = (_DEMO_TOTALS["clicks"] * weight * share
+                          / _DEMO_DAYS / _DEMO_MEAN["clicks"]
+                          * (1.0 + _DEMO_RAMPS["clicks"] * t))
+                clicks *= 1.0 + rng.uniform(-0.15, 0.15)
+                spend = (_DEMO_TOTALS["spend"] * weight * share
+                         / _DEMO_DAYS / _DEMO_MEAN["spend"]
+                         * (1.0 + _DEMO_RAMPS["spend"] * t))
+                spend *= 1.0 + rng.uniform(-0.12, 0.12)
+                revenue = (_DEMO_TOTALS["revenue"] * weight * share
+                           / _DEMO_DAYS / _DEMO_MEAN["revenue"]
+                           * (1.0 + _DEMO_RAMPS["revenue"] * t))
+                revenue *= 1.0 + rng.uniform(-0.15, 0.15)
+                conv = clicks * 0.02 * (1.0 + rng.uniform(-0.1, 0.1))
+                views = impr * 0.35 * (1.0 + rng.uniform(-0.1, 0.1))
+                spec = _DEMO_CREATIVES[ci]
+                writer.writerow([
+                    name, spec[1], spec[0], client, client + " FY26",
+                    vertical, market, objective, "Lower", iso,
+                    round(spend, 2), int(impr), int(clicks), round(conv, 1),
+                    int(views), round(revenue, 2), spec[4],
+                    "DEMO-%02d" % (ci + 1)])
+        payload = {"platform": platform, "source": "demo",
+                   "csv": buf.getvalue()}
+        total += apply_action(conn, "ingest", payload, prov)["inserted"]
+    for spec in _DEMO_CREATIVES:
+        creative.save_annotation(conn, spec[0], _demo_annotation(spec))
+        apply_action(conn, "retention",
+                     {"creative_key": spec[0],
+                      "points": _demo_retention_points(spec[5])}, prov)
+    conn.commit()
     conn.close()
     return total
 

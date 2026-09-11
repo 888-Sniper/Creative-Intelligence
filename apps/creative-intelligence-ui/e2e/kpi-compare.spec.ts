@@ -43,6 +43,18 @@ test.describe("kpi period comparison", () => {
     // Keyboard: focus opens, Escape closes.
     await info.focus();
     await expect(page.getByRole("tooltip")).toBeVisible();
+    // Anchored to the info icon itself: the popup sits ~6px above
+    // the button, centered on it — never over the arrow/percentage.
+    const tipBox = await page.getByRole("tooltip").boundingBox();
+    const btnBox = await info.boundingBox();
+    expect(tipBox).not.toBeNull();
+    expect(btnBox).not.toBeNull();
+    const gap = btnBox!.y - tipBox!.y - tipBox!.height;
+    expect(gap).toBeGreaterThanOrEqual(3);
+    expect(gap).toBeLessThanOrEqual(12);
+    const tipCenter = tipBox!.x + tipBox!.width / 2;
+    const btnCenter = btnBox!.x + btnBox!.width / 2;
+    expect(Math.abs(tipCenter - btnCenter)).toBeLessThanOrEqual(4);
     await page.keyboard.press("Escape");
     await expect(page.getByRole("tooltip")).toHaveCount(0);
 

@@ -100,6 +100,18 @@ describe("KpiTrend", () => {
     expect(container.textContent).not.toMatch(/Infinity|NaN/);
   });
 
+  it("anchors the tooltip to the info button, not the trend row", () => {
+    const { container } = render(<KpiTrend metricLabel="Impressions" comparison={comp({})} previous={PREV} />);
+    const btn = screen.getByRole("button", { name: "Explain Comparison Period" });
+    // Button and popup share a positioned anchor wrapper so every tab
+    // inherits identical icon-relative placement with no tab CSS.
+    const anchor = btn.parentElement;
+    expect(anchor?.className).toContain("trend-tooltip-anchor");
+    expect(container.querySelector(".kpi-trend")?.contains(anchor)).toBe(true);
+    fireEvent.focus(btn);
+    expect(anchor?.querySelector('[role="tooltip"]')).not.toBeNull();
+  });
+
   it("exposes an accessible info control that opens on focus", () => {
     render(<KpiTrend metricLabel="Impressions" comparison={comp({})} previous={PREV} />);
     const btn = screen.getByRole("button", { name: "Explain Comparison Period" });

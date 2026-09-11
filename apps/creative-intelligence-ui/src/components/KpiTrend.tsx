@@ -69,39 +69,66 @@ export function KpiTrend({ metricLabel, comparison, previous }: KpiTrendProps) {
   const [pinned, setPinned] = useState(false);
   const visible = open || pinned;
   const wrapRef = useRef<HTMLSpanElement | null>(null);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
   const tipRef = useRef<HTMLSpanElement | null>(null);
   const tipId = useId();
   const { state, direction, sentiment, percent_change: pct } = comparison;
 
-  // Small screens render the tooltip fixed: pin it to the trigger in
-  // viewport coordinates (flipping above the trigger near the bottom
-  // edge). Plain `top: auto` would resolve against the document and
-  // can leave the tooltip far off-screen. Reposition on scroll/resize
-  // while open: mobile browsers scroll on focus, which can otherwise
-  // strand the tooltip at stale coordinates.
+  // Positioning is anchored to the info button itself (buttonRef),
+  // never the whole trend row. Desktop is pure CSS (above the icon,
+  // centered, 6px gap) with JS collision handling for viewport edges
+  // and short viewports. Small screens render the tooltip fixed: pin
+  // it to the button in viewport coordinates (flipping above the
+  // button near the bottom edge). Reposition on scroll/resize while
+  // open: mobile browsers scroll on focus, which can otherwise strand
+  // the tooltip at stale coordinates.
   useEffect(() => {
-    if (!visible || !wrapRef.current || !tipRef.current) return;
-    if (window.innerWidth > 900) return;
-    const place = () => {
-      const anchor = wrapRef.current?.getBoundingClientRect();
-      const tip = tipRef.current;
-      if (!anchor || !tip) return;
-      const height = tip.offsetHeight;
-      let top = anchor.bottom + 6;
-      if (top + height > window.innerHeight - 8) {
-        top = Math.max(8, anchor.top - height - 6);
+    if (!visible || !tipRef.current) return;
+    const tip = tipRef.current;
+    if (window.innerWidth <= 900) {
+      const place = () => {
+        const anchor = buttonRef.current?.getBoundingClientRect();
+        if (!anchor) return;
+        const height = tip.offsetHeight;
+        let top = anchor.bottom + 6;
+        if (top + height > window.innerHeight - 8) {
+          top = Math.max(8, anchor.top - height - 6);
+        }
+        tip.style.top = `${Math.round(top)}px`;
+      };
+      place();
+      const raf = requestAnimationFrame(place);
+      window.addEventListener("scroll", place, { passive: true, capture: true });
+      window.addEventListener("resize", place);
+      return () => {
+        cancelAnimationFrame(raf);
+        window.removeEventListener("scroll", place, { capture: true });
+        window.removeEventListener("resize", place);
+      };
+    }
+    // Desktop: the tooltip moves with the page (absolute), so only
+    // viewport-edge collisions need correcting. Never tab-specific:
+    // everything lives in this shared component.
+    tip.style.top = "";
+    const adjust = () => {
+      const anchor = buttonRef.current?.getBoundingClientRect();
+      if (!anchor) return;
+      const box = tip.getBoundingClientRect();
+      let shift = 0;
+      if (box.left < 8) shift = 8 - box.left;
+      else if (box.right > window.innerWidth - 8) {
+        shift = window.innerWidth - 8 - box.right;
       }
-      tip.style.top = `${Math.round(top)}px`;
+      tip.style.setProperty("--tip-shift", `${Math.round(shift)}px`);
+      // Flip below the icon when there is no room above.
+      tip.classList.toggle(
+        "tip-below",
+        anchor.top - tip.offsetHeight - 6 < 8,
+      );
     };
-    place();
-    const raf = requestAnimationFrame(place);
-    window.addEventListener("scroll", place, { passive: true, capture: true });
-    window.addEventListener("resize", place);
-    return () => {
-      cancelAnimationFrame(raf);
-      window.removeEventListener("scroll", place, { capture: true });
-      window.removeEventListener("resize", place);
-    };
+    adjust();
+    window.addEventListener("resize", adjust);
+    return () => window.removeEventListener("resize", adjust);
   }, [visible ]);
 
   useEffect(() => {
@@ -165,41 +192,44 @@ export function KpiTrend({ metricLabel, comparison, previous }: KpiTrendProps) {
     >
       <span aria-hidden="true">{state === "new" ? null : ARROWS[direction]}</span>
       <span>{shown}</span>
-      <button
-        type="button"
-        className="trend-info"
-        aria-label="Explain Comparison Period"
-        aria-expanded={visible}
-        aria-describedby={visible ? tipId : undefined}
-        onClick={(e) => {
-          // Keyboard-activated clicks (Enter/Space) carry detail 0:
-          // leave the transient focus behavior alone. A real pointer
-          // tap/click pins the tooltip open independently of focus, so
-          // a later focus change on touch devices cannot close it; a
-          // second tap unpins.
-          if (e.detail === 0) return;
-          if (pinned) {
-            setPinned(false);
-            setOpen(false);
-          } else {
-            setPinned(true);
-            setOpen(true);
-          }
-        }}
-        onFocus={() => setOpen(true)}
-        onBlur={() => {
-          // Blur only closes a transient focus tooltip, never a
-          // touch/click-pinned one.
-          if (!pinned) setOpen(false);
-        }}
-      >
-        <span aria-hidden="true">i</span>
-      </button>
-      {visible ? (
-        <span role="tooltip" id={tipId} className="kpi-tip" ref={tipRef}>
-          {tip}
-        </span>
-      ) : null}
+      <span className="trend-tooltip-anchor">
+        <button
+          type="button"
+          ref={buttonRef}
+          className="trend-info"
+          aria-label="Explain Comparison Period"
+          aria-expanded={visible}
+          aria-describedby={visible ? tipId : undefined}
+          onClick={(e) => {
+            // Keyboard-activated clicks (Enter/Space) carry detail 0:
+            // leave the transient focus behavior alone. A real pointer
+            // tap/click pins the tooltip open independently of focus, so
+            // a later focus change on touch devices cannot close it; a
+            // second tap unpins.
+            if (e.detail === 0) return;
+            if (pinned) {
+              setPinned(false);
+              setOpen(false);
+            } else {
+              setPinned(true);
+              setOpen(true);
+            }
+          }}
+          onFocus={() => setOpen(true)}
+          onBlur={() => {
+            // Blur only closes a transient focus tooltip, never a
+            // touch/click-pinned one.
+            if (!pinned) setOpen(false);
+          }}
+        >
+          <span aria-hidden="true">i</span>
+        </button>
+        {visible ? (
+          <span role="tooltip" id={tipId} className="kpi-tip" ref={tipRef}>
+            {tip}
+          </span>
+        ) : null}
+      </span>
     </span>
   );
 }

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { FilterProvider } from "@/state/FilterContext";
 import { AnalystPage, scopeBody } from "@/pages/AnalystPage";
 
@@ -201,6 +201,73 @@ describe("AnalystPage", () => {
       expect(JSON.parse(String(call?.[1]?.body))).toEqual({
         status: "accepted",
       });
+    });
+  });
+
+  it("drops a late answer from the previous account after identity change", async () => {
+    // A07: Account A asks, the identity flips to B mid-flight, then
+    // A's answer resolves. It must never render under B.
+    let resolveAsk!: (value: Response) => void;
+    const askGate = new Promise<Response>((resolve) => {
+      resolveAsk = resolve;
+    });
+    window.fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith("/api/analyst/conversations") && (!init || init.method === "GET")) {
+        return Response.json({ conversations: [] });
+      }
+      if (url.startsWith("/api/analyst/ask")) return askGate;
+      return Response.json({ error: "not found" }, { status: 404 });
+    }) as unknown as typeof fetch;
+    const { rerender } = render(
+      <FilterProvider>
+        <AnalystPage accountKey="emp-A" />
+      </FilterProvider>,
+    );
+    fireEvent.change(screen.getByLabelText("Ask Foap Analyst"), {
+      target: { value: "hook rate for each creative" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Ask" }));
+    await waitFor(() => {
+      const fetchMock = window.fetch as unknown as ReturnType<typeof vi.fn>;
+      expect(fetchMock.mock.calls.some((c) => String(c[0]).startsWith("/api/analyst/ask"))).toBe(true);
+    });
+    rerender(
+      <FilterProvider>
+        <AnalystPage accountKey="emp-B" />
+      </FilterProvider>,
+    );
+    resolveAsk(Response.json(askPayload));
+    // Flush the whole late-response chain: without the accountKey
+    // guard the stale answer would render here and fail the test.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    expect(screen.queryByText("Hook rate: A 30%, B 12%.")).toBeNull();
+    expect(screen.queryByText("hook rate for each creative")).toBeNull();
+  });
+
+  it("clears chat state when the account key changes", async () => {
+    mockFetch();
+    const { rerender } = render(
+      <FilterProvider>
+        <AnalystPage accountKey="emp-A" />
+      </FilterProvider>,
+    );
+    fireEvent.change(screen.getByLabelText("Ask Foap Analyst"), {
+      target: { value: "hook rate for each creative, goal was reach" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Ask" }));
+    await waitFor(() => {
+      expect(screen.getByText("Hook rate: A 30%, B 12%.")).toBeDefined();
+    });
+    rerender(
+      <FilterProvider>
+        <AnalystPage accountKey="emp-B" />
+      </FilterProvider>,
+    );
+    await waitFor(() => {
+      expect(screen.queryByText("Hook rate: A 30%, B 12%.")).toBeNull();
     });
   });
 });

@@ -32,7 +32,7 @@ export function Avatar({ url, label }: { url: string; label: string }) {
  *  GET /api/auth/me afterwards; nothing is inherited from the previous
  *  account (item 19). */
 export function AccountMenu() {
-  const { me, refresh, logout } = useAuth();
+  const { me, switching, switchAccount, logout } = useAuth();
   const [accounts, setAccounts] = useState<StoredAccount[] | null>(null);
   const [error, setError] = useState("");
   const employee = me?.employee;
@@ -54,11 +54,13 @@ export function AccountMenu() {
   if (!employee) return null;
   const name = `${employee.first_name} ${employee.last_name}`.trim() || employee.email;
 
+  // A07: switching goes through the provider's dedicated switching
+  // state (gate hides protected content, stale refreshes rejected,
+  // pages remount by employee id). Nothing is inherited locally.
   const switchTo = async (employeeId: string) => {
     setError("");
     try {
-      await api("POST", "/api/auth/switch", { employee_id: employeeId });
-      await refresh();
+      await switchAccount(employeeId);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Switch failed.");
     }
@@ -84,7 +86,7 @@ export function AccountMenu() {
             .filter((a) => a.employee_id !== employee.id)
             .map((a) => (
               <li key={a.employee_id}>
-                <button type="button" className="link-btn" onClick={() => void switchTo(a.employee_id)}>
+                <button type="button" className="link-btn" disabled={switching} onClick={() => void switchTo(a.employee_id)}>
                   Switch to {`${a.first_name} ${a.last_name}`.trim() || a.email}
                 </button>{" "}
                 <span className="muted">

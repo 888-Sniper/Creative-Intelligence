@@ -32,6 +32,7 @@ export type AuthStatus =
   | "INITIALISING"
   | "SIGNED_OUT"
   | "AUTHENTICATING"
+  | "SWITCHING"
   | "PENDING"
   | "SUSPENDED"
   | "REVOKED"

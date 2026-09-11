@@ -19,6 +19,17 @@ export function AuthGate({ children }: { children: ReactNode }) {
           </div>
         </div>
       );
+    // A07: while the account switch is in flight, no protected
+    // content from either account is rendered.
+    case "SWITCHING":
+      return (
+        <div id="auth-screen">
+          <div className="auth-card">
+            <h1>Creative Intelligence</h1>
+            <p className="muted" role="status">Switching accounts…</p>
+          </div>
+        </div>
+      );
     case "SIGNED_OUT":
       return <LoginPage />;
     case "PENDING":

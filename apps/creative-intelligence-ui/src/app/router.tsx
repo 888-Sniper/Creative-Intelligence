@@ -22,11 +22,27 @@ function AdminOnly({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
+/** A07: the Analyst page partitions in-flight and stored chat state by
+ *  the signed-in employee, so late responses from the previous
+ *  account are dropped instead of rendered under the new identity. */
+function AnalystRoute() {
+  const { me } = useAuth();
+  return <AnalystPage accountKey={me?.employee?.id ?? ""} />;
+}
+
+/** A07: the protected tree remounts whenever the signed-in employee
+ *  changes, so no account-specific component state (Analyst
+ *  conversations, filters, drafts) can survive an account switch. */
+function KeyedLayout() {
+  const { me } = useAuth();
+  return <AppLayout key={me?.employee?.id ?? "signed-out"} />;
+}
+
 export const router = createBrowserRouter([
   {
     element: (
       <AuthGate>
-        <AppLayout />
+        <KeyedLayout />
       </AuthGate>
     ),
     children: [
@@ -34,7 +50,7 @@ export const router = createBrowserRouter([
       { path: "campaigns", element: <CampaignsPage /> },
       { path: "creatives", element: <CreativesPage /> },
       { path: "compare", element: <ComparePage /> },
-      { path: "analyst", element: <AnalystPage /> },
+      { path: "analyst", element: <AnalystRoute /> },
       { path: "benchmarks", element: <BenchmarksPage /> },
       { path: "reports", element: <ReportsPage /> },
       { path: "profile", element: <ProfilePage /> },

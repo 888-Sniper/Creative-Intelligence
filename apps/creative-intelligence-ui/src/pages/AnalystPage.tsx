@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/api/client";
 import { useFilters } from "@/state/FilterContext";
 
@@ -92,11 +92,16 @@ function fmtScope(scope?: Record<string, unknown>): string {
   return parts.join(" · ");
 }
 
-export function AnalystPage() {
+export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
   const { filters, scope } = useFilters();
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  // A07: identity generation for every in-flight analyst request.
+  // Late responses carrying the previous account's key are dropped
+  // instead of rendering Account A's content under Account B.
+  const accountRef = useRef(accountKey);
+  accountRef.current = accountKey;
   const [input, setInput] = useState("");
   const [objective, setObjective] = useState(filters.objective || "reach");
   const [locale, setLocale] = useState("auto");
@@ -109,11 +114,13 @@ export function AnalystPage() {
   const [datasetVersion, setDatasetVersion] = useState<string | null>(null);
 
   const loadConversations = useCallback(async () => {
+    const key = accountRef.current;
     try {
       const data = await api<{ conversations: ConversationSummary[] }>(
         "GET",
         "/api/analyst/conversations",
       );
+      if (key !== accountRef.current) return;
       setConversations(data.conversations ?? []);
     } catch {
       /* sidebar is optional; chat still works */
@@ -124,16 +131,34 @@ export function AnalystPage() {
     void loadConversations();
   }, [loadConversations]);
 
+  // A07: even if a remount is skipped, changing identity clears all
+  // account-specific chat state before reloading. busy resets too:
+  // the in-flight request's finally-block stands down because its
+  // key no longer matches.
+  useEffect(() => {
+    setConversations([]);
+    setActiveId(null);
+    setMessages([]);
+    setError(null);
+    setLastScope("");
+    setDatasetVersion(null);
+    setBusy(false);
+    void loadConversations();
+  }, [accountKey, loadConversations]);
+
   async function startConversation() {
     setError(null);
+    const key = accountRef.current;
     try {
       const data = await api<{ id: string }>("POST", "/api/analyst/conversations", {
         objective: objective || undefined,
       });
+      if (key !== accountRef.current) return;
       setActiveId(data.id);
       setMessages([]);
       await loadConversations();
     } catch (e) {
+      if (key !== accountRef.current) return;
       setError(e instanceof Error ? e.message : "Could not start a conversation");
     }
   }
@@ -141,6 +166,9 @@ export function AnalystPage() {
   async function send(maxPoints?: number) {
     const question = input.trim();
     if (!question || busy) return;
+    // A07: stamp the owning identity; a late answer from the previous
+    // account is dropped instead of rendered under the new one.
+    const key = accountRef.current;
     setBusy(true);
     setError(null);
     setMessages((prev) => [...prev, { role: "user", text: question }]);
@@ -154,6 +182,7 @@ export function AnalystPage() {
         language,
         max_points: maxPoints,
       });
+      if (key !== accountRef.current) return;
       if (!activeId) setActiveId(data.conversation_id);
       setLastScope(fmtScope(data.scope_snapshot));
       setDatasetVersion(data.dataset_version ?? null);
@@ -163,9 +192,10 @@ export function AnalystPage() {
       ]);
       await loadConversations();
     } catch (e) {
+      if (key !== accountRef.current) return;
       setError(e instanceof Error ? e.message : "Analyst request failed");
     } finally {
-      setBusy(false);
+      if (key === accountRef.current) setBusy(false);
     }
   }
 
@@ -213,10 +243,12 @@ export function AnalystPage() {
 
   async function decideFinding(findingId: string, decision: "accepted" | "rejected") {
     setError(null);
+    const key = accountRef.current;
     try {
       await api("POST", `/api/analyst/findings/${encodeURIComponent(findingId)}`, {
         status: decision,
       });
+      if (key !== accountRef.current) return;
       setMessages((prev) =>
         prev.map((m) =>
           m.answer?.findings_stored
@@ -233,6 +265,7 @@ export function AnalystPage() {
         ),
       );
     } catch (e) {
+      if (key !== accountRef.current) return;
       setError(e instanceof Error ? e.message : "Could not save the decision");
     }
   }

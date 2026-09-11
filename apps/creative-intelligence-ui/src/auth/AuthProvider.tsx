@@ -8,7 +8,9 @@ import { statusForMe } from "@/types/auth";
 interface AuthContextValue {
   status: AuthStatus;
   me: MeResponse | null;
+  switching: boolean;
   refresh: () => Promise<void>;
+  switchAccount: (employeeId: string) => Promise<void>;
   oauthStart: (provider: string) => Promise<void>;
   emailSignIn: (email: string, password: string) => Promise<void>;
   emailCodeSend: (email: string) => Promise<string>;
@@ -29,6 +31,11 @@ async function fetchMe(): Promise<MeResponse> {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [me, setMe] = useState<MeResponse | null>(null);
   const [authenticating, setAuthenticating] = useState(false);
+  const [switching, setSwitching] = useState(false);
+  // Monotonic refresh generation: only the latest /me resolution may
+  // apply, so a slow pre-switch response can never clobber the
+  // post-switch identity (A07).
+  const refreshSeq = useRef(0);
   // Employee id the container bind was last attempted for (item 18).
   const bindTriedFor = useRef<string | null>(null);
   // Set when the container bind is refused: this browser is foreign to the
@@ -37,17 +44,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const bindRefused = useRef(false);
 
   const refresh = useCallback(async () => {
+    const seq = ++refreshSeq.current;
+    const apply = (next: MeResponse) => {
+      if (seq === refreshSeq.current) setMe(next);
+    };
     try {
       const res = await fetchMe();
       if (bindRefused.current && res.authenticated) {
-        setMe({ authenticated: false, gate: "login", employee: null, is_admin: false, message: "", workos_configured: res.workos_configured });
+        apply({ authenticated: false, gate: "login", employee: null, is_admin: false, message: "", workos_configured: res.workos_configured });
       } else {
-        setMe(res);
+        apply(res);
       }
     } catch {
-      setMe({ authenticated: false, gate: "login", employee: null, is_admin: false, message: "", workos_configured: false });
+      apply({ authenticated: false, gate: "login", employee: null, is_admin: false, message: "", workos_configured: false });
     }
   }, []);
+
+  // Account switch with a dedicated switching state (A07). While
+  // switching is true the gate hides protected content, and the
+  // generation bump below invalidates every in-flight pre-switch
+  // refresh so late responses cannot resurrect the old identity.
+  // Pages additionally remount by employee id (router) and reject
+  // late account-stale payloads (AnalystPage accountKey).
+  const switchAccount = useCallback(
+    async (employeeId: string) => {
+      setSwitching(true);
+      refreshSeq.current++;
+      try {
+        await api("POST", "/api/auth/switch", { employee_id: employeeId });
+        await refresh();
+      } finally {
+        setSwitching(false);
+      }
+    },
+    [refresh],
+  );
 
   useEffect(() => {
     void refresh();
@@ -90,8 +121,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const status: AuthStatus = useMemo(() => {
     if (me === null) return "INITIALISING";
     if (authenticating) return "AUTHENTICATING";
+    if (switching) return "SWITCHING";
     return statusForMe(me);
-  }, [me, authenticating]);
+  }, [me, authenticating, switching]);
 
   const oauthStart = useCallback(async (provider: string) => {
     setAuthenticating(true);
@@ -171,8 +203,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   const value = useMemo(
-    () => ({ status, me, refresh, oauthStart, emailSignIn, emailCodeSend, emailCodeSignIn, emailReset, logout }),
-    [status, me, refresh, oauthStart, emailSignIn, emailCodeSend, emailCodeSignIn, emailReset, logout],
+    () => ({ status, me, switching, refresh, switchAccount, oauthStart, emailSignIn, emailCodeSend, emailCodeSignIn, emailReset, logout }),
+    [status, me, switching, refresh, switchAccount, oauthStart, emailSignIn, emailCodeSend, emailCodeSignIn, emailReset, logout],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

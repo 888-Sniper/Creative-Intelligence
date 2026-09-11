@@ -1,6 +1,10 @@
 import { useAuth } from "@/auth/AuthProvider";
-import { OAuthButtons } from "@/auth/OAuthButton";
+import { EmployeeOAuthButtons } from "@/auth/OAuthButton";
 import { EmailSignIn } from "@/auth/EmailSignIn";
+
+// Brand single-source: served by the backend from Web/assets
+// (GET /foap-logo.png); never duplicated into the frontend tree.
+const FOAP_LOGO = "/foap-logo.png";
 
 const TITLES: Record<string, string> = {
   pending: "Access Pending",
@@ -29,6 +33,18 @@ export function AccessRevoked() {
   return <GateScreen gate="revoked" />;
 }
 
+/** Shared centred shell: Foap logo above the card on every auth screen. */
+function AuthShell({ children }: { children: React.ReactNode }) {
+  return (
+    <div id="auth-screen">
+      <div className="login-shell">
+        <img src={FOAP_LOGO} alt="Foap" className="login-logo" />
+        {children}
+      </div>
+    </div>
+  );
+}
+
 function GateScreen({ gate }: { gate: "pending" | "suspended" | "revoked" }) {
   const { me, refresh, logout } = useAuth();
   const employee = me?.employee;
@@ -37,7 +53,7 @@ function GateScreen({ gate }: { gate: "pending" | "suspended" | "revoked" }) {
     employee?.email ||
     "";
   return (
-    <div id="auth-screen">
+    <AuthShell>
       <div className="auth-card" role="alert">
         <h1>{TITLES[gate]}</h1>
         <p className="muted">{who}</p>
@@ -49,7 +65,7 @@ function GateScreen({ gate }: { gate: "pending" | "suspended" | "revoked" }) {
           Log Out
         </button>
       </div>
-    </div>
+    </AuthShell>
   );
 }
 
@@ -59,17 +75,25 @@ export function LoginPage() {
   const authError = params.get("auth_error") ?? "";
   if (authError) window.history.replaceState(null, "", window.location.pathname);
   return (
-    <div id="auth-screen">
-      <div className="auth-card">
-        <h1>Welcome To Creative Intelligence</h1>
-        <p className="muted">Sign In With Your Work Account To Continue.</p>
+    <AuthShell>
+      <div className="auth-card login-card">
+        <h1>Welcome Back</h1>
+        <p className="muted login-sub">Sign in to your employee workspace.</p>
         {authError ? <p className="muted">Sign-In Failed: {authError}</p> : null}
-        <OAuthButtons />
         <EmailSignIn />
+        <div className="login-separator" aria-hidden="true">
+          <span>Or continue with</span>
+        </div>
+        <div className="login-providers">
+          <EmployeeOAuthButtons />
+        </div>
+        <p className="muted login-footer">
+          <span aria-hidden="true">🔒</span> For Foap employees only.
+        </p>
         {me?.workos_configured === false ? (
           <p className="muted">WorkOS Is Not Configured On This Server Yet — Ask Your Administrator To Set It Up.</p>
         ) : null}
       </div>
-    </div>
+    </AuthShell>
   );
 }

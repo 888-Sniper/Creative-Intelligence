@@ -9,6 +9,10 @@ interface AuthContextValue {
   status: AuthStatus;
   me: MeResponse | null;
   switching: boolean;
+  // True while an explicit sign-in operation is in flight. The login
+  // card stays mounted (form disabled) so result messages land on a
+  // live component instead of being lost across an unmount.
+  authenticating: boolean;
   refresh: () => Promise<void>;
   switchAccount: (employeeId: string) => Promise<void>;
   oauthStart: (provider: string) => Promise<void>;
@@ -203,8 +207,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   const value = useMemo(
-    () => ({ status, me, switching, refresh, switchAccount, oauthStart, emailSignIn, emailCodeSend, emailCodeSignIn, emailReset, logout }),
-    [status, me, switching, refresh, switchAccount, oauthStart, emailSignIn, emailCodeSend, emailCodeSignIn, emailReset, logout],
+    () => ({ status, me, switching, authenticating, refresh, switchAccount, oauthStart, emailSignIn, emailCodeSend, emailCodeSignIn, emailReset, logout }),
+    [status, me, switching, authenticating, refresh, switchAccount, oauthStart, emailSignIn, emailCodeSend, emailCodeSignIn, emailReset, logout],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

@@ -41,7 +41,7 @@ test.describe("admin journey", () => {
     // Generous timeouts: CI runners boot the seeded backend slowly and the
     // gate settles through a loading state first (same strict assertions).
     await loginAs(context, page, seeds.admin, "/", false);
-    await expect(page.getByRole("heading", { name: "Welcome To Creative Intelligence" })).toBeVisible({ timeout: 20000 });
+    await expect(page.getByRole("heading", { name: "Welcome Back" })).toBeVisible({ timeout: 20000 });
     await expect(page.getByRole("link", { name: "Overview" })).toHaveCount(0, { timeout: 15000 });
     await expect(page.getByRole("button", { name: /Switch to/ })).toHaveCount(0, { timeout: 15000 });
   });

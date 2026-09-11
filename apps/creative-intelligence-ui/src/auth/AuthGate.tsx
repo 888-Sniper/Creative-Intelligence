@@ -9,13 +9,18 @@ import type { ReactNode } from "react";
 export function AuthGate({ children }: { children: ReactNode }) {
   const { status } = useAuth();
   switch (status) {
-    case "INITIALISING":
+    // An explicit sign-in keeps the login card mounted (busy) so
+    // success/error outcomes render instead of flashing a loader.
     case "AUTHENTICATING":
+      return <LoginPage />;
+    case "INITIALISING":
       return (
         <div id="auth-screen">
-          <div className="auth-card">
-            <h1>Creative Intelligence</h1>
-            <p className="muted" role="status">Checking Your Session…</p>
+          <div className="login-shell">
+            <img src="/foap-logo.png" alt="Foap" className="login-logo" />
+            <div className="auth-card">
+              <p className="muted" role="status">Checking Your Session…</p>
+            </div>
           </div>
         </div>
       );
@@ -24,9 +29,11 @@ export function AuthGate({ children }: { children: ReactNode }) {
     case "SWITCHING":
       return (
         <div id="auth-screen">
-          <div className="auth-card">
-            <h1>Creative Intelligence</h1>
-            <p className="muted" role="status">Switching Accounts…</p>
+          <div className="login-shell">
+            <img src="/foap-logo.png" alt="Foap" className="login-logo" />
+            <div className="auth-card">
+              <p className="muted" role="status">Switching Accounts…</p>
+            </div>
           </div>
         </div>
       );

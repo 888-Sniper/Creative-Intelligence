@@ -60,12 +60,16 @@ export interface KpiTrendProps {
  *  so no arrow ever appears without real comparison data behind it.
  */
 export function KpiTrend({ metricLabel, comparison, previous }: KpiTrendProps) {
+  // Transient hover/focus state.
   const [open, setOpen] = useState(false);
+  // Touch/click-pinned state, independent of focus: a tap pins the
+  // tooltip open so a later focus change on touch devices (which can
+  // follow the tap or a viewport adjustment) cannot close it. Only a
+  // second tap, an outside tap, or Escape unpins.
+  const [pinned, setPinned] = useState(false);
+  const visible = open || pinned;
   const wrapRef = useRef<HTMLSpanElement | null>(null);
   const tipRef = useRef<HTMLSpanElement | null>(null);
-  // A touch tap fires focus (which opens) immediately before click;
-  // without this flag the first tap would open-then-instantly-close.
-  const openedByFocus = useRef(false);
   const tipId = useId();
   const { state, direction, sentiment, percent_change: pct } = comparison;
 
@@ -76,7 +80,7 @@ export function KpiTrend({ metricLabel, comparison, previous }: KpiTrendProps) {
   // while open: mobile browsers scroll on focus, which can otherwise
   // strand the tooltip at stale coordinates.
   useEffect(() => {
-    if (!open || !wrapRef.current || !tipRef.current) return;
+    if (!visible || !wrapRef.current || !tipRef.current) return;
     if (window.innerWidth > 900) return;
     const place = () => {
       const anchor = wrapRef.current?.getBoundingClientRect();
@@ -98,17 +102,21 @@ export function KpiTrend({ metricLabel, comparison, previous }: KpiTrendProps) {
       window.removeEventListener("scroll", place, { capture: true });
       window.removeEventListener("resize", place);
     };
-  }, [open ]);
+  }, [visible ]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!visible) return;
     const onDown = (e: PointerEvent) => {
       if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setPinned(false);
         setOpen(false);
       }
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") {
+        setPinned(false);
+        setOpen(false);
+      }
     };
     document.addEventListener("pointerdown", onDown);
     document.addEventListener("keydown", onKey);
@@ -116,7 +124,7 @@ export function KpiTrend({ metricLabel, comparison, previous }: KpiTrendProps) {
       document.removeEventListener("pointerdown", onDown);
       document.removeEventListener("keydown", onKey);
     };
-  }, [open ]);
+  }, [visible ]);
 
   if (state === "none") return null;
   // Defense in depth: the backend sends null (never Infinity/NaN) for
@@ -150,7 +158,10 @@ export function KpiTrend({ metricLabel, comparison, previous }: KpiTrendProps) {
       className={`kpi-trend trend-${sentiment}`}
       ref={wrapRef}
       onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
+      onMouseLeave={() => {
+        // A pinned tooltip survives the pointer leaving.
+        if (!pinned) setOpen(false);
+      }}
     >
       <span aria-hidden="true">{state === "new" ? null : ARROWS[direction]}</span>
       <span>{shown}</span>
@@ -158,28 +169,33 @@ export function KpiTrend({ metricLabel, comparison, previous }: KpiTrendProps) {
         type="button"
         className="trend-info"
         aria-label="Explain Comparison Period"
-        aria-expanded={open}
-        aria-describedby={open ? tipId : undefined}
-        onClick={() => {
-          if (openedByFocus.current) {
-            openedByFocus.current = false;
+        aria-expanded={visible}
+        aria-describedby={visible ? tipId : undefined}
+        onClick={(e) => {
+          // Keyboard-activated clicks (Enter/Space) carry detail 0:
+          // leave the transient focus behavior alone. A real pointer
+          // tap/click pins the tooltip open independently of focus, so
+          // a later focus change on touch devices cannot close it; a
+          // second tap unpins.
+          if (e.detail === 0) return;
+          if (pinned) {
+            setPinned(false);
+            setOpen(false);
+          } else {
+            setPinned(true);
             setOpen(true);
-            return;
           }
-          setOpen((v) => !v);
         }}
-        onFocus={() => {
-          openedByFocus.current = true;
-          setOpen(true);
-        }}
+        onFocus={() => setOpen(true)}
         onBlur={() => {
-          openedByFocus.current = false;
-          setOpen(false);
+          // Blur only closes a transient focus tooltip, never a
+          // touch/click-pinned one.
+          if (!pinned) setOpen(false);
         }}
       >
         <span aria-hidden="true">i</span>
       </button>
-      {open ? (
+      {visible ? (
         <span role="tooltip" id={tipId} className="kpi-tip" ref={tipRef}>
           {tip}
         </span>

@@ -114,11 +114,13 @@ describe("KpiTrend", () => {
   it("toggles on click and closes on Escape", () => {
     render(<KpiTrend metricLabel="Impressions" comparison={comp({})} previous={PREV} />);
     const btn = screen.getByRole("button", { name: "Explain Comparison Period" });
-    fireEvent.click(btn);
+    // detail 1 marks a real pointer tap/click (keyboard activation
+    // carries detail 0 and leaves transient focus behavior alone).
+    fireEvent.click(btn, { detail: 1 });
     expect(screen.getByRole("tooltip")).toBeDefined();
-    fireEvent.click(btn);
+    fireEvent.click(btn, { detail: 1 });
     expect(screen.queryByRole("tooltip")).toBeNull();
-    fireEvent.click(btn);
+    fireEvent.click(btn, { detail: 1 });
     expect(screen.getByRole("tooltip")).toBeDefined();
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("tooltip")).toBeNull();
@@ -129,10 +131,35 @@ describe("KpiTrend", () => {
     const btn = screen.getByRole("button", { name: "Explain Comparison Period" });
     // A real tap fires focus immediately before click.
     fireEvent.focus(btn);
-    fireEvent.click(btn);
+    fireEvent.click(btn, { detail: 1 });
     expect(screen.getByRole("tooltip")).toBeDefined();
     // The next tap closes it again.
-    fireEvent.click(btn);
+    fireEvent.click(btn, { detail: 1 });
+    expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+
+  it("keeps a tap-pinned tooltip open across a later blur", () => {
+    render(<KpiTrend metricLabel="Impressions" comparison={comp({})} previous={PREV} />);
+    const btn = screen.getByRole("button", { name: "Explain Comparison Period" });
+    fireEvent.focus(btn);
+    fireEvent.click(btn, { detail: 1 });
+    expect(screen.getByRole("tooltip")).toBeDefined();
+    // Touch devices can shift focus right after the tap (or after a
+    // viewport adjustment); a pinned tooltip must survive that.
+    fireEvent.blur(btn);
+    expect(screen.getByRole("tooltip")).toBeDefined();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+
+  it("does not pin on keyboard-activated clicks", () => {
+    render(<KpiTrend metricLabel="Impressions" comparison={comp({})} previous={PREV} />);
+    const btn = screen.getByRole("button", { name: "Explain Comparison Period" });
+    fireEvent.focus(btn);
+    // Enter/Space activation carries detail 0: transient behavior.
+    fireEvent.click(btn, { detail: 0 });
+    expect(screen.getByRole("tooltip")).toBeDefined();
+    fireEvent.blur(btn);
     expect(screen.queryByRole("tooltip")).toBeNull();
   });
 
@@ -144,7 +171,7 @@ describe("KpiTrend", () => {
         previous={null}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Explain Comparison Period" }));
+    fireEvent.click(screen.getByRole("button", { name: "Explain Comparison Period" }), { detail: 1 });
     expect(screen.getByRole("tooltip").textContent).toContain(
       "Previous-Period Value Was Zero",
     );

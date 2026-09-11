@@ -82,8 +82,10 @@ def test_ops_endpoint_reports_storage_and_jobs(tmp_path, monkeypatch):
     conn = sqlite3.connect(db)
     job = jobs_mod.enqueue(conn, "pipeline", {"a": 1},
                            owner="someone", max_retries=0)
-    assert jobs_mod.claim(conn, job["id"]) is not None
-    jobs_mod.fail(conn, job["id"], "boom")
+    claimed = jobs_mod.claim(conn, job["id"])
+    assert claimed is not None
+    jobs_mod.fail(conn, job["id"], "boom",
+                  run_token=claimed["run_token"])
     conn.commit()
     conn.close()
     resp = admin.get("/api/admin/ops")

@@ -15,6 +15,7 @@ import argparse
 import os
 import sqlite3
 import sys
+import threading
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -31,14 +32,42 @@ def _connect(db_path):
     return conn
 
 
+def _heartbeat_loop(db_path, job_id, run_token, stop):
+    """Renew the attempt lease while the handler runs (A12).
+
+    A live worker keeps prolonging its lease so boot recovery never
+    mistakes it for dead; a dead worker stops renewing and its job
+    becomes requeueable once the lease lapses.
+    """
+    while not stop.wait(jobs.LEASE_S / 3.0):
+        try:
+            conn = sqlite3.connect(db_path, timeout=30.0)
+            try:
+                alive = jobs.heartbeat(conn, job_id, run_token)
+            finally:
+                conn.close()
+        except Exception:  # noqa: BLE001 - renewal is best-effort
+            alive = True
+        if not alive:
+            print("job %s lease lost; completion will be fenced"
+                  % (job_id,), flush=True)
+            return
+
+
 def run_once(db_path, settings, media_dir=None):
     """Claim and run a single job; returns True when work was done."""
     conn = _connect(db_path)
     try:
-        job = jobs.claim(conn)
+        job = jobs.claim(conn, lease_owner="worker")
         if job is None:
             return False
+        token = job.get("run_token")
         ctx = {"settings": settings, "media_dir": media_dir}
+        stop = threading.Event()
+        pulse = threading.Thread(target=_heartbeat_loop,
+                                 args=(db_path, job["id"], token, stop),
+                                 daemon=True)
+        pulse.start()
         try:
             result = worker_handlers.run(conn, job["kind"],
                                          job.get("payload") or {},
@@ -52,11 +81,13 @@ def run_once(db_path, settings, media_dir=None):
                   flush=True)
             return True
         except Exception as exc:  # noqa: BLE001 - recorded on the job
-            jobs.fail(conn, job["id"], exc)
+            jobs.fail(conn, job["id"], exc, run_token=token)
             print("job %s (%s) failed: %s" % (job["id"], job["kind"], exc),
                   flush=True)
             return True
-        jobs.complete(conn, job["id"], result)
+        finally:
+            stop.set()
+        jobs.complete(conn, job["id"], result, run_token=token)
         print("job %s (%s) completed" % (job["id"], job["kind"]), flush=True)
         return True
     finally:

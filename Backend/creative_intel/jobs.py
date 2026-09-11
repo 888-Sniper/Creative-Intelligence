@@ -35,11 +35,23 @@ CREATE TABLE IF NOT EXISTS worker_jobs (
     created_at TEXT NOT NULL DEFAULT '',
     updated_at TEXT NOT NULL DEFAULT '',
     started_at TEXT NOT NULL DEFAULT '',
-    finished_at TEXT NOT NULL DEFAULT ''
+    finished_at TEXT NOT NULL DEFAULT '',
+    run_token TEXT NOT NULL DEFAULT '',
+    lease_owner TEXT NOT NULL DEFAULT '',
+    lease_expires_at TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS worker_jobs_status ON worker_jobs (status);
 CREATE INDEX IF NOT EXISTS worker_jobs_owner ON worker_jobs (owner_employee_id);
 """
+
+# A12: execution fencing. Every claim mints a run_token + lease; only
+# the holder may complete/fail/prolong, and boot recovery requeues
+# solely leases that are genuinely stale. Without this a web restart
+# duplicates a still-running worker's job, and the original execution
+# can then complete the replacement attempt.
+LEASE_COLUMNS = (("run_token", "TEXT"), ("lease_owner", "TEXT"),
+                 ("lease_expires_at", "TEXT"))
+LEASE_S = 300.0
 
 
 def utcnow() -> str:
@@ -48,6 +60,12 @@ def utcnow() -> str:
 
 def ensure(conn) -> None:
     conn.executescript(DDL)
+    cols = {r[1] for r in
+            conn.execute("PRAGMA table_info(worker_jobs)").fetchall()}
+    for name, ctype in LEASE_COLUMNS:
+        if name not in cols:
+            conn.execute("ALTER TABLE worker_jobs ADD COLUMN %s %s"
+                         " NOT NULL DEFAULT ''" % (name, ctype))
     conn.commit()
 
 
@@ -102,8 +120,17 @@ def list_for_owner(conn, owner, limit=50):
     return [_row_to_dict(r) for r in rows]
 
 
-def claim(conn, job_id=None):
-    """Atomically move one queued job (or the given id) to running."""
+def _lease_until(lease_s):
+    return (datetime.datetime.now(datetime.timezone.utc)
+            + datetime.timedelta(seconds=max(1.0, lease_s))).isoformat()
+
+
+def claim(conn, job_id=None, lease_owner="", lease_s=LEASE_S):
+    """Atomically move one queued job (or the given id) to running.
+
+    Mints the execution fence (run_token + lease): only the holder
+    may complete/fail/heartbeat this attempt.
+    """
     ensure(conn)
     if job_id is None:
         row = conn.execute(
@@ -113,14 +140,30 @@ def claim(conn, job_id=None):
             return None
         job_id = row[0]
     now = utcnow()
+    token = uuid.uuid4().hex
     cur = conn.execute(
         "UPDATE worker_jobs SET status='running', started_at=?,"
-        " attempts=attempts+1, updated_at=? WHERE id=? AND status='queued'",
-        (now, now, job_id))
+        " attempts=attempts+1, updated_at=?, run_token=?,"
+        " lease_owner=?, lease_expires_at=?"
+        " WHERE id=? AND status='queued'",
+        (now, now, token, lease_owner or "", _lease_until(lease_s),
+         job_id))
     conn.commit()
     if cur.rowcount != 1:
         return None
     return get(conn, job_id)
+
+
+def heartbeat(conn, job_id, run_token, lease_s=LEASE_S):
+    """Renew a live attempt's lease; False when fenced out (stale)."""
+    ensure(conn)
+    cur = conn.execute(
+        "UPDATE worker_jobs SET lease_expires_at=?, updated_at=?"
+        " WHERE id=? AND status='running' AND run_token=?"
+        " AND run_token != ''",
+        (_lease_until(lease_s), utcnow(), job_id, run_token or ""))
+    conn.commit()
+    return cur.rowcount == 1
 
 
 def set_progress(conn, job_id, progress):
@@ -131,32 +174,61 @@ def set_progress(conn, job_id, progress):
     conn.commit()
 
 
-def complete(conn, job_id, result=None):
+def _holds_fence(job, run_token):
+    # Rows minted before leases (or test rows without a claim) carry
+    # no token and stay governable; otherwise the caller must present
+    # the attempt's token or the write is a stale execution's.
+    if job is None or job["status"] != "running":
+        return False
+    if not job.get("run_token"):
+        return True
+    return bool(run_token) and run_token == job["run_token"]
+
+
+def complete(conn, job_id, result=None, run_token=None):
+    """Complete a running attempt; stale tokens are ignored (A12).
+
+    The fence lives in the UPDATE itself, so a superseded execution
+    cannot slip between the read and the write.
+    """
     ensure(conn)
     now = utcnow()
-    conn.execute("UPDATE worker_jobs SET status='completed', progress=100,"
-                 " result_json=?, finished_at=?, updated_at=?"
-                 " WHERE id=? AND status='running'",
-                 (json.dumps(result or {}), now, now, job_id))
+    cur = conn.execute(
+        "UPDATE worker_jobs SET status='completed', progress=100,"
+        " result_json=?, finished_at=?, updated_at=?,"
+        " run_token='', lease_owner='', lease_expires_at=''"
+        " WHERE id=? AND status='running'"
+        " AND (run_token='' OR run_token=?)",
+        (json.dumps(result or {}), now, now, job_id, run_token or ""))
     conn.commit()
+    if cur.rowcount != 1:
+        return get(conn, job_id)
     return get(conn, job_id)
 
 
-def fail(conn, job_id, error):
-    """Record failure; requeues while attempts remain, else terminal."""
+def fail(conn, job_id, error, run_token=None):
+    """Record failure; requeues while attempts remain, else terminal.
+
+    Stale tokens are ignored so a superseded execution cannot fail
+    the replacement attempt (A12).
+    """
     ensure(conn)
     job = get(conn, job_id)
-    if job is None or job["status"] != "running":
+    if not _holds_fence(job, run_token):
         return job
     now = utcnow()
+    fence = " AND (run_token='' OR run_token=?)"
+    fence_arg = run_token or ""
     if job["attempts"] <= max(0, job["max_retries"]):
         conn.execute("UPDATE worker_jobs SET status='queued', error=?,"
-                     " started_at='', updated_at=? WHERE id=?",
-                     (str(error or "")[:500], now, job_id))
+                     " started_at='', updated_at=?, run_token='',"
+                     " lease_owner='', lease_expires_at='' WHERE id=?"
+                     + fence,
+                     (str(error or "")[:500], now, job_id, fence_arg))
     else:
         conn.execute("UPDATE worker_jobs SET status='failed', error=?,"
-                     " finished_at=?, updated_at=? WHERE id=?",
-                     (str(error or "")[:500], now, now, job_id))
+                     " finished_at=?, updated_at=? WHERE id=?" + fence,
+                     (str(error or "")[:500], now, now, job_id, fence_arg))
     conn.commit()
     return get(conn, job_id)
 
@@ -179,13 +251,21 @@ def cancel(conn, job_id, owner=""):
 
 
 def requeue_interrupted(conn):
-    """Boot recovery: work marked running by a dead process waits again."""
+    """Boot recovery: requeue only genuinely stale leases (A12).
+
+    A running job whose lease is still fresh belongs to a live
+    worker (e.g. the web restarted but the worker service kept
+    running) and must NOT be duplicated. Lease-less rows predate
+    fencing and are treated as interrupted.
+    """
     ensure(conn)
     now = utcnow()
     cur = conn.execute(
         "UPDATE worker_jobs SET status='queued',"
-        " error='interrupted by restart', started_at='', updated_at=?"
-        " WHERE status='running'", (now,))
+        " error='interrupted by restart', started_at='', updated_at=?,"
+        " run_token='', lease_owner='', lease_expires_at=''"
+        " WHERE status='running'"
+        " AND (lease_expires_at='' OR lease_expires_at <= ?)", (now, now))
     conn.commit()
     return cur.rowcount
 
@@ -237,9 +317,12 @@ def run_through(conn, kind, payload, owner="", timeout_s=180.0,
         # fail() parks the job terminal once attempts run out, so the
         # real error surfaces via JobFailed above.
         budget = max(0, row.get("max_retries", 1))
+        claimed = None
         if (now >= inline_at and row["status"] == "queued"
-                and row.get("attempts", 0) <= budget
-                and claim(conn, job_id)):
+                and row.get("attempts", 0) <= budget):
+            claimed = claim(conn, job_id, lease_owner="inline")
+        if claimed:
+            token = claimed.get("run_token")
             try:
                 result = worker_handlers.run(conn, kind, payload, owner,
                                              ctx or {}, job_id)
@@ -247,9 +330,9 @@ def run_through(conn, kind, payload, owner="", timeout_s=180.0,
                 cancel(conn, job_id)
                 raise JobFailed("cancelled")
             except Exception as exc:  # noqa: BLE001 - recorded, not raised raw
-                fail(conn, job_id, exc)
+                fail(conn, job_id, exc, run_token=token)
                 continue
-            complete(conn, job_id, result)
+            complete(conn, job_id, result, run_token=token)
             continue
         if now >= deadline:
             raise JobTimeout("job %s did not complete in %.0fs"

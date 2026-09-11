@@ -28,7 +28,8 @@ def test_enqueue_get_claim_complete():
     assert claimed["status"] == "running"
     assert claimed["attempts"] == 1
     assert jobs.claim(conn) is None
-    done = jobs.complete(conn, job["id"], {"answer": "y"})
+    done = jobs.complete(conn, job["id"], {"answer": "y"},
+                         run_token=claimed["run_token"])
     assert done["status"] == "completed"
     assert done["progress"] == 100
     assert done["result"] == {"answer": "y"}
@@ -38,11 +39,13 @@ def test_enqueue_get_claim_complete():
 def test_fail_retries_then_terminal():
     conn = memdb()
     job = jobs.enqueue(conn, "ask", {}, max_retries=1)
-    jobs.claim(conn, job["id"])
-    back = jobs.fail(conn, job["id"], "boom")
+    first = jobs.claim(conn, job["id"])
+    back = jobs.fail(conn, job["id"], "boom",
+                     run_token=first["run_token"])
     assert back["status"] == "queued"  # attempts(1) <= max(1) -> retry
-    jobs.claim(conn, job["id"])
-    dead = jobs.fail(conn, job["id"], "boom again")
+    second = jobs.claim(conn, job["id"])
+    dead = jobs.fail(conn, job["id"], "boom again",
+                     run_token=second["run_token"])
     assert dead["status"] == "failed"
     assert dead["error"] == "boom again"
     conn.close()
@@ -60,8 +63,56 @@ def test_requeue_interrupted():
     conn = memdb()
     job = jobs.enqueue(conn, "ask", {})
     jobs.claim(conn, job["id"])
+    # Fresh lease: the worker may be alive (web restarted alone) —
+    # recovery must NOT duplicate it.
+    assert jobs.requeue_interrupted(conn) == 0
+    assert jobs.get(conn, job["id"])["status"] == "running"
+    # Expired lease: the worker is dead — requeue exactly once.
+    conn.execute("UPDATE worker_jobs SET lease_expires_at='2000-01-01T00:00:00+00:00'"
+                 " WHERE id=?", (job["id"],))
+    conn.commit()
     assert jobs.requeue_interrupted(conn) == 1
     assert jobs.get(conn, job["id"])["status"] == "queued"
+    conn.close()
+
+
+def test_stale_completion_rejected_after_recovery():
+    # A12: web restarts, dead lease requeued, replacement attempt
+    # claimed — the original execution's late complete/fail must be
+    # ignored instead of settling the replacement attempt.
+    conn = memdb()
+    job = jobs.enqueue(conn, "ask", {}, max_retries=0)
+    first = jobs.claim(conn, job["id"])
+    conn.execute("UPDATE worker_jobs SET lease_expires_at='2000-01-01T00:00:00+00:00'"
+                 " WHERE id=?", (job["id"],))
+    conn.commit()
+    assert jobs.requeue_interrupted(conn) == 1
+    second = jobs.claim(conn, job["id"])
+    assert second["run_token"] != first["run_token"]
+    # Stale original execution tries to settle: both fenced out.
+    stale_done = jobs.complete(conn, job["id"], {"answer": "stale"},
+                               run_token=first["run_token"])
+    assert stale_done["status"] == "running"
+    stale_fail = jobs.fail(conn, job["id"], "stale boom",
+                           run_token=first["run_token"])
+    assert stale_fail["status"] == "running"
+    # Current holder still settles normally.
+    done = jobs.complete(conn, job["id"], {"answer": "fresh"},
+                         run_token=second["run_token"])
+    assert done["status"] == "completed"
+    assert done["result"] == {"answer": "fresh"}
+    conn.close()
+
+
+def test_legacy_leaseless_row_recovers():
+    # Rows minted before fencing carry no lease and are treated as
+    # interrupted, so old databases still recover on upgrade.
+    conn = memdb()
+    job = jobs.enqueue(conn, "ask", {})
+    conn.execute("UPDATE worker_jobs SET status='running', started_at='x'"
+                 " WHERE id=?", (job["id"],))
+    conn.commit()
+    assert jobs.requeue_interrupted(conn) == 1
     conn.close()
 
 

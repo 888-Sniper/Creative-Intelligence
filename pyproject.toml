@@ -27,6 +27,14 @@ dev = [
   "ruff==0.16.6",
 ]
 
+# A10: explicit discovery — the repo root holds many non-package
+# directories (deploy, docs, Data, ...), so setuptools flat-layout
+# autodiscovery refuses to guess. The importable packages live in
+# Backend/ and are imported as top-level ci_backend / creative_intel.
+[tool.setuptools.packages.find]
+where = ["Backend"]
+include = ["ci_backend*", "creative_intel*"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]

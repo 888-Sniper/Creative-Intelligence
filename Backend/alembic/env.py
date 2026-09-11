@@ -51,6 +51,14 @@ def _run_on(connection) -> None:
                           target_metadata=Base.metadata)
         with context.begin_transaction():
             context.run_migrations()
+        # pysqlite autocommits DDL but rolls back an uncommitted
+        # version stamp (DML) when the connection closes. The
+        # programmatic paths commit in db.py; the `alembic` CLI used
+        # by the deploy scripts has no such caller, so without this
+        # commit `upgrade head` exits 0 while leaving the database
+        # half-migrated and unstamped — and the next run crashes on
+        # existing tables (A10).
+        connection.commit()
     finally:
         connection.execute(sa.text("PRAGMA foreign_keys=ON"))
 

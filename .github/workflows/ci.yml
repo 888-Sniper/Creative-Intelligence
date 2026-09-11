@@ -32,6 +32,14 @@ jobs:
         run: python3 -m pytest tests/ -q
       - name: Legacy unittest runner
         run: python3 -m unittest discover -s tests
+      - name: Package build/install (Oracle installer runs pip install .)
+        run: python3 -m pip install --no-deps .
+      - name: Deployment migration command (twice, like install then update)
+        run: |
+          export CREATIVE_INTEL_DB_URL="sqlite:///${RUNNER_TEMP}/ci-mig.db"
+          python3 -m alembic -c Backend/alembic.ini upgrade head
+          python3 -m alembic -c Backend/alembic.ini upgrade head
+          python3 -c "import sqlite3;db=sqlite3.connect('${RUNNER_TEMP}/ci-mig.db');v=db.execute('SELECT version_num FROM alembic_version').fetchall();assert v==[('0008',)],v;print('head:',v)"
       - name: Analysis-library self checks
         run: python3 Source/self_check.py
       - name: Python vulnerability audit

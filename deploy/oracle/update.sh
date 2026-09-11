@@ -18,6 +18,11 @@ rsync -a --delete \
   --exclude 'dist/' \
   --exclude 'Data/' \
   "${SOURCE_DIR}/" "${APP_DIR}/"
+# A18: rsync preserves the source tree's modes, so helpers synced from
+# a checkout/export without exec bits would go dead after an update.
+# Re-assert modes on every update (install.sh does the same at
+# install time); the bits are also committed in git as backup.
+chmod 750 "${APP_DIR}/deploy/oracle/"*.sh
 
 "${APP_DIR}/.venv/bin/pip" install --require-hashes -r "${APP_DIR}/requirements.lock"
 "${APP_DIR}/.venv/bin/pip" install --upgrade --force-reinstall --no-deps "${APP_DIR}"

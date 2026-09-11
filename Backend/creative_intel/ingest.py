@@ -14,7 +14,6 @@ import math
 import re
 import unicodedata
 
-
 #: Media-safe creative-key alphabet (mirrors media.KEY_RE; kept local
 #: so ingest never imports the media layer).
 _SAFE_KEY_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}")

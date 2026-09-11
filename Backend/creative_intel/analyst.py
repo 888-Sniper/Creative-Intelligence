@@ -21,9 +21,18 @@ from creative_intel import benchmarks
 from creative_intel import creative as creative_mod
 from creative_intel import retention as retention_mod
 
-OBJECTIVES = ("reach", "conversions")
+OBJECTIVES = ("reach", "video_views", "traffic", "conversions")
 
-DEFAULT_RANK = {"reach": "hook_rate_2s_impr", "conversions": "cpa"}
+# Upper-funnel briefs share reach-style semantics (attention first,
+# cost efficiency via CPM/CPCV, CTR secondary). Only "conversions"
+# switches to CPA/CVR outcomes. Matches the frontend objective
+# selector (AnalystPage OBJECTIVES).
+UPPER_FUNNEL = ("reach", "video_views", "traffic")
+
+DEFAULT_RANK = {"reach": "hook_rate_2s_impr",
+                "video_views": "hook_rate_2s_impr",
+                "traffic": "ctr_link",
+                "conversions": "cpa"}
 
 EXTRA_SCOPE_KEYS = ("placement", "audience", "campaign_id", "ad_id",
                     "account_id", "creator", "concept", "format",
@@ -422,12 +431,12 @@ def test_plan_for_finding(finding, analysis, control_key=None):
     primary = {
         "stop": "hook_rate_2s_impr", "hold": "hold_rate",
         "depth": "awt_per_view", "brand": "quartile_50_impr",
-        "efficiency": "cpcv" if objective == "reach" else "cpa"}.get(
-            layer, "hook_rate_2s_impr")
+        "efficiency": ("cpcv" if objective in UPPER_FUNNEL
+                         else "cpa")}.get(layer, "hook_rate_2s_impr")
     if objective == "conversions" and layer in ("stop", "hold",
                                                 "depth"):
         secondary = ["cpa", "cvr", "spend pacing"]
-    elif objective == "reach":
+    elif objective in UPPER_FUNNEL:
         secondary = ["frequency", "spend pacing",
                      "ctr_link (secondary only)"]
     else:

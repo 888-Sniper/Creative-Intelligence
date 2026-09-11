@@ -272,6 +272,100 @@ class AnalystApiTest(unittest.TestCase):
             self.assertFalse({r[0] for r in other}
                              & {target})
 
+    def test_ask_answer_envelope_matches_frontend(self):
+        # A04: the page reads data.answer.text (+tables/findings/
+        # follow_ups/warnings) and data.scope_snapshot. The backend
+        # must return that envelope on every ask.
+        with tmp_root() as root:
+            http = self._owner(root)
+            self._seed(http)
+            r = http.post("/api/analyst/ask", json={
+                "question": "Wylicz 2s hook rate dla każdej kreacji.",
+                "scope": {"campaign": ["C"]}})
+            self.assertEqual(r.status_code, 200, r.text)
+            body = r.json()
+            self.assertIn("answer", body)
+            self.assertIn("scope_snapshot", body)
+            answer = body["answer"]
+            self.assertEqual(answer["text"], body["text"])
+            for key in ("tables", "findings_stored", "follow_ups",
+                        "warnings"):
+                self.assertIn(key, answer)
+            self.assertTrue(answer["tables"])
+            self.assertEqual(
+                answer["tables"][0]["columns"],
+                ["kreacja", "hook 2s", "hold", "AWT", "klasa"])
+            self.assertEqual(len(answer["tables"][0]["rows"]), 3)
+            stored = answer["findings_stored"]
+            self.assertTrue(stored)
+            for finding in stored:
+                self.assertTrue(finding["finding_id"])
+                self.assertNotEqual(finding["finding_id"],
+                                    finding.get("rule_id", "\0"))
+                self.assertEqual(finding["status"], "proposed")
+
+    def test_create_conversation_post(self):
+        # A04: the page starts conversations with
+        # POST /api/analyst/conversations and expects {"id": ...}.
+        with tmp_root() as root:
+            http = self._owner(root)
+            r = http.post("/api/analyst/conversations",
+                          json={"objective": "traffic"})
+            self.assertEqual(r.status_code, 200, r.text)
+            conv_id = r.json()["id"]
+            self.assertTrue(conv_id)
+            r = http.post("/api/analyst/ask", json={
+                "conversation_id": conv_id,
+                "question": "hi",
+                "scope": {}})
+            self.assertEqual(r.status_code, 200, r.text)
+            self.assertEqual(r.json()["conversation_id"], conv_id)
+            r = http.post("/api/analyst/conversations",
+                          json={"objective": "nonsense"})
+            self.assertEqual(r.status_code, 409, r.text)
+
+    def test_objective_contract_all_selector_values(self):
+        # A04: every OBJECTIVES entry in the frontend selector must
+        # be accepted by ask/report with matching engine semantics;
+        # unknown objectives are rejected, never silently clamped.
+        with tmp_root() as root:
+            http = self._owner(root)
+            self._seed(http)
+            for objective in ("reach", "video_views", "traffic",
+                              "conversions"):
+                r = http.post("/api/analyst/ask", json={
+                    "question": "Summarise.",
+                    "scope": {"campaign": ["C"]},
+                    "objective": objective})
+                self.assertEqual(r.status_code, 200, r.text)
+                self.assertEqual(r.json()["objective"], objective)
+            r = http.post("/api/analyst/ask", json={
+                "question": "Summarise.",
+                "scope": {"campaign": ["C"]},
+                "objective": "engagement"})
+            self.assertEqual(r.status_code, 409, r.text)
+            r = http.post("/api/analyst/report", json={
+                "scope": {"campaign": ["C"]},
+                "objective": "leads", "override": True})
+            self.assertEqual(r.status_code, 409, r.text)
+
+    def test_efficiency_strength_never_rewards_cost(self):
+        # A19: a higher CPM/CPCV must not produce an efficiency
+        # "strength" when nothing else changes.
+        from creative_intel import analyst_diagnostics as diag
+        ctx = {"metrics": {
+            "cpm": {"value": 99.0, "state": "measured"},
+            "cpcv": {"value": 9.0, "state": "measured"},
+            "frequency": {"value": 8.0, "state": "measured"}},
+            "cohort": {
+            "cpm": [1.0, 2.0, 3.0],
+            "cpcv": [0.1, 0.2, 0.3],
+            "frequency": [1.0, 1.5, 2.0]}}
+        layers = {layer["layer"]: layer
+                  for layer in diag.five_layer_summary(ctx, [])}
+        self.assertNotEqual(layers["efficiency"]["status"],
+                            "strength")
+
     def test_report_unauthenticated_refused(self):
         with tmp_root() as root:
             http, _db = make_client(root)

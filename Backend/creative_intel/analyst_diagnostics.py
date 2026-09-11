@@ -1194,13 +1194,24 @@ def five_layer_summary(ctx, findings):
                   if f.get("layer") == layer
                   and f.get("confidence_level") in ("high", "medium")]
         bands = []
+        strengths = []
         for mid in key_metrics[layer]:
-            band, value, _info = _band(ctx, mid)
+            # Cost metrics must never read "high spend" as a strength:
+            # direction comes from the shared metric registry (A19).
+            # Neutral-direction metrics (e.g. frequency) are reported
+            # but never count toward strength either way.
+            direction = (metrics.METRICS.get(mid, {}) or {}).get(
+                "direction", "higher_is_better")
+            band, value, _info = _band(
+                ctx, mid, higher_is_better=(direction ==
+                                            "higher_is_better"))
             if value is not None:
                 bands.append((mid, band, round(value, 2)))
+                if direction != "neutral" and band == "high":
+                    strengths.append(mid)
         if strong:
             status = "concern"
-        elif any(b == "high" for _, b, _v in bands):
+        elif strengths:
             status = "strength"
         elif bands or layer_findings:
             status = "mixed"

@@ -793,6 +793,42 @@ async def analyst_ask(request: Request, conn=Depends(get_product_conn),
     return out
 
 
+class AnalystConversationBody(BaseModel):
+    objective: str = "reach"
+    language: str | None = None
+
+    @field_validator("objective", mode="before")
+    @classmethod
+    def _check_objective(cls, value):
+        from creative_intel import analyst as analyst_mod
+        if value in (None, ""):
+            return "reach"
+        if value not in analyst_mod.OBJECTIVES:
+            raise ValueError(
+                "objective must be one of %s"
+                % (list(analyst_mod.OBJECTIVES),))
+        return value
+
+
+@router.post("/api/analyst/conversations")
+async def analyst_conversation_create(
+        request: Request, conn=Depends(get_product_conn),
+        who=Depends(get_current_employee)):
+    """Start an empty conversation (A04: the page POSTs here)."""
+    body = _validated(AnalystConversationBody,
+                      await json_payload(request),
+                      "analyst conversation")
+    try:
+        conv_id = analyst_chat.create_conversation(
+            conn, who.id, "", {}, body.objective,
+            body.language or "en")
+        paudit.audit_request(request, conn, employee_id=who.id,
+                             action="analyst-conversation")
+        return {"id": conv_id}
+    except ValueError as exc:
+        raise _conflict(exc)
+
+
 @router.get("/api/analyst/conversations")
 def analyst_conversations(conn=Depends(get_product_conn),
                           who=Depends(get_current_employee)):
@@ -977,6 +1013,21 @@ class AnalystBody(BaseModel):
     rank_by: str | None = None
     max_points: int | None = Field(default=None, ge=1, le=10)
 
+    @field_validator("objective", mode="before")
+    @classmethod
+    def _check_objective(cls, value):
+        # Unknown objectives used to silently clamp to reach in the
+        # engine; reject them at the boundary instead (A04), so the
+        # selector and the analysis can never disagree silently.
+        from creative_intel import analyst as analyst_mod
+        if value in (None, ""):
+            return "reach"
+        if value not in analyst_mod.OBJECTIVES:
+            raise ValueError(
+                "objective must be one of %s"
+                % (list(analyst_mod.OBJECTIVES),))
+        return value
+
     @field_validator("scope", mode="before")
     @classmethod
     def _check_scope(cls, values):
@@ -1003,14 +1054,6 @@ class AnalystBody(BaseModel):
                         " 50 strings" % key)
                 scope[key] = vals
         return scope
-
-    @field_validator("objective", mode="before")
-    @classmethod
-    def _check_objective(cls, value):
-        text = str(value or "reach").lower()
-        if text not in ("reach", "conversions"):
-            raise ValueError("objective must be reach or conversions")
-        return text
 
     @field_validator("language", mode="before")
     @classmethod
@@ -1045,6 +1088,20 @@ class AnalystReportBody(BaseModel):
     fmt: str = "one-pager"
     rank_by: str | None = None
     override: bool = False
+
+    @field_validator("objective", mode="before")
+    @classmethod
+    def _check_objective(cls, value):
+        # Same contract as ask: unknown objectives are rejected at
+        # the boundary instead of silently clamped (A04).
+        from creative_intel import analyst as analyst_mod
+        if value in (None, ""):
+            return "reach"
+        if value not in analyst_mod.OBJECTIVES:
+            raise ValueError(
+                "objective must be one of %s"
+                % (list(analyst_mod.OBJECTIVES),))
+        return value
 
     @field_validator("sections", mode="before")
     @classmethod

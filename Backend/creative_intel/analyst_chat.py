@@ -873,9 +873,14 @@ def answer_turn(conn, owner_id, question, conversation_id=None,
                  (json.dumps(scope), objective, lang,
                   analysis.get("dataset_version", ""), conv_id))
     conn.commit()
+    answer = _answer_envelope(conn, conv_id, analysis, task, text,
+                              lang)
     return {"conversation_id": conv_id, "language": lang, "task": task,
             "text": text, "payload": payload,
             "scope": analysis.get("scope"),
+            "scope_snapshot": analysis.get("scope_detail",
+                                           analysis.get("scope")),
+            "answer": answer,
             "dataset_version": analysis.get("dataset_version"),
             "objective": objective}
 
@@ -902,6 +907,65 @@ def set_finding_status(conn, owner_id, finding_id, status):
                  " WHERE id=?", (status, _utcnow(), finding_id))
     conn.commit()
     return {"id": finding_id, "status": status}
+
+
+def _answer_envelope(conn, conv_id, analysis, task, text, lang):
+    """Frontend AskResponse.answer: the shared ask/display contract.
+
+    The page renders answer.text/tables/findings_stored/follow_ups/
+    warnings (AnalystPage AnalystAnswer); the flat text/payload keys
+    stay on the response for older API consumers.
+    """
+    stored = {r[0]: r[1] for r in conn.execute(
+        "SELECT id, status FROM analyst_findings"
+        " WHERE conversation_id=?", (conv_id,)).fetchall()}
+    findings, warnings, seen_warn = [], [], set()
+    for creative in analysis.get("creatives", []):
+        ckey = creative.get("creative_key", "")
+        for finding in creative.get("findings", []):
+            fid = finding.get("finding_id", "")
+            findings.append({
+                "finding_id": fid,
+                "rule_id": finding.get("rule_id", ""),
+                "status": stored.get(fid, "proposed"),
+                "primary_signal": finding.get("primary_signal"),
+                "diagnosis": finding.get("diagnosis"),
+                "creative_hypothesis": finding.get(
+                    "creative_hypothesis"),
+                "recommended_iteration": finding.get(
+                    "recommended_iteration"),
+                "priority": finding.get("priority"),
+                "confidence_level": finding.get("confidence_level"),
+                "element_to_preserve": finding.get(
+                    "element_to_preserve"),
+                "element_to_change": finding.get("element_to_change"),
+                "creative_ids": (finding.get("creative_ids")
+                                 or ([ckey] if ckey else []))})
+            for warn in finding.get("limitations", []) or []:
+                if warn and warn not in seen_warn:
+                    seen_warn.add(warn)
+                    warnings.append(warn)
+    tables = []
+    if task in ("full_analysis", "full_table") and \
+            analysis.get("creatives"):
+        header = (["creative", "2s hook", "hold", "AWT", "class"]
+                  if lang == "en"
+                  else ["kreacja", "hook 2s", "hold", "AWT", "klasa"])
+        rows = []
+        for creative in analysis.get("creatives", []):
+            mets = creative.get("metrics", {}) or {}
+
+            def _val(mid):
+                res = mets.get(mid) or {}
+                return res.get("value")
+            rows.append([creative.get("creative_key", ""),
+                         _val("hook_rate_2s_impr"), _val("hold_rate"),
+                         _val("awt_per_view"),
+                         creative.get("message_class", "unknown")])
+        tables.append({"title": None, "columns": header, "rows": rows})
+    return {"text": text, "language": lang, "tables": tables,
+            "findings_stored": findings, "follow_ups": [],
+            "warnings": warnings}
 
 
 def _slim_analysis(analysis):

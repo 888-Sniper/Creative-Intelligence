@@ -168,8 +168,21 @@ export function EmailSignIn() {
           Forgot password?
         </button>
       </div>
-      <button type="button" className="login-primary" disabled={authenticating} onClick={() => void signInPassword()}>
-        {authenticating ? "Signing In…" : "Sign In"}
+      <button
+        type="button"
+        className="login-primary"
+        disabled={authenticating}
+        aria-busy={authenticating}
+        onClick={() => void signInPassword()}
+      >
+        {authenticating ? (
+          <span className="login-primary-loading">
+            <span className="login-spinner" aria-hidden="true" />
+            <span>Signing In…</span>
+          </span>
+        ) : (
+          "Sign In"
+        )}
       </button>
       <button
         type="button"

@@ -12,6 +12,7 @@ are labelled as such — rewriting is not verification.
 from __future__ import annotations
 
 import datetime
+import hashlib
 import json
 import re
 import uuid
@@ -635,18 +636,53 @@ def build_analyst_report(analysis, lang="en", sections=None,
                      "sections": wanted, "language": lang}}
 
 
+def finding_instance_id(conv_id, creative_key, finding):
+    """Stable instance id, distinct from the diagnostic rule id.
+
+    The rule id (e.g. "drop_near_transition") names the diagnosis;
+    the instance id names one occurrence: conversation + creative +
+    rule + dataset version + scope. Two creatives firing the same
+    rule, or two conversations over the same data, never share a
+    row; re-analysis of the same conversation/scope/data yields the
+    same id instead of duplicating.
+    """
+    basis = json.dumps({
+        "conversation": conv_id or "",
+        "creative": creative_key or "",
+        "rule": finding.get("finding_id", ""),
+        "dataset_version": finding.get("dataset_version", ""),
+        "scope": finding.get("scope", {}),
+    }, sort_keys=True)
+    return "f-" + hashlib.sha256(basis.encode("utf-8")).hexdigest()[:16]
+
+
 def persist_findings(conn, conv_id, analysis):
-    """Store proposed findings with scope + dataset version."""
+    """Store proposed findings with scope + dataset version.
+
+    Instances upsert by instance id: a repeated analysis refreshes
+    the stored evidence but never resets an accepted/rejected status
+    back to proposed, and never steals another conversation's row.
+    The in-memory finding dicts are updated in place so the UI calls
+    accept/reject against the same instance ids.
+    """
     now = _utcnow()
     for creative in analysis.get("creatives", []):
+        ckey = creative.get("creative_key", "")
         for finding in creative.get("findings", []):
-            finding = dict(finding)
+            finding["rule_id"] = finding.get("finding_id", "")
+            finding["finding_id"] = finding_instance_id(
+                conv_id, ckey, finding)
             finding["conversation_id"] = conv_id
             conn.execute(
-                "INSERT OR REPLACE INTO analyst_findings (id,"
+                "INSERT INTO analyst_findings (id,"
                 " conversation_id, scope_json, dataset_version,"
                 " finding_json, status, created_at, updated_at)"
-                " VALUES (?, ?, ?, ?, ?, 'proposed', ?, ?)",
+                " VALUES (?, ?, ?, ?, ?, 'proposed', ?, ?)"
+                " ON CONFLICT(id) DO UPDATE SET"
+                " scope_json=excluded.scope_json,"
+                " dataset_version=excluded.dataset_version,"
+                " finding_json=excluded.finding_json,"
+                " updated_at=excluded.updated_at",
                 (finding["finding_id"], conv_id,
                  json.dumps(finding.get("scope", {})),
                  finding.get("dataset_version", ""),

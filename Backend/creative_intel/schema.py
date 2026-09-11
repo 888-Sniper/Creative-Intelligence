@@ -318,8 +318,15 @@ CREATE INDEX IF NOT EXISTS idx_product_audit_employee
 # scheduler) stores via ingest.upsert_rows(), so re-imports update
 # metrics instead of duplicating rows; insert_rows() stays the raw
 # append primitive and refuses exact-duplicate facts.
+#
+# Identity includes the tenant/account grain: two unrelated clients
+# using the same campaign/ad names on the same date must never
+# collapse into one fact (client B's re-import used to overwrite
+# client A's record). Rows without identifiers carry "" there, which
+# preserves the legacy dedup behavior exactly.
 SYNC_KEY_COLUMNS = ("source", "platform", "campaign", "adset",
-                    "ad_name", "date")
+                    "ad_name", "date", "client", "account_id",
+                    "campaign_id", "ad_id")
 
 
 def migrate(conn):
@@ -444,12 +451,15 @@ def migrate(conn):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_product_audit_employee"
                  " ON product_audit (employee_id)")
     key_cols = ", ".join(SYNC_KEY_COLUMNS)
+    # DROP first: IF NOT EXISTS would keep a stale narrow index from
+    # before account/client columns joined the key, silently
+    # re-allowing cross-client overwrites on old databases.
+    conn.execute("DROP INDEX IF EXISTS ads_sync_key")
     conn.execute(
         "DELETE FROM ads WHERE rowid NOT IN"
         " (SELECT MAX(rowid) FROM ads GROUP BY %s)" % key_cols)
     conn.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS ads_sync_key ON ads (%s)"
-        % key_cols)
+        "CREATE UNIQUE INDEX ads_sync_key ON ads (%s)" % key_cols)
     conn.execute(
         "CREATE TABLE IF NOT EXISTS sync_runs ("
         "id INTEGER PRIMARY KEY, source TEXT NOT NULL DEFAULT '',"

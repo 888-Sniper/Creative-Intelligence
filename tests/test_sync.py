@@ -87,6 +87,89 @@ class UpsertTest(unittest.TestCase):
         finally:
             conn.close()
 
+    def test_cross_client_rows_do_not_overwrite(self):
+        # Same names/date, different clients: two facts survive, each
+        # keeping its own client (A03).
+        head = ("campaign,ad set,ad name,spend,impressions,clicks,"
+                "conversions,date,client\n")
+        row = "CampA,Set1,ad-1,10,1000,20,2,2026-08-01,%s\n"
+        conn = _conn()
+        try:
+            out = ingest.upsert_rows(
+                conn, ingest.parse_csv(head + row % "ClientA", "meta"))
+            self.assertEqual(out, {"inserted": 1, "updated": 0})
+            out = ingest.upsert_rows(
+                conn, ingest.parse_csv(head + row % "ClientB", "meta"))
+            self.assertEqual(out, {"inserted": 1, "updated": 0})
+            clients = sorted(
+                r[0] for r in conn.execute("SELECT client FROM ads"))
+            self.assertEqual(clients, ["ClientA", "ClientB"])
+            # Same client re-imported still dedups instead of doubling.
+            out = ingest.upsert_rows(
+                conn, ingest.parse_csv(head + row % "ClientA", "meta"))
+            self.assertEqual(out, {"inserted": 0, "updated": 1})
+            self.assertEqual(_count(conn), 2)
+        finally:
+            conn.close()
+
+    def test_account_ids_separate_facts(self):
+        head = ("campaign,ad set,ad name,spend,impressions,clicks,"
+                "conversions,date,account id\n")
+        row = "CampA,Set1,ad-1,10,1000,20,2,2026-08-01,%s\n"
+        conn = _conn()
+        try:
+            ingest.upsert_rows(
+                conn, ingest.parse_csv(head + row % "act-1", "meta"))
+            ingest.upsert_rows(
+                conn, ingest.parse_csv(head + row % "act-2", "meta"))
+            self.assertEqual(_count(conn), 2)
+        finally:
+            conn.close()
+
+    def test_migrate_rebuilds_stale_narrow_index(self):
+        # Old databases carry the 6-column index: migrate() must
+        # replace it, or cross-client facts keep colliding there.
+        conn = _conn()
+        try:
+            conn.execute("DROP INDEX IF EXISTS ads_sync_key")
+            conn.execute(
+                "CREATE UNIQUE INDEX ads_sync_key ON ads (source,"
+                " platform, campaign, adset, ad_name, date)")
+            head = ("campaign,ad set,ad name,spend,impressions,clicks,"
+                    "conversions,date,client\n")
+            row = "CampA,Set1,ad-1,10,1000,20,2,2026-08-01,%s\n"
+            ingest.upsert_rows(
+                conn, ingest.parse_csv(head + row % "ClientA", "meta"))
+            schema.migrate(conn)
+            out = ingest.upsert_rows(
+                conn, ingest.parse_csv(head + row % "ClientB", "meta"))
+            self.assertEqual(out, {"inserted": 1, "updated": 0})
+            self.assertEqual(_count(conn), 2)
+        finally:
+            conn.close()
+
+    def test_unsafe_ad_names_get_uploadable_keys(self):
+        # A17: "Summer Hook 01" must not become an analytics-only
+        # ghost that media upload rejects.
+        from creative_intel import media as media_mod
+        key = ingest.safe_creative_key("Summer Hook 01")
+        self.assertTrue(media_mod.KEY_RE.fullmatch(key), key)
+        self.assertEqual(key, ingest.safe_creative_key("Summer Hook 01"))
+        accented = ingest.safe_creative_key("Zażółć Hook ångström")
+        self.assertTrue(media_mod.KEY_RE.fullmatch(accented), accented)
+        latin = ingest.safe_creative_key("钩子视频 01")
+        self.assertTrue(media_mod.KEY_RE.fullmatch(latin), latin)
+        self.assertNotEqual(key, accented)
+        # Already-safe keys (and the empty fallback) pass through, so
+        # every existing creative keeps its identity.
+        self.assertEqual(ingest.safe_creative_key("shared-creative"),
+                         "shared-creative")
+        self.assertEqual(ingest.safe_creative_key(""), "uncategorised")
+        rows = ingest.parse_csv(
+            "campaign,ad name,impressions\nC1,Summer Hook 01,100\n",
+            "meta")
+        media_mod.check_key(rows[0]["creative_key"])
+
     def test_migrate_collapses_legacy_duplicates(self):
         # Simulate a pre-sync-key database: no uniqueness index, with
         # duplicate facts from repeated imports. migrate() collapses

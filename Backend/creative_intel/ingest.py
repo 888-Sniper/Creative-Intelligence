@@ -8,10 +8,36 @@
 """
 
 import csv
+import hashlib
 import io
 import math
 import re
 import unicodedata
+
+
+#: Media-safe creative-key alphabet (mirrors media.KEY_RE; kept local
+#: so ingest never imports the media layer).
+_SAFE_KEY_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}")
+
+
+def safe_creative_key(name):
+    """Deterministic media-safe asset id for a human ad/creative name.
+
+    Names already in the safe alphabet (plus "uncategorised") pass
+    through unchanged, so every existing key keeps working. Anything
+    else — spaces, accents, non-Latin scripts — is slugified with a
+    content-hash suffix, so "Summer Hook 01" becomes an uploadable key
+    instead of an analytics-only ghost, and distinct names can never
+    share one key.
+    """
+    text = (name or "").strip() or "uncategorised"
+    if _SAFE_KEY_RE.fullmatch(text):
+        return text
+    slug = re.sub(r"[^A-Za-z0-9_-]+", "-",
+                  unicodedata.normalize("NFKD", text).encode(
+                      "ascii", "ignore").decode("ascii")).strip("-_")
+    digest = hashlib.sha1(text.encode("utf-8")).hexdigest()[:8]
+    return "%s-%s" % (slug[:60] or "creative", digest)
 
 CANONICAL_FIELDS = ("platform", "campaign", "adset", "ad_name",
                     "creative_key", "spend", "impressions", "clicks",
@@ -331,8 +357,10 @@ def _rows_from_dicts(fieldnames, dicts, platform, source, locale="en"):
         if bad is not None:
             quarantined.append({"source_row": lineno, "reason": bad})
             continue
-        if not row["creative_key"]:
-            row["creative_key"] = row["ad_name"] or "uncategorised"
+        # The stored key is always the safe asset id; the original
+        # human name stays in ad_name for display.
+        row["creative_key"] = safe_creative_key(
+            row["creative_key"] or row["ad_name"])
         import json as _json
         row["missing_json"] = _json.dumps(sorted(set(missing)))
         rows.append(row)
@@ -517,13 +545,15 @@ def insert_rows(conn, rows):
 
 
 # Columns refreshed when a re-import hits an existing fact: every
-# stored column except the sync key itself (source, platform,
-# campaign, adset, ad_name, date), which is the row identity and is
-# never overwritten.
+# stored column except the sync key itself, which is the row identity
+# and is never overwritten. The exclusion mirrors
+# schema.SYNC_KEY_COLUMNS (kept literal here so the constant stays
+# import-cycle free).
 UPSERT_VALUE_COLUMNS = tuple(
     col for col in STORED_COLUMNS
     if col not in ("source", "platform", "campaign", "adset",
-                   "ad_name", "date"))
+                   "ad_name", "date", "client", "account_id",
+                   "campaign_id", "ad_id"))
 
 
 def upsert_rows(conn, rows):
@@ -536,8 +566,11 @@ def upsert_rows(conn, rows):
     """
     from creative_intel import schema as schema_mod
     key_cols = schema_mod.SYNC_KEY_COLUMNS
+    # DROP first (same reason as schema.migrate): a stale narrow
+    # index would keep enforcing the old identity.
+    conn.execute("DROP INDEX IF EXISTS ads_sync_key")
     conn.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS ads_sync_key ON ads (%s)"
+        "CREATE UNIQUE INDEX ads_sync_key ON ads (%s)"
         % ", ".join(key_cols))
     where = " AND ".join("%s=?" % col for col in key_cols)
     update_sql = ("UPDATE ads SET %s WHERE %s" % (

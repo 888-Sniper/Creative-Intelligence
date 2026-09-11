@@ -228,6 +228,50 @@ class AnalystApiTest(unittest.TestCase):
             r = http.get("/api/analyst/creatives?objective=virality")
             self.assertEqual(r.status_code, 409)
 
+    def test_finding_instances_are_scoped_and_sticky(self):
+        # A06: same rule on two creatives -> two rows; accept survives
+        # re-analysis; other conversations get their own rows.
+        with tmp_root() as root:
+            http = self._owner(root)
+            self._seed(http)
+            ask = {"question": "Which creative is best?",
+                   "scope": {"campaign": ["C"]}}
+            first = http.post("/api/analyst/ask", json=ask).json()
+            conv = first["conversation_id"]
+            db = str(root / "app.db")
+
+            def _rows():
+                conn = sqlite3.connect(db)
+                try:
+                    return conn.execute(
+                        "SELECT id, conversation_id, status"
+                        " FROM analyst_findings").fetchall()
+                finally:
+                    conn.close()
+            rows = _rows()
+            self.assertGreaterEqual(len(rows), 2)
+            self.assertEqual(len({r[0] for r in rows}), len(rows))
+            self.assertTrue(all(r[1] == conv for r in rows))
+            target = rows[0][0]
+            r = http.post("/api/analyst/findings/%s" % target,
+                          json={"status": "accepted"})
+            self.assertEqual(r.status_code, 200, r.text)
+            # Re-ask the same question: evidence refreshes, the
+            # decision sticks, no duplicate rows appear.
+            http.post("/api/analyst/ask",
+                      json=dict(ask, conversation_id=conv))
+            rows = _rows()
+            kept = [r for r in rows if r[0] == target]
+            self.assertEqual(len(rows), len({r[0] for r in rows}))
+            self.assertEqual(kept[0][2], "accepted")
+            # A second conversation owns separate instances.
+            second = http.post("/api/analyst/ask", json=ask).json()
+            rows = _rows()
+            other = [r for r in rows if r[1] == second["conversation_id"]]
+            self.assertTrue(other)
+            self.assertFalse({r[0] for r in other}
+                             & {target})
+
     def test_report_unauthenticated_refused(self):
         with tmp_root() as root:
             http, _db = make_client(root)

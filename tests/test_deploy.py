@@ -1,4 +1,4 @@
-"""Deploy-script regression tests (A10/A18).
+"""Deploy-script regression tests (A10/A13/A18).
 
 Guards the exact production journeys: the `alembic` CLI migration
 command the Oracle scripts run (from the repo root, twice — the
@@ -50,13 +50,60 @@ def test_restore_validates_before_downtime():
 def test_update_restores_helper_modes_after_rsync():
     # A18: rsync -a preserves source modes, so update.sh must
     # re-assert them (install.sh already does at install time).
+    # A13: the mode is 755 so the unprivileged DuckDNS unit can
+    # still read and execute the root-owned helpers.
     with open(os.path.join(ORACLE, "update.sh")) as handle:
         text = handle.read()
     rsync_at = text.find("rsync -a")
-    chmod_at = text.find("chmod 750")
+    chmod_at = text.find("chmod 755")
     assert rsync_at != -1 and chmod_at != -1
     assert chmod_at > rsync_at, \
         "update.sh must chmod helpers after the rsync"
+
+
+def _service_text(name):
+    with open(os.path.join(ORACLE, name)) as handle:
+        return handle.read()
+
+
+def test_duckdns_unit_drops_root():
+    # A13: the updater is app-tree code — it must not execute as root.
+    text = _service_text("creative-intelligence-duckdns.service")
+    user = re.search(r"^User=(\S+)", text, re.M)
+    assert user, "duckdns unit must set User="
+    assert user.group(1) != "root", "duckdns unit must not run as root"
+    assert "NoNewPrivileges=true" in text
+
+
+def test_deploy_helpers_root_owned_after_chown():
+    # A13: install.sh/update.sh blanket-chown the tree to the service
+    # account but must then re-own deploy/ to root so the
+    # unprivileged DuckDNS unit executes non-app-writable code.
+    for name in ("install.sh", "update.sh"):
+        with open(os.path.join(ORACLE, name)) as handle:
+            text = handle.read()
+        chown_at = text.find("chown -R \"${APP_USER}:${APP_GROUP}\"")
+        if chown_at == -1:  # update.sh spells the account literally
+            chown_at = text.find(
+                "chown -R creative-intel:creative-intel")
+        root_at = text.find("chown -R root:root \"${APP_DIR}/deploy\"")
+        assert chown_at != -1 and root_at != -1, \
+            "%s must root-own deploy/" % name
+        assert root_at > chown_at, \
+            "%s must root-own deploy/ after the app chown" % name
+
+
+def test_duckdns_token_not_world_readable():
+    # A13: the token readable by the unprivileged unit must stay
+    # group-scoped — never world-readable.
+    with open(os.path.join(ORACLE, "install.sh")) as handle:
+        text = handle.read()
+    assert "chmod 640" in text and "duckdns.env" in text
+    world_readable = [line for line in text.splitlines()
+                      if "duckdns.env" in line
+                      and re.search(r"chmod\s+[0-7]*[4567]\b", line)]
+    assert not world_readable, \
+        "duckdns token must stay group-scoped: %r" % (world_readable,)
 
 
 def test_deploy_migration_command_from_repo_root(tmp_path):

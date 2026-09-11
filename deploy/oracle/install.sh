@@ -58,7 +58,9 @@ rsync -a --delete \
   --exclude 'dist/' \
   --exclude 'Data/' \
   "${SOURCE_DIR}/" "${APP_DIR}/"
-chmod 750 "${APP_DIR}/deploy/oracle/"*.sh
+# A13: deploy helpers stay world-readable/executable (root-owned below)
+# so the unprivileged DuckDNS unit can execute the updater.
+chmod 755 "${APP_DIR}/deploy/oracle/"*.sh
 
 python3.13 -m venv "${APP_DIR}/.venv"
 "${APP_DIR}/.venv/bin/python" -m pip install --upgrade pip wheel
@@ -92,8 +94,11 @@ cp "${APP_DIR}/deploy/oracle/creative-intelligence-restorecheck.service" "/etc/s
 cp "${APP_DIR}/deploy/oracle/creative-intelligence-restorecheck.timer" "/etc/systemd/system/${SERVICE_NAME}-restorecheck.timer"
 if [[ ! -f "${ENV_DIR}/duckdns.env" ]]; then
   cp "${APP_DIR}/deploy/oracle/duckdns.env.example" "${ENV_DIR}/duckdns.env"
-  chmod 600 "${ENV_DIR}/duckdns.env"
 fi
+# A13: the DuckDNS unit runs as the service account (not root), so
+# the token file must be group-readable by it — and by nobody else.
+chown root:"${APP_GROUP}" "${ENV_DIR}/duckdns.env"
+chmod 640 "${ENV_DIR}/duckdns.env"
 sed "s/__DOMAIN__/${DOMAIN}/g" "${APP_DIR}/deploy/oracle/nginx.conf.template" \
   > "/etc/nginx/sites-available/${SERVICE_NAME}"
 ln -sfn "/etc/nginx/sites-available/${SERVICE_NAME}" "/etc/nginx/sites-enabled/${SERVICE_NAME}"
@@ -101,6 +106,15 @@ rm -f /etc/nginx/sites-enabled/default
 
 chown -R "${APP_USER}:${APP_GROUP}" "${APP_DIR}" "${DATA_DIR}"
 chmod 750 "${DATA_DIR}" "${DATA_DIR}/media"
+# A13: deployment helpers stay root-owned and non-writable by the
+# application account — in particular the DuckDNS updater the (now
+# unprivileged) timer unit executes. The rest of the tree (plus the
+# data dir) stays app-owned via the blanket chown above.
+chown -R root:root "${APP_DIR}/deploy"
+chmod 755 "${APP_DIR}/deploy" "${APP_DIR}/deploy/oracle"
+# 755 (not 750): the unprivileged DuckDNS unit must still be able to
+# read and execute the updater; no secrets live in these files.
+chmod 755 "${APP_DIR}/deploy/oracle/"*.sh
 
 # Backup landing zone: the timer runs as creative-intel, so the
 # directory must exist with service-account ownership BEFORE the

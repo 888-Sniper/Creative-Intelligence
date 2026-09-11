@@ -4,6 +4,16 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
+# A13: never run app-tree code as root. The updater needs no
+# privileges beyond network egress and its own env file, so it runs
+# as the service account while the script itself stays root-owned
+# and non-writable by that account (see install.sh/update.sh).
 Type=oneshot
+User=creative-intel
+Group=creative-intel
 EnvironmentFile=-/etc/creative-intelligence/duckdns.env
 ExecStart=/opt/creative-intelligence/deploy/oracle/duckdns-update.sh
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true

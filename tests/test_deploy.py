@@ -7,6 +7,7 @@ helpers surviving an rsync-style update.
 """
 
 import os
+import re
 import sqlite3
 import stat
 import subprocess
@@ -27,6 +28,23 @@ def test_oracle_helpers_are_executable():
     for name in scripts:
         mode = stat.S_IMODE(os.stat(os.path.join(ORACLE, name)).st_mode)
         assert mode & 0o111, "%s missing exec bit (%o)" % (name, mode)
+
+
+def test_restore_validates_before_downtime():
+    # A11: hash/decrypt/stage/validate must all precede any
+    # systemctl stop; both writers (web + worker) must stop; a
+    # rollback path must restore the DB and prior unit states.
+    with open(os.path.join(ORACLE, "restore.sh")) as handle:
+        text = handle.read()
+    stops = [m.start() for m in re.finditer(r"systemctl stop", text)]
+    assert stops, "restore must stop writers"
+    for marker in ("sha256sum -c", "openssl enc -d",
+                   "integrity_check", "creative-intelligence-worker"):
+        pos = text.find(marker)
+        assert pos != -1, "restore.sh missing %r" % marker
+        assert pos < stops[0], \
+            "%r must precede the first service stop" % marker
+    assert "ROLLBACK" in text and "rollback" in text
 
 
 def test_update_restores_helper_modes_after_rsync():

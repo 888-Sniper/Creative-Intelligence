@@ -329,6 +329,54 @@ SYNC_KEY_COLUMNS = ("source", "platform", "campaign", "adset",
                     "campaign_id", "ad_id")
 
 
+def _sync_key_sql():
+    return ("CREATE UNIQUE INDEX ads_sync_key ON ads (%s)"
+            % ", ".join(SYNC_KEY_COLUMNS))
+
+
+def ensure_sync_key(conn):
+    """Idempotent, concurrency-safe sync-key index.
+
+    Steady state is a read-only check: when ads_sync_key already
+    exists with the current definition this performs zero writes, so
+    per-request init_db() calls and parallel imports can no longer
+    race "index already exists" or wedge each other with full-table
+    DDL on every call (that race crashed the seeded E2E backend under
+    parallel Playwright workers).
+
+    DROP + dedup + CREATE runs only when the index is missing or
+    stale. A stale narrow index from before account/client columns
+    joined the key is still replaced — IF NOT EXISTS alone would
+    keep it and silently re-allow cross-client overwrites. A lost
+    create-if-missing race tolerates "already exists" by re-verifying
+    the index definition instead of crashing.
+    Returns True when the index was (re)built.
+    """
+    import sqlite3
+    want = _sync_key_sql()
+    got = conn.execute(
+        "SELECT sql FROM sqlite_master"
+        " WHERE type='index' AND name='ads_sync_key'").fetchone()
+    if got and (got[0] or "") == want:
+        return False
+    conn.execute("DROP INDEX IF EXISTS ads_sync_key")
+    key_cols = ", ".join(SYNC_KEY_COLUMNS)
+    conn.execute(
+        "DELETE FROM ads WHERE rowid NOT IN"
+        " (SELECT MAX(rowid) FROM ads GROUP BY %s)" % key_cols)
+    try:
+        conn.execute(want)
+    except sqlite3.OperationalError as exc:
+        if "already exists" not in str(exc):
+            raise
+        got = conn.execute(
+            "SELECT sql FROM sqlite_master"
+            " WHERE type='index' AND name='ads_sync_key'").fetchone()
+        if not got or (got[0] or "") != want:
+            raise
+    return True
+
+
 def migrate(conn):
     """Add unification columns missing from an old ads table.
 
@@ -450,16 +498,7 @@ def migrate(conn):
                  " ON product_audit (created_at)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_product_audit_employee"
                  " ON product_audit (employee_id)")
-    key_cols = ", ".join(SYNC_KEY_COLUMNS)
-    # DROP first: IF NOT EXISTS would keep a stale narrow index from
-    # before account/client columns joined the key, silently
-    # re-allowing cross-client overwrites on old databases.
-    conn.execute("DROP INDEX IF EXISTS ads_sync_key")
-    conn.execute(
-        "DELETE FROM ads WHERE rowid NOT IN"
-        " (SELECT MAX(rowid) FROM ads GROUP BY %s)" % key_cols)
-    conn.execute(
-        "CREATE UNIQUE INDEX ads_sync_key ON ads (%s)" % key_cols)
+    ensure_sync_key(conn)
     conn.execute(
         "CREATE TABLE IF NOT EXISTS sync_runs ("
         "id INTEGER PRIMARY KEY, source TEXT NOT NULL DEFAULT '',"

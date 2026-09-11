@@ -565,12 +565,10 @@ def upsert_rows(conn, rows):
     """
     from creative_intel import schema as schema_mod
     key_cols = schema_mod.SYNC_KEY_COLUMNS
-    # DROP first (same reason as schema.migrate): a stale narrow
-    # index would keep enforcing the old identity.
-    conn.execute("DROP INDEX IF EXISTS ads_sync_key")
-    conn.execute(
-        "CREATE UNIQUE INDEX ads_sync_key ON ads (%s)"
-        % ", ".join(key_cols))
+    # Shared conditional helper (not inline DROP+CREATE): parallel
+    # imports used to race "index already exists" here, and a stale
+    # narrow index would keep enforcing the old identity.
+    schema_mod.ensure_sync_key(conn)
     where = " AND ".join("%s=?" % col for col in key_cols)
     update_sql = ("UPDATE ads SET %s WHERE %s" % (
         ", ".join("%s=?" % col for col in UPSERT_VALUE_COLUMNS), where))

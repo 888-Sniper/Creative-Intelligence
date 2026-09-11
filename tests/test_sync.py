@@ -592,5 +592,106 @@ class TickBearerTest(unittest.TestCase):
         self.assertIn("not connected", out[job["id"]]["error"])
 
 
+class SyncKeyConcurrencyTest(unittest.TestCase):
+    """The seeded E2E backend crashed under parallel Playwright
+    workers: per-request init_db() ran DROP+CREATE INDEX on every
+    call, so concurrent requests raced "index ads_sync_key already
+    exists" (and wedged on full-table DDL). Steady state must be a
+    read-only check; rebuilds happen only for a missing/stale index.
+    """
+
+    def _file_db(self):
+        import tempfile
+        handle, path = tempfile.mkstemp(suffix=".db")
+        os.close(handle)
+        self.addCleanup(lambda: os.path.exists(path) and os.unlink(path))
+        return path
+
+    def _index_sql(self, conn):
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master"
+            " WHERE type='index' AND name='ads_sync_key'").fetchone()
+        return row[0] if row else None
+
+    def test_steady_state_rebuilds_nothing(self):
+        conn = _conn()
+        try:
+            self.assertFalse(schema.ensure_sync_key(conn))
+            self.assertEqual(self._index_sql(conn),
+                             schema._sync_key_sql())
+        finally:
+            conn.close()
+
+    def test_stale_narrow_index_upgrades_and_keeps_clients(self):
+        conn = _conn()
+        try:
+            conn.execute("DROP INDEX ads_sync_key")
+            conn.execute(
+                "CREATE UNIQUE INDEX ads_sync_key ON ads"
+                " (source, platform, campaign, adset, ad_name, date)")
+            rows = ingest.parse_csv(CSV, "meta")
+            for row in rows:
+                row["client"] = "Client-A"
+            dupes = ingest.parse_csv(CSV, "meta")
+            for row in dupes:
+                row["client"] = "Client-B"
+            # Upserting through the stale index upgrades it first,
+            # then keeps both clients' facts (A03 identity).
+            counts = ingest.upsert_rows(conn, rows + dupes)
+            self.assertEqual(self._index_sql(conn),
+                             schema._sync_key_sql())
+            self.assertEqual(
+                sorted(r[0] for r in conn.execute(
+                    "SELECT DISTINCT client FROM ads")),
+                ["Client-A", "Client-B"])
+            self.assertEqual(counts["inserted"], 4)
+        finally:
+            conn.close()
+
+    def test_parallel_init_and_upsert_is_race_free(self):
+        import threading
+        path = self._file_db()
+        seed = sqlite3.connect(path)
+        try:
+            schema.init_db(seed)
+            ingest.insert_rows(seed, ingest.parse_csv(CSV, "meta"))
+            seed.commit()
+        finally:
+            seed.close()
+        errors = []
+
+        def worker(num):
+            try:
+                conn = sqlite3.connect(path, check_same_thread=False,
+                                       timeout=30.0)
+                try:
+                    schema.init_db(conn)
+                    batch = ingest.parse_csv(CSV, "meta")
+                    for row in batch:
+                        row["client"] = "w%d" % num
+                    ingest.upsert_rows(conn, batch)
+                    conn.commit()
+                finally:
+                    conn.close()
+            except Exception as exc:  # noqa: BLE001 - collected below
+                errors.append(exc)
+
+        threads = [threading.Thread(target=worker, args=(n,))
+                   for n in range(8)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(120)
+        self.assertEqual(errors, [])
+        conn = sqlite3.connect(path)
+        try:
+            self.assertEqual(self._index_sql(conn),
+                             schema._sync_key_sql())
+            # 2 seeded + 8 workers x 2 distinct-client facts, no dupes.
+            self.assertEqual(_count(conn), 18)
+        finally:
+            conn.close()
+
+
 if __name__ == "__main__":
     unittest.main()

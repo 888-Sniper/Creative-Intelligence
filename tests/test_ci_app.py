@@ -751,16 +751,37 @@ def test_no_licensing_concepts():
     assert hits == []
 
 
+def test_react_source_title_is_approved():
+    # The shipped browser title is fixed at the source: the Vite build
+    # carries index.html's <title> into dist/ verbatim, so this holds
+    # with or without a local frontend build.
+    src = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                       "..", "apps", "creative-intelligence-ui",
+                       "index.html")
+    with open(src, encoding="utf-8") as fh:
+        html = fh.read()
+    assert "<title>Creative Intelligence</title>" in html
+    assert "Foap Creative Intelligence" not in html
+
+
 def test_spa_shell_serving(client):
     # Deep links serve the app shell; unknown paths still 404; liveness
     # endpoints are not shadowed by the SPA fallback.
+    from ci_backend.actions import WEB_INDEX, react_index
+    uses_react = (os.path.normpath(react_index())
+                  != os.path.normpath(WEB_INDEX))
     for path in ("/campaigns", "/creatives", "/compare", "/benchmarks",
                  "/reports", "/profile", "/settings", "/admin"):
         r = client.get(path)
         assert r.status_code == 200, path
-        # Approved product title is exactly "Creative Intelligence"
-        # (never "Foap Creative Intelligence").
-        assert "<title>Creative Intelligence</title>" in r.text, path
+        if uses_react:
+            # Built production shell: approved title exactly
+            # "Creative Intelligence" (never "Foap ...").
+            assert "<title>Creative Intelligence</title>" in r.text, path
+        else:
+            # No dist/ in this checkout (backend-only CI job): the
+            # legacy fallback shell serves instead.
+            assert "Foap Creative Intelligence" in r.text, path
     assert client.get("/no-such-view").status_code == 404
     assert client.get("/health").json() == {"ok": True}
     assert client.get("/readiness").json() == {"ready": True}

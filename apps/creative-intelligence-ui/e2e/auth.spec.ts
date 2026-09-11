@@ -77,6 +77,8 @@ test.describe("employee journey", () => {
     await loginAs(context, page, seeds.employee);
     // Approved Dashboard greets by daypart: "Good Morning, Ada".
     await expect(page.getByRole("heading", { name: /Good (Morning|Afternoon|Evening),/ })).toBeVisible();
+    // Approved browser title is exactly "Creative Intelligence".
+    await expect(page).toHaveTitle("Creative Intelligence");
     await expect(page.getByText("Ada L")).toBeVisible();
 
     await page.getByRole("link", { name: "Profile" }).click();

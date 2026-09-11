@@ -80,6 +80,16 @@ class Settings(BaseSettings):
     the production scheduler switch (e.g. 3600 for hourly).
     """
 
+    demo_seed: bool = False
+    """Load the fixture/demo dataset on first boot of a fresh database.
+
+    Intended for ephemeral demo hosting (Render Free): when the
+    database file does not exist yet, startup ingests the bundled
+    fixture CSVs once. Existing databases are never touched, so a
+    restart of the same instance cannot duplicate rows. Local and
+    Oracle deployments keep this false (default).
+    """
+
     slow_request_ms: int = 2000
     """Requests slower than this are access-logged at WARNING."""
 

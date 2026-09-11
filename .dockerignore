@@ -1,0 +1,11 @@
+# Kept out of the Render image (and any docker build context).
+.git
+__pycache__
+*.pyc
+node_modules
+dist
+test-results
+.venv
+Data/*.db
+Data/*.db-*
+*.log

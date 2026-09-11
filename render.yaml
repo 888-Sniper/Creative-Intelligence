@@ -1,0 +1,45 @@
+# Render Free demo deployment (additive: Oracle support untouched).
+#
+# Connect this repo in the Render dashboard (New + -> Blueprint, point
+# at this file) or create the Web Service manually from the Docker
+# settings below. Deploys from main; every push to main redeploys.
+services:
+  - type: web
+    name: creative-intelligence
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    autoDeploy: true
+    healthCheckPath: /health
+    envVars:
+      # Public demo posture (fail-closed via require_public_safety()).
+      - key: CREATIVE_INTEL_ENVIRONMENT
+        value: demo
+      - key: CREATIVE_INTEL_COOKIE_SECURE
+        value: "true"
+      - key: CREATIVE_INTEL_PROVIDER_MODE
+        value: live
+      # Ephemeral demo storage + first-boot fixture seed (see docs/RENDER.md).
+      - key: CREATIVE_INTEL_DATA_DIR
+        value: /app/data
+      - key: CREATIVE_INTEL_DEMO_SEED
+        value: "true"
+      # Secrets below are placeholders: fill them in the Render
+      # dashboard AFTER creating the service (never commit values).
+      # The service stays unhealthy until the required ones are set.
+      - key: CREATIVE_INTEL_ADMIN_EMAIL
+        sync: false
+      - key: CREATIVE_INTEL_WORKOS_CLIENT_ID
+        sync: false
+      - key: CREATIVE_INTEL_KEY_WORKOS
+        sync: false
+      - key: CREATIVE_INTEL_WORKOS_REDIRECT_URI
+        sync: false
+      - key: CREATIVE_INTEL_MASTER_KEY
+        sync: false
+      - key: CREATIVE_INTEL_GOOGLE_CLIENT_ID
+        sync: false
+      - key: CREATIVE_INTEL_GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: CREATIVE_INTEL_GOOGLE_REDIRECT_URI
+        sync: false

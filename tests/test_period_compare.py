@@ -254,6 +254,28 @@ class CompareKpisTest(unittest.TestCase):
         self.assertEqual(got["current_period"], {"start": "2023-12-25", "end": "2024-01-05"})
         self.assertEqual(got["previous_period"], {"start": "2023-12-13", "end": "2023-12-24"})
 
+    def test_exact_date_is_a_one_day_period(self):
+        csv = (
+            HDR
+            + _row("S", "a", 80, 8000, 80, 8, 160, "meta", "2024-01-06")
+            + _row("S", "b", 100, 10000, 100, 10, 200, "meta", "2024-01-07")
+        )
+        got = self._got(csv, {"date": "2024-01-07"})
+        self.assertEqual(got["current_period"], {"start": "2024-01-07", "end": "2024-01-07"})
+        self.assertEqual(got["previous_period"], {"start": "2024-01-06", "end": "2024-01-06"})
+        impr = got["metrics"]["impressions"]
+        self.assertEqual(impr["current"], 10000)
+        self.assertEqual(impr["previous"], 8000)
+        self.assertEqual(impr["percent_change"], 25.0)
+
+    def test_exact_date_does_not_leak_into_previous_window(self):
+        # Only Jan 7 rows exist: an exact-date scope must still find
+        # the empty Jan 6 window, not constrain it to Jan 7 as well.
+        csv = HDR + _row("S", "b", 100, 10000, 100, 10, 200, "meta", "2024-01-07")
+        got = self._got(csv, {"date": "2024-01-07"})
+        self.assertEqual(got["metrics"]["impressions"]["current"], 10000)
+        self.assertEqual(got["metrics"]["impressions"]["state"], "none")
+
     def test_single_bound_is_no_comparison(self):
         got = self._got(HDR + PREV + CUR, {"date_from": "2024-01-01"})
         self.assertIsNone(got["comparison"])

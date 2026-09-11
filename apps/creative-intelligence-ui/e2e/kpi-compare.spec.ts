@@ -51,6 +51,15 @@ test.describe("kpi period comparison", () => {
     await page.locator(".filter-bar").getByLabel("Platform").selectOption("tiktok");
     await expect(page.getByText("12,500")).toBeVisible();
     await expect(page.getByText("+25%", { exact: true })).toHaveCount(2);
+
+    // An exact Date pins a one-day current period (Jan 5 here, whose
+    // previous day has no rows): graceful no-comparison state.
+    await page.getByRole("button", { name: "Clear Filters" }).click();
+    await page.locator(".filter-bar").getByLabel("Date", { exact: true }).fill("2024-01-05");
+    await expect(page.getByText("12,500")).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Explain Comparison Period" }),
+    ).toHaveCount(0);
   });
 
   test.describe("mobile", () => {
@@ -73,6 +82,15 @@ test.describe("kpi period comparison", () => {
     await expect(page.getByRole("tooltip")).toContainText(
       "Dec 25 – Dec 31, 2023",
     );
+    // On-screen, not merely in the DOM: the box must sit inside the
+    // viewport (a fixed tooltip with document-based `top` would pass
+    // toBeVisible while rendering far below the visible screen).
+    const box = await page.getByRole("tooltip").boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.y).toBeGreaterThanOrEqual(0);
+    expect(box!.y + box!.height).toBeLessThanOrEqual(844);
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(390);
     const overflow = await page.evaluate(
       () =>
         document.documentElement.scrollWidth <= window.innerWidth + 1,

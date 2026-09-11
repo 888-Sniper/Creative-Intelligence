@@ -62,11 +62,29 @@ export interface KpiTrendProps {
 export function KpiTrend({ metricLabel, comparison, previous }: KpiTrendProps) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLSpanElement | null>(null);
+  const tipRef = useRef<HTMLSpanElement | null>(null);
   // A touch tap fires focus (which opens) immediately before click;
   // without this flag the first tap would open-then-instantly-close.
   const openedByFocus = useRef(false);
   const tipId = useId();
   const { state, direction, sentiment, percent_change: pct } = comparison;
+
+  // Small screens render the tooltip fixed: pin it to the trigger in
+  // viewport coordinates (flipping above the trigger near the bottom
+  // edge). Plain `top: auto` would resolve against the document and
+  // can leave the tooltip far off-screen.
+  useEffect(() => {
+    if (!open || !wrapRef.current || !tipRef.current) return;
+    if (window.innerWidth > 900) return;
+    const anchor = wrapRef.current.getBoundingClientRect();
+    const tip = tipRef.current;
+    const height = tip.offsetHeight;
+    let top = anchor.bottom + 6;
+    if (top + height > window.innerHeight - 8) {
+      top = Math.max(8, anchor.top - height - 6);
+    }
+    tip.style.top = `${Math.round(top)}px`;
+  }, [open ]);
 
   useEffect(() => {
     if (!open) return;
@@ -95,9 +113,11 @@ export function KpiTrend({ metricLabel, comparison, previous }: KpiTrendProps) {
   const range = previous ? formatRange(previous) : null;
   let tip: string;
   if (state === "new") {
+    // The previous window had rows but the metric itself was zero
+    // there, so no honest percentage exists.
     tip = range
-      ? `First Seen In Current Period — No Data In ${range}.`
-      : "First Seen In Current Period — No Previous Data.";
+      ? `No Percentage Comparison Available Because The Previous-Period Value In ${range} Was Zero.`
+      : "No Percentage Comparison Available Because The Previous-Period Value Was Zero.";
   } else if (direction === "flat") {
     tip = range ? `No Change Compared With ${range}.`
       : "No Change Compared With The Previous Equivalent Date Range.";
@@ -146,7 +166,7 @@ export function KpiTrend({ metricLabel, comparison, previous }: KpiTrendProps) {
         <span aria-hidden="true">i</span>
       </button>
       {open ? (
-        <span role="tooltip" id={tipId} className="kpi-tip">
+        <span role="tooltip" id={tipId} className="kpi-tip" ref={tipRef}>
           {tip}
         </span>
       ) : null}

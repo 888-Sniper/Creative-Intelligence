@@ -33,6 +33,16 @@ strict Content-Security-Policy), and falls back to the legacy static
 `Web/Index.html` otherwise. Unknown paths still 404; `/health` and
 `/readiness` are never shadowed by the SPA fallback.
 
+Fallback scope decision: the legacy page is a supported no-build
+fallback, so shared presentational tokens stay synchronised with the
+React app (page/card/filter/auth heading spacing). Product behaviour
+newer than the fallback — including the `/api/kpis/compare`
+previous-period KPI system — is intentionally React-only and is not
+duplicated into `Web/Index.html`. Every deployment path
+(`deploy/oracle/install.sh`, `deploy/oracle/update.sh`, CI) builds
+the React bundle, so production always serves it; the fallback only
+matters when no build was ever produced.
+
 ## Tests
 
 ```sh

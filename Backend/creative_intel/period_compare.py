@@ -204,8 +204,20 @@ def compare_kpis(conn, scope):
     when no real range can be resolved.
     """
     filt = benchmarks.normalize_filters(dict(scope or {}))
-    base = {k: v for k, v in filt.items() if k not in ("date_from", "date_to")}
-    current = resolve_current_range(conn, filt)
+    # Exact `date` days with no date_from/date_to pair define the
+    # current period (one day, or min..max for several); the days must
+    # not also constrain the previous window. With an explicit range,
+    # `date` stays an ordinary row filter for both windows (matching
+    # /api/campaigns semantics).
+    exact_days = sorted(set(filt.get("date") or []))
+    use_exact = bool(exact_days) and not (filt.get("date_from") and filt.get("date_to"))
+    base = {
+        k: v for k, v in filt.items() if k not in ("date_from", "date_to") and (not use_exact or k != "date")
+    }
+    if use_exact:
+        current = (exact_days[0], exact_days[-1])
+    else:
+        current = resolve_current_range(conn, filt)
     if current is None:
         return {"current_period": None, "previous_period": None, "comparison": None, "metrics": {}}
     cur_start, cur_end = current

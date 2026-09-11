@@ -92,7 +92,7 @@ input[type="text"]{min-width:130px}
 .trend-info{width:20px;height:20px;min-width:20px;border-radius:50%;border:1px solid var(--line);background:transparent;color:inherit;font-size:11px;font-weight:700;line-height:1;padding:0;cursor:pointer;font-family:inherit}
 .trend-info:hover{border-color:var(--foap-primary);color:var(--foap-primary)}
 .kpi-tip{position:absolute;top:calc(100% + 6px);left:0;z-index:30;min-width:180px;max-width:240px;background:var(--foap-text);color:var(--bg);font-size:12px;font-weight:400;line-height:1.45;border-radius:8px;padding:8px 10px;box-shadow:var(--foap-shadow);white-space:normal}
-@media (max-width:900px){.kpi-tip{position:fixed;left:12px;right:12px;max-width:none}}
+@media (max-width:900px){.kpi-tip{position:fixed;top:auto;left:12px;right:12px;max-width:none}}
 .creative-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px}
 .creative-card{background:var(--card);border:1px solid var(--line);border-radius:var(--foap-radius);overflow:hidden;box-shadow:var(--foap-shadow);display:flex;flex-direction:column}
 .creative-card.selected{border-color:var(--foap-primary);box-shadow:0 0 0 2px var(--foap-primary-soft),var(--foap-shadow)}
@@ -121,6 +121,9 @@ video{max-width:100%;width:100%;border:1px solid var(--line);border-radius:var(-
 .auth-card h3{margin:20px 0 10px;font-size:15px}
 #account-menu{position:fixed;left:12px;bottom:12px;z-index:40;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;max-width:280px;font-size:13px}
 #account-menu[hidden]{display:none}
+#account-menu ul{max-height:132px;overflow-y:auto}
+/* Keep scrolled-to content clear of the fixed account menu. */
+html{scroll-padding-bottom:230px}
 .avatar{width:32px;height:32px;border-radius:50%;vertical-align:middle;margin-right:8px;background:var(--line);object-fit:cover}
 .link-btn{background:none;border:none;color:inherit;text-decoration:underline;cursor:pointer;font-size:13px;padding:2px 0;font-family:inherit}
 pre{white-space:pre-wrap;word-break:break-word;background:var(--foap-surface-2);border-radius:var(--foap-radius-sm);padding:12px;font-size:13px}

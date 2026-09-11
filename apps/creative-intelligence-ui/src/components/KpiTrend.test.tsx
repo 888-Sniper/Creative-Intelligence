@@ -145,6 +145,8 @@ describe("KpiTrend", () => {
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: "Explain Comparison Period" }));
-    expect(screen.getByRole("tooltip").textContent).toContain("No Previous Data");
+    expect(screen.getByRole("tooltip").textContent).toContain(
+      "Previous-Period Value Was Zero",
+    );
   });
 });

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { loginAs, readSeeds } from "./helpers";
+import { clickClearOfMenu, loginAs, readSeeds } from "./helpers";
 
 test.describe("employee journey", () => {
   test("signed out sees login, employee sees dashboard, profile, logout", async ({ page, context }) => {
@@ -39,7 +39,7 @@ test.describe("employee journey", () => {
     await expect(page.getByRole("heading", { name: "Google Drive" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Connect Google Drive" })).toBeVisible();
     // E2E has no Google credentials: the server says so instead of bouncing.
-    await page.getByRole("button", { name: "Connect Google Drive" }).click();
+    await clickClearOfMenu(page, page.getByRole("button", { name: "Connect Google Drive" }));
     await expect(page.getByText("Google Drive is not configured.")).toBeVisible();
   });
 
@@ -52,7 +52,7 @@ test.describe("employee journey", () => {
     await expect(page.getByText("boss@foap.test (verified, read-only)")).toBeVisible();
     await expect(page.getByRole("radio", { name: /System/ })).toBeVisible();
     page.on("dialog", (d) => void d.accept());
-    await page.getByRole("button", { name: "Log Out All Sessions" }).click();
+    await clickClearOfMenu(page, page.getByRole("button", { name: "Log Out All Sessions" }));
     // Revoking includes the current session, so the gate returns to login.
     await expect(page.getByRole("heading", { name: "Welcome To Creative Intelligence" })).toBeVisible();
   });

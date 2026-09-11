@@ -366,6 +366,64 @@ class AnalystApiTest(unittest.TestCase):
         self.assertNotEqual(layers["efficiency"]["status"],
                             "strength")
 
+    def test_scoped_ask_and_report_exclude_other_client(self):
+        # A05: the body scope must actually filter the analysis.
+        # SENTINEL LLC's unmistakable ad must never leak into
+        # Acme's answer or report.
+        csv = ("Campaign,Ad,Client,Impressions,2s views,3s views,"
+               "25% views,50% views,Completions,Watch time,"
+               "Video views,Spend,Link clicks,Message\n"
+               "C,Acme Hero,Acme,5000,1500,1200,900,500,300,5900,"
+               "5000,50,40,promotional\n"
+               "C,ZZZ-SENTINEL-QUARK,SENTINEL LLC,99999,9999,9999,"
+               "9999,9999,9999,99999,99999,999,999,neutral\n")
+        with tmp_root() as root:
+            http = self._owner(root)
+            r = http.post("/api/ingest",
+                          json={"platform": "tiktok", "csv": csv})
+            self.assertEqual(r.status_code, 200, r.text)
+            r = http.post("/api/analyst/ask", json={
+                "question": "Wylicz 2s hook rate dla każdej kreacji.",
+                "scope": {"client": ["Acme"]}})
+            self.assertEqual(r.status_code, 200, r.text)
+            body = r.json()
+            blob = body["text"] + str(body["answer"]["tables"])
+            self.assertNotIn("SENTINEL", blob)
+            self.assertIn("Acme", blob)
+            self.assertIn("Acme", str(body["scope_snapshot"]))
+            r = http.post("/api/analyst/report", json={
+                "scope": {"client": ["Acme"]},
+                "sections": ["results", "best_worst"]})
+            self.assertEqual(r.status_code, 200, r.text)
+            self.assertNotIn("SENTINEL", r.json()["markdown"])
+
+    def test_explicit_empty_scope_clears_conversation(self):
+        # A20: omitted scope inherits; explicit {} clears to all
+        # data. The applied scope is returned every time.
+        with tmp_root() as root:
+            http = self._owner(root)
+            self._seed(http)
+            r = http.post("/api/analyst/ask", json={
+                "question": "Wylicz 2s hook rate dla każdej kreacji.",
+                "scope": {"campaign": ["C"]}})
+            conv = r.json()["conversation_id"]
+            # Omitted scope inherits the campaign filter.
+            r = http.post("/api/analyst/ask", json={
+                "conversation_id": conv,
+                "question": "Podsumuj."})
+            self.assertEqual(r.status_code, 200, r.text)
+            self.assertIn("C", str(r.json()["scope_snapshot"]))
+            # Explicit {} clears back to the whole dataset.
+            r = http.post("/api/analyst/ask", json={
+                "conversation_id": conv,
+                "question": "Podsumuj.",
+                "scope": {}})
+            self.assertEqual(r.status_code, 200, r.text)
+            cleared = r.json()["scope_snapshot"]
+            self.assertFalse(
+                {k: v for k, v in cleared.items() if v},
+                "explicit empty scope must clear, got %r" % (cleared,))
+
     def test_report_unauthenticated_refused(self):
         with tmp_root() as root:
             http, _db = make_client(root)

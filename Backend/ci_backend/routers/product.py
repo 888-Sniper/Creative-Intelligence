@@ -1007,7 +1007,9 @@ async def analyst_finding_status(
 class AnalystBody(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     conversation_id: str | None = Field(default=None, max_length=64)
-    scope: dict = Field(default_factory=dict)
+    # None = scope omitted: inherit the conversation's scope (A20).
+    # {} = explicit "All Data": clear to the whole dataset.
+    scope: dict | None = None
     objective: str = "reach"
     language: str | None = None
     rank_by: str | None = None
@@ -1031,6 +1033,8 @@ class AnalystBody(BaseModel):
     @field_validator("scope", mode="before")
     @classmethod
     def _check_scope(cls, values):
+        if values is None:
+            return None
         from creative_intel import analyst as analyst_mod
         allowed = set(_FILTER_KEYS) | set(analyst_mod.EXTRA_SCOPE_KEYS)
         for key in (values or {}):

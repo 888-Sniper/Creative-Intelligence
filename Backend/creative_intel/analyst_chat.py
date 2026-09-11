@@ -721,15 +721,14 @@ def answer_turn(conn, owner_id, question, conversation_id=None,
         max_points = None
     objective = objective if objective in analyst.OBJECTIVES else "reach"
     lang = detect_language(question, language)
+    # A20: omitted scope (None) inherits the conversation's scope;
+    # an explicit {} clears back to the whole dataset.
+    inherit_scope = scope is None
     scope = dict(scope or {})
     if conversation_id is not None:
         conv = get_conversation(conn, owner_id, conversation_id)
         old_scope, old_dv = conv["scope"], conv["dataset_version"]
-        if scope and scope != old_scope:
-            pass  # explicit new filters win; noted below
-        elif old_scope:
-            scope = old_scope
-        if not scope and old_scope:
+        if inherit_scope and old_scope:
             scope = old_scope
         conv_id = conv["id"]
         if objective != conv.get("objective"):

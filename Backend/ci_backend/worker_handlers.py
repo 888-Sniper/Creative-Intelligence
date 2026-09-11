@@ -111,7 +111,9 @@ def run_analyst(conn, payload, owner, ctx, job_id=None):
     out = analyst_chat.answer_turn(
         conn, owner or "", payload.get("question", ""),
         conversation_id=payload.get("conversation_id"),
-        scope=payload.get("scope") or {},
+        # None passes through: omitted scope inherits the
+        # conversation's scope, explicit {} clears it (A20).
+        scope=payload.get("scope"),
         objective=payload.get("objective", "reach"),
         language=payload.get("language"),
         rank_by=payload.get("rank_by"),

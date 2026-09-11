@@ -53,15 +53,18 @@ test.describe("account switch isolation", () => {
       await route.continue();
     });
 
-    // NOTE: the floating #account-menu overlaps the composer's Ask
-    // button at this viewport (pre-existing layout), so submit with
-    // the keyboard — same form-submit path as clicking Ask.
     await page.getByLabel("Ask Foap Analyst").fill("hook rate for each creative");
     const askSeen = page.waitForRequest("**/api/analyst/ask");
-    await page.getByLabel("Ask Foap Analyst").press("Enter");
+    // Plain click: the collapsed account menu no longer overlaps the
+    // composer's Ask button.
+    await page
+      .getByRole("region", { name: "Foap Analyst Conversation" })
+      .getByRole("button", { name: "Ask", exact: true })
+      .click();
     // The ask request is now in flight (held above).
     await askSeen;
 
+    await page.getByRole("button", { name: "Toggle Account Menu" }).click();
     await page.getByRole("button", { name: /Switch To Boss Admin/ }).click();
     // The switch POST is held: the dedicated switching state must
     // hide all protected content from either account.

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { clickClearOfMenu, loginAs, readSeeds } from "./helpers";
+import { loginAs, readSeeds } from "./helpers";
 
 test.describe("employee journey", () => {
   test("signed out sees login, employee sees dashboard, profile, logout", async ({ page, context }) => {
@@ -20,8 +20,27 @@ test.describe("employee journey", () => {
     await expect(page.getByText("ada@foap.test")).toBeVisible();
     await expect(page.getByRole("textbox", { name: /email/i })).toHaveCount(0);
 
+    // The account menu ships collapsed; expand it to reach Log Out.
+    await page.getByRole("button", { name: "Toggle Account Menu" }).click();
     await page.getByRole("button", { name: "Log Out", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Welcome To Creative Intelligence" })).toBeVisible();
+  });
+
+  test("account menu collapses so it cannot cover page controls", async ({ page, context }) => {
+    const seeds = readSeeds();
+    // NOTE: the admin session — the employee session is destroyed by
+    // the logout step of the first journey in this file.
+    await loginAs(context, page, seeds.admin);
+    await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+    const toggle = page.getByRole("button", { name: "Toggle Account Menu" });
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(page.getByRole("button", { name: "Log Out", exact: true })).toHaveCount(0);
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await expect(page.getByRole("button", { name: "Log Out", exact: true })).toBeVisible();
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(page.getByRole("button", { name: "Log Out", exact: true })).toHaveCount(0);
   });
 
   test("pending employee sees pending gate and no dashboard", async ({ page, context }) => {
@@ -39,7 +58,8 @@ test.describe("employee journey", () => {
     await expect(page.getByRole("heading", { name: "Google Drive" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Connect Google Drive" })).toBeVisible();
     // E2E has no Google credentials: the server says so instead of bouncing.
-    await clickClearOfMenu(page, page.getByRole("button", { name: "Connect Google Drive" }));
+    // Plain click: the collapsed account menu cannot intercept it.
+    await page.getByRole("button", { name: "Connect Google Drive" }).click();
     await expect(page.getByText("Google Drive is not configured.")).toBeVisible();
   });
 
@@ -52,7 +72,7 @@ test.describe("employee journey", () => {
     await expect(page.getByText("boss@foap.test (verified, read-only)")).toBeVisible();
     await expect(page.getByRole("radio", { name: /System/ })).toBeVisible();
     page.on("dialog", (d) => void d.accept());
-    await clickClearOfMenu(page, page.getByRole("button", { name: "Log Out All Sessions" }));
+    await page.getByRole("button", { name: "Log Out All Sessions" }).click();
     // Revoking includes the current session, so the gate returns to login.
     await expect(page.getByRole("heading", { name: "Welcome To Creative Intelligence" })).toBeVisible();
   });

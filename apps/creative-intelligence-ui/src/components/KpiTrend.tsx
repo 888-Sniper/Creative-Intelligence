@@ -72,18 +72,32 @@ export function KpiTrend({ metricLabel, comparison, previous }: KpiTrendProps) {
   // Small screens render the tooltip fixed: pin it to the trigger in
   // viewport coordinates (flipping above the trigger near the bottom
   // edge). Plain `top: auto` would resolve against the document and
-  // can leave the tooltip far off-screen.
+  // can leave the tooltip far off-screen. Reposition on scroll/resize
+  // while open: mobile browsers scroll on focus, which can otherwise
+  // strand the tooltip at stale coordinates.
   useEffect(() => {
     if (!open || !wrapRef.current || !tipRef.current) return;
     if (window.innerWidth > 900) return;
-    const anchor = wrapRef.current.getBoundingClientRect();
-    const tip = tipRef.current;
-    const height = tip.offsetHeight;
-    let top = anchor.bottom + 6;
-    if (top + height > window.innerHeight - 8) {
-      top = Math.max(8, anchor.top - height - 6);
-    }
-    tip.style.top = `${Math.round(top)}px`;
+    const place = () => {
+      const anchor = wrapRef.current?.getBoundingClientRect();
+      const tip = tipRef.current;
+      if (!anchor || !tip) return;
+      const height = tip.offsetHeight;
+      let top = anchor.bottom + 6;
+      if (top + height > window.innerHeight - 8) {
+        top = Math.max(8, anchor.top - height - 6);
+      }
+      tip.style.top = `${Math.round(top)}px`;
+    };
+    place();
+    const raf = requestAnimationFrame(place);
+    window.addEventListener("scroll", place, { passive: true, capture: true });
+    window.addEventListener("resize", place);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("scroll", place, { capture: true });
+      window.removeEventListener("resize", place);
+    };
   }, [open ]);
 
   useEffect(() => {

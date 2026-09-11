@@ -17,23 +17,6 @@ export function readSeeds(): Seeds {
  *  The OAuth ceremony itself needs live WorkOS credentials (item 7) and is
  *  covered by backend stub tests; these journeys prove the gated app. */
 
-/** Click a control that may sit near the viewport bottom.
-
- *  The fixed account menu overlays the bottom-left corner, and
- *  Playwright's minimal scroll can park a target underneath it
- *  (font/viewport dependent). Centering first keeps the hit-target
- *  check deterministic; the click itself is still fully validated.
- */
-export async function clickClearOfMenu(
-  page: Page,
-  locator: ReturnType<Page["getByRole"]>,
-) {
-  await locator.evaluate((el) =>
-    el.scrollIntoView({ block: "center", inline: "center" }),
-  );
-  await locator.click();
-}
-
 export async function loginAs(
   context: BrowserContext,
   page: Page,

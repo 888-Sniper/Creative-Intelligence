@@ -51,6 +51,7 @@ test.describe("admin journey", () => {
     await loginAs(context, page, seeds.admin);
     await expect(page.getByRole("link", { name: "Admin" })).toBeVisible();
     // Switch to the non-admin employee account from the account menu.
+    await page.getByRole("button", { name: "Toggle Account Menu" }).click();
     await page.getByRole("button", { name: /Switch To Ada L/ }).click();
     await expect(page.getByText("Ada L").first()).toBeVisible();
     // Admin tab is gone: authorization follows the new account, not the old.

@@ -35,6 +35,11 @@ export function AccountMenu() {
   const { me, switching, switchAccount, logout } = useAuth();
   const [accounts, setAccounts] = useState<StoredAccount[] | null>(null);
   const [error, setError] = useState("");
+  // Collapsed by default: the menu is position:fixed, so an always-open
+  // panel physically overlaps page content parked at the viewport's
+  // bottom-left. Collapsed it is a single compact row that cannot
+  // cover interactive controls.
+  const [expanded, setExpanded] = useState(false);
   const employee = me?.employee;
 
   useEffect(() => {
@@ -68,7 +73,14 @@ export function AccountMenu() {
 
   return (
     <div id="account-menu">
-      <div style={{ display: "flex", alignItems: "center" }}>
+      <button
+        type="button"
+        className="menu-toggle"
+        aria-label="Toggle Account Menu"
+        aria-expanded={expanded}
+        aria-controls="account-menu-body"
+        onClick={() => setExpanded((v) => !v)}
+      >
         <Avatar url={employee.avatar_url} label={name} />
         <span>
           <strong>{name}</strong>
@@ -77,29 +89,36 @@ export function AccountMenu() {
             {employee.role} · {employee.status}
           </span>
         </span>
-      </div>
-      {accounts === null ? (
-        <p className="muted">Loading Accounts…</p>
-      ) : (
-        <ul className="plain">
-          {accounts
-            .filter((a) => a.employee_id !== employee.id)
-            .map((a) => (
-              <li key={a.employee_id}>
-                <button type="button" className="link-btn" disabled={switching} onClick={() => void switchTo(a.employee_id)}>
-                  Switch To {`${a.first_name} ${a.last_name}`.trim() || a.email}
-                </button>{" "}
-                <span className="muted">
-                  ({a.role} · {a.status})
-                </span>
-              </li>
-            ))}
-        </ul>
-      )}
-      {error ? <p className="muted">{error}</p> : null}
-      <button type="button" className="link-btn" onClick={() => void logout()}>
-        Log Out
+        <span aria-hidden="true" className="menu-chevron">
+          {expanded ? "▾" : "▸"}
+        </span>
       </button>
+      {expanded ? (
+        <div id="account-menu-body">
+          {accounts === null ? (
+            <p className="muted">Loading Accounts…</p>
+          ) : (
+            <ul className="plain">
+              {accounts
+                .filter((a) => a.employee_id !== employee.id)
+                .map((a) => (
+                  <li key={a.employee_id}>
+                    <button type="button" className="link-btn" disabled={switching} onClick={() => void switchTo(a.employee_id)}>
+                      Switch To {`${a.first_name} ${a.last_name}`.trim() || a.email}
+                    </button>{" "}
+                    <span className="muted">
+                      ({a.role} · {a.status})
+                    </span>
+                  </li>
+                ))}
+            </ul>
+          )}
+          {error ? <p className="muted">{error}</p> : null}
+          <button type="button" className="link-btn" onClick={() => void logout()}>
+            Log Out
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

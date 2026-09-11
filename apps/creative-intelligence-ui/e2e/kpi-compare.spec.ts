@@ -82,9 +82,21 @@ test.describe("kpi period comparison", () => {
     await expect(page.getByRole("tooltip")).toContainText(
       "Dec 25 – Dec 31, 2023",
     );
-    // On-screen, not merely in the DOM: the box must sit inside the
-    // viewport (a fixed tooltip with document-based `top` would pass
-    // toBeVisible while rendering far below the visible screen).
+    // On-screen, not merely in the DOM: wait until the box sits
+    // inside the viewport (a fixed tooltip with document-based `top`
+    // would pass toBeVisible while rendering far below the screen).
+    await page.waitForFunction(() => {
+      const tip = document.querySelector('[role="tooltip"]');
+      if (!tip) return false;
+      const r = tip.getBoundingClientRect();
+      return (
+        r.width > 0 &&
+        r.top >= 0 &&
+        r.bottom <= window.innerHeight &&
+        r.left >= 0 &&
+        r.right <= window.innerWidth
+      );
+    });
     const box = await page.getByRole("tooltip").boundingBox();
     expect(box).not.toBeNull();
     expect(box!.y).toBeGreaterThanOrEqual(0);

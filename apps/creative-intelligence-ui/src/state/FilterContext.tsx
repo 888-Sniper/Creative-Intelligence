@@ -59,8 +59,23 @@ function isoDate(d: Date): string {
 export function FilterProvider({ children }: { children: ReactNode }) {
   const [filters, setFilters] = useState<FilterValues>(EMPTY_FILTERS);
 
+  // Exact Date and From/To range are mutually exclusive: entering
+  // one clears the other, so the backend never receives an ambiguous
+  // state where the range wins but the exact date still filters rows
+  // (making previous-period matching impossible). Centralised here so
+  // every caller (FilterBar, presets, future controls) inherits it.
   const setFilter = useCallback((key: keyof FilterValues, value: string) => {
-    setFilters((f) => ({ ...f, [key]: value }));
+    setFilters((f) => {
+      const next = { ...f, [key]: value };
+      if (key === "date" && value) {
+        next.date_from = "";
+        next.date_to = "";
+      }
+      if ((key === "date_from" || key === "date_to") && value) {
+        next.date = "";
+      }
+      return next;
+    });
   }, []);
 
   const clearFilters = useCallback(() => setFilters(EMPTY_FILTERS), []);

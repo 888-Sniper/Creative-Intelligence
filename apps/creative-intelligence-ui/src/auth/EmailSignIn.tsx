@@ -171,7 +171,12 @@ export function EmailSignIn() {
       <button type="button" className="login-primary" disabled={authenticating} onClick={() => void signInPassword()}>
         {authenticating ? "Signing In…" : "Sign In"}
       </button>
-      <button type="button" className="login-link login-mode" onClick={() => switchMode("code")}>
+      <button
+        type="button"
+        className="login-link login-mode"
+        style={{ textTransform: "capitalize" }}
+        onClick={() => switchMode("code")}
+      >
         Use a sign-in code instead
       </button>
       <p className="muted login-status" role="status">{message}</p>

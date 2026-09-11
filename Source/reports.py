@@ -92,7 +92,7 @@ def export_csv(rows, path):
     fields = ["client", "project", "campaign_id", "creative_id", "platform",
               "vertical", "market", "objective", "funnel_stage", "date",
               "spend", "impr", "clicks", "video_views", "conversions",
-              "revenue", "cpm", "ctr", "vtr", "cpa", "roas"]
+              "revenue", "cpm", "ctr", "view_rate", "cpa", "roas"]
     with open(path, "w", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=fields, extrasaction="ignore")
         writer.writeheader()

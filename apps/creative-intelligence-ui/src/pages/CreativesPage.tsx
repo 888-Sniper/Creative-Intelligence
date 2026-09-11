@@ -896,7 +896,8 @@ export function CreativesPage() {
               <h4 style={{ marginTop: 0 }}>Performance</h4>
               {kpiRow("Spend", `$${String(m.spend ?? "—")}`)}
               {kpiRow("CPM", `$${String(m.cpm ?? "—")}`)}
-              {kpiRow("VTR", String(m.vtr ?? "—"))}
+              {kpiRow("VTR (completed)", String(m.vtr ?? "—"))}
+              {kpiRow("Play rate", String(m.view_rate ?? "—"))}
               {kpiRow("CTR", String(m.ctr ?? "—"))}
               {kpiRow("CPA", `$${String(m.cpa ?? "—")}`)}
               {kpiRow("ROAS", String(m.roas ?? "—"))}

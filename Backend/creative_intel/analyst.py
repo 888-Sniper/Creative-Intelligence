@@ -169,6 +169,12 @@ def creative_metrics(rows, duration_s=0):
                                       "conversions", scale=1.0)
     out["roas"] = metrics.pooled_ratio(rows, "roas", "revenue",
                                        "spend", scale=1.0)
+    if not metrics._currency_ok(rows):
+        # A14: money metrics never blend currencies — same rule the
+        # currency-gated wrappers (cpm/cpcv/...) enforce. Unit-free
+        # rates above are unaffected.
+        out["cpa"] = metrics.unavailable_mixed_currency("cpa", rows)
+        out["roas"] = metrics.unavailable_mixed_currency("roas", rows)
     if out["roas"]["state"] in (metrics.MEASURED, metrics.ESTIMATED):
         reported = any(bool(r.get("revenue_reported")) for r in rows)
         if not reported:
@@ -199,8 +205,11 @@ def _series_for(rows):
         freq = metrics.frequency(day)
         vtr = metrics.pooled_ratio(day, "vtr", "views_100",
                                    "impressions")
-        cpa = metrics.pooled_ratio(day, "cpa", "spend", "conversions",
-                                   scale=1.0)
+        # A14: daily money blends are as meaningless as pooled ones.
+        cpa = (metrics.unavailable_mixed_currency("cpa", day)
+               if not metrics._currency_ok(day)
+               else metrics.pooled_ratio(day, "cpa", "spend",
+                                         "conversions", scale=1.0))
         series.append({"date": date, "frequency": freq, "vtr": vtr,
                        "cpa": cpa,
                        "spend": sum(metrics._num(r, "spend")

@@ -41,7 +41,13 @@ def describe(values, weights):
 
 
 def derived(row):
-    """Add CPM, CTR, VTR, CPA, ROAS to a canonical grain row (in place)."""
+    """Add CPM, CTR, play/view rate, CPA, ROAS to a canonical grain row.
+
+    A15: this legacy grain carries plays but no completions measure,
+    so its rate is the play/view rate under the honest id
+    "view_rate" — never "vtr" (completions ÷ impressions, defined in
+    Backend/creative_intel/analyst_metrics.py).
+    """
     spend = row.get("spend", 0) or 0
     impr = row.get("impr", 0) or 0
     clicks = row.get("clicks", 0) or 0
@@ -50,7 +56,7 @@ def derived(row):
     rev = row.get("revenue", 0) or 0
     row["cpm"] = spend / impr * 1000 if impr else 0.0
     row["ctr"] = clicks / impr if impr else 0.0
-    row["vtr"] = views / impr if impr else 0.0
+    row["view_rate"] = views / impr if impr else 0.0
     row["cpa"] = spend / conv if conv else 0.0
     row["roas"] = rev / spend if spend else 0.0
     return row

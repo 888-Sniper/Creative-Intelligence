@@ -16,12 +16,20 @@ interface CreativeSide {
   conversions?: number | null;
   cpm?: number | null;
   vtr?: number | null;
+  view_rate?: number | null;
   ctr?: number | null;
   cpc?: number | null;
   cpa?: number | null;
   roas?: number | null;
   annotation?: CompareAnnotation | null;
 }
+
+/** A15: VTR is completions-based; the plays-based number reads Play rate. */
+const KPI_LABELS: Record<string, string> = {
+  vtr: "VTR (completed)",
+  view_rate: "Play rate",
+};
+const kpiLabel = (k: string): string => KPI_LABELS[k] ?? k.toUpperCase();
 
 interface AttributeRow {
   attribute: string;
@@ -72,6 +80,7 @@ const CAMPAIGN_KPIS = [
   "conversions",
   "cpm",
   "vtr",
+  "view_rate",
   "ctr",
   "cpa",
   "roas",
@@ -83,6 +92,7 @@ const PERIOD_KPIS = [
   "conversions",
   "cpm",
   "vtr",
+  "view_rate",
   "ctr",
   "cpc",
   "cpa",
@@ -315,10 +325,10 @@ export function ComparePage() {
                     </div>
                     <table>
                       <tbody>
-                        {(["spend", "impressions", "clicks", "conversions", "cpm", "vtr", "ctr", "cpc", "cpa", "roas"] as const).map(
+                        {(["spend", "impressions", "clicks", "conversions", "cpm", "vtr", "view_rate", "ctr", "cpc", "cpa", "roas"] as const).map(
                           (m) => (
                             <tr key={m}>
-                              <th scope="row">{m.toUpperCase()}</th>
+                              <th scope="row">{kpiLabel(m)}</th>
                               <td>{fmtKpi(d[m], MONEY_METRICS.has(m))}</td>
                             </tr>
                           ),
@@ -402,7 +412,7 @@ export function ComparePage() {
                 <tr>
                   <th>Campaign</th>
                   {CAMPAIGN_KPIS.map((k) => (
-                    <th key={k}>{k.toUpperCase()}</th>
+                    <th key={k}>{kpiLabel(k)}</th>
                   ))}
                 </tr>
               </thead>
@@ -486,7 +496,7 @@ export function ComparePage() {
                 <tbody>
                   {PERIOD_KPIS.map((m) => (
                     <tr key={m}>
-                      <td>{m.toUpperCase()}</td>
+                      <td>{kpiLabel(m)}</td>
                       <td>{fmtCell(periodData.a.kpis[m])}</td>
                       <td>{fmtCell(periodData.b.kpis[m])}</td>
                       <td>{fmtCell(periodData.delta[m])}</td>

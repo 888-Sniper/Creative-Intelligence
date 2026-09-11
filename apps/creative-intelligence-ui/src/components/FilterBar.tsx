@@ -1,7 +1,7 @@
 import { useFilters } from "@/state/FilterContext";
 import type { FilterValues } from "@/state/FilterContext";
 
-const KPI_OPTIONS = ["all", "spend", "ctr", "cpc", "cpa", "cpm", "vtr", "roas"];
+const KPI_OPTIONS = ["all", "spend", "ctr", "cpc", "cpa", "cpm", "vtr", "view_rate", "roas"];
 
 function TextField({ name, label, placeholder }: { name: keyof FilterValues; label: string; placeholder: string }) {
   const { filters, setFilter } = useFilters();

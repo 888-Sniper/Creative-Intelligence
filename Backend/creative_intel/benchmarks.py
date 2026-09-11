@@ -3,6 +3,10 @@
 import json
 import re
 
+from .analyst_metrics import METRICS as _METRIC_DEFS
+from .analyst_metrics import UNSUPPORTED as _FIELD_UNSUPPORTED
+from .analyst_metrics import field_state as _field_state
+
 GROUPABLE = ("platform", "campaign", "hook_type", "creator_vs_branded",
              "edit_style")
 
@@ -12,6 +16,105 @@ def _weight(rows, metric):
     if spend <= 0:
         return 0.0
     return sum(r["spend"] * r[metric] for r in rows) / spend
+
+
+def currency_breakdown(rows):
+    """Distinct non-blank currency codes pooled in one scope.
+
+    Codes are upper-cased so "usd" and "USD" compare equal. An empty
+    list means no row recorded a currency — not "all the same".
+    """
+    out = set()
+    for r in rows or []:
+        code = str((r or {}).get("currency") or "").strip().upper()
+        if code:
+            out.add(code)
+    return sorted(out)
+
+
+def money_scope(rows):
+    """Currency comparability for one pooled scope (A14).
+
+    Money sums stay arithmetic totals, but ratios carrying currency
+    units (CPM/CPC/CPA/ROAS) are only meaningful single-currency: a
+    mixed scope reports them as None with this metadata instead of a
+    blended number. No FX conversion exists anywhere in the app, so
+    none is attempted — mixed scopes stay separable via
+    by_currency() below.
+    """
+    currencies = currency_breakdown(rows)
+    return {"currency": currencies[0] if len(currencies) == 1 else None,
+            "currencies": currencies,
+            "mixed_currency": len(currencies) > 1}
+
+
+def by_currency(rows):
+    """Per-currency spend/revenue split for one pooled scope (A14)."""
+    out = {}
+    for r in rows or []:
+        code = (str((r or {}).get("currency") or "").strip().upper()
+                or "(unknown)")
+        cell = out.setdefault(code, {"spend": 0.0, "revenue": 0.0,
+                                     "n_ads": 0})
+        cell["spend"] += (r or {}).get("spend", 0) or 0
+        cell["revenue"] += (r or {}).get("revenue", 0) or 0
+        cell["n_ads"] += 1
+    return {code: {"spend": round(cell["spend"], 2),
+                   "revenue": round(cell["revenue"], 2),
+                   "n_ads": cell["n_ads"]}
+            for code, cell in sorted(out.items())}
+
+
+def matched_roas(rows):
+    """ROAS over the revenue-reporting sub-population only (A14).
+
+    Returns (value, coverage): value divides reported revenue by the
+    spend of exactly the rows that reported it; coverage is that
+    spend's share of total spend (None when total spend is 0). Never
+    divides reported revenue by unreported spend, and never treats
+    missing revenue as reported zero — a scope with no reported rows
+    yields (None, 0.0).
+    """
+    rows = list(rows or [])
+    total = sum((r or {}).get("spend", 0) or 0 for r in rows)
+    reported = [r for r in rows if (r or {}).get("revenue_reported")]
+    rep_spend = sum((r or {}).get("spend", 0) or 0 for r in reported)
+    revenue = sum((r or {}).get("revenue", 0) or 0 for r in reported)
+    coverage = (rep_spend / total) if total > 0 else None
+    if rep_spend <= 0:
+        return None, coverage
+    return round(revenue / rep_spend, 4), coverage
+
+
+def pooled_registry_ratio(rows, metric_id, impressions=None):
+    """Pooled ratio per the shared metric registry (A15).
+
+    Ordinary analytics previously computed "vtr" as plays over
+    impressions while the Analyst engine (and the registry) defines
+    VTR as completions over impressions. Both rates now come from
+    the one definition in analyst_metrics.METRICS: "vtr" pools the
+    registry numerator (views_100), "view_rate" pools video_views.
+
+    Zero-vs-missing uses the registry's own field_state over each
+    row's missing_json (ingest records unsupplied measures there):
+    a stored 0 for a supplied field is a measured zero and pools
+    normally, while a numerator no row supplied yields None — never
+    a 0.0 rate. Pooling runs over the numerator-supplying rows only,
+    the same matched-population rule A14 applies to revenue.
+    """
+    spec = _METRIC_DEFS[metric_id]
+    rows = list(rows or [])
+    state, usable = _field_state(rows, spec["numerator"])
+    if state == _FIELD_UNSUPPORTED or not usable:
+        return None
+    num = sum((r or {}).get(spec["numerator"], 0) or 0 for r in usable)
+    den_field = spec["denominator"]
+    if impressions is None:
+        impressions = sum((r or {}).get(den_field, 0) or 0
+                          for r in usable)
+    if not impressions:
+        return None
+    return round(num / impressions, 4)
 
 
 def summarize(rows):
@@ -27,6 +130,9 @@ def summarize(rows):
     conv = sum(r["conversions"] for r in rows)
     views = sum(r.get("video_views", 0) or 0 for r in rows)
     revenue = sum(r.get("revenue", 0) or 0 for r in rows)
+    scope = money_scope(rows)
+    mixed = scope["mixed_currency"]
+    roas, roas_coverage = matched_roas(rows)
     return {
         "n_ads": len(rows),
         "spend": round(spend, 2),
@@ -35,13 +141,30 @@ def summarize(rows):
         "conversions": conv,
         "video_views": views,
         "revenue": round(revenue, 2),
+        # A14: currency comparability travels with every pooled
+        # payload; money ratios go None on mixed scopes.
+        "currency": scope["currency"],
+        "currencies": scope["currencies"],
+        "mixed_currency": mixed,
+        "by_currency": by_currency(rows),
         "ctr": round(clicks / impr, 4) if impr else None,
-        "cpc": round(spend / clicks, 2) if clicks else None,
-        "cpm": round(spend / impr * 1000, 2) if impr else None,
-        "vtr": round(views / impr, 4) if impr else None,
+        "cpc": (None if mixed
+                else (round(spend / clicks, 2) if clicks else None)),
+        "cpm": (None if mixed
+                else (round(spend / impr * 1000, 2) if impr else None)),
+        # A15: "vtr" is the registry's completed-view rate
+        # (views_100 / impressions); the legacy plays-based number
+        # survives under its honest name "view_rate". Both come from
+        # pooled_registry_ratio over analyst_metrics.METRICS.
+        "vtr": pooled_registry_ratio(rows, "vtr"),
+        "view_rate": pooled_registry_ratio(rows, "view_rate"),
         "conv_rate_weighted": round(_weight(rows, "conv_rate"), 4),
-        "cpa": round(spend / conv, 2) if conv else None,
-        "roas": roas_of(revenue, spend, _population_reported(rows)),
+        "cpa": (None if mixed
+                else (round(spend / conv, 2) if conv else None)),
+        # A14: ROAS over the reporting sub-population only, with
+        # coverage; None on mixed scopes like every money ratio.
+        "roas": None if mixed else roas,
+        "roas_coverage": roas_coverage,
     }
 
 
@@ -102,10 +225,11 @@ Project identity is row["project"] when present, else row["campaign"].
 FILTER_KEYS = ("vertical", "platform", "funnel", "objective", "market",
                "client", "date", "campaign")
 
-KPI_KEYS = ("cpm", "vtr", "ctr", "cpc", "cpa", "roas")
+KPI_KEYS = ("cpm", "vtr", "view_rate", "ctr", "cpc", "cpa", "roas")
 
-KPI_DIRECTIONS = {"cpm": "lower", "vtr": "higher", "ctr": "higher",
-                  "cpc": "lower", "cpa": "lower", "roas": "higher"}
+KPI_DIRECTIONS = {"cpm": "lower", "vtr": "higher", "view_rate": "higher",
+                  "ctr": "higher", "cpc": "lower", "cpa": "lower",
+                  "roas": "higher"}
 
 def roas_of(revenue, spend, revenue_reported=False):
     """ROAS with honest null semantics.
@@ -142,7 +266,9 @@ def kpis_for_rows(rows):
     clicks = sum(r.get("clicks", 0) or 0 for r in rows)
     conv = sum(r.get("conversions", 0) or 0 for r in rows)
     views = sum(r.get("video_views", 0) or 0 for r in rows)
-    revenue = sum(r.get("revenue", 0) or 0 for r in rows)
+    scope = money_scope(rows)
+    mixed = scope["mixed_currency"]
+    roas, roas_coverage = matched_roas(rows)
     return {
         "n_ads": len(rows),
         "spend": round(spend, 2),
@@ -150,18 +276,31 @@ def kpis_for_rows(rows):
         "clicks": clicks,
         "conversions": conv,
         "video_views": views,
-        "cpm": round(spend / impr * 1000, 2) if impr else None,
-        "vtr": round(views / impr, 4) if impr else None,
+        # A14: same currency metadata + mixed-scope money gating as
+        # summarize(); A15: registry-backed vtr/view_rate split.
+        "currency": scope["currency"],
+        "currencies": scope["currencies"],
+        "mixed_currency": mixed,
+        "by_currency": by_currency(rows),
+        "cpm": (None if mixed
+                else (round(spend / impr * 1000, 2) if impr else None)),
+        "vtr": pooled_registry_ratio(rows, "vtr"),
+        "view_rate": pooled_registry_ratio(rows, "view_rate"),
         "ctr": round(clicks / impr, 4) if impr else None,
-        "cpc": round(spend / clicks, 2) if clicks else None,
-        "cpa": round(spend / conv, 2) if conv else None,
-        "roas": roas_of(revenue, spend, _population_reported(rows)),
+        "cpc": (None if mixed
+                else (round(spend / clicks, 2) if clicks else None)),
+        "cpa": (None if mixed
+                else (round(spend / conv, 2) if conv else None)),
+        "roas": None if mixed else roas,
+        "roas_coverage": roas_coverage,
     }
 
 
 def _percentile(sorted_vals, pct):
+    # A16: no measured values means no percentile — never a 0.0 that
+    # reads as a measured benchmark.
     if not sorted_vals:
-        return 0.0
+        return None
     if len(sorted_vals) == 1:
         return float(sorted_vals[0])
     rank = pct / 100 * (len(sorted_vals) - 1)
@@ -185,6 +324,18 @@ def describe_bands(values, weights):
     wts = [w for _v, w in pairs]
     ordered = sorted(vals)
     total = sum(wts)
+    # A16: an empty valid population has no measured centre or
+    # spread — every numeric band is None so the UI/export must
+    # render "unavailable", never a zero benchmark.
+    if not vals:
+        return {
+            "n": 0,
+            "n_missing": len(list(values or [])),
+            "mean_weighted": None,
+            "p25": None,
+            "median": None,
+            "p75": None,
+        }
     mean = sum(v * w for v, w in pairs) / total if total > 0 else 0.0
     return {
         "n": len(vals),
@@ -412,7 +563,7 @@ def all_rows(conn):
 
 
 def _row_metric(row, metric):
-    if metric in ("cpm", "vtr", "ctr", "cpa", "roas"):
+    if metric in ("cpm", "vtr", "view_rate", "ctr", "cpa", "roas"):
         return kpis_for_rows([row])[metric]
     if metric not in row:
         raise ValueError("unknown metric %r (try %s)" % (metric, sorted(KPI_KEYS)))
@@ -524,7 +675,7 @@ def compare_periods(conn, a_from, a_to, b_from, b_to, filters=None,
     side_b = _window(b_from, b_to, label_b)
     delta = {}
     for metric in ("spend", "impressions", "clicks", "conversions",
-                   "cpm", "vtr", "ctr", "cpc", "cpa", "roas"):
+                   "cpm", "vtr", "view_rate", "ctr", "cpc", "cpa", "roas"):
         va, vb = side_a["kpis"][metric], side_b["kpis"][metric]
         delta[metric] = (round(vb - va, 4) if va is not None
                          and vb is not None else None)
@@ -632,7 +783,8 @@ def _creative_rows(conn, campaign, scope=None):
     """
     scope = scope if isinstance(scope, Scope) else Scope(scope)
     cols = ["spend", "impressions", "clicks", "conversions",
-            "video_views", "revenue", "revenue_reported", "platform",
+            "video_views", "views_100", "revenue", "revenue_reported",
+            "currency", "missing_json", "platform",
             "client", "project", "campaign", "vertical", "market",
             "objective", "funnel_stage", "date"]
     out = []
@@ -651,6 +803,9 @@ def _creative_rows(conn, campaign, scope=None):
         conv = sum(r["conversions"] for r in rows)
         views = sum(r["video_views"] or 0 for r in rows)
         revenue = sum(r["revenue"] or 0 for r in rows)
+        mscope = money_scope(rows)
+        mixed = mscope["mixed_currency"]
+        roas, roas_coverage = matched_roas(rows)
         platforms = sorted({r["platform"] for r in rows if r["platform"]})
 
         def _distinct(col):
@@ -687,12 +842,30 @@ def _creative_rows(conn, campaign, scope=None):
             "conversions": conv,
             "video_views": views,
             "revenue": round(revenue, 2),
-            "cpm": round(spend / impr * 1000, 2) if impr else None,
-            "vtr": round(views / impr, 4) if impr else None,
+            # A14/A15: currency metadata, mixed-scope money gating,
+            # and the registry-backed vtr/view_rate split.
+            "currency": mscope["currency"],
+            "currencies": mscope["currencies"],
+            "mixed_currency": mixed,
+            "by_currency": by_currency(rows),
+            "cpm": (None if mixed
+                    else (round(spend / impr * 1000, 2)
+                          if impr else None)),
+            "vtr": pooled_registry_ratio(rows, "vtr"),
+            "view_rate": pooled_registry_ratio(rows, "view_rate"),
             "ctr": round(clicks / impr, 4) if impr else None,
-            "cpc": round(spend / clicks, 2) if clicks else None,
-            "cpa": round(spend / conv, 2) if conv else None,
-            "roas": roas_of(revenue, spend, _population_reported(rows)),
+            "cpc": (None if mixed
+                    else (round(spend / clicks, 2)
+                          if clicks else None)),
+            "cpa": (None if mixed
+                    else (round(spend / conv, 2) if conv else None)),
+            "roas": None if mixed else roas,
+            "roas_coverage": roas_coverage,
+            # A14: matched-population spend behind this creative's
+            # ROAS, so market roll-ups can divide by reported spend
+            # instead of reintroducing blended denominators.
+            "rep_spend": round(sum(
+                r["spend"] for r in rows if r.get("revenue_reported")), 2),
             "hook_type": ann.get("hook_type") or "unannotated",
             "hook_modality": ann.get("hook_modality") or "unknown",
             "creator_vs_branded": ann.get("creator_vs_branded") or "unannotated",
@@ -921,8 +1094,10 @@ def _report_extras(conn, names, strict_human=False, scope=None,
             late_keys.append(r["creative_key"])
     if early_i and late_i:
         briefs.append((
-            "TEST — Show product within the first 3s: early-product VTR "
-            "is %.2f%% vs late %.2f%%." % (
+            # A15: this pools plays (video_views), so it is the play
+            # rate — never labelled VTR.
+            "TEST — Show product within the first 3s: early-product play "
+            "rate is %.2f%% vs late %.2f%%." % (
                 100.0 * early_v / early_i, 100.0 * late_v / late_i),
             _brief_verified(early_keys + late_keys)))
     style_spend = {}
@@ -978,24 +1153,41 @@ def _report_extras(conn, names, strict_human=False, scope=None,
         m = r["market"] or "(unset)"
         cell = market_stats.setdefault(
             m, {"spend": 0.0, "conv": 0, "revenue": 0.0,
-                "reported": False, "keys": set()})
+                "rep_spend": 0.0, "currencies": set(),
+                "mixed": False, "keys": set()})
         cell["spend"] += r["spend"]
         cell["conv"] += r["conversions"] or 0
         cell["revenue"] += r["revenue"] or 0
-        cell["reported"] = cell["reported"] or bool(
-            r.get("revenue_reported"))
+        cell["rep_spend"] += r.get("rep_spend") or 0
+        cell["currencies"].update(r.get("currencies") or [])
+        cell["mixed"] = cell["mixed"] or bool(r.get("mixed_currency"))
         cell["keys"].add(r["creative_key"])
     markets = []
     for m in sorted(market_stats):
         cell = market_stats[m]
-        cpa = (cell["spend"] / cell["conv"]) if cell["conv"] else None
-        roas = roas_of(cell["revenue"], cell["spend"], cell["reported"])
+        mixed = cell["mixed"] or len(cell["currencies"]) > 1
+        # A14: matched-population ROAS (reported revenue over
+        # reported spend) with coverage; money ratios go None on
+        # mixed-currency markets like every other pooled scope.
+        rep = cell["rep_spend"]
+        roas = (round(cell["revenue"] / rep, 4)
+                if rep > 0 and not mixed else None)
+        coverage = ((rep / cell["spend"])
+                    if cell["spend"] > 0 else None)
+        cpa = (None if mixed
+               else ((cell["spend"] / cell["conv"])
+                     if cell["conv"] else None))
         markets.append({
             "market": m, "spend": round(cell["spend"], 2),
             "conversions": cell["conv"],
             "revenue": round(cell["revenue"], 2),
             "cpa": round(cpa, 2) if cpa is not None else None,
-            "roas": round(roas, 4) if roas is not None else None,
+            "roas": roas,
+            "roas_coverage": coverage,
+            "currency": (sorted(cell["currencies"])[0]
+                         if len(cell["currencies"]) == 1 else None),
+            "currencies": sorted(cell["currencies"]),
+            "mixed_currency": mixed,
             "n_creatives": len(cell["keys"]),
             "qualified": (cell["spend"] >= MIN_MARKET_SPEND
                           and cell["conv"] >= MIN_MARKET_CONV)})

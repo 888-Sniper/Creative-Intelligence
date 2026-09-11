@@ -9,6 +9,7 @@ const KPI_OPTIONS = [
   "conversions",
   "cpm",
   "vtr",
+  "view_rate",
   "ctr",
   "cpc",
   "cpa",

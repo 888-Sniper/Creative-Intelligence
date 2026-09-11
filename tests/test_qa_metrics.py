@@ -2,10 +2,13 @@
 
 Proves each Q&A branch answers the metric actually asked for — not just
 that the answer is flagged grounded:
-- Source ask: a VTR question compares VTR (early vs late product
-  appearance over video_views/impr), never CPA; a TikTok-format question
+- Source ask (plays-only legacy grain): a VTR question compares the
+  explicitly-labelled play rate (early vs late product appearance
+  over video_views/impr), never CPA; a TikTok-format question
   filters TikTok rows and compares creator vs branded formats.
-- Backend qa: same two branches over the SQLite ads + annotations store.
+- Backend qa: same two branches over the SQLite ads + annotations
+  store, answering completions-based VTR when completions were
+  measured and the labelled play rate otherwise (A15).
 - Both engines refuse unknown topics instead of inventing advice.
 """
 
@@ -80,8 +83,12 @@ class SourceVtrTest(unittest.TestCase):
         out = answer("Does showing the product earlier improve VTR?",
                      rows, joined)
         self.assertTrue(out["grounded"])
-        self.assertIn("VTR", out["answer"])
-        # Pooled VTR from the fixture: early 72500/200000, late 43500/150000.
+        # A15: the legacy grain has no completions measure, so the
+        # pooled rate is labelled play rate — never "VTR".
+        self.assertIn("play rate", out["answer"])
+        self.assertNotIn("VTR", out["answer"])
+        # Pooled play rate from the fixture: early 72500/200000,
+        # late 43500/150000.
         self.assertIn("36.2", out["answer"])
         self.assertIn("29.0", out["answer"])
         self.assertNotIn("CPA", out["answer"])
@@ -92,7 +99,7 @@ class SourceVtrTest(unittest.TestCase):
         out = answer("Should the product appear earlier in the video?",
                      rows, joined)
         self.assertTrue(out["grounded"])
-        self.assertIn("VTR", out["answer"])
+        self.assertIn("play rate", out["answer"])
         self.assertNotIn("CPA", out["answer"])
 
     def test_vtr_needs_both_sides(self):
@@ -154,7 +161,10 @@ class BackendVtrTest(unittest.TestCase):
         conn = self._seeded()
         out = qa.answer(conn, "Does early product appearance improve VTR?")
         # Early: (3000+8000)/(10000+20000)=36.7%; late: 8000/40000=20.0%.
-        self.assertIn("VTR", out["answer"])
+        # A15: no completions column in these uploads, so both sides
+        # are explicitly labelled play rate — never "VTR".
+        self.assertIn("play rate", out["answer"])
+        self.assertNotIn("VTR", out["answer"])
         self.assertIn("36.7%", out["answer"])
         self.assertIn("20.0%", out["answer"])
         self.assertIn("hook-a", out["answer"])
@@ -163,11 +173,31 @@ class BackendVtrTest(unittest.TestCase):
         self.assertIn("Annotation", out["sources"])
         conn.close()
 
+    def test_measured_completions_answer_true_vtr(self):
+        # A15: a completions column ("100% Views") means the same
+        # question gets completions-based VTR, not the play rate.
+        conn = fresh_db()
+        ingest.insert_rows(conn, ingest.parse_csv_report_ex(
+            "Campaign,Ad Name,Creative Name,Amount Spent,Impressions,"
+            "Link Clicks,Conversions,Video Views,100% Views\n"
+            "C1,A1,hook-a,100,10000,200,10,3000,1000\n"
+            "C1,A2,hook-b,300,30000,300,15,6000,2000\n", "meta")[0])
+        annotate(conn, "hook-a", product_start=1.0)
+        annotate(conn, "hook-b", product_start=8.0)
+        out = qa.answer(conn, "Does early product appearance improve VTR?")
+        # Early: 1000/10000 = 10.0% VTR; late: 2000/30000 = 6.7% VTR.
+        self.assertIn("VTR", out["answer"])
+        self.assertNotIn("play rate", out["answer"])
+        self.assertIn("10.0%", out["answer"])
+        self.assertIn("6.7%", out["answer"])
+        conn.close()
+
     def test_vtr_without_timing_falls_back_to_blended(self):
         conn = fresh_db()
         ingest.insert_rows(conn, ingest.parse_csv(META_CSV, "meta"))
         out = qa.answer(conn, "What is the VTR?")
         # Blended: 9000/40000 = 22.5%, top views from hook-b.
+        self.assertIn("play rate", out["answer"])
         self.assertIn("22.5%", out["answer"])
         self.assertIn("hook-b", out["answer"])
         conn.close()

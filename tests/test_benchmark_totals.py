@@ -16,12 +16,19 @@ from creative_intel import benchmarks, ingest, schema
 
 class SummarizeTotalsTest(unittest.TestCase):
     def test_extended_kpis_match_hand_computation(self):
+        # A14/A15: rows carry the flags real ingest writes
+        # (revenue_reported, currency, missing_json) plus measured
+        # completions, so the pooled contract is exercised exactly.
         rows = [
             {"spend": 100.0, "impressions": 10000, "clicks": 200,
-             "conversions": 10, "video_views": 3000, "revenue": 250.0,
+             "conversions": 10, "video_views": 3000, "views_100": 1000,
+             "revenue": 250.0, "revenue_reported": True,
+             "currency": "GBP", "missing_json": "[]",
              "conv_rate": 0.001, "creative_key": "a"},
             {"spend": 300.0, "impressions": 30000, "clicks": 300,
-             "conversions": 30, "video_views": 6000, "revenue": 750.0,
+             "conversions": 30, "video_views": 6000, "views_100": 2000,
+             "revenue": 750.0, "revenue_reported": True,
+             "currency": "GBP", "missing_json": "[]",
              "conv_rate": 0.001, "creative_key": "b"},
         ]
         got = benchmarks.summarize(rows)
@@ -37,8 +44,15 @@ class SummarizeTotalsTest(unittest.TestCase):
         self.assertEqual(got["video_views"], 9000)
         self.assertEqual(got["revenue"], 1000.0)
         self.assertEqual(got["cpm"], 10.0)
-        self.assertEqual(got["vtr"], 0.225)
+        # A15: vtr is completions-based; the plays-based number lives
+        # under view_rate. A14: fully-reported revenue keeps ROAS 2.5
+        # with full coverage on a single-currency scope.
+        self.assertEqual(got["vtr"], 0.075)
+        self.assertEqual(got["view_rate"], 0.225)
         self.assertEqual(got["roas"], 2.5)
+        self.assertEqual(got["roas_coverage"], 1.0)
+        self.assertEqual(got["currency"], "GBP")
+        self.assertFalse(got["mixed_currency"])
 
     def test_extended_kpis_zero_safe(self):
         rows = [{"spend": 0.0, "impressions": 0, "clicks": 0,

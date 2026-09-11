@@ -83,7 +83,7 @@ function buildKpiCards(campaigns: CampaignsResponse): KpiCard[] {
     { value: impr ? "$" + cpm.toFixed(2) : "—", label: "CPM", delta: impr ? scope : "no impressions yet" },
     {
       value: impr ? ((vtr * 100).toFixed(1) + "%") : "—",
-      label: "VTR",
+      label: "Play rate",
       delta: impr ? (views ? scope : "no video views yet") : "no impressions yet",
     },
     { value: impr ? ((ctr * 100).toFixed(2) + "%") : "—", label: "CTR", delta: impr ? scope : "no impressions yet" },

@@ -91,6 +91,22 @@ METRICS = {
         "aggregation": "pooled_ratio",
         "requires": ("views_100", "impressions"),
     },
+    # A15: the plays-based rate ordinary analytics used to publish
+    # under the "vtr" id. Separate id, explicit label, same shared
+    # registry — the two rates can never be confused again.
+    "view_rate": {
+        "display": {"en": "Play/view rate (plays ÷ impressions)",
+                     "pl": "Wskaźnik odtworzeń (odtworzenia ÷ wyświetlenia)"},
+        "source_platform": "any",
+        "native_field": "video_views",
+        "numerator": "video_views",
+        "denominator": "impressions",
+        "unit": "percent",
+        "direction": "higher_is_better",
+        "grain": "creative",
+        "aggregation": "pooled_ratio",
+        "requires": ("video_views", "impressions"),
+    },
     "quartile_25_impr": {
         "display": {"en": "25% viewing rate (impressions-based)",
                      "pl": "Oglądalność 25% (na bazie wyświetleń)"},
@@ -400,6 +416,17 @@ def _currency_ok(rows):
     are never combined.
     """
     return len(_currencies(rows)) <= 1
+
+
+def unavailable_mixed_currency(metric_id, rows):
+    """NA result for money metrics over multi-currency scopes (A14).
+
+    No FX conversion exists anywhere in the app, so a blended money
+    number is never produced — callers surface this NA instead.
+    """
+    return _result(metric_id, None, NA,
+                   reasons=["mixed currencies %s need a conversion policy"
+                            % _currencies(rows)])
 
 
 def pooled_ratio(rows, metric_id, num_field, den_field, scale=100.0):
@@ -727,9 +754,7 @@ def engagement_rate(rows):
 def cpcv(rows):
     """Spend over compatible completed views (views_100)."""
     if not _currency_ok(rows):
-        return _result("cpcv", None, NA,
-                       reasons=["mixed currencies %s need a conversion"
-                                " policy" % _currencies(rows)])
+        return unavailable_mixed_currency("cpcv", rows)
     return pooled_ratio(rows, "cpcv", "spend", "views_100", scale=1.0)
 
 

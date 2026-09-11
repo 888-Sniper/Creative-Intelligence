@@ -11,7 +11,6 @@ import os
 import sqlite3
 
 from creative_intel import (
-    benchmarks,
     creative,
     export_gate,
     ingest,
@@ -532,18 +531,32 @@ def build_creatives_list(conn, q):
         rev = sum(v["revenue"] for v in agg_rows)
         r["campaigns"] = sorted({v["campaign"] for v in agg_rows
                                  if v["campaign"]})
+        # A14/A15: same pooled contract as benchmarks.kpis_for_rows
+        # (currency metadata, mixed-scope money gating,
+        # matched-population ROAS, registry vtr/view_rate split).
+        _mscope = _bench.money_scope(agg_rows)
+        _mixed = _mscope["mixed_currency"]
+        _roas, _roas_cov = _bench.matched_roas(agg_rows)
         r["metrics"] = {
             "spend": round(spend, 2), "impressions": impr,
             "clicks": clicks, "conversions": conv,
             "video_views": views, "revenue": round(rev, 2),
-            "cpm": round(spend / impr * 1000, 2) if impr else None,
-            "vtr": round(views / impr, 4) if impr else None,
+            "currency": _mscope["currency"],
+            "currencies": _mscope["currencies"],
+            "mixed_currency": _mixed,
+            "by_currency": _bench.by_currency(agg_rows),
+            "cpm": (None if _mixed else (
+                round(spend / impr * 1000, 2) if impr else None)),
+            "vtr": _bench.pooled_registry_ratio(agg_rows, "vtr"),
+            "view_rate": _bench.pooled_registry_ratio(
+                agg_rows, "view_rate"),
             "ctr": round(clicks / impr, 4) if impr else None,
-            "cpc": round(spend / clicks, 2) if clicks else None,
-            "cpa": round(spend / conv, 2) if conv else None,
-            "roas": benchmarks.roas_of(
-                rev, spend,
-                any(v.get("revenue_reported") for v in agg_rows))}
+            "cpc": (None if _mixed else (
+                round(spend / clicks, 2) if clicks else None)),
+            "cpa": (None if _mixed else (
+                round(spend / conv, 2) if conv else None)),
+            "roas": None if _mixed else _roas,
+            "roas_coverage": _roas_cov}
         r["scope"] = scope.describe()
         ann = conn.execute(
             "SELECT annotation_json FROM annotations WHERE creative_key=?",
@@ -656,22 +669,34 @@ def build_compare(conn, q):
         impr = sum(r["impressions"] for r in rows)
         clicks = sum(r["clicks"] for r in rows)
         conv = sum(r["conversions"] for r in rows)
-        views = sum(r["video_views"] or 0 for r in rows)
-        revenue = sum(r["revenue"] or 0 for r in rows)
         ann = conn.execute("SELECT annotation_json FROM annotations"
                            " WHERE creative_key=?", (key,)).fetchone()
+        # A14/A15: same pooled contract as benchmarks.kpis_for_rows
+        # (currency metadata, mixed-scope money gating,
+        # matched-population ROAS, registry vtr/view_rate split).
+        _mscope = _bench2.money_scope(rows)
+        _mixed = _mscope["mixed_currency"]
+        _roas, _roas_cov = _bench2.matched_roas(rows)
         out[key] = {"spend": round(spend, 2),
                     "impressions": impr,
                     "clicks": clicks,
                     "conversions": conv,
-                    "cpm": round(spend / impr * 1000, 2) if impr else None,
-                    "vtr": round(views / impr, 4) if impr else None,
+                    "currency": _mscope["currency"],
+                    "currencies": _mscope["currencies"],
+                    "mixed_currency": _mixed,
+                    "by_currency": _bench2.by_currency(rows),
+                    "cpm": (None if _mixed else (
+                        round(spend / impr * 1000, 2) if impr else None)),
+                    "vtr": _bench2.pooled_registry_ratio(rows, "vtr"),
+                    "view_rate": _bench2.pooled_registry_ratio(
+                        rows, "view_rate"),
                     "ctr": round(clicks / impr, 4) if impr else None,
-                    "cpc": round(spend / clicks, 2) if clicks else None,
-                    "cpa": round(spend / conv, 2) if conv else None,
-                    "roas": benchmarks.roas_of(
-                        revenue, spend,
-                        any(r.get("revenue_reported") for r in rows)),
+                    "cpc": (None if _mixed else (
+                        round(spend / clicks, 2) if clicks else None)),
+                    "cpa": (None if _mixed else (
+                        round(spend / conv, 2) if conv else None)),
+                    "roas": None if _mixed else _roas,
+                    "roas_coverage": _roas_cov,
                     "scope": scope.describe(),
                     "annotation": json.loads(ann[0]) if ann else None}
     if len(keys) == 2:

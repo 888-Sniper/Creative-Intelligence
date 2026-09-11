@@ -3,6 +3,13 @@ import { api, scopedPath } from "@/api/client";
 import { useFilters } from "@/state/FilterContext";
 
 const KPI_LOWER_BETTER = ["cpa", "cpc", "cpm"];
+
+/** A15: VTR is completions-based; the plays-based number reads Play rate. */
+const KPI_LABELS: Record<string, string> = {
+  vtr: "VTR (completed)",
+  view_rate: "Play rate",
+};
+const kpiLabel = (k: string): string => KPI_LABELS[k] ?? k.toUpperCase();
 const SUMMARY_METRICS = [
   "spend",
   "impressions",
@@ -10,6 +17,7 @@ const SUMMARY_METRICS = [
   "conversions",
   "cpm",
   "vtr",
+  "view_rate",
   "ctr",
   "cpc",
   "cpa",
@@ -265,7 +273,7 @@ export function CampaignsPage() {
                   <tbody>
                     {detail.summary.map((s) => (
                       <tr key={s.m}>
-                        <th>{s.m.toUpperCase()}</th>
+                        <th>{kpiLabel(s.m)}</th>
                         <td>{s.v}</td>
                       </tr>
                     ))}

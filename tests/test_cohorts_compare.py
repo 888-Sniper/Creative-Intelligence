@@ -229,7 +229,13 @@ class FilterBuilderTest(unittest.TestCase):
         self.assertAlmostEqual(got["mean_weighted"], (2.0 * 20 + 4.0 * 40) / 60,
                                    places=4)
         self.assertEqual(benchmarks.describe_bands([], [])["n"], 0)
-        self.assertEqual(benchmarks.describe_bands([None], [5])["median"], 0.0)
+        # A16: an empty valid population has no measured centre or
+        # spread — every numeric band is None, never a 0.0 that reads
+        # as a measured benchmark.
+        empty = benchmarks.describe_bands([None, None], [5, 6])
+        self.assertEqual((empty["n"], empty["n_missing"]), (0, 2))
+        for key in ("mean_weighted", "p25", "median", "p75"):
+            self.assertIsNone(empty[key])
 
     def test_zero_conversion_rows_do_not_crash_benchmark(self):
         conn = fresh_db()

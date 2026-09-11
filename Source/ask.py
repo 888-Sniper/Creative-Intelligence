@@ -55,8 +55,12 @@ def _timing_split(joined, threshold=PRODUCT_EARLY_S):
     return early, late
 
 
-def _pooled_vtr(rows):
-    """Pooled VTR = sum(video_views) / sum(impr), plus the raw totals."""
+def _pooled_play_rate(rows):
+    """Pooled play rate = sum(video_views) / sum(impr), plus raw totals.
+
+    A15: this legacy grain has no completions measure, so the rate
+    is labelled play rate — never VTR.
+    """
     impr = sum(r.get("impr", 0) or 0 for r in rows)
     views = sum(r.get("video_views", 0) or 0 for r in rows)
     return (views / impr if impr else 0.0), views, impr
@@ -86,16 +90,16 @@ def answer(question, rows, joined):
             return {"grounded": False, "citations": [],
                     "answer": "Insufficient data: need creatives with both "
                               "early and late product appearance to compare "
-                              "VTR."}
-        evtr, eviews, eimpr = _pooled_vtr(early)
-        lvtr, lviews, limpr = _pooled_vtr(late)
+                              "play rate."}
+        evtr, eviews, eimpr = _pooled_play_rate(early)
+        lvtr, lviews, limpr = _pooled_play_rate(late)
         verdict = "yes" if evtr > lvtr else "no"
         early_cites = _cites(early)
         cites = early_cites + [c for c in _cites(late) if c not in early_cites]
         return {"grounded": True,
                 "citations": cites,
                 "answer": f"{verdict.title()}: product before second "
-                          f"{PRODUCT_EARLY_S:.0f} holds VTR "
+                          f"{PRODUCT_EARLY_S:.0f} holds play rate "
                           f"{evtr * 100:.1f}% ({eviews:,.0f} views / "
                           f"{eimpr:,.0f} impr across {len(early)} creatives: "
                           f"{', '.join(_ids(early))}) vs "

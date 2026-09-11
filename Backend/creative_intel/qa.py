@@ -84,17 +84,50 @@ def _product_start(ann):
     return min(starts) if starts else None
 
 
-def _vtr(group):
-    """Pooled VTR = sum(video_views) / sum(impressions), plus raw totals."""
-    impr = sum(r["impressions"] for r in group)
-    views = sum(r["video_views"] for r in group)
-    return (views / impr) if impr else 0.0, views, impr
-
-
 def _cpa(group):
     spend = sum(r["spend"] for r in group)
     conv = sum(r["conversions"] for r in group)
     return (spend / conv) if conv else 0.0, spend, conv
+
+
+def _view_rate(group):
+    """A15: (label, value, num, den) for one row group.
+
+    Completions-based VTR when the group measured completions,
+    otherwise the explicitly-labelled play rate (plays over
+    impressions). Rows are full ads dicts, so missing_json
+    distinguishes unmeasured numerators from measured zeros via the
+    shared registry field_state — an unmeasured rate yields None,
+    never a false 0.0.
+    """
+    from creative_intel import analyst_metrics as _metrics
+    for metric_id, label in (("vtr", "VTR"), ("view_rate", "play rate")):
+        spec = _metrics.METRICS[metric_id]
+        state, usable = _metrics.field_state(group, spec["numerator"])
+        if state == _metrics.UNSUPPORTED or not usable:
+            continue
+        num = sum((r or {}).get(spec["numerator"], 0) or 0 for r in usable)
+        den = sum((r or {}).get(spec["denominator"], 0) or 0 for r in usable)
+        if not den:
+            continue
+        return label, round(num / den, 4), num, den
+    return "play rate", None, 0, 0
+
+
+def _pct(value):
+    """Percent text for an optional rate: n/a, never a false 0.0%."""
+    return ("%.1f%%" % (100.0 * value)) if value is not None else "n/a"
+
+
+def _rate_noun(label):
+    return "completions" if label == "VTR" else "views"
+
+
+def _rate_json(group):
+    """JSON-safe _view_rate for LLM fact packs."""
+    label, value, num, den = _view_rate(group)
+    return {"label": label, "value": value,
+            "numerator": num, "denominator": den}
 
 
 def _show_metric(metric, value):
@@ -157,14 +190,13 @@ def _fact_pack(conn, limit=8, scope=None):
         if r.get("market"):
             by_market.setdefault(r["market"], []).append(r)
 
-    def _vtr(group):
-        impr = sum(x["impressions"] for x in group)
-        views = sum(x["video_views"] for x in group)
-        return round(views / impr, 4) if impr else None
-
     def _timed(group):
         stats = _kpis(group)
-        stats["vtr"] = _vtr(group)
+        # A15: completions-based VTR when measured, else an explicit
+        # play rate — never plays masquerading as VTR.
+        label, value, _num, _den = _view_rate(group)
+        stats["rate_label"] = label
+        stats["rate"] = value
         return stats
 
     def _timing_block(early_group, late_group):
@@ -311,10 +343,12 @@ def _fact_pack(conn, limit=8, scope=None):
                         reverse=True)[:limit]],
         "product_timing": {
             "early_s": PRODUCT_EARLY_S,
+            # A15: labelled rates for the LLM prompt — VTR only when
+            # completions were measured, else an explicit play rate.
             "early": {"n_creatives": len({x["creative_key"] for x in early}),
-                      "vtr": _vtr(early)} if early else None,
+                      "rate": _rate_json(early)} if early else None,
             "late": {"n_creatives": len({x["creative_key"] for x in late}),
-                     "vtr": _vtr(late)} if late else None},
+                     "rate": _rate_json(late)} if late else None},
         "brand_timing": {"cutoff_s": BRAND_EARLY_S,
                          **_timing_block(brand_early, brand_late)},
         "logo_timing": {"cutoff_s": BRAND_EARLY_S,
@@ -497,13 +531,21 @@ def answer(conn, question, llm=None, scope=None):
                                   "view rate", "completion")):
             metric = "vtr"
 
+        # A15: one rate id per scope for fair ranking — VTR when
+        # the scope measured completions, else the explicit play rate.
+        _rate_id = "view_rate"
+        _rate_label = "PLAY RATE"
+        if metric == "vtr":
+            from creative_intel import benchmarks as _bench
+            _rate_label = _view_rate(rows)[0]
+            _rate_id = "vtr" if _rate_label == "VTR" else "view_rate"
+
         def _group_metric(group):
             spend = sum(x["spend"] for x in group)
             impr = sum(x["impressions"] for x in group)
             clicks = sum(x["clicks"] for x in group)
             conv = sum(x["conversions"] for x in group)
             rev = sum(x.get("revenue") or 0 for x in group)
-            views = sum(x.get("video_views") or 0 for x in group)
             if metric == "cpa":
                 return (spend / conv) if conv else None
             if metric == "ctr":
@@ -511,14 +553,16 @@ def answer(conn, question, llm=None, scope=None):
             if metric == "roas":
                 return (rev / spend) if spend else None
             if metric == "vtr":
-                return (views / impr) if impr else None
+                return _bench.pooled_registry_ratio(group, _rate_id)
             return spend
 
         ranked = [(k, _group_metric(g)) for k, g in by_key.items()]
         ranked = [(k, v) for k, v in ranked if v is not None]
+        _metric_name = _rate_label if metric == "vtr" else (
+            metric.upper() if metric else "")
         if metric is not None and not ranked:
             parts.append("No creative has a computable %s, so there is "
-                         "no %s winner to name." % (metric.upper(), metric.upper()))
+                         "no %s winner to name." % (_metric_name, _metric_name))
             cite("Uploaded CSV")
         else:
             reverse = metric not in ("cpa",)
@@ -530,7 +574,7 @@ def answer(conn, question, llm=None, scope=None):
                              % (key, f"{spend:,.2f}"))
             else:
                 parts.append("Top creative by %s is %r at %s."
-                             % (metric.upper(), key,
+                             % (_metric_name, key,
                                 _show_metric(metric, dict(ranked)[key])))
             cite("Uploaded CSV")
         ann = conn.execute(
@@ -558,28 +602,35 @@ def answer(conn, question, llm=None, scope=None):
                 continue
             (early if start <= PRODUCT_EARLY_S else late).append(r)
         if early and late:
-            ev, evv, evi = _vtr(early)
-            lv, lvv, lvi = _vtr(late)
-            verdict = "yes" if ev > lv else "no"
+            # A15: per-side labelled rates — VTR where completions
+            # were measured, play rate elsewhere; never mixed blindly.
+            elab, ev, evv, evi = _view_rate(early)
+            llab, lv, lvv, lvi = _view_rate(late)
+            if ev is None or lv is None:
+                verdict = "unclear"
+            else:
+                verdict = "yes" if ev > lv else "no"
             parts.append(
-                "%s: early product appearance holds VTR %.1f%% (%d views / "
-                "%d impr across %s) vs late %.1f%% (%d views / %d impr "
+                "%s: early product appearance holds %s %s (%d %s / "
+                "%d impr across %s) vs late %s %s (%d %s / %d impr "
                 "across %s)."
-                % (verdict.title(), 100.0 * ev, evv, evi,
+                % (verdict.title(), elab, _pct(ev), evv,
+                   _rate_noun(elab), evi,
                    ", ".join(sorted({x["creative_key"] for x in early})),
-                   100.0 * lv, lvv, lvi,
+                   llab, _pct(lv), lvv, _rate_noun(llab), lvi,
                    ", ".join(sorted({x["creative_key"] for x in late}))))
             cite("Uploaded CSV")
             cite("Annotation")
             cite("Benchmark Derived")
         else:
-            v, vv, vi = _vtr(rows)
+            blab, v, vv, vi = _view_rate(rows)
             top = max(rows, key=lambda r: r["video_views"])
             parts.append(
-                "Blended VTR is %.1f%% (%d views / %d impr across %d rows; "
+                "Blended %s is %s (%d %s / %d impr across %d rows; "
                 "top views from %r). Add product-timing annotations to "
                 "split early vs late appearance."
-                % (100.0 * v, vv, vi, len(rows), top["creative_key"]))
+                % (blab, _pct(v), vv, _rate_noun(blab), vi, len(rows),
+                   top["creative_key"]))
             cite("Uploaded CSV")
             cite("Benchmark Derived")
     if any(w in q for w in ("tiktok", "format", "creator", "branded")):
@@ -640,11 +691,12 @@ def answer(conn, question, llm=None, scope=None):
             group = timing[side]
             if group:
                 bits.append(
-                    "%s %s: %d creatives at %s spend, VTR %s, CTR %s, CPA %s"
+                    "%s %s: %d creatives at %s spend, %s %s, CTR %s, CPA %s"
                     % (label, when % timing["cutoff_s"],
                        group["n_creatives"], _money(group["spend"]),
-                       ("%.2f%%" % (100.0 * group["vtr"])
-                        if group.get("vtr") is not None else "n/a"),
+                       group.get("rate_label", "play rate"),
+                       ("%.2f%%" % (100.0 * group["rate"])
+                        if group.get("rate") is not None else "n/a"),
                        ("%.2f%%" % (100.0 * group["ctr"])
                         if group.get("ctr") is not None else "n/a"),
                        _money(group["cpa"])))

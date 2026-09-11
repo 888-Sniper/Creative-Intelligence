@@ -397,7 +397,9 @@ class Gate6AskParityTest(unittest.TestCase):
     def test_early_product_vtr(self):
         text = self._ask("Does early product appearance improve VTR?",
                          SPAIN)
-        self.assertIn("VTR", text)
+        # A15: ACC fixtures carry no completions column, so the
+        # answer is the explicitly-labelled play rate.
+        self.assertIn("play rate", text)
         # shared-creative shows product at 6.2s (late); nothing is
         # early, so the blended fallback names the scoped rows.
         self.assertIn("shared-creative", text)

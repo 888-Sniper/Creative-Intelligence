@@ -163,7 +163,7 @@ early_a = answer("Does showing the product earlier improve VTR?",
                  rows, joined)
 check("early-product answer says yes with numbers",
       early_a["grounded"] and early_a["answer"].startswith("Yes")
-      and "VTR" in early_a["answer"] and "36.2" in early_a["answer"]
+      and "play rate" in early_a["answer"] and "36.2" in early_a["answer"]
       and "29.0" in early_a["answer"])
 check("early-product answer compares VTR, not CPA",
       "CPA" not in early_a["answer"] and "views" in early_a["answer"])
@@ -378,7 +378,7 @@ check("ranking ties keep stable input order",
 zero = derived({"spend": 0.0, "impr": 0, "clicks": 0, "video_views": 0,
                 "conversions": 0, "revenue": 0.0})
 check("zero denominators yield zeros, not crash",
-      zero["cpm"] == 0.0 and zero["ctr"] == 0.0 and zero["vtr"] == 0.0
+      zero["cpm"] == 0.0 and zero["ctr"] == 0.0 and zero["view_rate"] == 0.0
       and zero["cpa"] == 0.0 and zero["roas"] == 0.0)
 junk = [dict(r, product_first_visible_s=v)
         for r, v in zip(joined, ["soon", None, float("nan"), True])]

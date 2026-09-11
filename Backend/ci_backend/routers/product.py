@@ -30,6 +30,7 @@ from creative_intel import (  # noqa: E402
     export_gate,
     media,
     ooxml,
+    period_compare,
     qa,
     replay,
     retention,
@@ -226,6 +227,17 @@ def compare_periods(request: Request, conn=Depends(get_product_conn),
 def replay_history(request: Request, conn=Depends(get_product_conn),
                    _emp=Depends(get_current_employee)):
     return replay.history(conn)
+
+
+@router.get("/api/kpis/compare")
+def kpis_compare(request: Request, conn=Depends(get_product_conn),
+                 _emp=Depends(get_current_employee)):
+    q = query_multidict(request)
+    try:
+        scope = benchmarks.Scope.from_query(q)
+        return period_compare.compare_kpis(conn, scope.normalized())
+    except (ValueError, export_gate.ExportBlocked, emp.StoreError) as exc:
+        raise _conflict(exc)
 
 
 @router.get("/api/sync/status")

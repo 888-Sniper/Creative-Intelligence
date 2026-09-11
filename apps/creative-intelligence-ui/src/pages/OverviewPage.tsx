@@ -3,6 +3,8 @@ import type { ChangeEvent, ReactNode } from "react";
 import { api, scopedPath } from "@/api/client";
 import { useFilters } from "@/state/FilterContext";
 import { SyncJobs } from "@/components/SyncJobs";
+import { KpiTrend } from "@/components/KpiTrend";
+import type { KpiComparison, KpiPeriod } from "@/components/KpiTrend";
 
 interface CampaignAggregate {
   n_ads?: number;
@@ -51,7 +53,23 @@ interface ProviderStatusResponse {
 interface KpiCard {
   value: string;
   label: string;
-  delta: string;
+  /** Supporting scope text ("Across 3 Campaigns") — never a comparison. */
+  context: string;
+  /** Backend comparison metric id, or null when no trend applies. */
+  metricId: string | null;
+}
+
+interface CompareMetric extends KpiComparison {
+  current: number | null;
+  previous: number | null;
+  abs_change: number | null;
+}
+
+interface CompareResponse {
+  current_period: KpiPeriod | null;
+  previous_period: KpiPeriod | null;
+  comparison: string | null;
+  metrics: Record<string, CompareMetric>;
 }
 
 function errorMessage(e: unknown): string {
@@ -78,25 +96,28 @@ function buildKpiCards(campaigns: CampaignsResponse): KpiCard[] {
   const best = cpas.length ? Math.min(...cpas) : null;
   const scope = `Across ${groups.length} Campaign${groups.length === 1 ? "" : "s"}`;
   return [
-    { value: "$" + spend.toFixed(2), label: "Spend", delta: scope },
-    { value: impr ? impr.toLocaleString("en-US") : "—", label: "Impressions", delta: impr ? scope : "No Impressions Yet" },
-    { value: impr ? "$" + cpm.toFixed(2) : "—", label: "CPM", delta: impr ? scope : "No Impressions Yet" },
+    { value: "$" + spend.toFixed(2), label: "Spend", context: scope, metricId: "spend" },
+    { value: impr ? impr.toLocaleString("en-US") : "—", label: "Impressions", context: impr ? scope : "No Impressions Yet", metricId: "impressions" },
+    { value: impr ? "$" + cpm.toFixed(2) : "—", label: "CPM", context: impr ? scope : "No Impressions Yet", metricId: "cpm" },
     {
       value: impr ? ((vtr * 100).toFixed(1) + "%") : "—",
       label: "Play Rate",
-      delta: impr ? (views ? scope : "No Video Views Yet") : "No Impressions Yet",
+      context: impr ? (views ? scope : "No Video Views Yet") : "No Impressions Yet",
+      metricId: "view_rate",
     },
-    { value: impr ? ((ctr * 100).toFixed(2) + "%") : "—", label: "CTR", delta: impr ? scope : "No Impressions Yet" },
-    { value: conv ? "$" + cpa.toFixed(2) : "—", label: "CPA", delta: conv ? "Blended " + scope : "No Conversions Yet" },
+    { value: impr ? ((ctr * 100).toFixed(2) + "%") : "—", label: "CTR", context: impr ? scope : "No Impressions Yet", metricId: "ctr" },
+    { value: conv ? "$" + cpa.toFixed(2) : "—", label: "CPA", context: conv ? "Blended " + scope : "No Conversions Yet", metricId: "cpa" },
     {
       value: spend && rev ? roas.toFixed(2) + "x" : "—",
       label: "ROAS",
-      delta: spend && rev ? "Blended " + scope : "No Revenue Yet",
+      context: spend && rev ? "Blended " + scope : "No Revenue Yet",
+      metricId: "roas",
     },
     {
       value: best != null ? "$" + best.toFixed(2) : "—",
       label: "Best CPA",
-      delta: best != null ? "Lowest Single Campaign" : "No Conversions Yet",
+      context: best != null ? "Lowest Single Campaign" : "No Conversions Yet",
+      metricId: null,
     },
   ];
 }
@@ -147,6 +168,7 @@ export function OverviewPage() {
   const [syncMsg, setSyncMsg] = useState("");
   const [syncOut, setSyncOut] = useState("");
   const [provStatus, setProvStatus] = useState("");
+  const [compare, setCompare] = useState<CompareResponse | null>(null);
 
   const loadKpis = useCallback(async () => {
     try {
@@ -155,6 +177,17 @@ export function OverviewPage() {
       setKpiError("");
     } catch (e) {
       setKpiError(errorMessage(e));
+    }
+  }, [scope]);
+
+  const loadCompare = useCallback(async () => {
+    try {
+      const r = await api<CompareResponse>("GET", scopedPath("/api/kpis/compare", scope));
+      setCompare(r);
+    } catch {
+      // Comparisons are enhancement-only: a failed compare fetch
+      // must never break the KPI cards themselves.
+      setCompare(null);
     }
   }, [scope]);
 
@@ -187,9 +220,10 @@ export function OverviewPage() {
 
   const refreshViews = useCallback(() => {
     void loadKpis();
+    void loadCompare();
     void loadSync();
     void loadHealth();
-  }, [loadKpis, loadSync, loadHealth]);
+  }, [loadKpis, loadCompare, loadSync, loadHealth]);
 
   useEffect(() => {
     refreshViews();
@@ -250,13 +284,19 @@ export function OverviewPage() {
   } else {
     kpiContent = (
       <div className="kpi-grid">
-        {buildKpiCards(campaigns).map((c) => (
-          <div className="kpi-card" key={c.label}>
-            <div className="kpi-value">{c.value}</div>
-            <div className="kpi-label">{c.label}</div>
-            {c.delta ? <div className="kpi-delta">{c.delta}</div> : null}
-          </div>
-        ))}
+        {buildKpiCards(campaigns).map((c) => {
+          const comp = c.metricId ? compare?.metrics[c.metricId] ?? null : null;
+          return (
+            <div className="kpi-card" key={c.label}>
+              <div className="kpi-value">{c.value}</div>
+              <div className="kpi-label">{c.label}</div>
+              {c.context ? <div className="kpi-context">{c.context}</div> : null}
+              {comp && compare?.previous_period ? (
+                <KpiTrend metricLabel={c.label} comparison={comp} previous={compare.previous_period} />
+              ) : null}
+            </div>
+          );
+        })}
       </div>
     );
   }

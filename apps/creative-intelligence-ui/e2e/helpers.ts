@@ -6,6 +6,7 @@ export interface Seeds {
   admin: string;
   employee: string;
   pending: string;
+  kpi: string;
 }
 
 export function readSeeds(): Seeds {

@@ -60,6 +60,7 @@ export function scopedPath(path: string, scope: URLSearchParams): string {
     path.startsWith("/api/benchmarks") ||
     path === "/api/creatives" ||
     path.startsWith("/api/compare") ||
+    path.startsWith("/api/kpis/") ||
     path.startsWith("/api/retention/patterns") ||
     path.startsWith("/api/analyst/creatives") ||
     path.startsWith("/api/campaigns/recommendations");

@@ -35,6 +35,21 @@ const syncData = {
 
 const statusData = { mode: "mock", capabilities: {} };
 
+const compareData = {
+  current_period: { start: "2024-01-01", end: "2024-01-07" },
+  previous_period: { start: "2023-12-25", end: "2023-12-31" },
+  comparison: "previous_period",
+  metrics: {
+    spend: { current: 200, previous: 100, abs_change: 100, percent_change: 100, direction: "up", sentiment: "neutral", state: "compared" },
+    impressions: { current: 15000, previous: 12000, abs_change: 3000, percent_change: 25, direction: "up", sentiment: "good", state: "compared" },
+    cpm: { current: 13.33, previous: 8.33, abs_change: 5, percent_change: 60, direction: "up", sentiment: "bad", state: "compared" },
+    view_rate: { current: 0.2, previous: 0.2, abs_change: 0, percent_change: 0, direction: "flat", sentiment: "neutral", state: "compared" },
+    ctr: { current: 0.023, previous: 0.02, abs_change: 0.003, percent_change: 15, direction: "up", sentiment: "good", state: "compared" },
+    cpa: { current: 13.33, previous: 20, abs_change: -6.67, percent_change: -33.3, direction: "down", sentiment: "good", state: "compared" },
+    roas: { current: 2.5, previous: null, abs_change: null, percent_change: null, direction: "up", sentiment: "neutral", state: "new" },
+  },
+};
+
 interface SeenCall {
   url: string;
   method?: string;
@@ -67,6 +82,7 @@ function mockDefault() {
     if (url === "/api/providers/status") return Response.json(statusData);
     if (url === "/api/ingest") return Response.json({ inserted: 3, updated: 0, quarantined_count: 0 });
     if (url === "/api/sync/run") return Response.json({ inserted: 2, updated: 1, quarantined_count: 0 });
+    if (url.startsWith("/api/kpis/compare")) return Response.json(compareData);
     return Response.json({ error: "unexpected " + url }, { status: 500 });
   });
 }
@@ -109,6 +125,51 @@ describe("OverviewPage", () => {
     ).toBeDefined();
     const campaignsCall = seen.find((c) => c.url.startsWith("/api/campaigns"));
     expect(campaignsCall).toBeDefined();
+  });
+
+  it("renders period comparisons beside context, with tooltips", async () => {
+    mockDefault();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("+25%")).toBeDefined();
+    });
+    // Context stays visible and separate from the comparison.
+    expect(screen.getAllByText("Across 2 Campaigns").length).toBeGreaterThan(0);
+    // Negative-good CPA trend and new-state ROAS trend render too.
+    expect(screen.getByText("-33.3%")).toBeDefined();
+    expect(screen.getByText("New")).toBeDefined();
+    // The compare call carries the same scope as the campaigns call.
+    const campaignsCall = seen.find((c) => c.url.startsWith("/api/campaigns"));
+    const compareCall = seen.find((c) => c.url.startsWith("/api/kpis/compare"));
+    expect(compareCall).toBeDefined();
+    const campQuery = String(campaignsCall?.url).split("?")[1] ?? "";
+    const compQuery = String(compareCall?.url).split("?")[1] ?? "";
+    expect(new URLSearchParams(compQuery).toString()).toBe(
+      new URLSearchParams(campQuery).toString(),
+    );
+    // Tooltip opens on focus with the real previous range.
+    const info = screen.getAllByRole("button", { name: "Explain Comparison Period" })[0];
+    fireEvent.focus(info);
+    expect(screen.getByRole("tooltip").textContent).toContain("Dec 25 – Dec 31, 2023");
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+
+  it("shows no trend without comparison data", async () => {
+    mockFetch((url) => {
+      if (url.startsWith("/api/campaigns")) return Response.json(campaignData);
+      if (url.startsWith("/api/kpis/compare")) {
+        return Response.json({ current_period: null, previous_period: null, comparison: null, metrics: {} });
+      }
+      if (url === "/api/sync/status") return Response.json({ sources: {}, jobs: [] });
+      if (url === "/api/providers/status") return Response.json(statusData);
+      return Response.json({ error: "unexpected " + url }, { status: 500 });
+    });
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("$200.00")).toBeDefined();
+    });
+    expect(screen.queryByRole("button", { name: "Explain Comparison Period" })).toBeNull();
   });
 
   it("shows the legacy placeholder while KPIs load", async () => {

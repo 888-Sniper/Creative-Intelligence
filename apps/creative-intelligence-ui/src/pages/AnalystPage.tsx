@@ -8,6 +8,7 @@ import {
   EmptyState,
   Panel,
   Skeleton,
+  compareDisplayed,
   fmtCompact,
   platformLabel,
   useScopedApi,
@@ -728,23 +729,58 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
     // Findings, so they must not repeat here.
     const out: Array<{ title: string; body: string }> = [];
     if (bestHook?.ctr != null && hookRows.rows[1]?.ctr != null) {
-      const diff = bestHook.ctr - (hookRows.rows[1].ctr ?? 0);
-      out.push({
-        title: `${titleCase(bestHook.key)} Hooks Drive Higher CTR`,
-        body: `${titleCase(bestHook.key)} openings average ${bestHook.ctr.toFixed(1)}% CTR, ${diff >= 0 ? "+" : ""}${diff.toFixed(1)}pts versus ${titleCase(hookRows.rows[1].key)}.`,
-      });
+      const runner = hookRows.rows[1];
+      const verdict = compareDisplayed(bestHook.ctr, runner.ctr ?? NaN);
+      if (verdict !== "unknown") {
+        const diff = bestHook.ctr - (runner.ctr ?? 0);
+        out.push(verdict === "tie" ? {
+          title: `${titleCase(bestHook.key)} and ${titleCase(runner.key)} Tie on CTR`,
+          body: `${titleCase(bestHook.key)} and ${titleCase(runner.key)} openings both average ${bestHook.ctr.toFixed(1)}% CTR.`,
+        } : {
+          title: `${titleCase(bestHook.key)} Hooks Drive Higher CTR`,
+          body: `${titleCase(bestHook.key)} openings average ${bestHook.ctr.toFixed(1)}% CTR, ${diff >= 0 ? "+" : ""}${diff.toFixed(1)}pts versus ${titleCase(runner.key)}.`,
+        });
+      }
     }
     if (bestPlat?.roas != null) {
-      out.push({
-        title: `${platformLabel(bestPlat.key)} Leads On Efficiency`,
-        body: `${platformLabel(bestPlat.key)} averages ${bestPlat.roas.toFixed(1)}x ROAS across the current scope.`,
-      });
+      const runner = platRows.rows[1];
+      const verdict = runner?.roas != null
+        ? compareDisplayed(bestPlat.roas, runner.roas)
+        : "unknown";
+      if (verdict === "tie" && runner) {
+        out.push({
+          title: `${platformLabel(bestPlat.key)} and ${platformLabel(runner.key)} Tie on Efficiency`,
+          body: `${platformLabel(bestPlat.key)} and ${platformLabel(runner.key)} both average ${bestPlat.roas.toFixed(1)}x ROAS across the current scope.`,
+        });
+      } else if (verdict === "lead") {
+        out.push({
+          title: `${platformLabel(bestPlat.key)} Leads On Efficiency`,
+          body: `${platformLabel(bestPlat.key)} averages ${bestPlat.roas.toFixed(1)}x ROAS across the current scope.`,
+        });
+      } else if (verdict === "unknown" && !runner) {
+        // Single platform in scope: state the number without crowning it.
+        out.push({
+          title: `${platformLabel(bestPlat.key)} Efficiency Snapshot`,
+          body: `${platformLabel(bestPlat.key)} averages ${bestPlat.roas.toFixed(1)}x ROAS across the current scope.`,
+        });
+      }
     }
     if (bestLength?.ctr != null) {
-      out.push({
-        title: `${bestLength.label} Is The Length To Beat`,
-        body: `${bestLength.label} videos average ${bestLength.ctr.toFixed(1)}% CTR — build variants inside that band first.`,
-      });
+      const runnerBest = Math.max(...lengthRows
+        .filter((r) => r.label !== bestLength.label && r.ctr != null)
+        .map((r) => r.ctr ?? Number.NaN));
+      const verdict = compareDisplayed(bestLength.ctr, runnerBest);
+      if (verdict === "tie") {
+        out.push({
+          title: `${bestLength.label} Shares the Length Lead`,
+          body: `${bestLength.label} videos match the best band at ${bestLength.ctr.toFixed(1)}% CTR — build variants inside that band first.`,
+        });
+      } else if (verdict === "lead") {
+        out.push({
+          title: `${bestLength.label} Is The Length To Beat`,
+          body: `${bestLength.label} videos average ${bestLength.ctr.toFixed(1)}% CTR — build variants inside that band first.`,
+        });
+      }
     }
     return out.slice(0, 3);
   }, [bestHook, hookRows.rows, bestPlat, bestLength]);

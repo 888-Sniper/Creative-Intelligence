@@ -149,3 +149,57 @@ def test_meta_demo_dataset_shape(tmp_path, monkeypatch):
         assert c["last_date"] > ""
     # Demo windows end at the trailing edge, so every demo campaign reads Active.
     assert {c["status"] for c in campaigns} == {"Active"}
+
+
+def test_scope_construction_preserves_explicit_empty_campaign():
+    scope = benchmarks.Scope({"campaign": []})
+    assert scope.axes == {"campaign": []}
+    assert scope.normalized() == {"campaign": []}
+    assert scope.sql() == ("1=0", [])
+    assert scope.describe() == "No Campaigns"
+    assert not scope.is_empty()
+    assert scope.match({"campaign": "Anything"}) is False
+
+
+def test_scope_double_resolve_matches_single_resolve():
+    # Nested helpers (recommendations, reports) may resolve an
+    # already-resolved scope: the restriction must be idempotent.
+    conn = sqlite3.connect(":memory:")
+    try:
+        once = benchmarks.Scope({"campaign": []}).resolve(conn)
+        twice = once.resolve(conn)
+        assert once.axes == {"campaign": []}
+        assert twice.axes == {"campaign": []}
+        assert once.sql() == ("1=0", [])
+        assert twice.sql() == ("1=0", [])
+        assert twice.normalized() == {"campaign": []}
+        assert twice.match({"campaign": "Anything"}) is False
+    finally:
+        conn.close()
+
+
+def test_scope_query_without_campaign_stays_unrestricted():
+    # HTTP-absent or all-blank keys never spell "match nothing".
+    assert benchmarks.Scope.from_query({}).axes == {}
+    assert benchmarks.Scope.from_query({"campaign": [""]}).axes == {}
+    assert benchmarks.Scope.from_query({"campaign": ["A", ""]}).axes == {
+        "campaign": ["A"]}
+    assert benchmarks.Scope.from_query(
+        {"campaign": ["A"]}).sql() != ("1=0", [])
+
+
+def test_zero_match_scope_flows_into_recommendations(tmp_path, monkeypatch):
+    # Nested helper path: recommendations over a zero-match scope must
+    # report no creatives — never full-dataset advice.
+    from urllib.parse import quote
+
+    db = str(tmp_path / "zero-rec.db")
+    assert load_demo_dataset(db, media_dir=str(tmp_path / "media")) > 0
+    http = _authed_client(tmp_path, db, monkeypatch)
+    name = quote("Spring Skincare Launch")
+    r = http.get("/api/campaigns/recommendations?name=%s&status=Completed"
+                 % name)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["n_creatives"] == 0
+    assert "nothing to learn yet" in body["sections"][0]["bullets"][0]["text"]

@@ -103,3 +103,42 @@ jobs:
           name: approved-screens
           path: apps/creative-intelligence-ui/test-results/screens/
           if-no-files-found: warn
+
+  full-demo:
+    # Populated-demo visual suite: the 02-full-demo specs seed the ten
+    # synthetic campaigns/creatives/artwork on top of the small fixture
+    # (FULL_DEMO=1) and capture every reference screen with real content.
+    # Separate from the frontend job so the small-fixture suite keeps its
+    # deterministic dataset.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install backend dependencies (E2E server)
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install --require-hashes -r requirements.lock
+      - name: Install pnpm (Nextly packageManager strategy)
+        run: corepack enable && corepack prepare pnpm@10.14.0 --activate
+      - name: Install frontend dependencies
+        run: pnpm --dir apps/creative-intelligence-ui install --frozen-lockfile
+      - name: Frontend production build
+        run: pnpm --dir apps/creative-intelligence-ui build
+      - name: Install Playwright Chromium
+        run: pnpm --dir apps/creative-intelligence-ui exec playwright install chromium --with-deps
+      - name: Playwright full-demo suite (populated ten-example dataset)
+        run: pnpm --dir apps/creative-intelligence-ui exec playwright test e2e/02-full-demo.spec.ts
+        env:
+          FULL_DEMO: "1"
+      - name: Upload populated captures (visual review artifact)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: populated-screens
+          path: apps/creative-intelligence-ui/test-results/screens/
+          if-no-files-found: warn

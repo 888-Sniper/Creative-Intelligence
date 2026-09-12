@@ -103,6 +103,16 @@ export function platformLabel(value: string | null | undefined): string {
   return v.split(/[\s_-]+/).map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w)).join(" ");
 }
 
+/** Honest two-way comparison at display precision: "lead" only when a
+ *  is strictly ahead of b as printed, "tie" when the UI shows the same
+ *  number, "trail" otherwise, "unknown" when either side is missing.
+ *  Headings built from this can never contradict their own numbers. */
+export function compareDisplayed(a: number, b: number, digits = 1): "lead" | "tie" | "trail" | "unknown" {
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return "unknown";
+  if (a.toFixed(digits) === b.toFixed(digits)) return "tie";
+  return a > b ? "lead" : "trail";
+}
+
 export function formatDuration(seconds: number | null | undefined): string {
   const s = Math.max(0, Math.round(Number(seconds) || 0));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;

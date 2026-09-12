@@ -13,8 +13,15 @@ is the acceptance gate.
   production build).
 - Every CI run uploads them as the `approved-screens` workflow
   artifact (`.github/workflows/ci.yml`), even when E2E fails.
-- Local run: `pnpm --dir apps/creative-intelligence-ui test:e2e`,
-  then open `apps/creative-intelligence-ui/test-results/screens/`.
+- Populated suite: `apps/creative-intelligence-ui/e2e/02-full-demo.spec.ts`
+  (runs ONLY under `FULL_DEMO=1`; the `full-demo` CI job runs it and
+  uploads `d-*.png` as the `populated-screens` artifact). These show
+  the ten-example dataset with real content; the `00`/`01` captures
+  keep the small deterministic fixture.
+- Local runs: `pnpm --dir apps/creative-intelligence-ui test:e2e`,
+  or `FULL_DEMO=1 pnpm --dir apps/creative-intelligence-ui exec
+  playwright test e2e/02-full-demo.spec.ts`, then open
+  `apps/creative-intelligence-ui/test-results/screens/`.
 
 ## Viewport Matrix
 
@@ -28,6 +35,7 @@ is the acceptance gate.
 | `m-login.png` | 390x844 | Login |
 | `m-dashboard.png` … `m-settings.png` (all 14 routes) | 390x844 | All 14 routes |
 | `p-compare.png`, `p-insights.png`, `p-ask.png` | 1440x1000 | Populated Compare / Insights / Ask |
+| `d-dashboard.png` … `d-settings.png`, `d-campaigns-mobile.png` | 1440x1000 (mobile 390x844) | All fourteen screens on populated data |
 
 ## Review Procedure
 

@@ -7,7 +7,9 @@ import { loginAs, readSeeds } from "./helpers";
  *  fixture (which the rest of the suite keeps). Populates every
  *  reference screen with representative content and captures it:
  *  dashboard, campaign/creative comparisons, saved findings,
- *  generated reports, workbook preview and analyst results.
+ *  generated reports, workbook preview, analyst results, and the
+ *  remaining routes (campaigns, benchmarks, analyst, admin, profile,
+ *  settings) for fourteen-screen populated coverage.
  *
  *  Run: FULL_DEMO=1 npx playwright test e2e/02-full-demo.spec.ts
  */
@@ -27,6 +29,13 @@ test.describe("full demo visuals", () => {
     // The benchmark legend names the comparison honestly (the select
     // option with the same text is hidden by the closed dropdown).
     await expect(page.locator(".legend", { hasText: "Scope Average" })).toBeVisible();
+    // Recommendation headings agree with their numbers: the demo ties
+    // at 1dp, so no platform may be crowned the ROAS leader.
+    await expect(page.getByText("TikTok and Meta Tie on ROAS")).toBeVisible();
+    await expect(page.getByText("Leads On ROAS")).toHaveCount(0);
+    // Let KPI cards load so the review capture shows values, not skeletons.
+    await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
+    await expect(page.getByText("126.1M").first()).toBeVisible({ timeout: 30000 });
     await page.screenshot({ path: `${SHOTS}/d-dashboard.png`, fullPage: true, animations: "disabled" });
   });
 
@@ -94,6 +103,31 @@ test.describe("full demo visuals", () => {
     await loginAs(context, page, seeds.admin, "/workbook");
     await expect(page.getByRole("heading").first()).toBeVisible({ timeout: 30000 });
     await page.screenshot({ path: `${SHOTS}/d-workbook.png`, fullPage: true, animations: "disabled" });
+  });
+
+  test("remaining reference screens render on populated data", async ({ page, context }) => {
+    // Completes fourteen-screen populated coverage: every route below
+    // renders its heading with real demo content and no overflow.
+    const seeds = readSeeds();
+    const routes: Array<[shot: string, path: string, heading: string]> = [
+      ["d-campaigns", "/campaigns", "Campaigns"],
+      ["d-benchmarks", "/benchmarks", "Benchmarks Library"],
+      ["d-analyst", "/analyst", "Your Creative Partner"],
+      ["d-admin", "/admin", "Admin"],
+      ["d-profile", "/profile", "Profile"],
+      ["d-settings", "/settings", "Settings"],
+    ];
+    for (const [shot, path, heading] of routes) {
+      await loginAs(context, page, seeds.admin, path);
+      await expect(page.getByRole("heading", { level: 1, name: heading, exact: true }))
+        .toBeVisible({ timeout: 30000 });
+      await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
+      const overflow = await page.evaluate(
+        () => document.documentElement.scrollWidth - window.innerWidth,
+      );
+      expect(overflow).toBeLessThanOrEqual(1);
+      await page.screenshot({ path: `${SHOTS}/${shot}.png`, fullPage: true, animations: "disabled" });
+    }
   });
 
   test("mobile campaign filters stay readable", async ({ page, context }) => {

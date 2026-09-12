@@ -14,6 +14,7 @@ import {
   Panel,
   InsightList,
   Skeleton,
+  compareDisplayed,
   fmtCompact,
   fmtMoney,
   fmtMult,
@@ -303,58 +304,109 @@ export function DashboardPage() {
   const rail = useMemo(() => {
     const items: Array<{ icon: string; tint: string; title: string; body: string; action: string; href: string }> = [];
     if (hookRows.length > 1 && hookRows[0].ctr != null && hookRows[1].ctr != null) {
-      const diff = percentDiff(hookRows[0].ctr ?? 0, hookRows[1].ctr ?? 0);
-      items.push({
-        icon: "trend",
-        tint: "#DFF5F1",
-        title: `${titleCase(hookRows[0].key)} Hooks Drive Higher CTR`,
-        body: `${titleCase(hookRows[0].key)} openings average ${(hookRows[0].ctr ?? 0).toFixed(1)}% CTR${diff != null ? `, ${diff >= 0 ? "+" : ""}${diff.toFixed(0)}% versus ${titleCase(hookRows[1].key)}` : ""} across the current scope.`,
-        action: "View Creatives",
-        href: "/creatives",
-      });
+      const a = hookRows[0];
+      const b = hookRows[1];
+      const verdict = compareDisplayed(a.ctr ?? NaN, b.ctr ?? NaN);
+      if (verdict !== "unknown") {
+        const diff = percentDiff(a.ctr ?? 0, b.ctr ?? 0);
+        const tied = verdict === "tie";
+        items.push({
+          icon: "trend",
+          tint: "#DFF5F1",
+          title: tied
+            ? `${titleCase(a.key)} and ${titleCase(b.key)} Tie on CTR`
+            : `${titleCase(a.key)} Hooks Drive Higher CTR`,
+          body: tied
+            ? `${titleCase(a.key)} and ${titleCase(b.key)} openings both average ${(a.ctr ?? 0).toFixed(1)}% CTR across the current scope.`
+            : `${titleCase(a.key)} openings average ${(a.ctr ?? 0).toFixed(1)}% CTR${diff != null ? `, ${diff >= 0 ? "+" : ""}${diff.toFixed(0)}% versus ${titleCase(b.key)}` : ""} across the current scope.`,
+          action: "View Creatives",
+          href: "/creatives",
+        });
+      }
     }
     const creator = modeRows.find((r) => r.key === "creator");
     const branded = modeRows.find((r) => r.key === "branded");
     if (creator?.ctr != null && branded?.ctr != null) {
-      const diff = percentDiff(creator.ctr, branded.ctr);
-      items.push({
-        icon: "users",
-        tint: "#DFF5F1",
-        title: "Creator Content Outperforms Branded Content",
-        body: `Creator creatives average ${creator.ctr.toFixed(1)}% CTR versus ${branded.ctr.toFixed(1)}% for branded creatives${diff != null ? ` (${diff >= 0 ? "+" : ""}${diff.toFixed(0)}%)` : ""} across the current scope.`,
-        action: "Explore Creatives",
-        href: "/creatives",
-      });
+      const verdict = compareDisplayed(creator.ctr, branded.ctr);
+      if (verdict !== "unknown") {
+        const top = verdict === "trail" ? branded : creator;
+        const bottom = top === creator ? branded : creator;
+        const topName = top === creator ? "Creator" : "Branded";
+        const bottomName = bottom === creator ? "creator" : "branded";
+        const topCtr = top.ctr ?? 0;
+        const bottomCtr = bottom.ctr ?? 0;
+        const diff = percentDiff(topCtr, bottomCtr);
+        items.push({
+          icon: "users",
+          tint: "#DFF5F1",
+          title: verdict === "tie"
+            ? "Creator and Branded Content Tie on CTR"
+            : `${topName} Content Outperforms ${topName === "Creator" ? "Branded" : "Creator"} Content`,
+          body: verdict === "tie"
+            ? `Creator and branded creatives both average ${topCtr.toFixed(1)}% CTR across the current scope.`
+            : `${topName} creatives average ${topCtr.toFixed(1)}% CTR versus ${bottomCtr.toFixed(1)}% for ${bottomName} creatives${diff != null ? ` (${diff >= 0 ? "+" : ""}${diff.toFixed(0)}%)` : ""} across the current scope.`,
+          action: "Explore Creatives",
+          href: "/creatives",
+        });
+      }
     }
     const groups = Object.entries(platforms.data ?? {}).map(([key, g]) => ({ key, roas: g.roas ?? null }));
     const tiktok = groups.find((g) => g.key === "tiktok");
     const meta = groups.find((g) => g.key === "meta");
     if (tiktok?.roas != null && meta?.roas != null) {
-      const leader = tiktok.roas >= meta.roas ? tiktok : meta;
-      const trailer = leader === tiktok ? meta : tiktok;
-      const diff = percentDiff(leader.roas ?? 0, trailer.roas ?? 0);
-      items.push({
-        icon: "tiktok",
-        tint: "#E7F1FB",
-        title: `${platformLabel(leader.key)} Leads On ROAS`,
-        body: `${platformLabel(leader.key)} averages ${(leader.roas ?? 0).toFixed(1)}x ROAS versus ${(trailer.roas ?? 0).toFixed(1)}x on ${platformLabel(trailer.key)}${diff != null ? ` (${diff >= 0 ? "+" : ""}${diff.toFixed(0)}%)` : ""} across the current scope.`,
-        action: "View Campaigns",
-        href: "/campaigns",
-      });
+      const verdict = compareDisplayed(tiktok.roas, meta.roas);
+      if (verdict !== "unknown") {
+        if (verdict === "tie") {
+          items.push({
+            icon: "tiktok",
+            tint: "#E7F1FB",
+            title: "TikTok and Meta Tie on ROAS",
+            body: `TikTok and Meta both average ${tiktok.roas.toFixed(1)}x ROAS across the current scope.`,
+            action: "View Campaigns",
+            href: "/campaigns",
+          });
+        } else {
+          const leader = verdict === "lead" ? tiktok : meta;
+          const trailer = leader === tiktok ? meta : tiktok;
+          const diff = percentDiff(leader.roas ?? 0, trailer.roas ?? 0);
+          items.push({
+            icon: "tiktok",
+            tint: "#E7F1FB",
+            title: `${platformLabel(leader.key)} Leads On ROAS`,
+            body: `${platformLabel(leader.key)} averages ${(leader.roas ?? 0).toFixed(1)}x ROAS versus ${(trailer.roas ?? 0).toFixed(1)}x on ${platformLabel(trailer.key)}${diff != null ? ` (${diff >= 0 ? "+" : ""}${diff.toFixed(0)}%)` : ""} across the current scope.`,
+            action: "View Campaigns",
+            href: "/campaigns",
+          });
+        }
+      }
     }
     const sweet = durationRows.find((r) => r.key === "15–30s");
     const others = durationRows.filter((r) => r.key !== "15–30s" && r.ctr != null);
     if (sweet?.ctr != null && others.length) {
       const base = Math.max(...others.map((r) => r.ctr ?? 0));
-      const diff = percentDiff(sweet.ctr, base);
-      items.push({
-        icon: "play",
-        tint: "#E7F1FB",
-        title: "15–30 Second Videos Hold Attention Best",
-        body: `Videos between 15–30 seconds average ${sweet.ctr.toFixed(1)}% CTR${diff != null ? `, ${diff >= 0 ? "+" : ""}${diff.toFixed(0)}% above the next length bucket` : ""} across the current scope.`,
-        action: "See Recommendations",
-        href: "/insights",
-      });
+      const verdict = compareDisplayed(sweet.ctr, base);
+      // A trailing band gets no recommendation card: a false "best"
+      // is worse than a missing one.
+      if (verdict === "lead") {
+        const diff = percentDiff(sweet.ctr, base);
+        items.push({
+          icon: "play",
+          tint: "#E7F1FB",
+          title: "15–30 Second Videos Hold Attention Best",
+          body: `Videos between 15–30 seconds average ${sweet.ctr.toFixed(1)}% CTR${diff != null ? `, ${diff >= 0 ? "+" : ""}${diff.toFixed(0)}% above the next length bucket` : ""} across the current scope.`,
+          action: "See Recommendations",
+          href: "/insights",
+        });
+      } else if (verdict === "tie") {
+        items.push({
+          icon: "play",
+          tint: "#E7F1FB",
+          title: "15–30 Second Videos Share the Lead on Attention",
+          body: `Videos between 15–30 seconds match the best length bucket at ${sweet.ctr.toFixed(1)}% CTR across the current scope.`,
+          action: "See Recommendations",
+          href: "/insights",
+        });
+      }
     }
     return items.slice(0, 4);
   }, [hookRows, modeRows, platforms.data, durationRows]);

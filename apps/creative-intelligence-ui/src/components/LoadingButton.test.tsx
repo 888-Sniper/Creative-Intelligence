@@ -42,4 +42,26 @@ describe("LoadingButton", () => {
     );
     expect(screen.getByRole("button", { name: "Save Insight" }).getAttribute("disabled")).not.toBeNull();
   });
+
+  it("keeps the same button element across the loading swap", () => {
+    // Dimension stability starts here: the swap must not remount the
+    // button (which would drop focus and reset layout). The fixed-size
+    // .spinner and inline-flex button styles hold the box steady.
+    const { rerender } = render(
+      <LoadingButton type="button" loading={false} loadingLabel="Saving…">
+        Save Insight
+      </LoadingButton>,
+    );
+    const before = screen.getByRole("button", { name: "Save Insight" });
+    before.focus();
+    rerender(
+      <LoadingButton type="button" loading loadingLabel="Saving…">
+        Save Insight
+      </LoadingButton>,
+    );
+    const during = screen.getByRole("button");
+    expect(during).toBe(before);
+    expect(document.activeElement).toBe(before);
+    expect(during.querySelector(".spinner")).not.toBeNull();
+  });
 });

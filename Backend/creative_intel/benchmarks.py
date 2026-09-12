@@ -605,11 +605,19 @@ class Scope:
 
     def __init__(self, raw=None):
         self.axes = {}
+        raw = raw or {}
         for key in self.AXES:
-            vals = _as_list((raw or {}).get(key))
+            if key not in raw:
+                continue
+            vals = _as_list(raw.get(key))
             vals = [v for v in vals if v not in ("", "all")]
             if vals:
                 self.axes[key] = sorted(set(vals))
+            elif key == "campaign" and isinstance(raw.get(key), list):
+                # Explicitly empty allowlist ("match nothing") survives
+                # construction; only a list spells it (mirrors
+                # normalize_filters). Absent keys stay unrestricted.
+                self.axes[key] = []
 
     @classmethod
     def from_query(cls, query, ignore=()):
@@ -619,14 +627,18 @@ class Scope:
         compare route reuses ?campaign= for its candidate list)."""
         raw = {}
         for key in cls.AXES:
-            if key in ignore:
+            if key in ignore or key not in query:
                 continue
             if key == "project":
-                raw[key] = [v for v in query.get("project", [])
-                            if v not in ("", "all")]
+                vals = [v for v in query.get("project", [])
+                        if v not in ("", "all")]
             else:
-                raw[key] = [v for v in query.get(key, [])
-                            if v not in ("", "all")]
+                vals = [v for v in query.get(key, [])
+                        if v not in ("", "all")]
+            # Absent or all-blank query keys stay unrestricted: only a
+            # programmatic {"campaign": []} spells "match nothing".
+            if vals:
+                raw[key] = vals
         return cls(raw)
 
     @classmethod
@@ -719,11 +731,11 @@ class Scope:
         become >= / <= comparisons on the ISO date column."""
         bits, params = [], []
         for key in self.AXES:
+            if key == "campaign" and key in self.axes and not self.axes[key]:
+                bits.append("1=0")
+                continue
             vals = self.axes.get(key)
             if not vals:
-                continue
-            if key == "campaign" and vals == []:
-                bits.append("1=0")
                 continue
             if key == "date_from":
                 bits.append("date>=?")

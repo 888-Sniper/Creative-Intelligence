@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "@/api/client";
 import { Icon } from "@/components/icons";
 import { EmptyState, PageHeader, Panel } from "@/components/product";
+import { LoadingButton } from "@/components/LoadingButton";
 import type { MeResponse, PublicEmployee } from "@/types/auth";
 
 interface ProfileResponse {
@@ -66,6 +67,7 @@ export function ProfilePage() {
   const [avatarUrl, setAvatarUrl] = useState("");
   const [status, setStatus] = useState("");
   const [sessionStatus, setSessionStatus] = useState("");
+  const [op, setOp] = useState<null | "save" | "avatar" | "revoke">(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -103,7 +105,8 @@ export function ProfilePage() {
   };
 
   const save = async () => {
-    if (!employee) return;
+    if (!employee || op !== null) return;
+    setOp("save");
     setStatus("");
     try {
       let current = employee;
@@ -135,11 +138,14 @@ export function ProfilePage() {
       setStatus("Saved.");
     } catch (e: unknown) {
       setStatus(e instanceof Error ? e.message : String(e));
+    } finally {
+      setOp((cur) => (cur === "save" ? null : cur));
     }
   };
 
   const removeAvatar = async () => {
-    if (!employee) return;
+    if (!employee || op !== null) return;
+    setOp("avatar");
     setStatus("");
     try {
       const r = await api<ProfileResponse>("PATCH", "/api/auth/me", { avatar_url: "" });
@@ -147,16 +153,22 @@ export function ProfilePage() {
       setStatus("Avatar Removed.");
     } catch (e: unknown) {
       setStatus(e instanceof Error ? e.message : String(e));
+    } finally {
+      setOp((cur) => (cur === "avatar" ? null : cur));
     }
   };
 
   const revokeAll = async () => {
+    if (op !== null) return;
+    setOp("revoke");
     setSessionStatus("");
     try {
       const r = await api<RevokeResponse>("POST", "/api/auth/sessions/revoke-all", {});
       setSessionStatus(`Signed Out Of ${Number(r.revoked ?? 0)} Session(s).`);
     } catch (e: unknown) {
       setSessionStatus(e instanceof Error ? e.message : String(e));
+    } finally {
+      setOp((cur) => (cur === "revoke" ? null : cur));
     }
   };
 
@@ -240,12 +252,12 @@ export function ProfilePage() {
                 aria-label="Avatar Image File"
               />
               <div className="chip-row" style={{ marginTop: 14 }}>
-                <button type="button" className="btn-primary" onClick={() => void save()}>
+                <LoadingButton type="button" className="btn-primary" loading={op === "save"} loadingLabel="Saving…" disabled={op !== null} onClick={() => void save()}>
                   Save Profile
-                </button>
-                <button type="button" className="btn-outline" onClick={() => void removeAvatar()}>
+                </LoadingButton>
+                <LoadingButton type="button" className="btn-outline" loading={op === "avatar"} loadingLabel="Removing…" spinnerClass="spinner dark" disabled={op !== null} onClick={() => void removeAvatar()}>
                   Remove Avatar
-                </button>
+                </LoadingButton>
                 <span className="panel-sub" role="status" style={{ margin: 0 }}>
                   {status}
                 </span>
@@ -312,9 +324,9 @@ export function ProfilePage() {
                 Signing out everywhere revokes all sessions immediately — you will need to sign in again on each device.
               </p>
               <div className="chip-row" style={{ marginTop: 12 }}>
-                <button type="button" className="btn-outline" onClick={() => void revokeAll()}>
+                <LoadingButton type="button" className="btn-outline" loading={op === "revoke"} loadingLabel="Signing Out…" spinnerClass="spinner dark" disabled={op !== null} onClick={() => void revokeAll()}>
                   Log Out Everywhere
-                </button>
+                </LoadingButton>
                 <span className="panel-sub" role="status" style={{ margin: 0 }}>
                   {sessionStatus}
                 </span>

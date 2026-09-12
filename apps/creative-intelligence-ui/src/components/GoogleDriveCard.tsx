@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, ApiError } from "@/api/client";
 import { Icon } from "@/components/icons";
+import { LoadingButton } from "@/components/LoadingButton";
 
 /** Private Drive/Sheets connection. Server-side OAuth only: the browser
  *  is bounced to Google and back; tokens stay server-side. */
@@ -72,13 +73,13 @@ export function GoogleDriveCard() {
         {notice ? <p role="status" style={{ margin: "4px 0 0" }}>{notice}</p> : null}
       </div>
       {connected ? (
-        <button type="button" className="btn-outline" disabled={busy} onClick={() => void disconnect()}>
-          {busy ? "Working…" : "Disconnect"}
-        </button>
+        <LoadingButton type="button" className="btn-outline" loading={busy} loadingLabel="Working…" spinnerClass="spinner dark" disabled={busy} onClick={() => void disconnect()}>
+          Disconnect
+        </LoadingButton>
       ) : (
-        <button type="button" className="btn-outline" disabled={busy || connected === null} onClick={() => void connect()}>
-          {busy ? "Connecting…" : "Connect"}
-        </button>
+        <LoadingButton type="button" className="btn-outline" loading={busy} loadingLabel="Connecting…" spinnerClass="spinner dark" disabled={busy || connected === null} onClick={() => void connect()}>
+          Connect
+        </LoadingButton>
       )}
     </div>
   );

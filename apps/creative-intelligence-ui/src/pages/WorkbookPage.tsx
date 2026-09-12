@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { Icon } from "@/components/icons";
+import { LoadingButton } from "@/components/LoadingButton";
 import {
   CreativeThumb,
   EmptyState,
@@ -264,10 +265,9 @@ export function WorkbookPage() {
           </button>
           <span style={{ display: "flex", gap: 10 }}>
             <button type="button" className="btn-outline" onClick={resetAll}>Cancel</button>
-            <button type="button" className="btn-primary" disabled={busy} onClick={() => void createWorkbook()}>
-              {busy ? <span className="spinner" aria-hidden="true" /> : null}
-              {busy ? "Creating…" : "Create Workbook"}
-            </button>
+            <LoadingButton type="button" className="btn-primary" loading={busy} loadingLabel="Creating…" disabled={busy} onClick={() => void createWorkbook()}>
+              Create Workbook
+            </LoadingButton>
           </span>
         </div>
       </Panel>

@@ -36,9 +36,8 @@ export function AppShell() {
           onClick={close} />
       ) : null}
       <aside className={`sidebar${open ? " open" : ""}`} aria-label="Primary">
-        <Link to="/" className="side-brand" onClick={close}>
-          <img src="/foap-logo.png" alt="" aria-hidden="true" />
-          <b>Foap</b>
+        <Link to="/" className="side-brand" aria-label="Foap Creative Intelligence Dashboard" onClick={close}>
+          <img src="/foap-logo.png" alt="Foap" />
         </Link>
         <nav className="side-nav">
           {NAV.map((n) => (

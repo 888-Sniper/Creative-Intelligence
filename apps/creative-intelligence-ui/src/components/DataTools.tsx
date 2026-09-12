@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api, scopedPath } from "@/api/client";
 import { useFilters } from "@/state/FilterContext";
 import { EmptyState, Panel, Skeleton } from "@/components/product";
+import { LoadingButton } from "@/components/LoadingButton";
 
 /* Advanced data tooling relocated here from the old Benchmarks surface:
  * retention-pattern mining and the saved-cohort benchmark builder. All
@@ -307,10 +308,11 @@ export function CohortBuilder() {
                     <td><span className="cell-main">{c.name}</span></td>
                     <td>{Object.keys(c.filters ?? {}).length} axes</td>
                     <td>
-                      <button type="button" className="btn-outline" disabled={buildingId === c.id}
+                      <LoadingButton type="button" className="btn-outline" loading={buildingId === c.id} loadingLabel="Building…" spinnerClass="spinner dark"
+                        disabled={buildingId === c.id}
                         onClick={() => void buildCohort(c.id, cohorts ?? [])}>
-                        {buildingId === c.id ? "Building…" : "Build"}
-                      </button>
+                        Build
+                      </LoadingButton>
                     </td>
                   </tr>
                 ))}

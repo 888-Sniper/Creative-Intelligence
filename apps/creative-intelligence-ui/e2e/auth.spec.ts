@@ -6,7 +6,7 @@ test.describe("employee journey", () => {
     await page.goto("/");
     const card = page.locator(".login-card");
     await expect(page.getByRole("heading", { name: "Welcome Back" })).toBeVisible();
-    await expect(page.getByText("Sign in to your employee workspace.")).toBeVisible();
+    await expect(page.getByText("Sign In To Your Employee Workspace.")).toBeVisible();
     // No Creative Intelligence product branding on the login screen.
     await expect(page.getByText("Creative Intelligence")).toHaveCount(0);
     // Foap logo centred above the card.
@@ -28,8 +28,8 @@ test.describe("employee journey", () => {
     // Form controls.
     await expect(page.getByLabel("Work Email")).toBeVisible();
     await expect(page.getByRole("textbox", { name: "Password" })).toBeVisible();
-    await expect(page.getByText("Remember me")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Forgot password?" })).toBeVisible();
+    await expect(page.getByText("Remember Me")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Forgot Password?" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Sign In", exact: true })).toBeVisible();
     // Password is masked with a visibility toggle.
     await expect(page.getByRole("textbox", { name: "Password" })).toHaveAttribute("type", "password");
@@ -41,10 +41,10 @@ test.describe("employee journey", () => {
     await expect(page.getByRole("button", { name: "Continue With Apple" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Continue With GitHub" })).toHaveCount(0);
     await expect(page.getByLabel("Verification Code")).toHaveCount(0);
-    await page.getByRole("button", { name: "Use a sign-in code instead" }).click();
+    await page.getByRole("button", { name: "Use A Sign-In Code Instead" }).click();
     await expect(page.getByRole("button", { name: "Send Sign-In Code" })).toBeVisible();
     await expect(page.getByRole("textbox", { name: "Password" })).toHaveCount(0);
-    await page.getByRole("button", { name: "Back to password sign in" }).click();
+    await page.getByRole("button", { name: "Back To Password Sign In" }).click();
     await expect(page.getByRole("textbox", { name: "Password" })).toBeVisible();
     // Employee-only footer, no signup.
     await expect(page.getByText("For Foap employees only.", { exact: false })).toBeVisible();

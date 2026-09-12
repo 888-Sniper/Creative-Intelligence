@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useAuth } from "@/auth/AuthProvider";
+import { LoadingButton } from "@/components/LoadingButton";
 
 const PROVIDERS = [
   { id: "google", label: "Continue With Google" },
@@ -37,27 +38,40 @@ function ProviderMark({ provider }: { provider: string }) {
 // from this internal login UI — no documented Foap-employee use.
 const EMPLOYEE_PROVIDERS = ["google", "microsoft"] as const;
 
+const CONNECTING_NAMES: Record<string, string> = {
+  google: "Google",
+  microsoft: "Microsoft",
+  apple: "Apple",
+  github: "GitHub",
+};
+
 /** One OAuth provider button. Redirects to WorkOS; secrets never touch
- *  the browser (item 8). */
+ *  the browser (item 8). The spinner renders ONLY on the button the
+ *  employee pressed: the global `authenticating` flag disables the
+ *  sibling button but must never light up its spinner. */
 export function OAuthButton({ provider, label }: { provider: string; label?: string }) {
   const { authenticating, oauthStart } = useAuth();
   const [starting, setStarting] = useState(false);
   const busy = starting || authenticating;
+  const idleLabel = label ?? `Continue With ${provider}`;
+  const busyLabel = `Connecting To ${CONNECTING_NAMES[provider] ?? provider}…`;
   return (
-    <button
+    <LoadingButton
       type="button"
       className="auth-btn oauth-btn"
+      loading={starting}
+      loadingLabel={busyLabel}
+      spinnerClass="spinner dark"
       disabled={busy}
-      aria-busy={busy}
       onClick={() => {
         if (busy) return;
         setStarting(true);
         void oauthStart(provider).finally(() => setStarting(false));
       }}
     >
-      {busy ? <span className="spinner dark" aria-hidden="true" /> : <ProviderMark provider={provider} />}
-      <span>{starting ? "Connecting…" : (label ?? `Continue With ${provider}`)}</span>
-    </button>
+      <ProviderMark provider={provider} />
+      <span>{idleLabel}</span>
+    </LoadingButton>
   );
 }
 

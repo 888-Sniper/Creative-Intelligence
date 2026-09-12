@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/api/client";
 import { useFilters } from "@/state/FilterContext";
 import { Icon } from "@/components/icons";
+import { LoadingButton } from "@/components/LoadingButton";
 import {
   CreativeThumb,
   EmptyState,
@@ -314,6 +315,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
   // "auto" means omit so the backend detects from the question text.
   const language = locale === "auto" ? undefined : locale;
   const [busy, setBusy] = useState(false);
+  const [exporting, setExporting] = useState<null | "one-pager" | "xlsx">(null);
   const [error, setError] = useState<string | null>(null);
   const [lastScope, setLastScope] = useState("");
   const [datasetVersion, setDatasetVersion] = useState<string | null>(null);
@@ -420,6 +422,8 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
   }
 
   async function downloadReport(fmt: "one-pager" | "xlsx") {
+    if (exporting !== null) return;
+    setExporting(fmt);
     setError(null);
     try {
       // One-pager goes through the shared client so session expiry
@@ -458,6 +462,8 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
       URL.revokeObjectURL(url);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Report Export Failed");
+    } finally {
+      setExporting((cur) => (cur === fmt ? null : cur));
     }
   }
 
@@ -783,11 +789,10 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
           <button type="button" className="link-teal" onClick={clearAll}>
             Clear
           </button>
-          <button type="button" className="btn-primary" disabled={busy || !input.trim()}
+          <LoadingButton type="button" className="btn-primary" loading={busy} loadingLabel="Analysing…" disabled={busy || !input.trim()}
             onClick={() => void send()}>
-            {busy ? <span className="spinner" aria-hidden="true" /> : <Icon name="spark" size={16} />}
-            {busy ? "Analysing…" : "Run Analysis"}
-          </button>
+            <Icon name="spark" size={16} /> Run Analysis
+          </LoadingButton>
         </div>
       </div>
 
@@ -807,9 +812,9 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
               placeholder="Ask anything about your campaigns, creatives, or performance…"
               aria-label="Ask Foap Analyst"
             />
-            <button type="submit" className="btn-primary" disabled={busy || !input.trim()}>
-              {busy ? "Analysing…" : "Ask"}
-            </button>
+            <LoadingButton type="submit" className="btn-primary" loading={busy} loadingLabel="Analysing…" disabled={busy || !input.trim()}>
+              Ask
+            </LoadingButton>
             <button
               type="button"
               className="btn-outline"
@@ -918,14 +923,16 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
           <button type="button" className="btn-outline" onClick={() => void startConversation()}>
             <Icon name="plus" size={14} /> New Conversation
           </button>
-          <button type="button" className="btn-outline" onClick={() => void downloadReport("one-pager")}
-            disabled={busy} title="Sectioned Findings Report (Markdown)">
+          <LoadingButton type="button" className="btn-outline" onClick={() => void downloadReport("one-pager")}
+            loading={exporting === "one-pager"} loadingLabel="Preparing…" spinnerClass="spinner dark"
+            disabled={busy || exporting !== null} title="Sectioned Findings Report (Markdown)">
             Report
-          </button>
-          <button type="button" className="btn-outline" onClick={() => void downloadReport("xlsx")}
-            disabled={busy} title="Sectioned Findings Report (Excel)">
+          </LoadingButton>
+          <LoadingButton type="button" className="btn-outline" onClick={() => void downloadReport("xlsx")}
+            loading={exporting === "xlsx"} loadingLabel="Preparing…" spinnerClass="spinner dark"
+            disabled={busy || exporting !== null} title="Sectioned Findings Report (Excel)">
             Report XLSX
-          </button>
+          </LoadingButton>
           <a className="btn-outline" style={{ textDecoration: "none" }} href="/api/analyst/workbook">
             Blank Workbook
           </a>

@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { api } from "@/api/client";
 import { useFilters } from "@/state/FilterContext";
 import { Icon } from "@/components/icons";
+import { LoadingButton } from "@/components/LoadingButton";
 import {
   EmptyState,
   PageHeader,
@@ -190,10 +191,9 @@ export function InsightsPage() {
         title="Saved Insights"
         sub="Your saved insights, key learnings, and creative findings all in one place."
         actions={(
-          <button type="button" className="btn-primary" disabled={saving} onClick={() => void saveInsight()}>
-            {saving ? <span className="spinner" aria-hidden="true" /> : <Icon name="plus" size={16} />}
-            {saving ? "Saving…" : "Save Insight"}
-          </button>
+          <LoadingButton type="button" className="btn-primary" loading={saving} loadingLabel="Saving…" disabled={saving} onClick={() => void saveInsight()}>
+            <Icon name="plus" size={16} /> Save Insight
+          </LoadingButton>
         )}
       />
       {saveStatus ? <p className="panel-sub" role="status" style={{ margin: "0 0 12px" }}>{saveStatus}</p> : null}

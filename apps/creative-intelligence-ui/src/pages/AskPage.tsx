@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { api, ApiError } from "@/api/client";
 import { useFilters } from "@/state/FilterContext";
 import { Icon } from "@/components/icons";
+import { LoadingButton } from "@/components/LoadingButton";
 import { TrendChart } from "@/components/charts";
 import {
   EmptyState,
@@ -177,10 +178,9 @@ export function AskPage() {
                 placeholder="Ask a question about your marketing data…"
                 aria-label="Ask a question about your marketing data"
               />
-              <button type="button" className="btn-primary" disabled={busy || !question.trim()} onClick={() => void ask()}>
-                {busy ? <span className="spinner" aria-hidden="true" /> : <Icon name="chat" size={16} />}
-                {busy ? "Asking…" : "Ask"}
-              </button>
+              <LoadingButton type="button" className="btn-primary" loading={busy} loadingLabel="Asking…" disabled={busy || !question.trim()} onClick={() => void ask()}>
+                <Icon name="chat" size={16} /> Ask
+              </LoadingButton>
             </div>
             <div className="prompt-chips">
               {PROMPTS.map((p) => (
@@ -266,10 +266,10 @@ export function AskPage() {
           <Panel title="Suggested Questions">
             <div className="rail-stack" style={{ gap: 8 }}>
               {SUGGESTED.map((s) => (
-                <button key={s} type="button" className="btn-outline" style={{ justifyContent: "space-between" }}
+                <button key={s} type="button" className="btn-outline" style={{ justifyContent: "space-between", textAlign: "left" }}
                   onClick={() => { setQuestion(s); void ask(s); }}>
-                  <span>{s}</span>
-                  <Icon name="chev" size={14} />
+                  <span style={{ minWidth: 0, whiteSpace: "normal" }}>{s}</span>
+                  <span style={{ flex: "none" }} aria-hidden="true"><Icon name="chev" size={14} /></span>
                 </button>
               ))}
             </div>

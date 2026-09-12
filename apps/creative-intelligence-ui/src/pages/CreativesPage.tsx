@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { api } from "@/api/client";
 import { useFilters } from "@/state/FilterContext";
 import { Icon } from "@/components/icons";
+import { LoadingButton } from "@/components/LoadingButton";
 import { RetentionCurve } from "@/components/charts";
 import {
   CreativeThumb,
@@ -417,9 +418,9 @@ export function CreativesPage() {
                     <Icon name="grid" size={16} />
                   </button>
                 </div>
-                <button type="button" className="btn-outline" disabled={exportBusy} onClick={() => void onExport()}>
-                  <Icon name="download" size={15} /> {exportBusy ? "Exporting…" : "Export"}
-                </button>
+                <LoadingButton type="button" className="btn-outline" loading={exportBusy} loadingLabel="Exporting…" spinnerClass="spinner dark" disabled={exportBusy} onClick={() => void onExport()}>
+                  <Icon name="download" size={15} /> Export
+                </LoadingButton>
               </div>
             )}
           >

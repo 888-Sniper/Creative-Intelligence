@@ -76,7 +76,7 @@ describe("AuthGate screens", () => {
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Welcome Back" })).toBeDefined();
     });
-    expect(screen.getByText("Sign in to your employee workspace.")).toBeDefined();
+    expect(screen.getByText("Sign In To Your Employee Workspace.")).toBeDefined();
     expect(screen.queryByText("Welcome To Creative Intelligence")).toBeNull();
     // No Creative Intelligence product branding on the login screen.
     expect(screen.queryByText("Creative Intelligence")).toBeNull();
@@ -97,8 +97,8 @@ describe("AuthGate screens", () => {
     const password = screen.getByLabelText("Password") as HTMLInputElement;
     expect(password.getAttribute("placeholder")).toBe("Enter your password");
     expect(password.getAttribute("type")).toBe("password");
-    expect(screen.getByRole("checkbox", { name: "Remember me" })).toBeDefined();
-    expect(screen.getByRole("button", { name: "Forgot password?" })).toBeDefined();
+    expect(screen.getByRole("checkbox", { name: "Remember Me" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Forgot Password?" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Sign In" })).toBeDefined();
     // Password visibility toggle keeps secure behaviour by default.
     const toggle = screen.getByRole("button", { name: "Show Password" });
@@ -133,18 +133,18 @@ describe("AuthGate screens", () => {
     mockMe(base);
     renderGate();
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Use a sign-in code instead" })).toBeDefined();
+      expect(screen.getByRole("button", { name: "Use A Sign-In Code Instead" })).toBeDefined();
     });
     // Hidden initially: no code field, no Verify button.
     expect(screen.queryByLabelText("Verification Code")).toBeNull();
     expect(screen.queryByRole("button", { name: /Verify/ })).toBeNull();
     // Opens through the secondary control; password mode hides.
-    fireEvent.click(screen.getByRole("button", { name: "Use a sign-in code instead" }));
+    fireEvent.click(screen.getByRole("button", { name: "Use A Sign-In Code Instead" }));
     expect(screen.getByLabelText("Work Email")).toBeDefined();
     expect(screen.getByRole("button", { name: "Send Sign-In Code" })).toBeDefined();
     expect(screen.queryByLabelText("Password")).toBeNull();
     // Back to password mode.
-    fireEvent.click(screen.getByRole("button", { name: "Back to password sign in" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back To Password Sign In" }));
     expect(screen.getByLabelText("Password")).toBeDefined();
     expect(screen.queryByLabelText("Verification Code")).toBeNull();
   });
@@ -231,6 +231,151 @@ describe("AuthGate screens", () => {
       expect(screen.getByText("Overview")).toBeDefined();
     });
     expect(screen.getByText("Ada L")).toBeDefined();
+  });
+});
+
+describe("login loading states", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  function deferredFetch(routes: Record<string, () => Promise<Response>>) {
+    window.fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      const handler = routes[url];
+      if (handler) return handler();
+      return Response.json(base);
+    }) as unknown as typeof fetch;
+  }
+
+  function defer(): { gate: Promise<Response>; release: (res: Response) => void; reject: (err: unknown) => void } {
+    let release!: (res: Response) => void;
+    let reject!: (err: unknown) => void;
+    const gate = new Promise<Response>((res, rej) => { release = res; reject = rej; });
+    return { gate, release, reject };
+  }
+
+  async function openCodeMode() {
+    renderGate();
+    await waitFor(() => {
+      expect(screen.getByLabelText("Work Email")).toBeDefined();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Use A Sign-In Code Instead" }));
+  }
+
+  it("shows Sending Code… only on the send button", async () => {
+    const d = defer();
+    deferredFetch({ "/api/auth/email/code": () => d.gate });
+    await openCodeMode();
+    fireEvent.click(screen.getByRole("button", { name: "Send Sign-In Code" }));
+    await waitFor(() => {
+      expect(screen.getByText("Sending Code…")).toBeDefined();
+    });
+    // Siblings disable but keep idle labels: no spinner leak.
+    expect(screen.getByRole("button", { name: "Continue With Google" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Continue With Microsoft" })).toBeDefined();
+    d.release(Response.json({}));
+    await waitFor(() => {
+      expect(screen.getByLabelText("Verification Code")).toBeDefined();
+    });
+  });
+
+  it("shows Verifying… only on the verify button", async () => {
+    const d = defer();
+    deferredFetch({
+      "/api/auth/email/code": async () => Response.json({}),
+      "/api/auth/email/code/signin": () => d.gate,
+    });
+    await openCodeMode();
+    fireEvent.click(screen.getByRole("button", { name: "Send Sign-In Code" }));
+    await waitFor(() => {
+      expect(screen.getByLabelText("Verification Code")).toBeDefined();
+    });
+    fireEvent.change(screen.getByLabelText("Verification Code"), { target: { value: "123456" } });
+    fireEvent.click(screen.getByRole("button", { name: "Verify & Sign In" }));
+    await waitFor(() => {
+      expect(screen.getByText("Verifying…")).toBeDefined();
+    });
+    expect(screen.getByRole("button", { name: "Continue With Microsoft" })).toBeDefined();
+    d.reject(new Error("network down"));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Verify & Sign In" })).toBeDefined();
+    });
+  });
+
+  it("shows Sending… only on the forgot-password button", async () => {
+    const d = defer();
+    deferredFetch({ "/api/auth/email/reset": () => d.gate });
+    renderGate();
+    await waitFor(() => {
+      expect(screen.getByLabelText("Work Email")).toBeDefined();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Forgot Password?" }));
+    await waitFor(() => {
+      expect(screen.getByText("Sending…")).toBeDefined();
+    });
+    expect(screen.getByRole("button", { name: "Sign In" })).toBeDefined();
+    d.release(Response.json({}));
+    await waitFor(() => {
+      expect(screen.getByText("If That Email Exists, A Reset Is On Its Way.")).toBeDefined();
+    });
+  });
+
+  it("shows Signing In… only on the Sign In button", async () => {
+    const d = defer();
+    deferredFetch({ "/api/auth/email/signin": () => d.gate });
+    renderGate();
+    await waitFor(() => {
+      expect(screen.getByLabelText("Work Email")).toBeDefined();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Sign In" }));
+    await waitFor(() => {
+      expect(screen.getByText("Signing In…")).toBeDefined();
+    });
+    // OAuth siblings keep idle labels while email auth is in flight.
+    expect(screen.getByRole("button", { name: "Continue With Google" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Continue With Microsoft" })).toBeDefined();
+    d.release(new Response(JSON.stringify({ detail: { error: "Incorrect email or password." } }), {
+      status: 409,
+      headers: { "Content-Type": "application/json" },
+    }));
+    await waitFor(() => {
+      expect(screen.getByText("Incorrect email or password.")).toBeDefined();
+    });
+  });
+
+  it("shows Connecting To Google… only on the pressed provider", async () => {
+    const d = defer();
+    deferredFetch({ "/api/auth/oauth/start": () => d.gate });
+    renderGate();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Continue With Google" })).toBeDefined();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Continue With Google" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Connecting To Google…" })).toBeDefined();
+    });
+    // Microsoft disables but never shows the spinner/label.
+    expect(screen.getByRole("button", { name: "Continue With Microsoft" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Connecting To Microsoft…" })).toBeNull();
+    d.release(Response.json({ url: "https://workos.test/authorize" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Connecting To Google…" })).toBeNull();
+    });
+  });
+});
+
+describe("AuthGate screens (account admin)", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    cleanup();
   });
 
   it("hides the Admin tab from non-admins", async () => {

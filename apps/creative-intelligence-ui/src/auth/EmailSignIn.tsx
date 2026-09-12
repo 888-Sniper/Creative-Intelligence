@@ -2,9 +2,10 @@ import { useState } from "react";
 import { useAuth } from "@/auth/AuthProvider";
 import { ApiError } from "@/api/client";
 import { Icon } from "@/components/icons";
+import { LoadingButton } from "@/components/LoadingButton";
 
 // localStorage holds the work email ONLY (never the password) when the
-// employee ticks "Remember me". Session lifetime stays server-controlled
+// employee ticks "Remember Me". Session lifetime stays server-controlled
 // (30-day cookie); there is no safe client-side session toggle, so the
 // checkbox honestly means "remember my email on this device".
 const REMEMBERED_EMAIL_KEY = "ci-remember-email";
@@ -33,13 +34,23 @@ export function EmailSignIn() {
   const [code, setCode] = useState("");
   const [codeSent, setCodeSent] = useState(false);
   const [message, setMessage] = useState("");
+  // Which async auth action this form started (null when idle). The
+  // spinner renders ONLY on the button the employee actually pressed —
+  // a global `authenticating` from another button must never light up
+  // every control. It still disables everything to avoid double submit.
+  const [op, setOp] = useState<null | "password" | "send" | "verify" | "reset">(null);
+  const busy = authenticating || op !== null;
 
-  const submit = async (fn: () => Promise<string | void>) => {
+  const run = async (name: NonNullable<typeof op>, fn: () => Promise<string | void>) => {
+    if (busy) return;
+    setOp(name);
     try {
       const msg = await fn();
       setMessage(typeof msg === "string" ? msg : "");
     } catch (err) {
       setMessage(err instanceof ApiError ? err.message : "Sign-In Failed.");
+    } finally {
+      setOp(null);
     }
   };
 
@@ -56,7 +67,7 @@ export function EmailSignIn() {
   };
 
   const signInPassword = () =>
-    submit(async () => {
+    run("password", async () => {
       await emailSignIn(email, password);
       persistRememberedEmail(email, remember);
     });
@@ -86,13 +97,13 @@ export function EmailSignIn() {
           />
         </div>
         {!codeSent ? (
-          <button type="button" className="login-primary" disabled={authenticating} onClick={() => void submit(async () => {
+          <LoadingButton type="button" className="login-primary" loading={op === "send"} loadingLabel="Sending Code…" disabled={busy} onClick={() => void run("send", async () => {
             const msg = await emailCodeSend(email);
             setCodeSent(true);
             return msg;
           })}>
             Send Sign-In Code
-          </button>
+          </LoadingButton>
         ) : (
           <>
             <label className="login-label" htmlFor="login-code">
@@ -107,13 +118,13 @@ export function EmailSignIn() {
               value={code}
               onChange={(e) => setCode(e.target.value)}
             />
-            <button type="button" className="login-primary" disabled={authenticating} onClick={() => void submit(() => emailCodeSignIn(email, code))}>
-              Verify &amp; Sign In
-            </button>
+            <LoadingButton type="button" className="login-primary" loading={op === "verify"} loadingLabel="Verifying…" disabled={busy} onClick={() => void run("verify", () => emailCodeSignIn(email, code))}>
+              <>Verify &amp; Sign In</>
+            </LoadingButton>
           </>
         )}
         <button type="button" className="login-link" onClick={() => switchMode("password")}>
-          Back to password sign in
+          Back To Password Sign In
         </button>
         <p className="muted login-status" role="status">{message}</p>
       </div>
@@ -170,17 +181,17 @@ export function EmailSignIn() {
               persistRememberedEmail(email, want);
             }}
           />
-          Remember me
+          Remember Me
         </label>
-        <button type="button" className="login-link" onClick={() => void submit(() => emailReset(email))}>
-          Forgot password?
-        </button>
+        <LoadingButton type="button" className="login-link" loading={op === "reset"} loadingLabel="Sending…" disabled={busy} onClick={() => void run("reset", () => emailReset(email))}>
+          Forgot Password?
+        </LoadingButton>
       </div>
-      <button type="button" className="login-primary" disabled={authenticating} aria-busy={authenticating} onClick={() => void signInPassword()}>
-        {authenticating ? (<><span className="spinner" aria-hidden="true" /><span>Signing In…</span></>) : "Sign In"}
-      </button>
+      <LoadingButton type="button" className="login-primary" loading={op === "password"} loadingLabel="Signing In…" disabled={busy} onClick={() => void signInPassword()}>
+        Sign In
+      </LoadingButton>
       <button type="button" className="login-link login-mode" onClick={() => switchMode("code")}>
-        Use a sign-in code instead
+        Use A Sign-In Code Instead
       </button>
       <p className="muted login-status" role="status">{message}</p>
     </div>

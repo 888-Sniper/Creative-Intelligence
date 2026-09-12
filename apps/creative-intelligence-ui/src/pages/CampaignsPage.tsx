@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { api, ApiError } from "@/api/client";
 import { useFilters } from "@/state/FilterContext";
 import { Icon } from "@/components/icons";
+import { LoadingButton } from "@/components/LoadingButton";
 import { GroupBars, TrendChart } from "@/components/charts";
 import {
   EmptyState,
@@ -483,9 +484,9 @@ export function CampaignsPage() {
                 <button type="button" className="btn-outline" onClick={onCompare}>
                   Compare Selected ({selected.size})
                 </button>
-                <button type="button" className="btn-outline" disabled={exportBusy} onClick={() => void onExport()}>
-                  <Icon name="download" size={15} /> {exportBusy ? "Exporting…" : "Export"}
-                </button>
+                <LoadingButton type="button" className="btn-outline" loading={exportBusy} loadingLabel="Exporting…" spinnerClass="spinner dark" disabled={exportBusy} onClick={() => void onExport()}>
+                  <Icon name="download" size={15} /> Export
+                </LoadingButton>
               </div>
             )}
           >

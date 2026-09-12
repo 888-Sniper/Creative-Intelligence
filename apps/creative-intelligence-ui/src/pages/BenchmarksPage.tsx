@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { api, scopedPath } from "@/api/client";
 import { useFilters } from "@/state/FilterContext";
 import { Icon } from "@/components/icons";
+import { LoadingButton } from "@/components/LoadingButton";
 import {
   EmptyState,
   PageHeader,
@@ -192,10 +193,9 @@ export function BenchmarksPage() {
         title="Benchmarks Library"
         sub="Discover, save, and manage benchmarks to guide stronger creative decisions."
         actions={(
-          <button type="button" className="btn-primary" disabled={saving} onClick={() => void createBenchmark()}>
-            {saving ? <span className="spinner" aria-hidden="true" /> : <Icon name="plus" size={16} />}
-            {saving ? "Saving…" : "Create Benchmark"}
-          </button>
+          <LoadingButton type="button" className="btn-primary" loading={saving} loadingLabel="Saving…" disabled={saving} onClick={() => void createBenchmark()}>
+            <Icon name="plus" size={16} /> Create Benchmark
+          </LoadingButton>
         )}
       />
       <Panel title="Benchmark Filters">
@@ -290,9 +290,9 @@ export function BenchmarksPage() {
             sub="Benchmarks computed from available campaign performance in the current scope."
             action={(
               <div style={{ display: "flex", gap: 8 }}>
-                <button type="button" className="btn-outline" disabled={exportBusy} onClick={() => void onExport()}>
-                  <Icon name="download" size={15} /> {exportBusy ? "Exporting…" : "Export"}
-                </button>
+                <LoadingButton type="button" className="btn-outline" loading={exportBusy} loadingLabel="Exporting…" spinnerClass="spinner dark" disabled={exportBusy} onClick={() => void onExport()}>
+                  <Icon name="download" size={15} /> Export
+                </LoadingButton>
               </div>
             )}
           >

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api, scopedPath } from "@/api/client";
 import { useFilters } from "@/state/FilterContext";
 import { Icon } from "@/components/icons";
+import { LoadingButton } from "@/components/LoadingButton";
 import { TrendChart } from "@/components/charts";
 import {
   CreativeThumb,
@@ -609,10 +610,9 @@ export function ComparePage() {
               ))}
             </select>
           </div>
-          <button type="button" className="btn-primary" disabled={loading} onClick={apply}>
-            {loading ? <span className="spinner" aria-hidden="true" /> : null}
-            {loading ? "Comparing…" : "Apply Comparison"}
-          </button>
+          <LoadingButton type="button" className="btn-primary" loading={loading} loadingLabel="Comparing…" disabled={loading} onClick={apply}>
+            Apply Comparison
+          </LoadingButton>
         </div>
       </Panel>
       {error ? <p className="panel-sub" role="alert" style={{ margin: "12px 0 0" }}>{error}</p> : null}
@@ -806,10 +806,9 @@ export function ComparePage() {
           </div>
         </div>
         <div className="filter-actions">
-          <button type="button" className="btn-primary" disabled={periodLoading} onClick={() => void comparePeriods()}>
-            {periodLoading ? <span className="spinner" aria-hidden="true" /> : null}
-            {periodLoading ? "Comparing…" : "Compare Periods"}
-          </button>
+          <LoadingButton type="button" className="btn-primary" loading={periodLoading} loadingLabel="Comparing…" disabled={periodLoading} onClick={() => void comparePeriods()}>
+            Compare Periods
+          </LoadingButton>
         </div>
         <div style={{ marginTop: 8 }}>
           {periodLoading ? <Skeleton height={120} /> : null}

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api, scopedPath } from "@/api/client";
 import { useFilters } from "@/state/FilterContext";
 import { Icon } from "@/components/icons";
+import { LoadingButton } from "@/components/LoadingButton";
 import { EmptyState, PageHeader, Panel } from "@/components/product";
 
 const KPI_OPTIONS = [
@@ -474,10 +475,9 @@ export function ReportsPage() {
                 );
               })}
               <div className="fmt-go">
-                <button type="button" className="btn-primary" disabled={busy || campaigns === null} onClick={generate}>
-                  {busy ? <span className="spinner" aria-hidden="true" /> : <Icon name="spark" size={16} />}
-                  {busy ? "Generating…" : "Generate Report"}
-                </button>
+                <LoadingButton type="button" className="btn-primary" loading={busy} loadingLabel="Generating…" disabled={busy || campaigns === null} onClick={generate}>
+                  <Icon name="spark" size={16} /> Generate Report
+                </LoadingButton>
                 <p className="panel-sub">Estimated generation time: 1–2 minutes</p>
               </div>
             </div>
@@ -526,7 +526,7 @@ export function ReportsPage() {
                     {rows.map((r) => (
                       <tr key={r.id}>
                         <td>
-                          <strong className="cell-main">{r.title}</strong>
+                          <strong className="cell-main" style={{ display: "block" }}>{r.title}</strong>
                           <span className="panel-sub">{r.kind}</span>
                         </td>
                         <td><StatusPill status={r.status} /></td>

@@ -78,11 +78,11 @@ export function LoginPage() {
     <AuthShell>
       <div className="auth-card login-card">
         <h1>Welcome Back</h1>
-        <p className="muted login-sub">Sign in to your employee workspace.</p>
+        <p className="muted login-sub">Sign In To Your Employee Workspace.</p>
         {authError ? <p className="muted">Sign-In Failed: {authError}</p> : null}
         <EmailSignIn />
         <div className="login-separator" aria-hidden="true">
-          <span>Or continue with</span>
+          <span>Or Continue With</span>
         </div>
         <div className="login-providers">
           <EmployeeOAuthButtons />

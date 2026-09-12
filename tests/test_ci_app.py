@@ -771,7 +771,9 @@ def test_spa_shell_serving(client):
     uses_react = (os.path.normpath(react_index())
                   != os.path.normpath(WEB_INDEX))
     for path in ("/campaigns", "/creatives", "/compare", "/benchmarks",
-                 "/reports", "/profile", "/settings", "/admin"):
+                 "/reports", "/profile", "/settings", "/admin",
+                 "/analyst", "/insights", "/workbook", "/ask",
+                 "/dashboard"):
         r = client.get(path)
         assert r.status_code == 200, path
         if uses_react:

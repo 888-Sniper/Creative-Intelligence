@@ -1675,7 +1675,8 @@ def index_alias():
 # React Router client paths: serve the app shell so deep links and
 # refreshes work (item 51). Explicit list — unknown paths still 404.
 _SPA_PATHS = ("campaigns", "creatives", "compare", "benchmarks",
-              "reports", "profile", "settings", "admin", "analyst")
+              "reports", "profile", "settings", "admin", "analyst",
+              "insights", "workbook", "ask", "dashboard")
 
 
 @router.get("/{spa_path}")

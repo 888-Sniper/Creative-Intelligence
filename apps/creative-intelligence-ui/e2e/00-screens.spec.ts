@@ -13,19 +13,53 @@ import { loginAs, readSeeds } from "./helpers";
  *  full-page screenshot under test-results/screens/ for human
  *  side-by-side comparison against the approved references. Pixel
  *  assertions are deliberately absent: font rendering differs between
- *  developer machines and CI runners, so a pixel gate would be flaky;
- *  the screenshots are the reviewable artifact, the assertions below
+ *  developer machines and CI runners, so a pixel gate would be flaky.
+ *  The review gate is the uploaded `approved-screens` CI artifact
+ *  (see .github/workflows/ci.yml and docs/Visual Review.md): the
+ *  screenshots are the reviewable artifact, the assertions below
  *  are the deterministic gate.
  *
- *  Approved viewports: 1440x1000 desktop, 390x844 mobile (key routes).
+ *  Approved viewports: 1440x1000 desktop; 1280x800, 1024x768 and
+ *  768x1024 responsive passes over all 14 routes; 390x844 mobile
+ *  (key routes).
  */
 const SHOTS = "test-results/screens";
+
+type Route = [shot: string, path: string, heading: string | RegExp];
+
+const ROUTES: Route[] = [
+  ["02-dashboard", "/", /Good (Morning|Afternoon|Evening),/],
+  ["03-campaigns", "/campaigns", "Campaigns"],
+  ["04-creatives", "/creatives", "Creatives"],
+  ["05-compare", "/compare", "Compare"],
+  ["06-benchmarks", "/benchmarks", "Benchmarks Library"],
+  ["07-insights", "/insights", "Saved Insights"],
+  ["08-reports", "/reports", "Generated Reports"],
+  ["09-workbook", "/workbook", "Blank Workbook"],
+  ["10-ask", "/ask", "Ask The Data"],
+  ["11-analyst", "/analyst", "Your Creative Partner"],
+  ["12-admin", "/admin", "Admin"],
+  ["13-profile", "/profile", "Profile"],
+  ["14-settings", "/settings", "Settings"],
+];
 
 async function expectNoOverflow(page: Page) {
   const overflow = await page.evaluate(
     () => document.documentElement.scrollWidth - window.innerWidth,
   );
   expect(overflow).toBeLessThanOrEqual(1);
+}
+
+async function expectRoute(page: Page, path: string, heading: string | RegExp) {
+  await page.goto(path);
+  if (typeof heading === "string") {
+    await expect(page.getByRole("heading", { level: 1, name: heading, exact: true })).toBeVisible();
+  } else {
+    await expect(page.getByRole("heading", { name: heading })).toBeVisible();
+  }
+  // Best effort: let charts/tables populate before the capture.
+  await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
+  await expectNoOverflow(page);
 }
 
 test.describe("approved screens at desktop viewport", () => {
@@ -42,23 +76,7 @@ test.describe("approved screens at desktop viewport", () => {
     await page.screenshot({ path: `${SHOTS}/01-login.png`, animations: "disabled" });
   });
 
-  const routes: Array<[shot: string, path: string, heading: string | RegExp]> = [
-    ["02-dashboard", "/", /Good (Morning|Afternoon|Evening),/],
-    ["03-campaigns", "/campaigns", "Campaigns"],
-    ["04-creatives", "/creatives", "Creatives"],
-    ["05-compare", "/compare", "Compare"],
-    ["06-benchmarks", "/benchmarks", "Benchmarks Library"],
-    ["07-insights", "/insights", "Saved Insights"],
-    ["08-reports", "/reports", "Generated Reports"],
-    ["09-workbook", "/workbook", "Blank Workbook"],
-    ["10-ask", "/ask", "Ask The Data"],
-    ["11-analyst", "/analyst", "Your Creative Partner"],
-    ["12-admin", "/admin", "Admin"],
-    ["13-profile", "/profile", "Profile"],
-    ["14-settings", "/settings", "Settings"],
-  ];
-
-  for (const [shot, path, heading] of routes) {
+  for (const [shot, path, heading] of ROUTES) {
     test(`${shot} ${path}`, async ({ page, context }) => {
       const seeds = readSeeds();
       await loginAs(context, page, seeds.admin, path);
@@ -74,6 +92,33 @@ test.describe("approved screens at desktop viewport", () => {
       await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
       await expectNoOverflow(page);
       await page.screenshot({ path: `${SHOTS}/${shot}.png`, fullPage: true, animations: "disabled" });
+    });
+  }
+});
+
+test.describe("approved screens at responsive viewports", () => {
+  // One login per viewport, then every route in the same session:
+  // heading composition + no horizontal overflow + capture each.
+  const viewports = [
+    { width: 1280, height: 800 },
+    { width: 1024, height: 768 },
+    { width: 768, height: 1024 },
+  ];
+
+  for (const vp of viewports) {
+    test(`all routes at ${vp.width}x${vp.height}`, async ({ page, context }) => {
+      test.setTimeout(240000);
+      const seeds = readSeeds();
+      await loginAs(context, page, seeds.admin, ROUTES[0][1]);
+      await page.setViewportSize(vp);
+      for (const [shot, path, heading] of ROUTES) {
+        await expectRoute(page, path, heading);
+        await page.screenshot({
+          path: `${SHOTS}/${shot}-${vp.width}.png`,
+          fullPage: true,
+          animations: "disabled",
+        });
+      }
     });
   }
 });

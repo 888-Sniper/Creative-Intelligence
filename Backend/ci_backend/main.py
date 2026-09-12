@@ -115,6 +115,10 @@ def main() -> None:
     seeded = maybe_seed_demo(db_path, settings, fresh)
     if seeded:
         print("demo seed rows: %d" % seeded)
+    elif fresh and not settings.demo_seed:
+        # A dashboard-level CREATIVE_INTEL_DEMO_SEED=false override lands
+        # here: say so explicitly so startup logs show why no seed ran.
+        print("demo seed skipped: CREATIVE_INTEL_DEMO_SEED is not true")
     sync_every = resolve_sync_every(args, settings)
     if sync_every > 0:
         import threading

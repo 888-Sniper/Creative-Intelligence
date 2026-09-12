@@ -1,6 +1,7 @@
 import { useAuth } from "@/auth/AuthProvider";
 import { EmployeeOAuthButtons } from "@/auth/OAuthButton";
 import { EmailSignIn } from "@/auth/EmailSignIn";
+import { Icon } from "@/components/icons";
 
 // Brand single-source: served by the backend from Web/assets
 // (GET /foap-logo.png); never duplicated into the frontend tree.
@@ -33,10 +34,16 @@ export function AccessRevoked() {
   return <GateScreen gate="revoked" />;
 }
 
-/** Shared centred shell: Foap logo above the card on every auth screen. */
+/** Shared centred shell: Foap logo above the card on every auth screen,
+ *  over pale aqua decorative blobs (approved login treatment). */
 function AuthShell({ children }: { children: React.ReactNode }) {
   return (
     <div id="auth-screen">
+      <div className="auth-blobs" aria-hidden="true">
+        <span className="auth-blob b1" />
+        <span className="auth-blob b2" />
+        <span className="auth-blob b3" />
+      </div>
       <div className="login-shell">
         <img src={FOAP_LOGO} alt="Foap" className="login-logo" />
         {children}
@@ -88,7 +95,7 @@ export function LoginPage() {
           <EmployeeOAuthButtons />
         </div>
         <p className="muted login-footer">
-          <span aria-hidden="true">🔒</span> For Foap Employees Only.
+          <Icon name="lock" size={14} /> For Foap Employees Only.
         </p>
         {me?.workos_configured === false ? (
           <p className="muted">WorkOS Is Not Configured On This Server Yet — Ask Your Administrator To Set It Up.</p>

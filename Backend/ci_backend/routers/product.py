@@ -120,6 +120,20 @@ def campaigns(request: Request, conn=Depends(get_product_conn),
         raise _conflict(exc)
 
 
+@router.get("/api/campaigns/meta")
+def campaigns_meta(request: Request, conn=Depends(get_product_conn),
+                   _emp=Depends(get_current_employee)):
+    """Per-campaign display metadata (client, platforms, derived status).
+
+    Additive read-only surface for the Campaigns screen filters and
+    table; the aggregated /api/campaigns payload is unchanged.
+    """
+    try:
+        return benchmarks.campaign_meta(conn)
+    except (ValueError, export_gate.ExportBlocked, emp.StoreError) as exc:
+        raise _conflict(exc)
+
+
 @router.get("/api/campaigns/recommendations")
 def recommendations(request: Request, conn=Depends(get_product_conn),
                     _emp=Depends(get_current_employee)):

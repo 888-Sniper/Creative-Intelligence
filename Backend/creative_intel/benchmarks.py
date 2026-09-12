@@ -253,6 +253,65 @@ def benchmark(conn, group_by="hook_type", filters=None):
     return {k: summarize(v) for k, v in sorted(groups.items())}
 
 
+# Trailing inactivity after which a campaign reads "Completed".
+CAMPAIGN_ACTIVE_WINDOW_DAYS = 14
+
+
+def campaign_meta(conn):
+    """Per-campaign display metadata for the Campaigns screen.
+
+    Returns ``{"campaigns": [...]}`` with one entry per distinct
+    campaign: name, client (most frequent non-blank value), distinct
+    platforms / markets / objectives / verticals, last activity date,
+    and a derived ``status``. Status is deliberately derived, not
+    stored: "Active" when the campaign's latest activity date falls
+    within ``CAMPAIGN_ACTIVE_WINDOW_DAYS`` of the newest date in the
+    database, otherwise "Completed". Campaigns with no dated rows
+    read "Completed" — undated rows cannot prove recency.
+    """
+    from collections import Counter
+    from datetime import date as _date
+
+    conn.row_factory = None
+    cols = [c[0] for c in conn.execute("SELECT * FROM ads LIMIT 0").description]
+    rows = [dict(zip(cols, v)) for v in conn.execute("SELECT * FROM ads").fetchall()]
+    days = sorted({str(r.get("date") or "") for r in rows} - {""})
+    newest = None
+    if days:
+        try:
+            newest = _date.fromisoformat(days[-1])
+        except ValueError:
+            newest = None
+    out = []
+    for name in sorted({str(r.get("campaign") or "") for r in rows} - {""}):
+        sub = [r for r in rows if str(r.get("campaign") or "") == name]
+
+        def _distinct(key):
+            return sorted({str(r.get(key) or "").strip() for r in sub}
+                          - {""})
+
+        client = Counter(str(r.get("client") or "").strip() for r in sub
+                         if str(r.get("client") or "").strip()).most_common(1)
+        lasts = sorted({str(r.get("date") or "") for r in sub} - {""})
+        last = lasts[-1] if lasts else ""
+        status = "Completed"
+        if last and newest:
+            try:
+                gap = (newest - _date.fromisoformat(last)).days
+                status = "Active" if gap <= CAMPAIGN_ACTIVE_WINDOW_DAYS else "Completed"
+            except ValueError:
+                status = "Completed"
+        out.append({"name": name,
+                    "client": client[0][0] if client else "",
+                    "platforms": _distinct("platform"),
+                    "markets": _distinct("market"),
+                    "objectives": _distinct("objective"),
+                    "verticals": _distinct("vertical"),
+                    "last_date": last,
+                    "status": status})
+    return {"campaigns": out}
+
+
 # === EXPERT 2 (COHORTS+COMPARE) EXTENSION — appended; original functions above untouched. ===
 """Multi-filter benchmark builder, campaign compare, and report helpers.
 

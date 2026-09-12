@@ -93,3 +93,13 @@ jobs:
         run: pnpm --dir apps/creative-intelligence-ui exec playwright install chromium --with-deps
       - name: Playwright E2E (seeded backend + production build)
         run: pnpm --dir apps/creative-intelligence-ui test:e2e
+      - name: Upload screen captures (visual review artifact)
+        # Side-by-side review gate against the 14 approved references
+        # (see docs/Visual Review.md). Always uploads, even when the
+        # E2E step fails, so a red run still yields reviewable shots.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: approved-screens
+          path: apps/creative-intelligence-ui/test-results/screens/
+          if-no-files-found: warn

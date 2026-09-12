@@ -31,6 +31,13 @@ interface CampaignRow {
   campaigns: number;
 }
 
+/* Per-campaign display metadata from GET /api/campaigns/meta
+ * (unscoped attribute data: client, platforms, derived status). */
+interface CampaignMeta {
+  name: string; client: string; platforms: string[]; markets: string[];
+  objectives: string[]; verticals: string[]; last_date: string; status: string;
+}
+
 interface BenchSummary extends CampaignRow {
   n_ads: number;
 }
@@ -73,6 +80,7 @@ export function CampaignsPage() {
   const { filters, setFilter, clearFilters } = useFilters();
   const [applied, setApplied] = useState(0);
   const [spendRange, setSpendRange] = useState("All Spend Ranges");
+  const [statusFilter, setStatusFilter] = useState("all");
   const [moreFilters, setMoreFilters] = useState(false);
   const [platMetric, setPlatMetric] = useState<(typeof PLATFORM_METRICS)[number]["value"]>("spend");
   const [search, setSearch] = useState("");
@@ -83,6 +91,7 @@ export function CampaignsPage() {
   const campaigns = useScopedApi<Record<string, CampaignRow>>("/api/campaigns", applied);
   const benchPlatform = useScopedApi<Record<string, BenchSummary>>("/api/benchmarks?group_by=platform", applied);
   const benchHook = useScopedApi<Record<string, BenchSummary>>("/api/benchmarks?group_by=hook_type", applied);
+  const meta = useScopedApi<{ campaigns: CampaignMeta[] }>("/api/campaigns/meta", applied);
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [details, setDetails] = useState<Record<string, CampaignDetail | null>>({});
@@ -116,6 +125,23 @@ export function CampaignsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initial.kpi]);
 
+  /* Campaign attribute lookup (client / platforms / derived status).
+   * Status has no backend scope axis, so it filters client-side here. */
+  const metaMap = useMemo(() => {
+    const map = new Map<string, CampaignMeta>();
+    for (const c of meta.data?.campaigns ?? []) map.set(c.name, c);
+    return map;
+  }, [meta.data]);
+  const metaClients = useMemo(
+    () => [...new Set((meta.data?.campaigns ?? []).map((c) => c.client).filter(Boolean))].sort(),
+    [meta.data]);
+  const metaMarkets = useMemo(
+    () => [...new Set((meta.data?.campaigns ?? []).flatMap((c) => c.markets))].sort(),
+    [meta.data]);
+  const metaObjectives = useMemo(
+    () => [...new Set((meta.data?.campaigns ?? []).flatMap((c) => c.objectives))].sort(),
+    [meta.data]);
+
   const rows = useMemo(() => {
     const list = Object.entries(campaigns.data ?? {}).map(([name, m]) => ({ name, ...m }));
     const q = search.trim().toLowerCase();
@@ -127,8 +153,12 @@ export function CampaignsPage() {
         if (spendRange === "Over $50K") return num(r.spend) > 50000;
         return true;
       })
+      .filter((r) => {
+        if (statusFilter === "all") return true;
+        return (metaMap.get(r.name)?.status ?? "") === statusFilter;
+      })
       .sort((a, b) => num(b.spend) - num(a.spend));
-  }, [campaigns.data, search, spendRange]);
+  }, [campaigns.data, search, spendRange, statusFilter, metaMap]);
 
   const avgCtr = useMemo(() => {
     const impr = rows.reduce((t, r) => t + num(r.impressions), 0);
@@ -320,13 +350,16 @@ export function CampaignsPage() {
             <label htmlFor="c-client">Client</label>
             <select id="c-client" {...selectProps("client")}>
               <option value="all">All Clients</option>
+              {metaClients.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
           </div>
           <div className="field">
-            <label htmlFor="c-campaign">Campaign</label>
-            <select id="c-campaign" {...selectProps("campaign")}>
-              <option value="all">All Campaigns</option>
-              {Object.keys(campaigns.data ?? {}).map((n) => <option key={n} value={n}>{n}</option>)}
+            <label htmlFor="c-status">Campaign Status</label>
+            <select id="c-status" value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}>
+              <option value="all">All Statuses</option>
+              <option value="Active">Active</option>
+              <option value="Completed">Completed</option>
             </select>
           </div>
           <div className="field">
@@ -341,14 +374,22 @@ export function CampaignsPage() {
             <label htmlFor="c-objective">Campaign Objective</label>
             <select id="c-objective" {...selectProps("objective")}>
               <option value="all">All Objectives</option>
-              <option value="awareness">Awareness</option>
-              <option value="conversions">Conversions</option>
+              {metaObjectives.map((o) => <option key={o} value={o}>{o}</option>)}
+            </select>
+          </div>
+          {/* Team attribution does not exist in the ads dataset, so this
+            control honestly offers All Teams until team data exists. */}
+          <div className="field">
+            <label htmlFor="c-team">Team</label>
+            <select id="c-team" value="all" aria-label="Team" disabled>
+              <option value="all">All Teams</option>
             </select>
           </div>
           <div className="field">
             <label htmlFor="c-market">Market</label>
             <select id="c-market" {...selectProps("market")}>
               <option value="all">All Markets</option>
+              {metaMarkets.map((m) => <option key={m} value={m}>{m}</option>)}
             </select>
           </div>
           <div className="field">
@@ -498,6 +539,9 @@ export function CampaignsPage() {
                       <tr>
                         <th scope="col"><input type="checkbox" aria-label="Select all campaigns" checked={allChecked} onChange={toggleAll} /></th>
                         <th scope="col">Campaign</th>
+                        <th scope="col">Client</th>
+                        <th scope="col">Platform</th>
+                        <th scope="col">Status</th>
                         <th scope="col" className="num">Impressions</th>
                         <th scope="col" className="num">Clicks</th>
                         <th scope="col" className="num">CTR</th>
@@ -515,6 +559,13 @@ export function CampaignsPage() {
                               checked={selected.has(r.name)} onChange={() => toggle(r.name)} />
                           </td>
                           <td><span className="cell-main">{r.name}</span></td>
+                          <td>{metaMap.get(r.name)?.client || "—"}</td>
+                          <td>{(metaMap.get(r.name)?.platforms ?? []).map(platformLabel).join(", ") || "—"}</td>
+                          <td>{metaMap.get(r.name)?.status ? (
+                            <span className={`badge ${metaMap.get(r.name)?.status === "Active" ? "good" : "bad"}`}>
+                              {metaMap.get(r.name)?.status}
+                            </span>
+                          ) : "—"}</td>
                           <td className="num">{fmtCompact(num(r.impressions))}</td>
                           <td className="num">{fmtCompact(num(r.clicks))}</td>
                           <td className="num">{r.ctr == null ? "—" : `${(r.ctr * 100).toFixed(1)}%`}</td>

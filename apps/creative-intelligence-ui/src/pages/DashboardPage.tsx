@@ -389,6 +389,11 @@ export function DashboardPage() {
         )}
       />
       <FilterPanel actions="none" />
+      {/* Approved composition: the Insights rail spans the full right
+        side from the KPI row down (KPIs | Insights, Charts | Insights,
+        Top Creatives + Retention | Insights). */}
+      <div className="main-rail">
+        <div className="rail-stack">
       {compare ? (
         <div className="kpi-grid">
           {kpiConfigs.map((k) => (
@@ -472,8 +477,6 @@ export function DashboardPage() {
           ) : <Skeleton height={250} />}
         </Panel>
       </div>
-      <div className="main-rail">
-        <div className="rail-stack">
           <Panel
             title="Top Performing Creatives"
             action={<Link className="link-teal" to="/creatives">See All</Link>}

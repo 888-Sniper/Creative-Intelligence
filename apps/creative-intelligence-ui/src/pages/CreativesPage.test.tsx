@@ -36,6 +36,18 @@ const rows = [
     metrics: { spend: 50, impressions: 2100000, clicks: 39900, conversions: 400, revenue: 105, cpa: 5, ctr: 0.019, cpc: 1, cpm: 6, vtr: 0.3, roas: 2.1 },
     annotation: { hook_type: "offer", creator_vs_branded: "branded", duration_s: 15 },
   },
+  {
+    // Heavy branded winner: the branded pool beats the creator pool,
+    // so the heading must crown branded — never a fixed creator phrase.
+    creative_key: "ck-gamma",
+    name: "Gamma",
+    platform: "meta",
+    format: "9:16 Video",
+    campaigns: ["Camp C"],
+    duration_s: 45,
+    metrics: { spend: 200, impressions: 10000000, clicks: 350000, conversions: 2000, revenue: 900, cpa: 4, ctr: 0.035, cpc: 0.8, cpm: 7, vtr: 0.35, roas: 4.5 },
+    annotation: { hook_type: "testimonial", creator_vs_branded: "branded", duration_s: 45 },
+  },
 ];
 
 const hooks = {
@@ -122,5 +134,50 @@ describe("CreativesPage", () => {
       expect(screen.getByText("Audience Retention")).toBeDefined();
     });
     expect(screen.getByText("Objective")).toBeDefined();
+  });
+
+  it("crowns the real leader and scopes every section to the length filter", async () => {
+    mockLibrary();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("Top Performing Creatives")).toBeDefined();
+    });
+    // Branded pool (3.2%) beats creator pool (2.8%): the heading must
+    // say so instead of a fixed creator phrase.
+    await waitFor(() => {
+      expect(screen.getByText("Branded Hooks Perform Best")).toBeDefined();
+    });
+    expect(screen.queryByText("Creator-Led Hooks Perform Best")).toBeNull();
+    expect(screen.getByText("Testimonial Hooks Lead CTR")).toBeDefined();
+    // Narrow to long videos: only Gamma survives anywhere.
+    fireEvent.change(screen.getByLabelText("Video Length"), { target: { value: "long" } });
+    await waitFor(() => {
+      expect(screen.queryByText("Alpha")).toBeNull();
+    });
+    expect(screen.queryByText("Beta")).toBeNull();
+    expect(screen.getAllByText("Gamma").length).toBeGreaterThan(0);
+    // Single-group learnings stay neutral; the duel disappears.
+    expect(screen.queryByText("Branded Hooks Perform Best")).toBeNull();
+    expect(screen.getByText("Over 30s Videos Snapshot")).toBeDefined();
+    // KPIs describe the filtered group (Gamma only).
+    expect(screen.getByText("Showing over-30s creatives only.")).toBeDefined();
+  });
+
+  it("reset restores the full scope and local view state", async () => {
+    mockLibrary();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("Top Performing Creatives")).toBeDefined();
+    });
+    fireEvent.change(screen.getByLabelText("Video Length"), { target: { value: "long" } });
+    await waitFor(() => {
+      expect(screen.queryByText("Alpha")).toBeNull();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Reset Filters" }));
+    await waitFor(() => {
+      expect(screen.getAllByText("Alpha").length).toBeGreaterThan(0);
+    });
+    expect((screen.getByLabelText("Video Length") as HTMLSelectElement).value).toBe("all");
+    expect(screen.getByText("Branded Hooks Perform Best")).toBeDefined();
   });
 });

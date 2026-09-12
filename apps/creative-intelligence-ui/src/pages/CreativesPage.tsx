@@ -13,6 +13,7 @@ import {
   PageHeader,
   Panel,
   Skeleton,
+  compareDisplayed,
   fmtCompact,
   platformLabel,
   useCompare,
@@ -45,11 +46,6 @@ export interface CreativeRowDatum {
   campaigns?: string[];
   metrics: CreativeMetrics;
   annotation?: CreativeAnnotation | null;
-}
-
-interface BenchGroup {
-  impressions: number; clicks: number; spend: number; revenue: number;
-  ctr: number | null; roas: number | null;
 }
 
 type SortKey = "top" | "ctr" | "roas" | "impressions";
@@ -171,67 +167,130 @@ export function CreativesPage() {
 
   const compare = useCompare(applied);
   const creatives = useScopedApi<CreativeRowDatum[]>("/api/creatives", applied);
-  const hooks = useScopedApi<Record<string, BenchGroup>>("/api/benchmarks?group_by=hook_type", applied);
-  const modes = useScopedApi<Record<string, BenchGroup>>("/api/benchmarks?group_by=creator_vs_branded", applied);
+
+  // Every section below reads lengthRows: the Video Length filter is a
+  // page-level scope, so top cards, KPIs, baseline and learnings all
+  // describe the same filtered group as the table.
+  const lengthRows = useMemo(() => (creatives.data ?? []).filter((c) => {
+    const s = secondsOf(c);
+    if (length === "short" && !(s > 0 && s < 15)) return false;
+    if (length === "sweet" && !(s >= 15 && s <= 30)) return false;
+    if (length === "long" && !(s > 30)) return false;
+    return true;
+  }), [creatives.data, length]);
 
   const rows = useMemo(() => {
-    const list = (creatives.data ?? []).filter((c) => {
-      const s = secondsOf(c);
-      if (length === "short" && !(s > 0 && s < 15)) return false;
-      if (length === "sweet" && !(s >= 15 && s <= 30)) return false;
-      if (length === "long" && !(s > 30)) return false;
-      return true;
-    });
     const by = {
       top: (c: CreativeRowDatum) => num(c.metrics.roas),
       ctr: (c: CreativeRowDatum) => num(c.metrics.ctr),
       roas: (c: CreativeRowDatum) => num(c.metrics.roas),
       impressions: (c: CreativeRowDatum) => num(c.metrics.impressions),
     }[sort];
-    return list.slice().sort((a, b) => by(b) - by(a));
-  }, [creatives.data, sort, length]);
+    return lengthRows.slice().sort((a, b) => by(b) - by(a));
+  }, [lengthRows, sort]);
 
   const topCards = useMemo(
-    () => (creatives.data ?? []).slice()
+    () => lengthRows.slice()
       .sort((a, b) => num(b.metrics.impressions) - num(a.metrics.impressions)).slice(0, 5),
-    [creatives.data],
+    [lengthRows],
   );
 
+  // Pooled KPIs for the filtered group. With no length filter these
+  // equal the scope totals and the compare-driven cards (with trends)
+  // render instead; with a filter active the cards show pooled values
+  // with no trend (no previous-period data exists for the subgroup).
+  const pooled = useMemo(() => {
+    const impr = lengthRows.reduce((t, c) => t + num(c.metrics.impressions), 0);
+    const clicks = lengthRows.reduce((t, c) => t + num(c.metrics.clicks), 0);
+    const spend = lengthRows.reduce((t, c) => t + num(c.metrics.spend), 0);
+    const revenue = lengthRows.reduce((t, c) => t + num(c.metrics.revenue), 0);
+    return { impr, clicks, roas: spend > 0 ? revenue / spend : null };
+  }, [lengthRows]);
+
   const roasBase = useMemo(() => {
-    const list = (creatives.data ?? []).map((c) => c.metrics.roas).filter((r): r is number => r != null);
+    const list = lengthRows.map((c) => c.metrics.roas).filter((r): r is number => r != null);
     if (!list.length) return null;
     return benchmark === "Top Performer" ? Math.max(...list) : list.reduce((t, r) => t + r, 0) / list.length;
-  }, [creatives.data, benchmark]);
+  }, [lengthRows, benchmark]);
 
+  // Learnings aggregate the LENGTH-FILTERED rows client-side, so they
+  // describe the same group as the table and cards. Headings follow
+  // the displayed numbers (ties, reversed leaders, single groups).
   const learnings = useMemo(() => {
     const out: Array<{ icon: string; title: string; body: string }> = [];
-    const hookRows = Object.entries(hooks.data ?? {})
-      .map(([key, g]) => ({ key, ctr: g.ctr == null ? null : g.ctr * 100 }))
+    const byHook = new Map<string, { clicks: number; impr: number }>();
+    const byMode = new Map<string, { clicks: number; impr: number }>();
+    for (const c of lengthRows) {
+      const key = (c.annotation?.hook_type ?? "").trim() || "unannotated";
+      const h = byHook.get(key) ?? { clicks: 0, impr: 0 };
+      h.clicks += num(c.metrics.clicks);
+      h.impr += num(c.metrics.impressions);
+      byHook.set(key, h);
+      const mode = (c.annotation?.creator_vs_branded ?? "").trim().toLowerCase();
+      if (mode === "creator" || mode === "branded") {
+        const m = byMode.get(mode) ?? { clicks: 0, impr: 0 };
+        m.clicks += num(c.metrics.clicks);
+        m.impr += num(c.metrics.impressions);
+        byMode.set(mode, m);
+      }
+    }
+    const ctrOf = (g: { clicks: number; impr: number }) => (g.impr > 0 ? (g.clicks / g.impr) * 100 : null);
+    const hookRows = [...byHook.entries()]
+      .map(([key, g]) => ({ key, ctr: ctrOf(g) }))
       .filter((r) => r.ctr != null)
       .sort((a, b) => (b.ctr ?? 0) - (a.ctr ?? 0));
-    if (hookRows[0]?.ctr != null) {
+    if (hookRows.length > 1 && hookRows[0].ctr != null && hookRows[1].ctr != null) {
+      const a = hookRows[0];
+      const b = hookRows[1];
+      const verdict = compareDisplayed(a.ctr ?? NaN, b.ctr ?? NaN);
+      if (verdict !== "unknown") {
+        out.push(verdict === "tie" ? {
+          icon: "spark",
+          title: `${shortHook(a.key)} and ${shortHook(b.key)} Tie on CTR`,
+          body: `${shortHook(a.key)} and ${shortHook(b.key)} openings both average ${(a.ctr ?? 0).toFixed(1)}% CTR across the current scope.`,
+        } : {
+          icon: "spark",
+          title: `${shortHook(a.key)} Hooks Lead CTR`,
+          body: `${shortHook(a.key)} openings average ${(a.ctr ?? 0).toFixed(1)}% CTR versus ${(b.ctr ?? 0).toFixed(1)}% for ${shortHook(b.key)} across the current scope.`,
+        });
+      }
+    } else if (hookRows.length === 1 && hookRows[0].ctr != null) {
       out.push({
         icon: "spark",
-        title: `${shortHook(hookRows[0].key)} Hooks Lead CTR`,
+        title: `${shortHook(hookRows[0].key)} Openings Snapshot`,
         body: `${shortHook(hookRows[0].key)} openings average ${(hookRows[0].ctr ?? 0).toFixed(1)}% CTR across the current scope.`,
       });
     }
-    const creator = modes.data?.creator;
-    const branded = modes.data?.branded;
-    if (creator?.ctr != null && branded?.ctr != null && branded.ctr) {
-      const lift = ((creator.ctr - branded.ctr) / Math.abs(branded.ctr)) * 100;
-      out.push({
-        icon: "users",
-        title: "Creator-Led Hooks Perform Best",
-        body: `Creatives with creator intros see ${lift >= 0 ? "+" : ""}${lift.toFixed(0)}% CTR versus branded content.`,
-      });
+    const creatorG = byMode.get("creator");
+    const brandedG = byMode.get("branded");
+    const creatorCtr = creatorG ? ctrOf(creatorG) : null;
+    const brandedCtr = brandedG ? ctrOf(brandedG) : null;
+    if (creatorCtr != null && brandedCtr != null) {
+      const verdict = compareDisplayed(creatorCtr, brandedCtr);
+      if (verdict !== "unknown") {
+        const lift = brandedCtr !== 0 ? ((creatorCtr - brandedCtr) / Math.abs(brandedCtr)) * 100 : null;
+        const liftTxt = lift != null ? ` (${lift >= 0 ? "+" : ""}${lift.toFixed(0)}%)` : "";
+        out.push(verdict === "tie" ? {
+          icon: "users",
+          title: "Creator and Branded Hooks Tie on CTR",
+          body: `Creatives with creator intros and branded openings both average ${creatorCtr.toFixed(1)}% CTR across the current scope.`,
+        } : verdict === "lead" ? {
+          icon: "users",
+          title: "Creator-Led Hooks Perform Best",
+          body: `Creatives with creator intros see ${creatorCtr.toFixed(1)}% CTR versus ${brandedCtr.toFixed(1)}% for branded content${liftTxt}.`,
+        } : {
+          icon: "users",
+          title: "Branded Hooks Perform Best",
+          body: `Creatives with branded openings see ${brandedCtr.toFixed(1)}% CTR versus ${creatorCtr.toFixed(1)}% for creator intros${liftTxt}.`,
+        });
+      }
     }
     const buckets = [
       { key: "Under 15s", test: (s: number) => s > 0 && s < 15 },
       { key: "15–30s", test: (s: number) => s >= 15 && s <= 30 },
       { key: "Over 30s", test: (s: number) => s > 30 },
     ].map((b) => ({ ...b, clicks: 0, impr: 0 }));
-    for (const c of creatives.data ?? []) {
+    for (const c of lengthRows) {
       const s = secondsOf(c);
       const b = buckets.find((x) => x.test(s));
       if (b) {
@@ -243,15 +302,30 @@ export function CreativesPage() {
       .map((b) => ({ key: b.key, ctr: b.impr ? (b.clicks / b.impr) * 100 : null }))
       .filter((b) => b.ctr != null)
       .sort((a, b) => (b.ctr ?? 0) - (a.ctr ?? 0));
-    if (ranked[0]?.ctr != null) {
+    if (ranked.length > 1 && ranked[0].ctr != null && ranked[1].ctr != null) {
+      const verdict = compareDisplayed(ranked[0].ctr ?? NaN, ranked[1].ctr ?? NaN);
+      if (verdict === "tie") {
+        out.push({
+          icon: "bars",
+          title: `${ranked[0].key} Shares the Length Lead`,
+          body: `Videos in the ${ranked[0].key} bucket match the best band at ${(ranked[0].ctr ?? 0).toFixed(1)}% CTR in the current scope.`,
+        });
+      } else if (verdict !== "unknown") {
+        out.push({
+          icon: "bars",
+          title: `${ranked[0].key} Videos Lead on CTR`,
+          body: `Videos in the ${ranked[0].key} bucket average ${(ranked[0].ctr ?? 0).toFixed(1)}% CTR versus ${(ranked[1].ctr ?? 0).toFixed(1)}% for ${ranked[1].key} in the current scope.`,
+        });
+      }
+    } else if (ranked.length === 1 && ranked[0].ctr != null) {
       out.push({
         icon: "bars",
-        title: "Shorter Videos Convert Better",
+        title: `${ranked[0].key} Videos Snapshot`,
         body: `Videos in the ${ranked[0].key} bucket average ${(ranked[0].ctr ?? 0).toFixed(1)}% CTR in the current scope.`,
       });
     }
     return out.slice(0, 5);
-  }, [hooks.data, modes.data, creatives.data]);
+  }, [lengthRows]);
 
   const tests = useMemo(() => [
     { icon: "spark", title: "Test Creator vs. Branded Intros", body: "Compare performance of creator-led vs. branded openings." },
@@ -306,7 +380,19 @@ export function CreativesPage() {
         sub="Explore top performing creatives, analyze what works, and get AI-powered recommendations."
         actions={(
           <>
-            <button type="button" className="link-teal" onClick={clearFilters}
+            {/* Reset restores local view state too: a stale length/sort
+              selection after reset would keep sections disagreeing. */}
+            <button type="button" className="link-teal" onClick={() => {
+              clearFilters();
+              setApplied((n) => n + 1);
+              setSort("top");
+              setView("list");
+              setLength("all");
+              setBenchmark("Scope Average");
+              setSelected(new Set());
+              setExpandedKey(null);
+              setBanner("");
+            }}
               style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
               <Icon name="reset" size={15} /> Reset Filters
             </button>
@@ -343,24 +429,44 @@ export function CreativesPage() {
       {banner ? <p className="panel-sub" role="status" style={{ margin: "12px 0 0" }}>{banner}</p> : null}
       <div className="main-rail" style={{ marginTop: 16 }}>
         <div className="rail-stack">
-          {compare ? (
-            <div className="kpi-grid">
-              <div className="kpi-card">
-                <span className="kpi-ico" style={{ background: "#DFF5F1", color: "#009485" }}>
-                  <Icon name="play" size={22} />
-                </span>
-                <div>
-                  <p className="kpi-label">Total Creatives</p>
-                  <p className="kpi-value">{fmtCompact(rows.length)}</p>
+          {creatives.data && (length === "all" ? compare : true) ? (
+            <>
+              {length !== "all" ? (
+                <p className="panel-sub" style={{ margin: "0 0 8px" }}>
+                  {`Showing ${length === "short" ? "under-15s" : length === "sweet" ? "15–30s" : "over-30s"} creatives only.`}
+                </p>
+              ) : null}
+              <div className="kpi-grid">
+                <div className="kpi-card">
+                  <span className="kpi-ico" style={{ background: "#DFF5F1", color: "#009485" }}>
+                    <Icon name="play" size={22} />
+                  </span>
+                  <div>
+                    <p className="kpi-label">Total Creatives</p>
+                    <p className="kpi-value">{fmtCompact(rows.length)}</p>
+                  </div>
                 </div>
+                {length === "all" && compare ? (
+                  <>
+                    <KpiCard label="Total Impressions" display={fmtCompact(num(compare.metrics.impressions?.current))}
+                      icon="bars" tint="#E7F1FB" metricLabel="Impressions" compare={compare} />
+                    <KpiCard label="Total Clicks" display={fmtCompact(num(compare.metrics.clicks?.current))}
+                      icon="click" tint="#E7F1FB" metricLabel="Clicks" compare={compare} />
+                    <KpiCard label="Average ROAS" display={`${num(compare.metrics.roas?.current).toFixed(1)}x`}
+                      icon="users" tint="#DFF5F1" metricLabel="ROAS" compare={compare} />
+                  </>
+                ) : (
+                  <>
+                    <KpiCard label="Total Impressions" display={fmtCompact(pooled.impr)}
+                      icon="bars" tint="#E7F1FB" metricLabel="Impressions" compare={null} />
+                    <KpiCard label="Total Clicks" display={fmtCompact(pooled.clicks)}
+                      icon="click" tint="#E7F1FB" metricLabel="Clicks" compare={null} />
+                    <KpiCard label="Average ROAS" display={pooled.roas == null ? "—" : `${pooled.roas.toFixed(1)}x`}
+                      icon="users" tint="#DFF5F1" metricLabel="ROAS" compare={null} />
+                  </>
+                )}
               </div>
-              <KpiCard label="Total Impressions" display={fmtCompact(num(compare.metrics.impressions?.current))}
-                icon="bars" tint="#E7F1FB" metricLabel="Impressions" compare={compare} />
-              <KpiCard label="Total Clicks" display={fmtCompact(num(compare.metrics.clicks?.current))}
-                icon="click" tint="#E7F1FB" metricLabel="Clicks" compare={compare} />
-              <KpiCard label="Average ROAS" display={`${num(compare.metrics.roas?.current).toFixed(1)}x`}
-                icon="users" tint="#DFF5F1" metricLabel="ROAS" compare={compare} />
-            </div>
+            </>
           ) : (
             <div className="kpi-grid">
               {[0, 1, 2, 3].map((i) => <Skeleton key={i} height={118} />)}
@@ -521,7 +627,7 @@ export function CreativesPage() {
         </div>
         <div className="rail-stack">
           <Panel title="Top Learnings" action={<Link className="link-teal" to="/insights">See All</Link>}>
-            {hooks.data && modes.data ? (
+            {creatives.data ? (
               learnings.length ? (
                 <div>
                   {learnings.map((l) => (

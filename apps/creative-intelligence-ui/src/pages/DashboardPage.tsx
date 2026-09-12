@@ -163,7 +163,7 @@ function formatBench(metric: BenchMetric, value: number | null): string {
 
 export function DashboardPage() {
   const { me } = useAuth();
-  const { clearFilters } = useFilters();
+  const { clearFilters, filters, setFilter } = useFilters();
   const [applied, setApplied] = useState(0);
   const [leftMetric, setLeftMetric] = useState<TrendMetric>("impressions");
   const [rightMetric, setRightMetric] = useState<TrendMetric>("clicks");
@@ -174,12 +174,31 @@ export function DashboardPage() {
   const [curveError, setCurveError] = useState("");
 
   const compare: CompareResp | null = useCompare(applied);
-  const daily = useDaily(90, applied);
+  const daily = useDaily(30, applied);
+  const [rangeBooted, setRangeBooted] = useState(false);
   const campaigns = useScopedApi<Record<string, CampaignTotals>>("/api/campaigns", applied);
   const creatives = useScopedApi<CreativeRow[]>("/api/creatives", applied);
   const platforms = useScopedApi<Record<string, BenchGroup>>("/api/benchmarks?group_by=platform", applied);
   const hooks = useScopedApi<Record<string, BenchGroup>>("/api/benchmarks?group_by=hook_type", applied);
   const modes = useScopedApi<Record<string, BenchGroup>>("/api/benchmarks?group_by=creator_vs_branded", applied);
+
+  // Default reporting period: the trailing 30 days present in the data.
+  // A blank scope makes the backend compare the whole dataset extent
+  // against an empty previous window (honest "none", no percentages),
+  // so the dashboard opens on a range with a real previous equivalent.
+  // User-chosen dates always win; this runs once per mount.
+  useEffect(() => {
+    if (rangeBooted) return;
+    if (filters.date || filters.date_from || filters.date_to) {
+      setRangeBooted(true);
+      return;
+    }
+    if (!daily || daily.length < 2) return;
+    const dates = daily.map((p) => p.date).sort();
+    setFilter("date_from", dates[0]);
+    setFilter("date_to", dates[dates.length - 1]);
+    setRangeBooted(true);
+  }, [daily, filters.date, filters.date_from, filters.date_to, rangeBooted, setFilter]);
 
   const hour = new Date().getHours();
   const daypart = hour < 12 ? "Morning" : hour < 18 ? "Afternoon" : "Evening";
@@ -424,7 +443,7 @@ export function DashboardPage() {
   ];
 
   return (
-    <>
+    <div className="dashboard">
       <PageHeader
         title={`Good ${daypart}, ${firstName}`}
         sub="Your creative performance at a glance."
@@ -466,7 +485,7 @@ export function DashboardPage() {
           {[0, 1, 2, 3].map((i) => <Skeleton key={i} height={118} />)}
         </div>
       )}
-      <div className="cols-2">
+      <div className="cols-2 dash-charts">
         <Panel
           title="Campaign Performance Trends"
           action={(
@@ -483,14 +502,14 @@ export function DashboardPage() {
         >
           {daily ? (
             <>
-              <TrendChart series={trendSeries} labels={trend.map((p) => shortDay(p.date))} />
+              <TrendChart series={trendSeries} labels={trend.map((p) => shortDay(p.date))} height={205} />
               <div className="legend">
                 {trendSeries.map((s) => (
                   <span key={s.label}><i style={{ background: s.color }} />{s.label}</span>
                 ))}
               </div>
             </>
-          ) : <Skeleton height={250} />}
+          ) : <Skeleton height={205} />}
         </Panel>
         <Panel
           title="Benchmark Comparison"
@@ -511,6 +530,7 @@ export function DashboardPage() {
             platformGroups.length ? (
               <>
                 <GroupBars
+                  height={205}
                   groups={platformGroups.map((g) => ({
                     label: platformLabel(g.key),
                     yours: g.value ?? 0,
@@ -526,12 +546,12 @@ export function DashboardPage() {
                 </div>
               </>
             ) : <EmptyState text="No platform benchmarks in the current scope." />
-          ) : <Skeleton height={250} />}
+          ) : <Skeleton height={205} />}
         </Panel>
       </div>
       {/* Approved composition: Top Creatives and Retention sit side by
         side beneath the charts (collapses to stacked under 1180px). */}
-      <div className="cols-2">
+      <div className="cols-2 dash-lower">
           <Panel
             title="Top Performing Creatives"
             action={<Link className="link-teal" to="/creatives">See All</Link>}
@@ -539,7 +559,7 @@ export function DashboardPage() {
             {creatives.data ? (
               topCreatives.length ? (
                 <div className="tbl-wrap">
-                  <table className="tbl">
+                  <table className="tbl dash-table">
                     <thead>
                       <tr>
                         <th scope="col">#</th>
@@ -569,10 +589,10 @@ export function DashboardPage() {
                                   duration={c.annotation?.duration_s ?? c.duration_s}
                                   label={c.name || c.creative_key}
                                 />
-                                <span className="cell-main">{c.name || c.creative_key}</span>
+                                <span className="cell-main" title={c.name || c.creative_key}>{c.name || c.creative_key}</span>
                               </span>
                             </td>
-                            <td>{c.campaigns?.[0] ?? "—"}</td>
+                            <td title={c.campaigns?.[0] ?? undefined}>{c.campaigns?.[0] ?? "—"}</td>
                             <td className="num">{fmtCompact(num(c.metrics?.impressions))}</td>
                             <td className="num">{ctr == null ? "—" : `${ctr.toFixed(1)}%`}</td>
                             <td className="num">{cvr == null ? "—" : `${cvr.toFixed(1)}%`}</td>
@@ -592,7 +612,7 @@ export function DashboardPage() {
             ) : <Skeleton height={220} />}
           </Panel>
           <Panel title="Retention & Hook Insights">
-            <div className="tabs" role="tablist" aria-label="Retention and hook insights">
+            <div className="tabs retention-tabs" role="tablist" aria-label="Retention and hook insights">
               {[
                 { value: "retention", label: "Audience Retention" },
                 { value: "hooks", label: "Hook Analysis" },
@@ -605,16 +625,17 @@ export function DashboardPage() {
               ))}
             </div>
             {tab === "retention" ? (
-              <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 16 }}>
+              <div className="retention-split">
                 <div>
                   {curve ? (
                     <RetentionCurve
                       points={curve}
                       callout={nearThree ? `${Math.round(nearThree[1])}% at 3s` : undefined}
+                      height={170}
                     />
                   ) : curveError ? (
                     <EmptyState text={curveError} />
-                  ) : <Skeleton height={190} />}
+                  ) : <Skeleton height={170} />}
                 </div>
                 <div className="takeaways">
                   <h5><Icon name="check" size={15} /> Key Takeaways</h5>
@@ -634,17 +655,17 @@ export function DashboardPage() {
             ) : null}
             {tab === "hooks" ? (
               hookCompare.length ? (
-                <GroupBars groups={hookCompare} format={(v) => `${v.toFixed(1)}%`} />
+                <GroupBars height={190} groups={hookCompare} format={(v) => `${v.toFixed(1)}%`} />
               ) : <EmptyState text="No hook benchmarks in the current scope." />
             ) : null}
             {tab === "length" ? (
               lengthCompare.length ? (
-                <GroupBars groups={lengthCompare} format={(v) => `${v.toFixed(1)}%`} />
+                <GroupBars height={190} groups={lengthCompare} format={(v) => `${v.toFixed(1)}%`} />
               ) : <EmptyState text="No duration data in the current scope." />
             ) : null}
             {tab === "format" ? (
               formatCompare.length ? (
-                <GroupBars groups={formatCompare} format={(v) => `${v.toFixed(1)}%`} />
+                <GroupBars height={190} groups={formatCompare} format={(v) => `${v.toFixed(1)}%`} />
               ) : <EmptyState text="No format data in the current scope." />
             ) : null}
           </Panel>
@@ -661,7 +682,7 @@ export function DashboardPage() {
           ) : <Skeleton height={320} />}
         </Panel>
       </div>
-    </>
+    </div>
   );
 }
 

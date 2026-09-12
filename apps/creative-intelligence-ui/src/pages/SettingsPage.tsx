@@ -343,7 +343,7 @@ export function SettingsPage() {
               checked={prefs.productUpdates} onChange={(v) => setPref("productUpdates", v)} />
           </Panel>
           <Panel title="Integrations" sub="Connect your data sources to unlock deeper insights."
-            action={<span className="link-teal">Manage Integrations</span>}>
+            action={<a className="link-teal" href="#integration-google">Manage Integrations</a>}>
             <GoogleDriveCard />
             {[["Meta", "Import campaign performance data from Meta Ads."],
               ["TikTok", "Connect your TikTok Ads account for deeper analysis."],

@@ -144,37 +144,59 @@ function sideOf(data: CompareResponse, key: string): CreativeSide {
   return {};
 }
 
-function GroupedBars({ series, metric }: {
+export function GroupedBars({ series, metric }: {
   series: Array<{ label: string; color: string; values: Record<string, number | null> }>;
   metric: string;
 }) {
-  const vals = series.map((s) => s.values[metric]).filter((v): v is number => v != null && Number.isFinite(v));
-  const max = Math.max(1, ...vals);
-  const W = 560, H = 190, PL = 8, PB = 22, PT = 10;
+  // One metric, one scale: every bar shows the SELECTED metric for one
+  // campaign. The previous renderer drew all five KPIs — currency,
+  // percent and ratio values — against the selected metric's scale,
+  // which clipped large units and shrank the selected metric to noise.
+  const kpi = (DIFF_KPIS as readonly string[]).includes(metric) ? metric : "ctr";
+  const vals = series.map((s) => s.values[kpi]).filter((v): v is number => v != null && Number.isFinite(v));
+  const max = Math.max(...vals, 0) || 1;
+  const W = 560, H = 200, PL = 52, PB = 34, PT = 16;
   const n = series.length || 1;
-  const slot = (W - PL - 8) / 5;
-  const bw = Math.min(34, (slot - 14) / n);
-  const y = (v: number) => PT + (H - PT - PB) * (1 - v / max);
+  const slot = (W - PL - 8) / n;
+  const bw = Math.min(72, slot * 0.55);
+  const y = (v: number) => PT + (H - PT - PB) * (1 - Math.min(Math.max(v, 0), max) / max);
+  const tick = (f: number) => fmtCard(kpi as (typeof CARD_KPIS)[number], max * f);
+  const short = (label: string) => {
+    const room = Math.max(4, Math.floor(slot / 7.5));
+    return label.length > room ? `${label.slice(0, room - 1)}…` : label;
+  };
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }} role="img" aria-label={`${kpiLabel(metric)} comparison chart`}>
-      {[0.25, 0.5, 0.75, 1].map((f) => (
-        <line key={f} x1={PL} x2={W - 8} y1={y(max * f)} y2={y(max * f)} stroke="#E3EAF3" strokeWidth={1} />
-      ))}
-      {DIFF_KPIS.map((m, mi) => (
-        <g key={m}>
-          {series.map((s, si) => {
-            const v = s.values[m];
-            const x = PL + mi * slot + 7 + si * bw;
-            return v == null ? null : (
-              <rect key={s.label} x={x} y={y(v)} width={Math.max(3, bw - 3)} height={Math.max(1, H - PB - y(v))}
-                rx={3} fill={metric === m ? s.color : "#D7E1EC"} opacity={metric === m ? 1 : 0.85} />
-            );
-          })}
-          <text x={PL + mi * slot + 7 + ((series.length * bw) / 2)} y={H - 6} textAnchor="middle" fontSize={10.5} fill="#8CA0B5">
-            {kpiLabel(m)}
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }} role="img" aria-label={`${kpiLabel(kpi)} comparison chart`}>
+      {[0, 0.25, 0.5, 0.75, 1].map((f) => (
+        <g key={f}>
+          <line x1={PL} x2={W - 8} y1={y(max * f)} y2={y(max * f)} stroke="#E3EAF3" strokeWidth={1} />
+          <text x={PL - 6} y={y(max * f) + 3.5} textAnchor="end" fontSize={10} fill="#8CA0B5">
+            {tick(f)}
           </text>
         </g>
       ))}
+      {series.map((s, si) => {
+        const v = s.values[kpi];
+        const x = PL + si * slot + (slot - bw) / 2;
+        return (
+          <g key={s.label}>
+            {v == null ? (
+              <text x={x + bw / 2} y={y(0) - 6} textAnchor="middle" fontSize={11} fill="#8CA0B5">—</text>
+            ) : (
+              <>
+                <rect x={x} y={y(v)} width={bw} height={Math.max(2, y(0) - y(v))}
+                  rx={4} fill={s.color} />
+                <text x={x + bw / 2} y={y(v) - 6} textAnchor="middle" fontSize={11} fontWeight={700} fill="#33475F">
+                  {fmtCard(kpi as (typeof CARD_KPIS)[number], v)}
+                </text>
+              </>
+            )}
+            <text x={x + bw / 2} y={H - 8} textAnchor="middle" fontSize={10.5} fill="#8CA0B5">
+              {short(s.label)}
+            </text>
+          </g>
+        );
+      })}
     </svg>
   );
 }

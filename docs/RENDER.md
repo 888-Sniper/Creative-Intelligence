@@ -85,11 +85,19 @@ Render Free has an **ephemeral filesystem**: anything written under
 2. `create_app()` runs the Alembic migrations to head (same
    authoritative path as local/Oracle — no separate migration step).
 3. Because `CREATIVE_INTEL_DEMO_SEED=true` and the database file did
-   not exist before this boot, the bundled fixture CSVs are ingested
-   once (`Meta Sample`, `TikTok Sample`, `Retention Sample`).
+   not exist before this boot, the ten synthetic demo campaigns, ten
+   annotated demo creatives and their artwork are seeded once via
+   `load_demo_dataset()` (120 days of rows ending yesterday, so KPI
+   comparisons, charts and trends compute for real).
 4. An existing database is never touched: a second boot of the same
    instance skips seeding entirely, so rows cannot duplicate and demo
    edits made during the session survive until the instance stops.
+   If the dashboard ever shows `demo seed skipped:
+   CREATIVE_INTEL_DEMO_SEED is not true`, the Render dashboard has the
+   variable unset/overridden to false — set it to `true` and redeploy,
+   or use the Admin page's **Seed Demo Data** button (audited upsert,
+   demo environment only: existing rows are never duplicated or
+   deleted, accounts and uploads preserved).
 5. After a Render restart/redeploy the slate is clean again: fresh
    migrations + fresh seed. That data loss is expected and acceptable
    for a demo; it is not production storage.

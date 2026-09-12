@@ -2,9 +2,9 @@ import { expect, test, type Page } from "@playwright/test";
 import { loginAs, readSeeds } from "./helpers";
 
 /** Full-demo visual acceptance: runs ONLY under FULL_DEMO=1, when the
- *  webServer seeds the ten synthetic campaigns, ten annotated
- *  creatives and their artwork on top of the small functional
- *  fixture (which the rest of the suite keeps). Populates every
+ *  webServer seeds EXACTLY the ten synthetic campaigns, ten annotated
+ *  creatives and their artwork (the small functional fixture is
+ *  skipped here, so captures never show it). Populates every
  *  reference screen with representative content and captures it:
  *  dashboard, campaign/creative comparisons, saved findings,
  *  generated reports, workbook preview, analyst results, and the
@@ -41,10 +41,14 @@ test.describe("full demo visuals", () => {
     // The benchmark legend names the comparison honestly (the select
     // option with the same text is hidden by the closed dropdown).
     await expect(page.locator(".legend", { hasText: "Scope Average" })).toBeVisible();
-    // Recommendation headings agree with their numbers: the demo ties
-    // at 1dp, so no platform may be crowned the ROAS leader.
-    await expect(page.getByText("TikTok and Meta Tie on ROAS")).toBeVisible();
-    await expect(page.getByText("Leads On ROAS")).toHaveCount(0);
+    // The default reporting period demonstrates real comparisons:
+    // KPI percentage-change indicators render on open.
+    await expect(page.locator(".kpi-card .kpi-trend").first()).toBeVisible({ timeout: 30000 });
+    // Recommendation headings agree with their numbers: over the
+    // trailing-30-day default scope Meta leads TikTok on ROAS at 1dp,
+    // so the rail crowns Meta instead of declaring a tie.
+    await expect(page.getByText("Meta Leads On ROAS")).toBeVisible();
+    await expect(page.getByText("Tie on ROAS")).toHaveCount(0);
     await expectCleanDemo(page);
     await expectReady(page);
     await page.screenshot({ path: `${SHOTS}/d-dashboard.png`, fullPage: true, animations: "disabled" });
@@ -75,10 +79,22 @@ test.describe("full demo visuals", () => {
     await expect(page.getByRole("img", { name: /comparison chart/ }).first()).toBeVisible({ timeout: 60000 });
     await expect(page.getByText("Spring Skincare Launch").first()).toBeVisible();
     // Exercise the picker flow too: drop one campaign and re-apply,
-    // keeping a completed (three-way) comparison on screen.
+    // keeping a completed (three-way) comparison on screen. Completion
+    // is proven by the comparison response itself — layout absence
+    // alone can catch a mid-transition frame with stale cards.
     await page.getByRole("button", { name: "Remove Adventure Awaits" }).click();
+    const compared = page.waitForResponse(
+      (r) => r.request().method() === "GET" && r.url().includes("/api/compare/campaigns"),
+      { timeout: 60000 },
+    );
     await page.getByRole("button", { name: "Apply Comparison" }).click();
+    await compared;
+    await expect(page.getByText("Comparing…")).toHaveCount(0);
     await expect(page.getByText("Select two to four campaigns or creatives, then Apply Comparison.")).toHaveCount(0);
+    await expect(page.getByText("No daily data for the selected campaigns.")).toHaveCount(0);
+    // Displayed selections match the requested three-way comparison.
+    await expect(page.getByRole("button", { name: /^Remove / })).toHaveCount(3);
+    await expect(page.getByRole("button", { name: "Remove Adventure Awaits" })).toHaveCount(0);
     await expect(page.getByRole("img", { name: /comparison chart/ }).first()).toBeVisible({ timeout: 60000 });
     await expectCleanDemo(page);
     await expectReady(page);
@@ -186,6 +202,7 @@ test.describe("full demo visuals", () => {
       () => document.documentElement.scrollWidth - window.innerWidth,
     );
     expect(overflow).toBeLessThanOrEqual(1);
+    await expectReady(page);
     await page.screenshot({ path: `${SHOTS}/d-campaigns-mobile.png`, fullPage: true, animations: "disabled" });
   });
 });

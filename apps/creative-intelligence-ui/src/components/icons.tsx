@@ -74,11 +74,11 @@ const PATHS: Record<string, React.ReactNode> = {
     </>
   ),
   dots: (
-    <>
-      <circle cx="12" cy="5" r="1.3" />
-      <circle cx="12" cy="12" r="1.3" />
-      <circle cx="12" cy="19" r="1.3" />
-    </>
+    <g fill="currentColor" stroke="none">
+      <circle cx="12" cy="5" r="1.6" />
+      <circle cx="12" cy="12" r="1.6" />
+      <circle cx="12" cy="19" r="1.6" />
+    </g>
   ),
   check: <path d="m4 12.5 5 5L20 6.5" />,
   info: (

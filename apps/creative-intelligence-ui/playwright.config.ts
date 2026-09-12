@@ -1,4 +1,6 @@
 import { defineConfig } from "@playwright/test";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { E2E_CONTAINER, E2E_DB, E2E_PORT, E2E_SEEDS } from "./e2e/paths";
 
 export default defineConfig({
@@ -26,6 +28,9 @@ export default defineConfig({
       env: {
         ...(process.env as Record<string, string>),
         PYTHONDONTWRITEBYTECODE: "1",
+        // Isolated media store for seeded demo artwork (empty on
+        // small-fixture runs; populated under FULL_DEMO=1).
+        CREATIVE_INTEL_MEDIA_DIR: path.join(tmpdir(), "ci-e2e-media"),
       },
     },
   ],

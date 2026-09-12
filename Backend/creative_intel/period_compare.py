@@ -225,6 +225,12 @@ def compare_kpis(conn, scope):
     rows = benchmarks.all_rows(conn)
     cur_rows = _in_window(rows, base, cur_start, cur_end)
     prev_rows = _in_window(rows, base, prev_start, prev_end)
+    if not cur_rows and not prev_rows:
+        # Explicitly empty selection (e.g. a status/spend band nothing
+        # satisfies): report no comparison rather than dataset-extent
+        # periods with null metrics.
+        return {"current_period": None, "previous_period": None,
+                "comparison": None, "metrics": {}}
     cur_sums, prev_sums = _raw_sums(cur_rows), _raw_sums(prev_rows)
     cur_pooled = benchmarks.kpis_for_rows(cur_rows)
     prev_pooled = benchmarks.kpis_for_rows(prev_rows)

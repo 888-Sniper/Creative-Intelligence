@@ -12,6 +12,7 @@ import sqlite3
 
 from creative_intel import (
     creative,
+    demo_art,
     export_gate,
     ingest,
     media,
@@ -290,7 +291,10 @@ def save_view(conn, name, state):
         unknown_axes = sorted(set(state["filters"]) - set(_bench.Scope.AXES))
         if unknown_axes:
             raise ValueError("unknown view filter axes: %s" % unknown_axes)
-        _bench.Scope(state["filters"]).normalized()  # validates values
+        _bench.Scope({k: v for k, v in state["filters"].items()
+                       if k not in ("status", "spend_min", "spend_max")}
+                      ).normalized()  # validates row-level values
+        _bench.Scope(state["filters"]).campaign_axes()  # validates status/spend
         clean["filters"] = {k: v for k, v in state["filters"].items()
                             if v not in ("", "all", [], {})}
     if "kpi" in state:
@@ -500,7 +504,7 @@ def build_creatives_list(conn, q):
         "SELECT creative_key, platform, name, duration_s, status,"
         " transcript FROM creatives")]
     from creative_intel import benchmarks as _bench
-    scope = _bench.Scope.from_query(q)
+    scope = _bench.Scope.from_query(q).resolve(conn)
     norm = scope.normalized()
     ad_cols = [c[0] for c in conn.execute(
         "SELECT * FROM ads LIMIT 0").description]
@@ -673,7 +677,7 @@ def build_compare(conn, q):
         raise ValueError("compare takes at most 6 creatives")
     if not keys:
         keys = ["", ""]
-    scope = _bench2.Scope.from_query(q)
+    scope = _bench2.Scope.from_query(q).resolve(conn)
     ad_cols = [c[0] for c in conn.execute(
         "SELECT * FROM ads LIMIT 0").description]
     out = {}
@@ -876,13 +880,18 @@ def _demo_retention_points(secs):
             for i in range(steps)]
 
 
-def load_demo_dataset(db_path):
+def load_demo_dataset(db_path, media_dir=None):
     """Seed the synthetic demo dataset (source="demo").
 
     Ten campaigns and ten annotated creatives with ~120 days of daily
     rows ending yesterday, so charts, benchmarks, comparisons and
     KpiTrend all compute from real seeded rows. Ingest upserts, so a
     repeated load inserts nothing new; annotations upsert by key.
+    Each demo creative also gains a distinct seeded image asset (an
+    uploaded-media row, skipped when one already exists), so the
+    thumbnail endpoint serves real per-creative art instead of the
+    generated fallback. media_dir overrides the media store (tests
+    pass an isolated directory); the default is the app media store.
     Returns the number of rows inserted on this call.
     """
     import csv as _csv
@@ -948,6 +957,16 @@ def load_demo_dataset(db_path):
         apply_action(conn, "retention",
                      {"creative_key": spec[0],
                       "points": _demo_retention_points(spec[5])}, prov)
+    store = _media_dir(media_dir)
+    media.ensure_schema(conn)
+    for spec in _DEMO_CREATIVES:
+        key = spec[0]
+        has_image = conn.execute(
+            "SELECT 1 FROM media WHERE creative_key=?"
+            " AND mime LIKE 'image/%' LIMIT 1", (key,)).fetchone()
+        if not has_image:
+            media.save_media_bytes(conn, store, key, key + ".png",
+                                   demo_art.art_for_key(key))
     conn.commit()
     conn.close()
     return total

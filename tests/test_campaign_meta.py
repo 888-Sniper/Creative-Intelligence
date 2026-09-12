@@ -67,17 +67,23 @@ def test_resolve_converts_status_and_spend_to_campaign_scope():
         ("Old", "Acme", "meta", "UK", "Conversions", "2026-01-01", 100, 100, 5),
     ])
     active = benchmarks.Scope(
-        {"status": ["Active"]}).resolve(conn)["campaign"]
+        {"status": ["Active"]}).resolve(conn).normalized()["campaign"]
     assert active == ["New"]
-    rich = benchmarks.Scope({"spend_min": ["10000"]}).resolve(conn)["campaign"]
+    rich = benchmarks.Scope(
+        {"spend_min": ["10000"]}).resolve(conn).normalized()["campaign"]
     assert rich == ["New"]
     band = benchmarks.Scope(
-        {"spend_min": ["50"], "spend_max": ["500"]}).resolve(conn)["campaign"]
+        {"spend_min": ["50"], "spend_max": ["500"]}
+        ).resolve(conn).normalized()["campaign"]
     assert band == ["Old"]
+    # Explicitly empty allowlist survives end to end (never "everything").
+    empty = benchmarks.Scope({"spend_min": ["99999999"]}).resolve(conn)
+    assert empty.normalized()["campaign"] == []
+    assert empty.describe() == "No Campaigns"
     # No campaign-level keys: identical to normalized(), no campaign axis.
     plain = benchmarks.Scope({"platform": ["meta"]}).resolve(conn)
-    assert "campaign" not in plain
-    assert plain["platform"] == ["meta"]
+    assert "campaign" not in plain.normalized()
+    assert plain.normalized()["platform"] == ["meta"]
 
 
 def test_resolve_rejects_bad_values():
@@ -94,9 +100,42 @@ def test_resolve_rejects_bad_values():
         raise AssertionError("expected ValueError for %r" % (raw,))
 
 
+def test_zero_match_scopes_stay_empty_end_to_end(tmp_path, monkeypatch):
+    # Demo campaigns are all Active: Completed must match nothing —
+    # never the whole dataset — on tables, totals and charts alike.
+    db = str(tmp_path / "zero.db")
+    assert load_demo_dataset(db, media_dir=str(tmp_path / "media")) > 0
+    http = _authed_client(tmp_path, db, monkeypatch)
+    r = http.get("/api/campaigns", params={"status": "Completed"})
+    assert r.status_code == 200, r.text
+    assert r.json() == {}
+    r = http.get("/api/kpis/compare", params={"status": "Completed"})
+    assert r.status_code == 200, r.text
+    assert r.json()["comparison"] is None
+    # Impossible spend range and conflicting selections behave the same.
+    for params in ({"spend_min": "999999999"},
+                   {"spend_min": "500", "spend_max": "100"},
+                   {"status": "Completed", "campaign": "Spring Skincare Launch"}):
+        r = http.get("/api/campaigns", params=params)
+        if "spend_min" in params and "spend_max" in params \
+                and params["spend_min"] == "500":
+            assert r.status_code == 409, r.text
+            continue
+        assert r.status_code == 200, r.text
+        assert r.json() == {}, params
+    # Invalid values fail closed with 409, never silent discard.
+    for params in ({"status": "Paused"}, {"spend_min": "abc"}):
+        r = http.get("/api/campaigns", params=params)
+        assert r.status_code == 409, r.text
+    # Navigation with filters active: creatives honour the same scope.
+    r = http.get("/api/creatives", params={"status": "Completed"})
+    assert r.status_code == 200, r.text
+    assert r.json() == []
+
+
 def test_meta_demo_dataset_shape(tmp_path, monkeypatch):
     db = str(tmp_path / "meta.db")
-    assert load_demo_dataset(db) > 0
+    assert load_demo_dataset(db, media_dir=str(tmp_path / "media")) > 0
     http = _authed_client(tmp_path, db, monkeypatch)
     r = http.get("/api/campaigns/meta")
     assert r.status_code == 200, r.text

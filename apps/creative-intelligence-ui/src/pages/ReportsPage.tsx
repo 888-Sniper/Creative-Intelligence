@@ -583,7 +583,7 @@ export function ReportsPage() {
               </li>
               <li>
                 <span className="insight-ico" style={{ background: "#E5F5EC" }}><Icon name="users" size={18} /></span>
-                <div><h4>Use Benchmarks for Context</h4><p>Compare against industry benchmarks to highlight performance.</p></div>
+                <div><h4>Use Benchmarks for Context</h4><p>Compare against workspace benchmarks to highlight performance.</p></div>
               </li>
               <li>
                 <span className="insight-ico" style={{ background: "#E7F1FB" }}><Icon name="report" size={18} /></span>

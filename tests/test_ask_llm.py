@@ -174,5 +174,63 @@ class AskHttpTest(unittest.TestCase):
             os.environ.update(saved)
 
 
+class AskAnswerLevelTest(unittest.TestCase):
+    """Best-X answers rank at the requested level and share tied leads."""
+
+    def _conn(self, meta_rev, tik_rev):
+        conn = sqlite3.connect(":memory:")
+        schema.init_db(conn)
+        conn.executemany(
+            "INSERT INTO ads (platform, campaign, creative_key, spend,"
+            " impressions, clicks, conversions, revenue, date)"
+            " VALUES (?,?,?,?,?,?,?,?,?)",
+            [("meta", "A", "k1", 100, 10000, 200, 10, meta_rev,
+              "2026-08-01"),
+             ("tiktok", "B", "k2", 100, 10000, 200, 10, tik_rev,
+              "2026-08-01")])
+        return conn
+
+    def test_platform_question_ranks_platforms(self):
+        conn = self._conn(200, 300)
+        try:
+            got = qa.answer(conn, "Which platform has the best ROAS?")
+            self.assertIn("Top platform by ROAS is TikTok at 3.0x",
+                          got["answer"])
+            self.assertNotIn("Top creative", got["answer"])
+        finally:
+            conn.close()
+
+    def test_platform_tie_is_declared(self):
+        conn = self._conn(200, 200)
+        try:
+            got = qa.answer(conn, "Which platform has the best ROAS?")
+            self.assertIn("tied", got["answer"])
+            self.assertIn("Meta", got["answer"])
+            self.assertIn("TikTok", got["answer"])
+        finally:
+            conn.close()
+
+    def test_sub_display_precision_gap_is_still_a_tie(self):
+        # ROAS prints at one decimal: 2.0x vs 2.0x (raw 2.004x)
+        # must tie rather than crown the unrounded leader, matching
+        # the takeaways the UI prints beside the winner sentence.
+        conn = self._conn(200, 200.4)
+        try:
+            got = qa.answer(conn, "Which platform has the best ROAS?")
+            self.assertIn("tied", got["answer"])
+            self.assertIn("2.0x", got["answer"])
+        finally:
+            conn.close()
+
+    def test_campaign_question_ranks_campaigns(self):
+        conn = self._conn(200, 300)
+        try:
+            got = qa.answer(conn, "Which campaign has the best ROAS?")
+            self.assertIn("Top campaign by ROAS is B at 3.0x",
+                          got["answer"])
+        finally:
+            conn.close()
+
+
 if __name__ == "__main__":
     unittest.main()

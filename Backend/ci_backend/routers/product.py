@@ -45,7 +45,7 @@ from creative_intel import (
     providers as providers_mod,
 )
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import FileResponse, Response  # noqa: E402
+from fastapi.responses import FileResponse, RedirectResponse, Response  # noqa: E402
 from pydantic import BaseModel, Field, field_validator, model_validator  # noqa: E402
 
 from ci_backend import actions as legacy  # noqa: E402
@@ -116,7 +116,7 @@ def campaigns(request: Request, conn=Depends(get_product_conn),
     try:
         return benchmarks.benchmark(
             conn, "campaign",
-            benchmarks.Scope.from_query(query_multidict(request)).resolve(conn))
+            benchmarks.Scope.from_query(query_multidict(request)).resolve(conn).normalized())
     except (ValueError, export_gate.ExportBlocked, emp.StoreError) as exc:
         raise _conflict(exc)
 
@@ -146,7 +146,7 @@ def recommendations(request: Request, conn=Depends(get_product_conn),
                 if q.get("rank_by") else "cpa") or "cpa").lower()
     try:
         return benchmarks.campaign_recommendations(
-            conn, name, benchmarks.Scope.from_query(q), rank_by)
+            conn, name, benchmarks.Scope.from_query(q).resolve(conn), rank_by)
     except (ValueError, export_gate.ExportBlocked, emp.StoreError) as exc:
         raise _conflict(exc)
 
@@ -159,7 +159,7 @@ def benchmark_route(request: Request, conn=Depends(get_product_conn),
         return benchmarks.benchmark(
             conn, (q.get("group_by", ["hook_type"])[0]
                    if q.get("group_by") else "hook_type"),
-            benchmarks.Scope.from_query(q).resolve(conn))
+            benchmarks.Scope.from_query(q).resolve(conn).normalized())
     except (ValueError, export_gate.ExportBlocked, emp.StoreError) as exc:
         raise _conflict(exc)
 
@@ -199,7 +199,7 @@ def retention_patterns(request: Request, conn=Depends(get_product_conn),
                        _emp=Depends(get_current_employee)):
     try:
         return retention.patterns(
-            conn, benchmarks.Scope.from_query(query_multidict(request)))
+            conn, benchmarks.Scope.from_query(query_multidict(request)).resolve(conn))
     except (ValueError, export_gate.ExportBlocked, emp.StoreError) as exc:
         raise _conflict(exc)
 
@@ -250,7 +250,7 @@ def kpis_compare(request: Request, conn=Depends(get_product_conn),
     q = query_multidict(request)
     try:
         scope = benchmarks.Scope.from_query(q)
-        return period_compare.compare_kpis(conn, scope.resolve(conn))
+        return period_compare.compare_kpis(conn, scope.resolve(conn).normalized())
     except (ValueError, export_gate.ExportBlocked, emp.StoreError) as exc:
         raise _conflict(exc)
 
@@ -263,7 +263,7 @@ def kpis_daily(request: Request, conn=Depends(get_product_conn),
     try:
         scope = benchmarks.Scope.from_query(q)
         days = (q.get("days", [""])[0] if q.get("days") else "") or 30
-        return benchmarks.daily_series(conn, scope.resolve(conn), days)
+        return benchmarks.daily_series(conn, scope.resolve(conn).normalized(), days)
     except (ValueError, export_gate.ExportBlocked, emp.StoreError) as exc:
         raise _conflict(exc)
 
@@ -911,7 +911,7 @@ def analyst_creatives(request: Request,
     _ = (who, _limited)
     from creative_intel import benchmarks as benchmarks_mod
     query = query_multidict(request)
-    scope = benchmarks_mod.Scope.from_query(query).normalized()
+    scope = benchmarks_mod.Scope.from_query(query).resolve(conn).normalized()
     objective = (query.get("objective") or ["reach"])[0]
     if objective not in analyst.OBJECTIVES:
         raise _conflict(ValueError(
@@ -1597,10 +1597,19 @@ def creative_thumbnail(key: str, request: Request,
                        conn=Depends(get_product_conn),
                        _emp=Depends(get_current_employee)):
     # Authenticated employees only: creative names are account data.
-    # Deterministic sample art for creatives without uploaded media;
-    # unknown creatives 404 so cards keep the gradient fallback.
+    # Uploaded media wins; generated sample art covers creatives
+    # without uploads; unknown creatives 404 so cards keep the
+    # gradient fallback.
     _ = request
     try:
+        from ci_backend import actions as legacy
+        store = legacy._media_dir()
+    except Exception:
+        store = ""
+    try:
+        url = thumbnails.uploaded_image_url(conn, store, key)
+        if url is not None:
+            return RedirectResponse(url, status_code=302)
         svg = thumbnails.for_creative(conn, key)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail={"error": str(exc)})

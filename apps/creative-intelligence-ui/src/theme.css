@@ -264,6 +264,11 @@ ul.plain li{padding:6px 0;border-bottom:1px solid var(--line)}
 .btn-soft{display:inline-flex;align-items:center;justify-content:center;background:var(--shell-teal-soft);color:var(--shell-teal-dark);border:0;border-radius:8px;padding:8px 18px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;text-decoration:none;white-space:nowrap}
 .btn-soft:hover{filter:brightness(.96)}
 .filter-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px 14px}
+/* Date-range pairs wrap into stacked full-width inputs on narrow
+ * columns instead of squeezing two unreadable date fields side by
+ * side. */
+.date-pair{display:flex;gap:8px;flex-wrap:wrap}
+.date-pair>input{flex:1 1 150px;min-width:0}
 .field label{display:block;font-size:13px;font-weight:600;color:var(--shell-navy);margin:0 0 6px}
 .field select,.field input{width:100%;box-sizing:border-box;background:var(--shell-card);border:1px solid var(--shell-line);border-radius:8px;padding:9px 11px;font-size:13.5px;color:var(--shell-navy);font-family:inherit}
 .field select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748F' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;padding-right:30px}

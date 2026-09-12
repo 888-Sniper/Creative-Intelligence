@@ -13,11 +13,19 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Backend"))
 
+import pytest
 from auth_help import authed
 from ci_backend.app import create_app
 from ci_backend.config import Settings
 from fastapi.testclient import TestClient
 from test_demo_dataset import _authed_client
+
+
+@pytest.fixture(autouse=True)
+def _isolated_media_dir(tmp_path, monkeypatch):
+    # Seeded demo artwork must never land in the repo Data/ tree.
+    monkeypatch.setenv("CREATIVE_INTEL_MEDIA_DIR",
+                       str(tmp_path / "media"))
 
 
 def _demo_settings(tmp_path):
@@ -50,12 +58,17 @@ def test_admin_seed_populates_and_verifies(tmp_path, monkeypatch):
     assert body["inserted"] > 0
     assert body["campaigns"] == 10
     assert body["creatives"] == 10
+    # Demo-namespaced proof: the ten synthetic examples specifically.
+    assert body["demo_campaigns"] == 10
+    assert body["demo_creatives"] == 10
     # Second call is a verified no-op: counts hold, nothing duplicated.
     r = http.post("/api/admin/demo/seed", headers=headers)
     assert r.status_code == 200, r.text
     assert r.json()["inserted"] == 0
     assert r.json()["campaigns"] == 10
     assert r.json()["creatives"] == 10
+    assert r.json()["demo_campaigns"] == 10
+    assert r.json()["demo_creatives"] == 10
 
 
 def test_admin_seed_refused_outside_demo(tmp_path, monkeypatch):

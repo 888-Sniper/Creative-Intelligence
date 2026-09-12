@@ -312,6 +312,19 @@ def campaign_meta(conn):
     return {"campaigns": out}
 
 
+def resolve_scope(conn, scope):
+    """A Scope (or plain filter dict) with campaign-level axes resolved.
+
+    Uniform entry point: every UI-scope consumer resolves through here,
+    so status/spend behave identically on tables, totals, charts,
+    comparisons, exports and saved views — and an explicitly empty
+    campaign selection stays empty everywhere. Without campaign-level
+    axes the result equals normalized() as a Scope.
+    """
+    base = scope if isinstance(scope, Scope) else Scope(scope)
+    return base.resolve(conn)
+
+
 def _qualifying_campaigns(conn, status, smin, smax):
     """Campaign names passing status / lifetime-spend criteria.
 
@@ -494,6 +507,11 @@ def normalize_filters(filters):
         vals = _as_list(filters.get(key))
         if vals:
             out[key] = sorted(set(vals))
+        elif key == "campaign" and isinstance(filters.get(key), list):
+            # Explicitly empty allowlist (e.g. a status/spend selection
+            # nothing satisfies): "match nothing" must survive as [] and
+            # never collapse into "no restriction".
+            out[key] = []
     for key in ("date_from", "date_to"):
         vals = [v for v in _as_list(filters.get(key)) if v not in ("", "all")]
         if vals:
@@ -529,11 +547,12 @@ def match_filters(row, filters):
     """
     for key in FILTER_KEYS:
         allowed = (filters or {}).get(key)
-        if allowed:
-            actual = str(row.get(FILTER_FIELD.get(key, key)) or "").lower()
-            wanted = [str(v).lower() for v in allowed]
-            if actual not in wanted:
-                return False
+        if allowed is None:
+            continue
+        actual = str(row.get(FILTER_FIELD.get(key, key)) or "").lower()
+        wanted = [str(v).lower() for v in allowed]
+        if actual not in wanted:
+            return False
     filt = filters or {}
     lo, hi = filt.get("date_from"), filt.get("date_to")
     if lo or hi:
@@ -626,24 +645,14 @@ class Scope:
         """True when an enriched ads row is inside this scope."""
         return match_filters(row, self.normalized())
 
-    def resolve(self, conn):
-        """Normalized filters with campaign-level axes resolved.
+    def campaign_axes(self):
+        """Validated (status, spend_min, spend_max), pure (no conn).
 
-        ``status`` / ``spend_min`` / ``spend_max`` are campaign
-        attributes, not row columns, so they cannot ride
-        match_filters (and normalize_filters rightly rejects unknown
-        keys). resolve() converts them — against UNSCOPED campaign
-        attributes, so a status or spend band means the same thing on
-        every card, chart and table of a page — into a ``campaign``
-        allowlist intersected with any explicit campaign filter, then
-        returns plain row-level filters. Bounds are inclusive on both
-        ends. Endpoints rendering one filtered page (campaigns,
-        compare, daily, benchmarks) call resolve(conn); everything
-        else keeps normalized(), which never sees these keys.
+        Raises ValueError on unknown statuses, non-numeric or
+        negative spend bounds, or min > max. Shared by resolve() and
+        by validators (e.g. saved views) that must accept these keys
+        without a database handle.
         """
-        filt = Scope({k: v for k, v in self.axes.items()
-                      if k not in ("status", "spend_min", "spend_max")}
-                     ).normalized()
         status = [(v or "").strip().lower()
                   for v in self.axes.get("status", [])]
         status = [v for v in status if v]
@@ -667,13 +676,38 @@ class Scope:
         smin, smax = _num("spend_min"), _num("spend_max")
         if smin is not None and smax is not None and smin > smax:
             raise ValueError("spend_min must not exceed spend_max")
+        return status, smin, smax
+
+    def resolve(self, conn):
+        """This scope with campaign-level axes resolved (new Scope).
+
+        ``status`` / ``spend_min`` / ``spend_max`` are campaign
+        attributes, not row columns, so they cannot ride
+        match_filters (and normalize_filters rightly rejects unknown
+        keys). resolve() converts them — against UNSCOPED campaign
+        attributes, so a status or spend band means the same thing on
+        every card, chart and table of a page — into a ``campaign``
+        allowlist intersected with any explicit campaign filter.
+        Bounds are inclusive on both ends. An allowlist nothing
+        satisfies stays an explicit ``[]`` ("No Campaigns"), never a
+        silent reset to everything. With no campaign-level axes the
+        returned scope equals normalized().
+        """
+        status, smin, smax = self.campaign_axes()
+        row_axes = {k: v for k, v in self.axes.items()
+                    if k not in ("status", "spend_min", "spend_max")}
         if not status and smin is None and smax is None:
-            return filt
+            out = Scope()
+            out.axes = {k: list(v) for k, v in Scope(row_axes).axes.items()}
+            return out
         names = _qualifying_campaigns(conn, status, smin, smax)
-        if "campaign" in filt:
-            names &= set(filt["campaign"])
-        filt["campaign"] = sorted(names)
-        return filt
+        explicit = row_axes.get("campaign")
+        if explicit:
+            names &= {str(v) for v in explicit}
+        row_axes["campaign"] = sorted(names)
+        out = Scope()
+        out.axes = row_axes
+        return out
 
     def sql(self):
         """Case-insensitive WHERE fragment over ads columns for
@@ -687,6 +721,9 @@ class Scope:
         for key in self.AXES:
             vals = self.axes.get(key)
             if not vals:
+                continue
+            if key == "campaign" and vals == []:
+                bits.append("1=0")
                 continue
             if key == "date_from":
                 bits.append("date>=?")
@@ -711,6 +748,9 @@ class Scope:
         bits = []
         for key in self.AXES:
             if key in ("date_from", "date_to"):
+                continue
+            if key == "campaign" and key in self.axes and not self.axes[key]:
+                bits.append("No Campaigns")
                 continue
             if self.axes.get(key):
                 vals = self.axes[key]
@@ -791,7 +831,7 @@ def _campaign_elements(conn, campaign, scope=None):
     a Market=Spain why-analysis never cites the French creative mix.
     """
     import json
-    scope = scope if isinstance(scope, Scope) else Scope(scope)
+    scope = resolve_scope(conn, scope)
     rows = [r for r in all_rows(conn)
             if (r.get("campaign") or "") == campaign and scope.match(r)]
     hook_types, modes, platforms = set(), set(), set()
@@ -828,7 +868,7 @@ def compare_periods(conn, a_from, a_to, b_from, b_to, filters=None,
     a start after its end raises instead of silently returning
     empty.
     """
-    scope = filters if isinstance(filters, Scope) else Scope(filters)
+    scope = resolve_scope(conn, filters)
     base = scope.normalized()
 
     def _window(lo, hi, label):
@@ -871,7 +911,7 @@ def compare_campaigns(conn, campaigns=None, rank_by="cpa", filters=None):
     """
     if rank_by not in KPI_KEYS:
         raise ValueError("rank_by must be one of %s" % sorted(KPI_KEYS))
-    scope = filters if isinstance(filters, Scope) else Scope(filters)
+    scope = resolve_scope(conn, filters)
     per = campaign_kpis(conn, campaigns, filters=scope.normalized())
     if len(per) < 1:
         raise ValueError("no campaigns match %r" % (campaigns,))
@@ -954,7 +994,7 @@ def _creative_rows(conn, campaign, scope=None):
     selects Campaign A. Rows also carry the full creative-analysis
     classification set the XLSX export needs.
     """
-    scope = scope if isinstance(scope, Scope) else Scope(scope)
+    scope = resolve_scope(conn, scope)
     cols = ["spend", "impressions", "clicks", "conversions",
             "video_views", "views_100", "revenue", "revenue_reported",
             "currency", "missing_json", "platform",
@@ -1089,7 +1129,7 @@ def _report_extras(conn, names, strict_human=False, scope=None,
     if rank_by not in KPI_KEYS:
         raise ValueError("rank_by must be one of %s" % sorted(KPI_KEYS))
     higher = KPI_DIRECTIONS[rank_by] == "higher"
-    scope = scope if isinstance(scope, Scope) else Scope(scope)
+    scope = resolve_scope(conn, scope)
     per_campaign = {}
     hook_spend, hook_conv = {}, {}
     strict_nulled = 0
@@ -1697,7 +1737,7 @@ def campaign_recommendations(conn, campaign, scope=None, rank_by="cpa"):
 
     # --- Benchmark gap: campaign aggregate vs scoped peer median.
     gaps_bench = []
-    peers = benchmark(conn, "campaign", scoped.normalized())
+    peers = benchmark(conn, "campaign", scoped.resolve(conn).normalized())
     own = (peers.get(campaign) or {}).get(rank_by)
     peer_vals = sorted(v[rank_by] for name, v in peers.items()
                        if name != campaign and v[rank_by] is not None)
@@ -1835,7 +1875,7 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
         rank_by = wanted_kpis[0] if wanted_kpis[0] in KPI_KEYS else "cpa"
     if rank_by not in KPI_KEYS:
         raise ValueError("rank_by must be one of %s" % sorted(KPI_KEYS))
-    scope = filters if isinstance(filters, Scope) else Scope(filters)
+    scope = resolve_scope(conn, filters)
     comp = compare_campaigns(conn, campaigns, rank_by=rank_by,
                              filters=scope)
     bench_scoped = (benchmark_scope or "filters").lower() != "global"

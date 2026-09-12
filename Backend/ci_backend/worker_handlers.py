@@ -84,7 +84,7 @@ def run_ask(conn, payload, owner, ctx, job_id=None):
         _raise_if_cancelled(cancelled)
     prov = _providers()
     live = prov.llm if getattr(prov, "mode", "mock") == "live" else None
-    scope = benchmarks.Scope.from_payload(payload)
+    scope = benchmarks.Scope.from_payload(payload).resolve(conn)
     result = qa.answer(conn, payload.get("question", ""), llm=live,
                        scope=scope)
     if progress is not None:

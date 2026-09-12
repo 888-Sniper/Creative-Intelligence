@@ -201,12 +201,12 @@ export function AdminEmployeesPage() {
     setSeedBusy(true);
     setSeedResult("");
     try {
-      const r = await api<{ ok: boolean; inserted: number; campaigns: number; creatives: number }>(
+      const r = await api<{ ok: boolean; inserted: number; campaigns: number; creatives: number; demo_campaigns: number; demo_creatives: number }>(
         "POST", "/api/admin/demo/seed", {});
       setSeedResult(
         r.inserted > 0
-          ? `Seeded ${r.inserted} Row(s): ${r.campaigns} Campaign(s), ${r.creatives} Creative(s).`
-          : `Already Populated: ${r.campaigns} Campaign(s), ${r.creatives} Creative(s). Nothing Duplicated.`);
+          ? `Seeded ${r.inserted} Row(s): ${r.demo_campaigns}/10 Demo Campaign(s), ${r.demo_creatives}/10 Demo Creative(s).`
+          : `Already Populated: ${r.demo_campaigns}/10 Demo Campaign(s), ${r.demo_creatives}/10 Demo Creative(s). Nothing Duplicated.`);
     } catch (e) {
       setSeedResult(msg(e));
     } finally {

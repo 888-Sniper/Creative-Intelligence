@@ -318,7 +318,8 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
   // Which action owns the in-flight request: only that button spins,
   // the other stays merely disabled (per-button spinner requirement).
   const [op, setOp] = useState<null | "run" | "ask">(null);
-  const [exporting, setExporting] = useState<null | "one-pager" | "xlsx">(null);
+  const [exporting, setExporting] = useState<null | "one-pager" | "xlsx" | "workbook">(null);
+  const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastScope, setLastScope] = useState("");
   const [datasetVersion, setDatasetVersion] = useState<string | null>(null);
@@ -365,6 +366,8 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
   }, [accountKey, loadConversations]);
 
   async function startConversation() {
+    if (starting) return;
+    setStarting(true);
     setError(null);
     const key = accountRef.current;
     try {
@@ -378,6 +381,8 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
     } catch (e) {
       if (key !== accountRef.current) return;
       setError(e instanceof Error ? e.message : "Could Not Start A Conversation");
+    } finally {
+      if (key === accountRef.current) setStarting(false);
     }
   }
 
@@ -472,6 +477,37 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
       setError(e instanceof Error ? e.message : "Report Export Failed");
     } finally {
       setExporting((cur) => (cur === fmt ? null : cur));
+    }
+  }
+
+  async function downloadWorkbook() {
+    // The blank workbook is built server-side on demand: fetch it as a
+    // blob (with parsed errors and session re-gating) instead of a
+    // direct link, which would download error pages as .xlsx files.
+    if (exporting !== null) return;
+    setExporting("workbook");
+    setError(null);
+    const key = accountRef.current;
+    try {
+      const res = await fetch("/api/analyst/workbook");
+      if (key !== accountRef.current) return;
+      if (!res.ok) {
+        const detail = (await res.json().catch(() => null)) as {
+          detail?: { error?: string };
+        } | null;
+        throw new Error(detail?.detail?.error ?? `Workbook download failed (${res.status})`);
+      }
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "foap-analyst-workbook.xlsx";
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      if (key !== accountRef.current) return;
+      setError(e instanceof Error ? e.message : "Workbook Download Failed");
+    } finally {
+      if (key === accountRef.current) setExporting((cur) => (cur === "workbook" ? null : cur));
     }
   }
 
@@ -928,9 +964,11 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
               <option value="en">English</option>
             </select>
           </label>
-          <button type="button" className="btn-outline" onClick={() => void startConversation()}>
+          <LoadingButton type="button" className="btn-outline" onClick={() => void startConversation()}
+            loading={starting} loadingLabel="Starting…" spinnerClass="spinner dark"
+            disabled={busy} title="Start a new analyst conversation">
             <Icon name="plus" size={14} /> New Conversation
-          </button>
+          </LoadingButton>
           <LoadingButton type="button" className="btn-outline" onClick={() => void downloadReport("one-pager")}
             loading={exporting === "one-pager"} loadingLabel="Preparing…" spinnerClass="spinner dark"
             disabled={busy || exporting !== null} title="Sectioned Findings Report (Markdown)">
@@ -941,9 +979,11 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
             disabled={busy || exporting !== null} title="Sectioned Findings Report (Excel)">
             Report XLSX
           </LoadingButton>
-          <a className="btn-outline" style={{ textDecoration: "none" }} href="/api/analyst/workbook">
+          <LoadingButton type="button" className="btn-outline" onClick={() => void downloadWorkbook()}
+            loading={exporting === "workbook"} loadingLabel="Preparing…" spinnerClass="spinner dark"
+            disabled={busy || exporting !== null} title="Blank analyst workbook (Excel)">
             Blank Workbook
-          </a>
+          </LoadingButton>
         </div>
         {conversations.length > 0 && (
           <div className="chip-row" style={{ marginTop: 12 }} aria-label="Previous analyses">

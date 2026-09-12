@@ -82,6 +82,8 @@ def maybe_seed_demo(db_path: str, settings, fresh: bool) -> int:
     if not settings.demo_seed or not fresh:
         return 0
     from ci_backend.actions import load_demo_dataset
+    # Default media store: the same canonical store the thumbnail and
+    # /media routes serve from, so seeded art is actually reachable.
     return load_demo_dataset(db_path)
 
 

@@ -105,15 +105,33 @@ describe("AnalystPage", () => {
     ).toBeDefined();
   });
 
-  it("exposes report and workbook exports", () => {
+  it("exposes report and workbook exports", async () => {
     mockFetch();
     renderPage();
     expect(screen.getByRole("button", { name: "Report" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Report XLSX" })).toBeDefined();
-    expect(screen.getByRole("link", { name: "Blank Workbook" })).toHaveProperty(
-      "href",
-      expect.stringContaining("/api/analyst/workbook"),
-    );
+    // The workbook is built server-side on demand, so it downloads
+    // through a loading button (with parsed errors) rather than a
+    // direct link that would save error pages as .xlsx files.
+    const fetchMock = window.fetch as unknown as ReturnType<typeof vi.fn>;
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      blob: () => Promise.resolve(new Blob(["wb"])),
+    });
+    const createSpy = vi.fn(() => "blob:mock");
+    window.URL.createObjectURL = createSpy;
+    window.URL.revokeObjectURL = vi.fn();
+    fireEvent.click(screen.getByRole("button", { name: "Blank Workbook" }));
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find((c) =>
+        String(c[0]).startsWith("/api/analyst/workbook"),
+      );
+      expect(call).toBeDefined();
+    });
+    await waitFor(() => {
+      expect(createSpy).toHaveBeenCalled();
+    });
+    expect(screen.getByRole("button", { name: "Blank Workbook" })).toBeDefined();
   });
 
   it("sends the filter scope in the ask body", async () => {

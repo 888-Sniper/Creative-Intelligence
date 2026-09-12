@@ -38,7 +38,6 @@ interface Prefs {
   retention: string;
   accent: string;
   density: string;
-  twoFactor: boolean;
 }
 
 const DEFAULTS: Prefs = {
@@ -57,7 +56,6 @@ const DEFAULTS: Prefs = {
   retention: "24 Months",
   accent: "Teal (Default)",
   density: "Comfortable",
-  twoFactor: true,
 };
 
 const ACCENTS: Record<string, { teal: string; dark: string }> = {
@@ -280,15 +278,15 @@ export function SettingsPage() {
               </div>
             </div>
           </Panel>
-          <Panel title="Data & Privacy" sub="Manage how your data is used and your privacy preferences.">
+          <Panel title="Data & Privacy" sub="Manage how your data is used and your privacy preferences. These preferences live in this browser; workspace policy is set by your administrator.">
             <Toggle label="Data Usage" body="Help improve Foap by allowing anonymized usage data."
               checked={prefs.dataUsage} onChange={(v) => setPref("dataUsage", v)} />
-            <Toggle label="Share Analytics Data" body="Allow aggregated, anonymized data to contribute to industry benchmarks."
+            <Toggle label="Share Analytics Data" body="Allow aggregated, anonymized data to contribute to workspace benchmark averages."
               checked={prefs.shareAnalytics} onChange={(v) => setPref("shareAnalytics", v)} />
             <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", padding: "10px 0" }}>
               <div>
                 <strong style={{ display: "block", fontSize: 13.5 }}>Data Retention Period</strong>
-                <span className="panel-sub">Choose how long to keep your data in Foap.</span>
+                <span className="panel-sub">Browser preference only — actual workspace retention is managed by your administrator.</span>
               </div>
               <select aria-label="Data Retention Period" value={prefs.retention} onChange={(e) => setPref("retention", e.target.value)}>
                 {["12 Months", "24 Months", "36 Months"].map((o) => <option key={o}>{o}</option>)}
@@ -334,7 +332,7 @@ export function SettingsPage() {
           </Panel>
         </div>
         <div className="rail-stack">
-          <Panel title="Notifications" sub="Choose what you want to be notified about.">
+          <Panel title="Notifications" sub="Choose what you want to be notified about. Stored in this browser only — workspace policies are set by your administrator.">
             <Toggle label="Email Reports" body="Receive scheduled reports and key insights via email."
               checked={prefs.emailReports} onChange={(v) => setPref("emailReports", v)} />
             <Toggle label="Campaign Updates" body="Get notified when campaigns are completed or updated."
@@ -372,8 +370,16 @@ export function SettingsPage() {
                 Change Password
               </LoadingButton>
             </div>
-            <Toggle label="Two-Factor Authentication" body="Add an extra layer of security to your account."
-              checked={prefs.twoFactor} onChange={(v) => setPref("twoFactor", v)} />
+            {/* Two-factor enrolment lives with the sign-in provider, not
+              in a browser preference: this control is explicitly
+              unavailable rather than a toggle that proves nothing. */}
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", padding: "10px 0", borderBottom: "1px solid var(--shell-line)" }}>
+              <div>
+                <strong style={{ display: "block", fontSize: 13.5 }}>Two-Factor Authentication</strong>
+                <span className="panel-sub">Managed by your sign-in provider or administrator — not available as an in-app toggle.</span>
+              </div>
+              <span className="badge-demo" title="Two-factor status comes from your sign-in provider">Unavailable</span>
+            </div>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", padding: "10px 0", flexWrap: "wrap" }}>
               <div>
                 <strong style={{ display: "block", fontSize: 13.5 }}>Active Sessions</strong>

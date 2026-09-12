@@ -136,7 +136,10 @@ def _show_metric(metric, value):
     if metric in ("ctr", "vtr"):
         return "%.2f%%" % (value * 100.0)
     if metric == "roas":
-        return "%.2fx" % value
+        # One decimal everywhere (KPI cards, benchmark context, Ask
+        # takeaways): the winner sentence shares the same precision,
+        # so ties are judged exactly as displayed.
+        return "%.1fx" % value
     return str(value)
 
 
@@ -515,9 +518,26 @@ def answer(conn, question, llm=None, scope=None):
         cite("Benchmark Derived")
         cite("Uploaded CSV")
     if any(w in q for w in ("best", "top", "winner", "creative")):
+        # Answer at the requested level: an explicit platform/campaign
+        # question ranks platforms/campaigns, otherwise creatives.
+        # (Platform words do not trigger this branch on their own; the
+        # trigger above still applies.)
+        if any(w in q for w in ("platform", "meta", "tiktok")):
+            _level, _lname = "platform", "platform"
+        elif "campaign" in q:
+            _level, _lname = "campaign", "campaign"
+        else:
+            _level, _lname = "creative_key", "creative"
+
+        def _group_label(raw):
+            if _level == "platform":
+                low = str(raw or "").lower()
+                return {"meta": "Meta", "tiktok": "TikTok"}.get(low, str(raw))
+            return str(raw)
+
         by_key = {}
         for r in rows:
-            by_key.setdefault(r["creative_key"], []).append(r)
+            by_key.setdefault(r[_level] or "(unattributed)", []).append(r)
         # A named metric picks the ranking; bare "best/top/winner"
         # falls back to spend, labelled as such.
         metric = None
@@ -561,25 +581,37 @@ def answer(conn, question, llm=None, scope=None):
         _metric_name = _rate_label if metric == "vtr" else (
             metric.upper() if metric else "")
         if metric is not None and not ranked:
-            parts.append("No creative has a computable %s, so there is "
-                         "no %s winner to name." % (_metric_name, _metric_name))
+            parts.append("No %s has a computable %s, so there is "
+                         "no %s winner to name." % (_lname, _metric_name,
+                                                    _metric_name))
             cite("Uploaded CSV")
         else:
             reverse = metric not in ("cpa",)
-            key = (max if reverse else min)(ranked, key=lambda kv: kv[1])[0]
-            group = by_key[key]
+            ordered = sorted(ranked, key=lambda kv: kv[1],
+                             reverse=reverse)
+            # Ties are judged on the DISPLAYED value: anything the UI
+            # prints identically shares the lead, so the winner sentence
+            # can never crown a leader the takeaways call tied.
+            disp = {k: _show_metric(metric, v) for k, v in ordered}
+            top_disp = disp[ordered[0][0]]
+            leaders = [k for k, _v in ordered if disp[k] == top_disp]
+            group = by_key[leaders[0]]
+            shown = ", ".join(_group_label(k) for k in leaders)
             if metric is None:
                 spend = sum(x["spend"] for x in group)
-                parts.append("Top creative by spend is %r at $%s."
-                             % (key, f"{spend:,.2f}"))
+                parts.append("Top %s by spend is %s at $%s."
+                             % (_lname, shown, f"{spend:,.2f}"))
+            elif len(leaders) > 1:
+                parts.append("Top %s by %s is tied: %s at %s."
+                             % (_lname, _metric_name, shown, top_disp))
             else:
-                parts.append("Top creative by %s is %r at %s."
-                             % (_metric_name, key,
-                                _show_metric(metric, dict(ranked)[key])))
+                parts.append("Top %s by %s is %s at %s."
+                             % (_lname, _metric_name, shown, top_disp))
             cite("Uploaded CSV")
+        key = leaders[0] if ranked else None
         ann = conn.execute(
             "SELECT annotation_json FROM annotations WHERE creative_key=?",
-            (key,)).fetchone()
+            (key,)).fetchone() if _level == "creative_key" and ranked else None
         if ann and ann[0]:
             a = json.loads(ann[0])
             parts.append("Annotation: hook=%s, format=%s."
@@ -588,7 +620,7 @@ def answer(conn, question, llm=None, scope=None):
             cite("Annotation")
         tr = conn.execute(
             "SELECT transcript FROM creatives WHERE creative_key=?",
-            (key,)).fetchone()
+            (key,)).fetchone() if _level == "creative_key" and ranked else None
         if tr and tr[0]:
             parts.append("Transcript excerpt: %s" % tr[0][:200])
             cite("ASR Transcript")

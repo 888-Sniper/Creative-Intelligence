@@ -24,8 +24,12 @@ test.describe("analyst journey", () => {
     await expect(
       page.getByRole("button", { name: "Report XLSX" }),
     ).toBeVisible();
-    await expect(
-      page.getByRole("main").getByRole("link", { name: "Blank Workbook" }),
-    ).toHaveAttribute("href", "/api/analyst/workbook");
+    // The workbook is built server-side on demand: the button fetches
+    // it as a blob (parsed errors, no error-pages-saved-as-xlsx), so
+    // prove the real download instead of a link href.
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByRole("main").getByRole("button", { name: "Blank Workbook" }).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe("foap-analyst-workbook.xlsx");
   });
 });

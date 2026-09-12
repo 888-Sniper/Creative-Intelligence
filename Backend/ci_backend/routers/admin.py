@@ -142,14 +142,17 @@ def seed_demo(request: Request, db=Depends(get_db),
               _rl=Depends(admin_rate_limit)):
     """Admin: populate the synthetic demo dataset on demand (audited).
 
-    Safe by construction: refused outside demo environments (so real
-    deployments can never gain synthetic rows this way), and the loader
-    upserts, so existing rows are never duplicated or deleted. Returns
-    live campaign/creative counts so the caller can verify population.
+    Safe by construction: refused anywhere but the demo environment
+    (production stays protected even if CREATIVE_INTEL_DEMO_SEED is
+    accidentally enabled there), and the loader upserts, so existing
+    rows are never duplicated or deleted. Returns live counts,
+    including demo-namespaced proof (source="demo" campaigns and
+    annotated demo-* creatives), so the caller can verify the ten
+    synthetic examples specifically — not just totals.
     """
     _ = db
     env = (settings.environment or "").strip().lower()
-    if env != "demo" and not settings.demo_seed:
+    if env != "demo":
         raise HTTPException(status_code=403, detail={
             "error": "Demo seeding is only available on demo environments."})
     import sqlite3
@@ -164,12 +167,21 @@ def seed_demo(request: Request, db=Depends(get_db),
             "SELECT COUNT(DISTINCT campaign) FROM ads").fetchone()[0]
         creatives = conn.execute(
             "SELECT COUNT(*) FROM creatives").fetchone()[0]
+        demo_campaigns = conn.execute(
+            "SELECT COUNT(DISTINCT campaign) FROM ads"
+            " WHERE source='demo'").fetchone()[0]
+        demo_creatives = conn.execute(
+            "SELECT COUNT(*) FROM creatives AS c JOIN annotations AS a"
+            " USING (creative_key) WHERE c.creative_key LIKE 'demo-%'"
+            ).fetchone()[0]
     finally:
         conn.close()
     security_log.event("demo_seed", actor=admin.id, target="demo",
                        detail="%d row(s) inserted by admin" % inserted)
     return {"ok": True, "inserted": inserted,
-            "campaigns": campaigns, "creatives": creatives}
+            "campaigns": campaigns, "creatives": creatives,
+            "demo_campaigns": demo_campaigns,
+            "demo_creatives": demo_creatives}
 
 
 @router.get("/audit/product")

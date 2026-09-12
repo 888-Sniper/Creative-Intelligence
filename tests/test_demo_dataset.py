@@ -25,7 +25,7 @@ IDENT = {"id": "w-demo", "email": "demo@foap.test", "email_verified": True,
 
 def _seeded_db(tmp_path):
     db = str(tmp_path / "demo.db")
-    inserted = load_demo_dataset(db)
+    inserted = load_demo_dataset(db, media_dir=str(tmp_path / "media"))
     return db, inserted
 
 
@@ -79,7 +79,7 @@ def test_demo_seed_shape_and_totals(tmp_path):
 def test_demo_seed_reload_inserts_nothing(tmp_path):
     db, inserted = _seeded_db(tmp_path)
     before = _totals(db)
-    assert load_demo_dataset(db) == 0
+    assert load_demo_dataset(db, media_dir=str(tmp_path / "media")) == 0
     assert _totals(db) == before
     assert inserted > 0
 

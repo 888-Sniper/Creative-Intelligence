@@ -55,8 +55,7 @@ def dataset_version(conn):
 
 def scoped_rows(conn, scope):
     """Ads rows inside the shared Scope plus analyst extra keys."""
-    scope_obj = (scope if isinstance(scope, benchmarks.Scope)
-                 else benchmarks.Scope(scope))
+    scope_obj = benchmarks.resolve_scope(conn, scope)
     extras = {}
     if isinstance(scope, dict):
         for key in EXTRA_SCOPE_KEYS:

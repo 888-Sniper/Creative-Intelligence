@@ -78,6 +78,32 @@ def sample_svg(key: str, name: str = "", platform: str = "",
            hue, title, meta))
 
 
+def uploaded_image_url(conn, store, key: str):
+    """First uploaded image's /media/<id> URL, or None.
+
+    Uploaded media takes precedence over generated art; a database row
+    whose file is missing does not count (genuine fallback then).
+    Raises ValueError for malformed keys.
+    """
+    import os as _os
+
+    from . import media as _media
+
+    _media.check_key(key)
+    _media.ensure_schema(conn)
+    conn.row_factory = None
+    row = conn.execute(
+        "SELECT id, stored_name FROM media WHERE creative_key=?"
+        " AND mime LIKE 'image/%' ORDER BY id LIMIT 1", (key,)).fetchone()
+    if not row:
+        return None
+    if _os.path.basename(row[1]) != row[1]:
+        return None
+    if not _os.path.isfile(_os.path.join(store or "", row[1])):
+        return None
+    return "/media/%s" % row[0]
+
+
 def for_creative(conn, key: str):
     """Sample SVG for a stored creative, or None when unknown.
 

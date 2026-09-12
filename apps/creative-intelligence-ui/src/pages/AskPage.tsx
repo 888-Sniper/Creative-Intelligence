@@ -70,20 +70,27 @@ function num(v: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function bucket(points: Array<{ date: string; revenue: number }>): { labels: string[]; values: number[] } {
-  if (points.length <= 12) {
+/** Bucket daily revenue into at most 12 EQUAL-TIME spans. Fixed-count
+ *  chunking leaves a short final bucket whose smaller sum reads as a
+ *  revenue cliff; equal time spans keep every bucket comparable. */
+export function bucket(points: Array<{ date: string; revenue: number }>): { labels: string[]; values: number[] } {
+  const pts = points.filter((p) => typeof p.date === "string" && p.date.length >= 8);
+  if (pts.length <= 12) {
     return {
-      labels: points.map((p) => p.date.slice(5)),
-      values: points.map((p) => num(p.revenue)),
+      labels: pts.map((p) => p.date.slice(5)),
+      values: pts.map((p) => num(p.revenue)),
     };
   }
-  const size = Math.ceil(points.length / 12);
-  const labels: string[] = [];
-  const values: number[] = [];
-  for (let i = 0; i < points.length; i += size) {
-    const chunk = points.slice(i, i + size);
-    labels.push(chunk[0].date.slice(5));
-    values.push(chunk.reduce((t, p) => t + num(p.revenue), 0));
+  const N = 12;
+  const t0 = Date.parse(pts[0].date);
+  const t1 = Date.parse(pts[pts.length - 1].date);
+  const width = (Math.max(t1, t0) - t0 + 86400000) / N;
+  const labels = new Array<string>(N).fill("");
+  const values = new Array<number>(N).fill(0);
+  for (const p of pts) {
+    const i = Math.min(N - 1, Math.max(0, Math.floor((Date.parse(p.date) - t0) / width)));
+    values[i] += num(p.revenue);
+    if (!labels[i]) labels[i] = p.date.slice(5);
   }
   return { labels, values };
 }
@@ -139,7 +146,14 @@ export function AskPage() {
       .filter((r) => r.roas != null)
       .sort((a, b) => (b.roas ?? 0) - (a.roas ?? 0));
     if (rows[0]?.roas != null) {
-      out.push(`${rows[0].key === "meta" ? "Meta" : rows[0].key === "tiktok" ? "TikTok" : rows[0].key} leads the current scope at ${rows[0].roas.toFixed(1)}x ROAS.`);
+      // Ties at one decimal are declared honestly instead of crowning
+      // the first row of a tied sort.
+      const top = rows[0].roas as number;
+      const tied = rows.filter((r) => (r.roas ?? -1).toFixed(1) === top.toFixed(1));
+      const name = (k: string) => (k === "meta" ? "Meta" : k === "tiktok" ? "TikTok" : k);
+      out.push(tied.length > 1
+        ? `${tied.map((r) => name(r.key)).join(" and ")} tie at ${top.toFixed(1)}x ROAS.`
+        : `${name(rows[0].key)} leads the current scope at ${top.toFixed(1)}x ROAS.`);
     }
     const hookRows = Object.entries(hooks.data ?? {})
       .map(([key, g]) => ({ key, ctr: g.ctr == null ? null : g.ctr * 100 }))
@@ -210,7 +224,7 @@ export function AskPage() {
                       />
                     ))}
                   </div>
-                  <Panel title="ROI Trend by Top Campaigns">
+                  <Panel title="Revenue Trend">
                     {daily ? (
                       <TrendChart
                         series={[{ label: "Revenue", color: "#00B3A0", soft: "#DDF3F0", points: roi.values }]}

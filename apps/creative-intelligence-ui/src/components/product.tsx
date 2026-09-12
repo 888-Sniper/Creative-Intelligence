@@ -225,7 +225,7 @@ export function FilterPanel({ onApply, kpi = true, creative = false, trailing, a
           {trailing}
           <div className="field">
             <label id="f-date-label">Date Range</label>
-            <div style={{ display: "flex", gap: 8 }} role="group" aria-labelledby="f-date-label">
+            <div className="date-pair" role="group" aria-labelledby="f-date-label">
               <input type="date" aria-label="From date" value={filters.date_from}
                 onChange={(e) => setFilter("date_from", e.target.value)} />
               <input type="date" aria-label="To date" value={filters.date_to}
@@ -294,7 +294,7 @@ export function FilterPanel({ onApply, kpi = true, creative = false, trailing, a
         ) : <div />}
         <div className="field">
           <label id="f-date-label">Date</label>
-          <div style={{ display: "flex", gap: 8 }} role="group" aria-labelledby="f-date-label">
+          <div className="date-pair" role="group" aria-labelledby="f-date-label">
             <input type="date" aria-label="From date" value={filters.date_from}
               onChange={(e) => setFilter("date_from", e.target.value)} />
             <input type="date" aria-label="To date" value={filters.date_to}

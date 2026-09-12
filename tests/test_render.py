@@ -21,6 +21,13 @@ from ci_backend.config import Settings
 from ci_backend.main import maybe_seed_demo, resolve_bind
 
 
+@pytest.fixture(autouse=True)
+def _isolated_media_dir(tmp_path, monkeypatch):
+    # Seeded demo artwork must never land in the repo Data/ tree.
+    monkeypatch.setenv("CREATIVE_INTEL_MEDIA_DIR",
+                       str(tmp_path / "media"))
+
+
 def _args(**kw):
     base = {"port": None, "host": None}
     base.update(kw)
@@ -101,7 +108,7 @@ def test_demo_seed_never_overwrites_existing_rows(tmp_path):
         conn.commit()
     # A second first-boot-style load inserts nothing new (ingest
     # upserts) and the sentinel row survives: no duplication, no wipe.
-    assert load_demo_dataset(db) == 0
+    assert load_demo_dataset(db, media_dir=str(tmp_path / "media")) == 0
     with sqlite3.connect(db) as conn:
         assert (
             conn.execute(

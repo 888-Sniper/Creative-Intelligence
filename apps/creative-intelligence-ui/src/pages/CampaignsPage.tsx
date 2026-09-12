@@ -123,8 +123,9 @@ export function CampaignsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initial.kpi]);
 
-  /* Campaign attribute lookup (client / platforms / derived status).
-   * Status has no backend scope axis, so it filters client-side here. */
+  /* Campaign attribute lookup (client / platforms / derived status
+   * labels for the meta panel). Status and spend resolve server-side
+   * through the shared scope; only the name search filters here. */
   const metaMap = useMemo(() => {
     const map = new Map<string, CampaignMeta>();
     for (const c of meta.data?.campaigns ?? []) map.set(c.name, c);
@@ -361,7 +362,7 @@ export function CampaignsPage() {
         )}
       />
       <Panel title="Campaign Filters">
-        <div className="filter-grid" style={{ gridTemplateColumns: "repeat(5,minmax(0,1fr))" }}>
+        <div className="filter-grid">
           <div className="field">
             <label htmlFor="c-client">Client</label>
             <select id="c-client" {...selectProps("client")}>
@@ -412,7 +413,7 @@ export function CampaignsPage() {
           </div>
           <div className="field">
             <label htmlFor="c-from">Date Range</label>
-            <div style={{ display: "flex", gap: 8 }}>
+            <div className="date-pair">
               <input type="date" aria-label="From date" value={filters.date_from}
                 onChange={(e) => setFilter("date_from", e.target.value)} />
               <input type="date" aria-label="To date" value={filters.date_to}

@@ -96,16 +96,17 @@ def main() -> None:
         }
     with open(seeds_path, "w") as fh:
         json.dump(seeds, fh)
-    seed_ads(db_path)
     if os.environ.get("FULL_DEMO") == "1" or "--full-demo" in sys.argv:
-        # Full-demo visual setup (separate from the small functional
-        # fixture above, which existing specs keep): the ten synthetic
-        # campaigns, ten annotated creatives and their seeded artwork,
-        # so reference screens capture representative content.
+        # Full-demo visual dataset: EXACTLY the ten synthetic campaigns,
+        # ten annotated creatives and their seeded artwork — the small
+        # functional fixture is deliberately skipped so captures never
+        # show an extra "Seeded" campaign or technical creatives.
         from ci_backend.actions import load_demo_dataset  # noqa: E402
 
         media_dir = os.environ.get("CREATIVE_INTEL_MEDIA_DIR") or None
         load_demo_dataset(db_path, media_dir=media_dir)
+    else:
+        seed_ads(db_path)
     print("seeded %s" % db_path)
 
 

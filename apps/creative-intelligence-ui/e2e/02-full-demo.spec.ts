@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { loginAs, readSeeds } from "./helpers";
 
 /** Full-demo visual acceptance: runs ONLY under FULL_DEMO=1, when the
@@ -15,6 +15,18 @@ import { loginAs, readSeeds } from "./helpers";
  */
 const FULL = process.env.FULL_DEMO === "1";
 const SHOTS = "test-results/screens";
+
+/** Fail if the small functional fixture leaked into the visual set:
+ *  the full-demo dataset is exactly the ten synthetic examples. */
+async function expectCleanDemo(page: Page) {
+  await expect(page.getByText("Seeded", { exact: true })).toHaveCount(0);
+}
+
+/** Every async area finished: no loading skeleton may remain when the
+ *  capture is taken. */
+async function expectReady(page: Page) {
+  await expect(page.locator(".skel")).toHaveCount(0, { timeout: 30000 });
+}
 
 test.describe("full demo visuals", () => {
   test.skip(!FULL, "needs a FULL_DEMO=1 seeded server");
@@ -33,9 +45,8 @@ test.describe("full demo visuals", () => {
     // at 1dp, so no platform may be crowned the ROAS leader.
     await expect(page.getByText("TikTok and Meta Tie on ROAS")).toBeVisible();
     await expect(page.getByText("Leads On ROAS")).toHaveCount(0);
-    // Let KPI cards load so the review capture shows values, not skeletons.
-    await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
-    await expect(page.getByText("126.1M").first()).toBeVisible({ timeout: 30000 });
+    await expectCleanDemo(page);
+    await expectReady(page);
     await page.screenshot({ path: `${SHOTS}/d-dashboard.png`, fullPage: true, animations: "disabled" });
   });
 
@@ -45,7 +56,13 @@ test.describe("full demo visuals", () => {
     await expect(page.getByText("Glowing Skin Made Easy").first()).toBeVisible({ timeout: 30000 });
     const thumbs = page.locator('img[src*="/thumbnail"]');
     await expect(thumbs.first()).toBeVisible();
-    expect(await thumbs.count()).toBeGreaterThanOrEqual(10);
+    // Exactly the ten demo creatives: five top cards plus ten table
+    // rows, each with seeded artwork.
+    await expect(page.getByText("All Creatives (10)")).toBeVisible({ timeout: 30000 });
+    await expect(page.locator("table.tbl tbody tr")).toHaveCount(10, { timeout: 30000 });
+    await expect(thumbs).toHaveCount(15, { timeout: 30000 });
+    await expectCleanDemo(page);
+    await expectReady(page);
     await page.screenshot({ path: `${SHOTS}/d-creatives.png`, fullPage: true, animations: "disabled" });
   });
 
@@ -63,6 +80,8 @@ test.describe("full demo visuals", () => {
     await page.getByRole("button", { name: "Apply Comparison" }).click();
     await expect(page.getByText("Select two to four campaigns or creatives, then Apply Comparison.")).toHaveCount(0);
     await expect(page.getByRole("img", { name: /comparison chart/ }).first()).toBeVisible({ timeout: 60000 });
+    await expectCleanDemo(page);
+    await expectReady(page);
     await page.screenshot({ path: `${SHOTS}/d-compare.png`, fullPage: true, animations: "disabled" });
   });
 
@@ -71,6 +90,7 @@ test.describe("full demo visuals", () => {
     await loginAs(context, page, seeds.admin, "/insights");
     await page.getByRole("button", { name: "Save Insight" }).click();
     await expect(page.getByText(/Saved Insight —/)).toBeVisible({ timeout: 30000 });
+    await expectReady(page);
     await page.screenshot({ path: `${SHOTS}/d-insights.png`, fullPage: true, animations: "disabled" });
   });
 
@@ -83,6 +103,7 @@ test.describe("full demo visuals", () => {
     await loginAs(context, page, seeds.admin, "/reports");
     await page.getByRole("button", { name: "Generate Report" }).click();
     await expect(page.getByRole("link", { name: /Download / }).first()).toBeVisible({ timeout: 90000 });
+    await expectReady(page);
     await page.screenshot({ path: `${SHOTS}/d-reports.png`, fullPage: true, animations: "disabled" });
   });
 
@@ -95,6 +116,7 @@ test.describe("full demo visuals", () => {
     await expect(page.getByText("Suggested Follow-Ups")).toBeVisible({ timeout: 60000 });
     // Platform-level answer: names Meta/TikTok, never a creative title.
     await expect(page.getByText(/Meta|TikTok/).first()).toBeVisible();
+    await expectReady(page);
     await page.screenshot({ path: `${SHOTS}/d-ask.png`, fullPage: true, animations: "disabled" });
   });
 
@@ -102,6 +124,7 @@ test.describe("full demo visuals", () => {
     const seeds = readSeeds();
     await loginAs(context, page, seeds.admin, "/workbook");
     await expect(page.getByRole("heading").first()).toBeVisible({ timeout: 30000 });
+    await expectReady(page);
     await page.screenshot({ path: `${SHOTS}/d-workbook.png`, fullPage: true, animations: "disabled" });
   });
 
@@ -126,6 +149,7 @@ test.describe("full demo visuals", () => {
         () => document.documentElement.scrollWidth - window.innerWidth,
       );
       expect(overflow).toBeLessThanOrEqual(1);
+      await expectReady(page);
       await page.screenshot({ path: `${SHOTS}/${shot}.png`, fullPage: true, animations: "disabled" });
     }
   });
@@ -137,6 +161,7 @@ test.describe("full demo visuals", () => {
     await expect(page.getByLabel("Campaign Status")).toBeVisible({ timeout: 30000 });
     // Full ten-campaign table, lightest demo campaign included.
     await expect(page.getByText("Discover Something New").first()).toBeVisible();
+    await expectCleanDemo(page);
     // No control may be squeezed to an unreadable sliver: every
     // filter field keeps a usable minimum width and fields in the
     // same row never overlap.

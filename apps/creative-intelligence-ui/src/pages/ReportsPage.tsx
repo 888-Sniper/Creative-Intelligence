@@ -36,7 +36,7 @@ const KPI_LABELS: Record<string, string> = {
 const kpiLabel = (k: string): string => KPI_LABELS[k] ?? k.toUpperCase();
 
 const BENCH_OPTIONS = [
-  { id: "industry", label: "Industry Benchmark" },
+  { id: "industry", label: "Scope Average" },
   { id: "hook_type", label: "Hook Type" },
   { id: "creator_vs_branded", label: "Creator Vs Branded" },
   { id: "edit_style", label: "Edit Style" },

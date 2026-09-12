@@ -61,6 +61,39 @@ def test_meta_boundary_and_undated_rows():
     assert by_name["Dateless"]["status"] == "Completed"
 
 
+def test_resolve_converts_status_and_spend_to_campaign_scope():
+    conn = _conn_with([
+        ("New", "Acme", "meta", "UK", "Conversions", "2026-08-21", 30000, 100, 5),
+        ("Old", "Acme", "meta", "UK", "Conversions", "2026-01-01", 100, 100, 5),
+    ])
+    active = benchmarks.Scope(
+        {"status": ["Active"]}).resolve(conn)["campaign"]
+    assert active == ["New"]
+    rich = benchmarks.Scope({"spend_min": ["10000"]}).resolve(conn)["campaign"]
+    assert rich == ["New"]
+    band = benchmarks.Scope(
+        {"spend_min": ["50"], "spend_max": ["500"]}).resolve(conn)["campaign"]
+    assert band == ["Old"]
+    # No campaign-level keys: identical to normalized(), no campaign axis.
+    plain = benchmarks.Scope({"platform": ["meta"]}).resolve(conn)
+    assert "campaign" not in plain
+    assert plain["platform"] == ["meta"]
+
+
+def test_resolve_rejects_bad_values():
+    conn = _conn_with([
+        ("New", "Acme", "meta", "UK", "Conversions", "2026-08-21", 10, 100, 5),
+    ])
+    for raw in ({"status": ["Paused"]}, {"spend_min": ["abc"]},
+                {"spend_min": ["-5"]},
+                {"spend_min": ["500"], "spend_max": ["100"]}):
+        try:
+            benchmarks.Scope(raw).resolve(conn)
+        except ValueError:
+            continue
+        raise AssertionError("expected ValueError for %r" % (raw,))
+
+
 def test_meta_demo_dataset_shape(tmp_path, monkeypatch):
     db = str(tmp_path / "meta.db")
     assert load_demo_dataset(db) > 0

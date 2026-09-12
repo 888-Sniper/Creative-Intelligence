@@ -312,6 +312,28 @@ def campaign_meta(conn):
     return {"campaigns": out}
 
 
+def _qualifying_campaigns(conn, status, smin, smax):
+    """Campaign names passing status / lifetime-spend criteria.
+
+    Attributes are UNSCOPED (whole database), so one selection reads
+    identically on every surface of a page. Spend bounds inclusive.
+    """
+    conn.row_factory = None
+    spend = {name: total for name, total in conn.execute(
+        "SELECT campaign, SUM(spend) FROM ads GROUP BY campaign")}
+    names = set()
+    for meta in campaign_meta(conn)["campaigns"]:
+        if status and meta["status"].lower() not in status:
+            continue
+        total = spend.get(meta["name"], 0) or 0
+        if smin is not None and total < smin:
+            continue
+        if smax is not None and total > smax:
+            continue
+        names.add(meta["name"])
+    return names
+
+
 # === EXPERT 2 (COHORTS+COMPARE) EXTENSION — appended; original functions above untouched. ===
 """Multi-filter benchmark builder, campaign compare, and report helpers.
 
@@ -560,7 +582,7 @@ class Scope:
     AXES = ("client", "project", "campaign", "platform", "vertical",
             "market", "funnel", "objective", "hook_type",
             "creator_vs_branded", "format", "date", "date_from",
-            "date_to")
+            "date_to", "status", "spend_min", "spend_max")
 
     def __init__(self, raw=None):
         self.axes = {}
@@ -603,6 +625,55 @@ class Scope:
     def match(self, row):
         """True when an enriched ads row is inside this scope."""
         return match_filters(row, self.normalized())
+
+    def resolve(self, conn):
+        """Normalized filters with campaign-level axes resolved.
+
+        ``status`` / ``spend_min`` / ``spend_max`` are campaign
+        attributes, not row columns, so they cannot ride
+        match_filters (and normalize_filters rightly rejects unknown
+        keys). resolve() converts them — against UNSCOPED campaign
+        attributes, so a status or spend band means the same thing on
+        every card, chart and table of a page — into a ``campaign``
+        allowlist intersected with any explicit campaign filter, then
+        returns plain row-level filters. Bounds are inclusive on both
+        ends. Endpoints rendering one filtered page (campaigns,
+        compare, daily, benchmarks) call resolve(conn); everything
+        else keeps normalized(), which never sees these keys.
+        """
+        filt = Scope({k: v for k, v in self.axes.items()
+                      if k not in ("status", "spend_min", "spend_max")}
+                     ).normalized()
+        status = [(v or "").strip().lower()
+                  for v in self.axes.get("status", [])]
+        status = [v for v in status if v]
+        for v in status:
+            if v not in ("active", "completed"):
+                raise ValueError(
+                    "status must be Active or Completed, got %r" % v)
+
+        def _num(key):
+            vals = [v for v in self.axes.get(key, []) if v not in ("",)]
+            if not vals:
+                return None
+            try:
+                num = float(vals[0])
+            except (TypeError, ValueError):
+                raise ValueError("%s must be a number, got %r" % (key, vals[0]))
+            if num < 0:
+                raise ValueError("%s must be >= 0" % key)
+            return num
+
+        smin, smax = _num("spend_min"), _num("spend_max")
+        if smin is not None and smax is not None and smin > smax:
+            raise ValueError("spend_min must not exceed spend_max")
+        if not status and smin is None and smax is None:
+            return filt
+        names = _qualifying_campaigns(conn, status, smin, smax)
+        if "campaign" in filt:
+            names &= set(filt["campaign"])
+        filt["campaign"] = sorted(names)
+        return filt
 
     def sql(self):
         """Case-insensitive WHERE fragment over ads columns for

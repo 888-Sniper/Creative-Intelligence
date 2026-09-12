@@ -10,6 +10,9 @@ export interface FilterValues {
   market: string;
   funnel: string;
   objective: string;
+  status: string;
+  spend_min: string;
+  spend_max: string;
   kpi: string;
   hook_type: string;
   creator_vs_branded: string;
@@ -28,6 +31,9 @@ export const EMPTY_FILTERS: FilterValues = {
   market: "",
   funnel: "",
   objective: "",
+  status: "",
+  spend_min: "",
+  spend_max: "",
   kpi: "all",
   hook_type: "",
   creator_vs_branded: "",

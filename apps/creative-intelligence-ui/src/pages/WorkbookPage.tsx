@@ -125,7 +125,7 @@ export function WorkbookPage() {
         )}
       />
       <Panel title="1. Configure Your Workbook" sub="Select the modules and options you want to include in your workbook.">
-        <div className="cards-4" style={{ gridTemplateColumns: "repeat(4,minmax(0,1fr))" }}>
+        <div className="cards-4">
           {MODULES.map((m) => {
             const on = modules.includes(m.id);
             return (
@@ -152,7 +152,7 @@ export function WorkbookPage() {
           })}
         </div>
       </Panel>
-      <div className="main-rail" style={{ gridTemplateColumns: "minmax(0,1fr) minmax(0,1.4fr) minmax(0,1fr)", marginTop: 16 }}>
+      <div className="wb-rail">
         <Panel title="2. Workbook Details">
           <div className="field">
             <label htmlFor="wb-name">Workbook Name</label>
@@ -188,7 +188,7 @@ export function WorkbookPage() {
           {compare && creatives.data ? (
             <div>
               <p style={{ fontSize: 13, fontWeight: 700 }}>1. Campaign Summary</p>
-              <div className="cards-4" style={{ gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: 8 }}>
+              <div className="cards-4" style={{ gap: 8 }}>
                 <div className="cmp-card" style={{ padding: 10 }}>
                   <strong>{fmtCompact(num(compare.metrics.impressions?.current))}</strong>
                   <p className="panel-sub">Impressions</p>

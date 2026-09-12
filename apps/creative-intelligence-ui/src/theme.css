@@ -292,6 +292,8 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13.5px}
 .idx{color:var(--shell-faint);font-weight:600;width:26px}
 .thumb{width:46px;height:46px;border-radius:9px;object-fit:cover;display:block;background:var(--shell-blue-soft);flex:0 0 auto}
 .thumb-wrap{position:relative;flex:0 0 auto}
+.thumb-art{position:relative;overflow:hidden}
+.thumb-art img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 .thumb-dur{position:absolute;right:3px;bottom:3px;background:rgba(15,23,42,.82);color:#fff;font-size:10px;font-weight:700;border-radius:5px;padding:1px 5px}
 .cell-main{font-weight:600}
 .cell-sub{font-size:12px;color:var(--shell-muted)}
@@ -323,10 +325,15 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13.5px}
 .spinner{width:16px;height:16px;border-radius:50%;border:2.5px solid rgba(255,255,255,.4);border-top-color:#fff;animation:spin .7s linear infinite;display:inline-block}
 .spinner.dark{border-color:var(--shell-line);border-top-color:var(--shell-teal)}
 @keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spinner{animation:none}}
 .badge-demo{display:inline-flex;align-items:center;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--shell-teal-dark);background:var(--shell-teal-soft);border-radius:6px;padding:3px 9px}
 .empty{padding:34px 20px;text-align:center;color:var(--shell-muted);font-size:14px}
 .section-gap{margin-top:20px}
 .cards-4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}
+/* Workbook 3-column rail: mirrors .main-rail but keeps its desktop
+ * proportions in CSS (not inline) so it collapses with the rest. */
+.wb-rail{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr) minmax(0,1fr);gap:16px;margin-top:16px;align-items:start}
+.wb-rail>*{min-width:0}
 .cmp-card{background:var(--shell-card);border:1px solid var(--shell-line);border-radius:var(--shell-radius);box-shadow:var(--shell-shadow);padding:18px}
 .cmp-card.sel{border:1.5px solid var(--shell-teal)}
 .chip-row{display:flex;flex-wrap:wrap;gap:8px}
@@ -341,7 +348,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13.5px}
 .side-overlay{display:none}
 @media (max-width:1180px){
   .kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .cols-2,.cols-3,.main-rail{grid-template-columns:1fr}
+  .cols-2,.cols-3,.main-rail,.wb-rail{grid-template-columns:1fr}
   .filter-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
   .cards-4{grid-template-columns:repeat(2,minmax(0,1fr))}
 }

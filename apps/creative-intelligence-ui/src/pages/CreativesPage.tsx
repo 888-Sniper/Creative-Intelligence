@@ -163,7 +163,7 @@ export function CreativesPage() {
   const [sort, setSort] = useState<SortKey>("top");
   const [view, setView] = useState<"list" | "grid">("list");
   const [length, setLength] = useState<LengthKey>("all");
-  const [benchmark, setBenchmark] = useState("Industry Benchmark");
+  const [benchmark, setBenchmark] = useState("Scope Average");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const [exportBusy, setExportBusy] = useState(false);
@@ -333,7 +333,7 @@ export function CreativesPage() {
             <div className="field">
               <label htmlFor="cr-bench">Benchmark</label>
               <select id="cr-bench" value={benchmark} onChange={(e) => setBenchmark(e.target.value)}>
-                <option>Industry Benchmark</option>
+                <option>Scope Average</option>
                 <option>Top Performer</option>
               </select>
             </div>
@@ -344,7 +344,7 @@ export function CreativesPage() {
       <div className="main-rail" style={{ marginTop: 16 }}>
         <div className="rail-stack">
           {compare ? (
-            <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(4,minmax(0,1fr))" }}>
+            <div className="kpi-grid">
               <div className="kpi-card">
                 <span className="kpi-ico" style={{ background: "#DFF5F1", color: "#009485" }}>
                   <Icon name="play" size={22} />
@@ -362,7 +362,7 @@ export function CreativesPage() {
                 icon="users" tint="#DFF5F1" metricLabel="ROAS" compare={compare} />
             </div>
           ) : (
-            <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(4,minmax(0,1fr))" }}>
+            <div className="kpi-grid">
               {[0, 1, 2, 3].map((i) => <Skeleton key={i} height={118} />)}
             </div>
           )}
@@ -401,7 +401,7 @@ export function CreativesPage() {
           <Panel
             title={`All Creatives (${fmtCompact(rows.length)})`}
             action={(
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                 <label htmlFor="cr-sort" className="panel-sub">Sort By</label>
                 <select id="cr-sort" value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
                   {SORTS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}

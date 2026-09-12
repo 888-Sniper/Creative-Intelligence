@@ -111,9 +111,13 @@ export function formatDuration(seconds: number | null | undefined): string {
 export function CreativeThumb({ seed, duration, label }: {
   seed: string; duration?: number | null; label?: string;
 }) {
+  const [imgOk, setImgOk] = useState(true);
   let hash = 0;
   for (const ch of seed) hash = (hash * 31 + ch.charCodeAt(0)) % 360;
   const hue = (hash + 360) % 360;
+  // Sample thumbnail asset; the gradient stays as the genuine fallback
+  // when no image is available (unknown creative, backend error).
+  const src = `/api/creatives/${encodeURIComponent(seed)}/thumbnail`;
   return (
     <span className="thumb-wrap" role="img" aria-label={label ? `${label} thumbnail` : "Creative thumbnail"}>
       <span
@@ -123,7 +127,12 @@ export function CreativeThumb({ seed, duration, label }: {
           background:
             `linear-gradient(135deg, hsl(${hue}, 42%, 76%) 0%, hsl(${(hue + 48) % 360}, 48%, 55%) 58%, hsl(${(hue + 96) % 360}, 42%, 38%) 100%)`,
         }}
-      />
+      >
+        {imgOk ? (
+          <img src={src} alt="" aria-hidden="true" loading="lazy"
+            onError={() => setImgOk(false)} />
+        ) : null}
+      </span>
       {duration != null ? <span className="thumb-dur">{formatDuration(duration)}</span> : null}
     </span>
   );

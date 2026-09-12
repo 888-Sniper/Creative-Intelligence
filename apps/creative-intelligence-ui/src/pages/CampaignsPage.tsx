@@ -79,8 +79,6 @@ export function CampaignsPage() {
   const navigate = useNavigate();
   const { filters, setFilter, clearFilters } = useFilters();
   const [applied, setApplied] = useState(0);
-  const [spendRange, setSpendRange] = useState("All Spend Ranges");
-  const [statusFilter, setStatusFilter] = useState("all");
   const [moreFilters, setMoreFilters] = useState(false);
   const [platMetric, setPlatMetric] = useState<(typeof PLATFORM_METRICS)[number]["value"]>("spend");
   const [search, setSearch] = useState("");
@@ -142,23 +140,17 @@ export function CampaignsPage() {
     () => [...new Set((meta.data?.campaigns ?? []).flatMap((c) => c.objectives))].sort(),
     [meta.data]);
 
+  /* Table, KPI cards, charts and recommendations all read the same
+   * backend scope: status/spend live in the shared filter state and
+   * resolve server-side, so every surface agrees. Only the name search
+   * stays local (it has no backend axis). */
   const rows = useMemo(() => {
     const list = Object.entries(campaigns.data ?? {}).map(([name, m]) => ({ name, ...m }));
     const q = search.trim().toLowerCase();
     return list
       .filter((r) => (!q || r.name.toLowerCase().includes(q)))
-      .filter((r) => {
-        if (spendRange === "Under $25K") return num(r.spend) < 25000;
-        if (spendRange === "$25K – $50K") return num(r.spend) >= 25000 && num(r.spend) <= 50000;
-        if (spendRange === "Over $50K") return num(r.spend) > 50000;
-        return true;
-      })
-      .filter((r) => {
-        if (statusFilter === "all") return true;
-        return (metaMap.get(r.name)?.status ?? "") === statusFilter;
-      })
       .sort((a, b) => num(b.spend) - num(a.spend));
-  }, [campaigns.data, search, spendRange, statusFilter, metaMap]);
+  }, [campaigns.data, search]);
 
   const avgCtr = useMemo(() => {
     const impr = rows.reduce((t, r) => t + num(r.impressions), 0);
@@ -232,6 +224,30 @@ export function CampaignsPage() {
     }
     return items.slice(0, 4);
   }, [benchPlatform.data, benchHook.data, underperformers, avgCtr, rows]);
+
+  /* Reset clears every active filter: shared scope plus the local
+   * name search (status/spend live in shared state since the
+   * consistency pass, so clearFilters covers them too). */
+  const resetAll = () => {
+    clearFilters();
+    setSearch("");
+  };
+
+  const spendBand = !filters.spend_min && !filters.spend_max ? "all"
+    : filters.spend_min === "25000" && filters.spend_max === "50000" ? "mid"
+    : filters.spend_min === "50000" ? "over"
+    : filters.spend_max === "25000" ? "under" : "all";
+  const setSpendBand = (band: string) => {
+    if (band === "under") {
+      setFilter("spend_min", ""); setFilter("spend_max", "25000");
+    } else if (band === "mid") {
+      setFilter("spend_min", "25000"); setFilter("spend_max", "50000");
+    } else if (band === "over") {
+      setFilter("spend_min", "50000"); setFilter("spend_max", "");
+    } else {
+      setFilter("spend_min", ""); setFilter("spend_max", "");
+    }
+  };
 
   const toggle = (name: string) =>
     setSelected((prev) => {
@@ -334,7 +350,7 @@ export function CampaignsPage() {
         sub="Plan, monitor, and optimize your creative campaigns with real-time insights."
         actions={(
           <>
-            <button type="button" className="link-teal" onClick={clearFilters}
+            <button type="button" className="link-teal" onClick={resetAll}
               style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
               <Icon name="reset" size={15} /> Reset Filters
             </button>
@@ -355,8 +371,8 @@ export function CampaignsPage() {
           </div>
           <div className="field">
             <label htmlFor="c-status">Campaign Status</label>
-            <select id="c-status" value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}>
+            <select id="c-status" value={filters.status || "all"}
+              onChange={(e) => setFilter("status", e.target.value === "all" ? "" : e.target.value)}>
               <option value="all">All Statuses</option>
               <option value="Active">Active</option>
               <option value="Completed">Completed</option>
@@ -378,10 +394,12 @@ export function CampaignsPage() {
             </select>
           </div>
           {/* Team attribution does not exist in the ads dataset, so this
-            control honestly offers All Teams until team data exists. */}
+            control is explicitly unavailable (All Teams only) until
+            team data exists — never a silently dead filter. */}
           <div className="field">
             <label htmlFor="c-team">Team</label>
-            <select id="c-team" value="all" aria-label="Team" disabled>
+            <select id="c-team" value="all" aria-label="Team (unavailable: no team data)" disabled
+              title="Team filtering is unavailable: the dataset carries no team attribution.">
               <option value="all">All Teams</option>
             </select>
           </div>
@@ -403,8 +421,11 @@ export function CampaignsPage() {
           </div>
           <div className="field">
             <label htmlFor="c-spend">Spend Range</label>
-            <select id="c-spend" value={spendRange} onChange={(e) => setSpendRange(e.target.value)}>
-              {["All Spend Ranges", "Under $25K", "$25K – $50K", "Over $50K"].map((o) => <option key={o}>{o}</option>)}
+            <select id="c-spend" value={spendBand} onChange={(e) => setSpendBand(e.target.value)}>
+              <option value="all">All Spend Ranges</option>
+              <option value="under">Under $25K</option>
+              <option value="mid">$25K – $50K</option>
+              <option value="over">Over $50K</option>
             </select>
           </div>
           <div className="field">
@@ -458,7 +479,7 @@ export function CampaignsPage() {
       <div className="main-rail" style={{ marginTop: 16 }}>
         <div className="rail-stack">
           {compare ? (
-            <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(4,minmax(0,1fr))" }}>
+            <div className="kpi-grid">
               <div className="kpi-card">
                 <span className="kpi-ico" style={{ background: "#E4F4ED", color: "#0E7C5B" }}>
                   <Icon name="users" size={22} />
@@ -476,7 +497,7 @@ export function CampaignsPage() {
                 icon="coin" tint="#E4F4ED" metricLabel="ROAS" compare={compare} />
             </div>
           ) : (
-            <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(4,minmax(0,1fr))" }}>
+            <div className="kpi-grid">
               {[0, 1, 2, 3].map((i) => <Skeleton key={i} height={118} />)}
             </div>
           )}

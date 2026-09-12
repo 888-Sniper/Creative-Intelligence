@@ -197,7 +197,7 @@ export function AskPage() {
               ) : answer ? (
                 <>
                   <p style={{ fontSize: 14, lineHeight: 1.6 }}>{answer.answer}</p>
-                  <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(4,minmax(0,1fr))" }}>
+                  <div className="kpi-grid">
                     {kpis.map((k) => (
                       <KpiCard
                         key={k.metric}

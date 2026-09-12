@@ -14,6 +14,7 @@ from ci_backend.deps import (
     admin_rate_limit,
     get_current_admin,
     get_db,
+    get_settings,
     json_payload,
 )
 
@@ -132,6 +133,43 @@ def ops(request: Request, db=Depends(get_db),
                            backup_dir=backup_dir)
     finally:
         conn.close()
+
+
+@router.post("/demo/seed")
+def seed_demo(request: Request, db=Depends(get_db),
+              admin=Depends(get_current_admin),
+              settings=Depends(get_settings),
+              _rl=Depends(admin_rate_limit)):
+    """Admin: populate the synthetic demo dataset on demand (audited).
+
+    Safe by construction: refused outside demo environments (so real
+    deployments can never gain synthetic rows this way), and the loader
+    upserts, so existing rows are never duplicated or deleted. Returns
+    live campaign/creative counts so the caller can verify population.
+    """
+    _ = db
+    env = (settings.environment or "").strip().lower()
+    if env != "demo" and not settings.demo_seed:
+        raise HTTPException(status_code=403, detail={
+            "error": "Demo seeding is only available on demo environments."})
+    import sqlite3
+
+    from ci_backend.actions import load_demo_dataset
+
+    db_path = str(request.app.state.ci_db_path)
+    inserted = load_demo_dataset(db_path)
+    conn = sqlite3.connect(db_path, check_same_thread=False)
+    try:
+        campaigns = conn.execute(
+            "SELECT COUNT(DISTINCT campaign) FROM ads").fetchone()[0]
+        creatives = conn.execute(
+            "SELECT COUNT(*) FROM creatives").fetchone()[0]
+    finally:
+        conn.close()
+    security_log.event("demo_seed", actor=admin.id, target="demo",
+                       detail="%d row(s) inserted by admin" % inserted)
+    return {"ok": True, "inserted": inserted,
+            "campaigns": campaigns, "creatives": creatives}
 
 
 @router.get("/audit/product")

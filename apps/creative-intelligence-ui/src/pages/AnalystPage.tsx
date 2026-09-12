@@ -315,6 +315,9 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
   // "auto" means omit so the backend detects from the question text.
   const language = locale === "auto" ? undefined : locale;
   const [busy, setBusy] = useState(false);
+  // Which action owns the in-flight request: only that button spins,
+  // the other stays merely disabled (per-button spinner requirement).
+  const [op, setOp] = useState<null | "run" | "ask">(null);
   const [exporting, setExporting] = useState<null | "one-pager" | "xlsx">(null);
   const [error, setError] = useState<string | null>(null);
   const [lastScope, setLastScope] = useState("");
@@ -357,6 +360,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
     setLastScope("");
     setDatasetVersion(null);
     setBusy(false);
+    setOp(null);
     void loadConversations();
   }, [accountKey, loadConversations]);
 
@@ -377,13 +381,14 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
     }
   }
 
-  async function send(maxPoints?: number, override?: string) {
+  async function send(kind: "run" | "ask", maxPoints?: number, override?: string) {
     const question = (override ?? input).trim();
     if (!question || busy) return;
     // A07: stamp the owning identity; a late answer from the previous
     // account is dropped instead of rendered under the new one.
     const key = accountRef.current;
     setBusy(true);
+    setOp(kind);
     setError(null);
     setMessages((prev) => [...prev, { role: "user", text: question }]);
     setInput("");
@@ -409,7 +414,10 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
       if (key !== accountRef.current) return;
       setError(e instanceof Error ? e.message : "Analyst Request Failed");
     } finally {
-      if (key === accountRef.current) setBusy(false);
+      if (key === accountRef.current) {
+        setBusy(false);
+        setOp((cur) => (cur === kind ? null : cur));
+      }
     }
   }
 
@@ -789,8 +797,8 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
           <button type="button" className="link-teal" onClick={clearAll}>
             Clear
           </button>
-          <LoadingButton type="button" className="btn-primary" loading={busy} loadingLabel="Analysing…" disabled={busy || !input.trim()}
-            onClick={() => void send()}>
+          <LoadingButton type="button" className="btn-primary" loading={op === "run"} loadingLabel="Analysing…" disabled={busy || !input.trim()}
+            onClick={() => void send("run")}>
             <Icon name="spark" size={16} /> Run Analysis
           </LoadingButton>
         </div>
@@ -801,7 +809,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            void send();
+            void send("ask");
           }}
         >
           <div className="composer">
@@ -812,14 +820,14 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
               placeholder="Ask anything about your campaigns, creatives, or performance…"
               aria-label="Ask Foap Analyst"
             />
-            <LoadingButton type="submit" className="btn-primary" loading={busy} loadingLabel="Analysing…" disabled={busy || !input.trim()}>
+            <LoadingButton type="submit" className="btn-primary" loading={op === "ask"} loadingLabel="Analysing…" disabled={busy || !input.trim()}>
               Ask
             </LoadingButton>
             <button
               type="button"
               className="btn-outline"
               disabled={busy || !input.trim()}
-              onClick={() => void send(3)}
+              onClick={() => void send("ask", 3)}
               title="Condense The Answer To 3 Points"
             >
               3 Points
@@ -832,7 +840,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
           </span>
           {TRY_ASKING.map((q) => (
             <button key={q} type="button" className="chip"
-              onClick={() => { setInput(q); void send(undefined, q); }}>
+              onClick={() => { setInput(q); void send('ask', undefined, q); }}>
               {q}
             </button>
           ))}
@@ -1028,7 +1036,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
                         <div className="prompt-chips">
                           {(m.answer.follow_ups ?? []).map((q) => (
                             <button key={q} type="button" className="chip"
-                              onClick={() => { setInput(q); void send(undefined, q); }}>
+                              onClick={() => { setInput(q); void send('ask', undefined, q); }}>
                               {q}
                             </button>
                           ))}

@@ -133,16 +133,30 @@ test.describe("approved screens at mobile viewport", () => {
     await page.screenshot({ path: `${SHOTS}/m-login.png`, animations: "disabled" });
   });
 
+  // Every route at mobile width: one login, then each route in the
+  // same session (heading + no-overflow + capture each).
   const mobileRoutes: Array<[shot: string, path: string, heading: string | RegExp]> = [
     ["m-dashboard", "/", /Good (Morning|Afternoon|Evening),/],
+    ["m-campaigns", "/campaigns", "Campaigns"],
+    ["m-creatives", "/creatives", "Creatives"],
     ["m-compare", "/compare", "Compare"],
+    ["m-benchmarks", "/benchmarks", "Benchmarks Library"],
+    ["m-insights", "/insights", "Saved Insights"],
+    ["m-reports", "/reports", "Generated Reports"],
+    ["m-workbook", "/workbook", "Blank Workbook"],
+    ["m-ask", "/ask", "Ask The Data"],
     ["m-analyst", "/analyst", "Your Creative Partner"],
+    ["m-admin", "/admin", "Admin"],
+    ["m-profile", "/profile", "Profile"],
+    ["m-settings", "/settings", "Settings"],
   ];
 
-  for (const [shot, path, heading] of mobileRoutes) {
-    test(`${shot} ${path}`, async ({ page, context }) => {
-      const seeds = readSeeds();
-      await loginAs(context, page, seeds.admin, path);
+  test("all routes fit without overflow", async ({ page, context }) => {
+    test.setTimeout(240000);
+    const seeds = readSeeds();
+    await loginAs(context, page, seeds.admin, mobileRoutes[0][1]);
+    for (const [shot, path, heading] of mobileRoutes) {
+      await page.goto(path);
       if (typeof heading === "string") {
         await expect(page.getByRole("heading", { level: 1, name: heading, exact: true })).toBeVisible();
       } else {
@@ -150,6 +164,6 @@ test.describe("approved screens at mobile viewport", () => {
       }
       await expectNoOverflow(page);
       await page.screenshot({ path: `${SHOTS}/${shot}.png`, fullPage: true, animations: "disabled" });
-    });
-  }
+    }
+  });
 });

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@/api/client";
 import { Icon } from "@/components/icons";
+import { LoadingButton } from "@/components/LoadingButton";
 import { EmptyState, PageHeader, Panel, Skeleton } from "@/components/product";
 
 /** Admin employee management (port of legacy Web/Index.html v-admin).
@@ -99,6 +100,8 @@ export function AdminEmployeesPage() {
   const [addFirst, setAddFirst] = useState("");
   const [addLast, setAddLast] = useState("");
   const [addRole, setAddRole] = useState("employee");
+  const [seedBusy, setSeedBusy] = useState(false);
+  const [seedResult, setSeedResult] = useState("");
 
   useEffect(() => {
     let live = true;
@@ -191,6 +194,23 @@ export function AdminEmployeesPage() {
       setNotice(`${Number(r.revoked) || 0} Session(s) Revoked.`);
     } catch (e) {
       setNotice(msg(e));
+    }
+  }
+
+  async function seedDemo(): Promise<void> {
+    setSeedBusy(true);
+    setSeedResult("");
+    try {
+      const r = await api<{ ok: boolean; inserted: number; campaigns: number; creatives: number }>(
+        "POST", "/api/admin/demo/seed", {});
+      setSeedResult(
+        r.inserted > 0
+          ? `Seeded ${r.inserted} Row(s): ${r.campaigns} Campaign(s), ${r.creatives} Creative(s).`
+          : `Already Populated: ${r.campaigns} Campaign(s), ${r.creatives} Creative(s). Nothing Duplicated.`);
+    } catch (e) {
+      setSeedResult(msg(e));
+    } finally {
+      setSeedBusy(false);
     }
   }
 
@@ -523,6 +543,21 @@ export function AdminEmployeesPage() {
           </ul>
         </Panel>
       </div>
+
+      <div className="section-gap" />
+      <Panel
+        title="Demo Dataset"
+        sub="Populate the ten synthetic campaigns and creatives. Upserts only: existing rows are never duplicated or deleted."
+      >
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <LoadingButton type="button" className="btn-outline" loading={seedBusy}
+            loadingLabel="Seeding…" spinnerClass="spinner dark" disabled={seedBusy}
+            onClick={() => void seedDemo()}>
+            <Icon name="download" size={15} /> Seed Demo Data
+          </LoadingButton>
+          {seedResult ? <span className="panel-sub" role="status" style={{ margin: 0 }}>{seedResult}</span> : null}
+        </div>
+      </Panel>
 
       <div className="section-gap" />
       <Panel

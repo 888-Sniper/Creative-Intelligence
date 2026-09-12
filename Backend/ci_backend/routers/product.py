@@ -36,6 +36,7 @@ from creative_intel import (  # noqa: E402
     retention,
     schema,
     sync,
+    thumbnails,
 )
 from creative_intel import (
     jobs as jobs_mod,
@@ -115,7 +116,7 @@ def campaigns(request: Request, conn=Depends(get_product_conn),
     try:
         return benchmarks.benchmark(
             conn, "campaign",
-            benchmarks.Scope.from_query(query_multidict(request)).normalized())
+            benchmarks.Scope.from_query(query_multidict(request)).resolve(conn))
     except (ValueError, export_gate.ExportBlocked, emp.StoreError) as exc:
         raise _conflict(exc)
 
@@ -158,7 +159,7 @@ def benchmark_route(request: Request, conn=Depends(get_product_conn),
         return benchmarks.benchmark(
             conn, (q.get("group_by", ["hook_type"])[0]
                    if q.get("group_by") else "hook_type"),
-            benchmarks.Scope.from_query(q).normalized())
+            benchmarks.Scope.from_query(q).resolve(conn))
     except (ValueError, export_gate.ExportBlocked, emp.StoreError) as exc:
         raise _conflict(exc)
 
@@ -249,7 +250,7 @@ def kpis_compare(request: Request, conn=Depends(get_product_conn),
     q = query_multidict(request)
     try:
         scope = benchmarks.Scope.from_query(q)
-        return period_compare.compare_kpis(conn, scope.normalized())
+        return period_compare.compare_kpis(conn, scope.resolve(conn))
     except (ValueError, export_gate.ExportBlocked, emp.StoreError) as exc:
         raise _conflict(exc)
 
@@ -262,7 +263,7 @@ def kpis_daily(request: Request, conn=Depends(get_product_conn),
     try:
         scope = benchmarks.Scope.from_query(q)
         days = (q.get("days", [""])[0] if q.get("days") else "") or 30
-        return benchmarks.daily_series(conn, scope.normalized(), days)
+        return benchmarks.daily_series(conn, scope.resolve(conn), days)
     except (ValueError, export_gate.ExportBlocked, emp.StoreError) as exc:
         raise _conflict(exc)
 
@@ -1589,6 +1590,25 @@ def media_by_creative(key: str, request: Request,
     except ValueError as exc:
         raise HTTPException(status_code=404, detail={"error": str(exc)})
     return {"media": items}
+
+
+@router.get("/api/creatives/{key}/thumbnail")
+def creative_thumbnail(key: str, request: Request,
+                       conn=Depends(get_product_conn),
+                       _emp=Depends(get_current_employee)):
+    # Authenticated employees only: creative names are account data.
+    # Deterministic sample art for creatives without uploaded media;
+    # unknown creatives 404 so cards keep the gradient fallback.
+    _ = request
+    try:
+        svg = thumbnails.for_creative(conn, key)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail={"error": str(exc)})
+    if svg is None:
+        raise HTTPException(status_code=404,
+                            detail={"error": "Unknown creative."})
+    return Response(content=svg, media_type="image/svg+xml",
+                    headers={"Cache-Control": "private, no-store"})
 
 
 @router.get("/media/{media_id}")

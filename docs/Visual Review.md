@@ -25,7 +25,9 @@ is the acceptance gate.
 | `02-dashboard-1280.png` … | 1280x800 | All 14 routes |
 | `02-dashboard-1024.png` … | 1024x768 | All 14 routes |
 | `02-dashboard-768.png` …  | 768x1024 | All 14 routes |
-| `m-login.png`, `m-dashboard.png`, `m-compare.png`, `m-analyst.png` | 390x844 | Key mobile routes |
+| `m-login.png` | 390x844 | Login |
+| `m-dashboard.png` … `m-settings.png` (all 14 routes) | 390x844 | All 14 routes |
+| `p-compare.png`, `p-insights.png`, `p-ask.png` | 1440x1000 | Populated Compare / Insights / Ask |
 
 ## Review Procedure
 

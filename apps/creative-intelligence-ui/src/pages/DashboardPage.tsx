@@ -167,7 +167,7 @@ export function DashboardPage() {
   const [leftMetric, setLeftMetric] = useState<TrendMetric>("impressions");
   const [rightMetric, setRightMetric] = useState<TrendMetric>("clicks");
   const [benchMetric, setBenchMetric] = useState<BenchMetric>("ctr");
-  const [baseline, setBaseline] = useState("Industry");
+  const [baseline, setBaseline] = useState("Scope Average");
   const [tab, setTab] = useState("retention");
   const [curve, setCurve] = useState<Array<[number, number]> | null>(null);
   const [curveError, setCurveError] = useState("");
@@ -449,7 +449,7 @@ export function DashboardPage() {
               </select>
               <span className="mini-vs">vs.</span>
               <select aria-label="Benchmark baseline" value={baseline} onChange={(e) => setBaseline(e.target.value)}>
-                <option value="Industry">Industry</option>
+                <option value="Scope Average">Scope Average</option>
                 <option value="Top Performer">Top Performer</option>
               </select>
             </div>
@@ -470,13 +470,16 @@ export function DashboardPage() {
                 />
                 <div className="legend">
                   <span><i style={{ background: "#0E7C8C", borderRadius: 2 }} />Your Campaigns</span>
-                  <span><i style={{ background: "#CBD8E6", borderRadius: 2 }} />{baseline === "Top Performer" ? "Top Performer" : "Industry Benchmark"}</span>
+                  <span><i style={{ background: "#CBD8E6", borderRadius: 2 }} />{baseline === "Top Performer" ? "Top Performer" : "Scope Average"}</span>
                 </div>
               </>
             ) : <EmptyState text="No platform benchmarks in the current scope." />
           ) : <Skeleton height={250} />}
         </Panel>
       </div>
+      {/* Approved composition: Top Creatives and Retention sit side by
+        side beneath the charts (collapses to stacked under 1180px). */}
+      <div className="cols-2">
           <Panel
             title="Top Performing Creatives"
             action={<Link className="link-teal" to="/creatives">See All</Link>}
@@ -593,6 +596,7 @@ export function DashboardPage() {
               ) : <EmptyState text="No format data in the current scope." />
             ) : null}
           </Panel>
+      </div>
         </div>
         <Panel
           title="Insights & Recommendations"

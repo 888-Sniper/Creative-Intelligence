@@ -8,6 +8,7 @@ import { useTheme } from "@/app/useTheme";
 import type { ThemeMode } from "@/app/useTheme";
 import { Icon } from "@/components/icons";
 import { PageHeader, Panel } from "@/components/product";
+import { LoadingButton } from "@/components/LoadingButton";
 
 const PROVIDER_LABELS: Record<string, string> = {
   google: "Google",
@@ -139,6 +140,7 @@ export function SettingsPage() {
   const [prefs, setPrefs] = useState<Prefs>(loadPrefs);
   const [saved, setSaved] = useState<Prefs>(loadPrefs);
   const [status, setStatus] = useState("");
+  const [sessionOp, setSessionOp] = useState<null | "password" | "logout" | "logout-all">(null);
   const employee = me?.employee;
   const dirty = JSON.stringify(prefs) !== JSON.stringify(saved);
 
@@ -167,6 +169,16 @@ export function SettingsPage() {
     setSaved({ ...DEFAULTS });
     storageRemove();
     setStatus("Defaults Restored.");
+  };
+
+  const runSessionOp = async (name: NonNullable<typeof sessionOp>, fn: () => Promise<unknown>) => {
+    if (sessionOp !== null) return;
+    setSessionOp(name);
+    try {
+      await fn();
+    } finally {
+      setSessionOp((cur) => (cur === name ? null : cur));
+    }
   };
 
   const changePassword = async () => {
@@ -356,24 +368,24 @@ export function SettingsPage() {
                 <strong style={{ display: "block", fontSize: 13.5 }}>Password</strong>
                 <span className="panel-sub">Reset your password by email.</span>
               </div>
-              <button type="button" className="btn-outline" onClick={() => void changePassword()}>
+              <LoadingButton type="button" className="btn-outline" loading={sessionOp === "password"} loadingLabel="Sending…" spinnerClass="spinner dark" disabled={sessionOp !== null} onClick={() => void runSessionOp("password", changePassword)}>
                 Change Password
-              </button>
+              </LoadingButton>
             </div>
             <Toggle label="Two-Factor Authentication" body="Add an extra layer of security to your account."
               checked={prefs.twoFactor} onChange={(v) => setPref("twoFactor", v)} />
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", padding: "10px 0" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", padding: "10px 0", flexWrap: "wrap" }}>
               <div>
                 <strong style={{ display: "block", fontSize: 13.5 }}>Active Sessions</strong>
                 <span className="panel-sub">Manage your active sessions across devices.</span>
               </div>
-              <span style={{ display: "flex", gap: 8 }}>
-                <button type="button" className="btn-outline" onClick={() => void logout()}>
+              <span style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <LoadingButton type="button" className="btn-outline" loading={sessionOp === "logout"} loadingLabel="Signing Out…" spinnerClass="spinner dark" disabled={sessionOp !== null} onClick={() => void runSessionOp("logout", logout)}>
                   Log Out
-                </button>
-                <button type="button" className="btn-outline" onClick={() => void logoutAll()}>
+                </LoadingButton>
+                <LoadingButton type="button" className="btn-outline" loading={sessionOp === "logout-all"} loadingLabel="Signing Out…" spinnerClass="spinner dark" disabled={sessionOp !== null} onClick={() => void runSessionOp("logout-all", logoutAll)}>
                   Log Out All Sessions
-                </button>
+                </LoadingButton>
               </span>
             </div>
           </Panel>

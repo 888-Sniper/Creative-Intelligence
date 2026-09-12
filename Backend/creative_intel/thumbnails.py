@@ -10,9 +10,15 @@ genuinely available (unknown creative, backend error).
 """
 
 import hashlib
-from xml.sax.saxutils import escape as _escape
 
 WIDTH, HEIGHT = 480, 360
+
+
+def _escape(text: str) -> str:
+    """Minimal XML text escaper (no xml import: nothing is parsed here,
+    so there is no XXE surface; keeps the dependency tree unchanged)."""
+    return (str(text).replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;").replace('"', "&quot;"))
 
 
 def hue_for(key: str) -> int:

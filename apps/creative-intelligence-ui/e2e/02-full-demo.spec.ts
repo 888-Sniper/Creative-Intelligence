@@ -25,10 +25,20 @@ async function expectCleanDemo(page: Page) {
 /** Every async area finished: no loading skeleton may remain, and no
  *  button may be stuck in its loading state, when the capture is taken.
  *  (Status spinners elsewhere — e.g. background report jobs — are
- *  legitimate settled content, so only button spinners count.) */
+ *  legitimate settled content, so only button spinners count.
+ *  LoadingButton keeps both faces mounted for width stability with the
+ *  idle face visibility:hidden, so only a VISIBLE spinner is evidence
+ *  of a stuck request.) */
 async function expectReady(page: Page) {
   await expect(page.locator(".skel")).toHaveCount(0, { timeout: 30000 });
-  await expect(page.locator("button .spinner")).toHaveCount(0, { timeout: 30000 });
+  await expect(page.locator("button .spinner:visible")).toHaveCount(0, { timeout: 30000 });
+}
+
+/** No async button is stuck mid-request. LoadingButton marks the live
+ *  state with aria-busy, which — unlike button text — ignores the
+ *  hidden width-reservation face. */
+async function expectNoBusyButton(page: Page) {
+  await expect(page.locator('button[aria-busy="true"]')).toHaveCount(0, { timeout: 30000 });
 }
 
 /** Every rendered <img> under the selector decoded to real pixels
@@ -53,8 +63,10 @@ test.describe("full demo visuals", () => {
     const seeds = readSeeds();
     await loginAs(context, page, seeds.admin, "/");
     // Top-5 table: the heaviest demo campaigns lead on real seeded rows.
-    await expect(page.getByText("Spring Skincare Launch").first()).toBeVisible({ timeout: 30000 });
-    await expect(page.getByText("Built For Real Life").first()).toBeVisible();
+    // (Scoped to table cells: the filter selects carry the same names as
+    // hidden options earlier in the DOM.)
+    await expect(page.locator("td", { hasText: "Spring Skincare Launch" }).first()).toBeVisible({ timeout: 30000 });
+    await expect(page.locator("td", { hasText: "Built For Real Life" }).first()).toBeVisible();
     // The benchmark legend names the comparison honestly (the select
     // option with the same text is hidden by the closed dropdown).
     await expect(page.locator(".legend", { hasText: "Scope Average" })).toBeVisible();
@@ -99,8 +111,10 @@ test.describe("full demo visuals", () => {
     // acceptance capture is that completed four-way state: all four
     // cards plus every result section fully loaded.
     await expect(page.getByRole("button", { name: /^Remove / })).toHaveCount(4, { timeout: 60000 });
-    await expect(page.getByText("Spring Skincare Launch").first()).toBeVisible();
-    await expect(page.getByText("Comparing…")).toHaveCount(0);
+    // (Scoped to result cards: the picker selects carry the same names
+    // as hidden options earlier in the DOM.)
+    await expect(page.locator(".cmp-card h4", { hasText: "Spring Skincare Launch" })).toBeVisible();
+    await expectNoBusyButton(page);
     await expect(page.getByText("Select two to four campaigns or creatives, then Apply Comparison.")).toHaveCount(0);
     await expect(page.getByText("No daily data for the selected campaigns.")).toHaveCount(0);
     await expect(page.getByRole("img", { name: /comparison chart/ }).first()).toBeVisible({ timeout: 60000 });
@@ -122,7 +136,7 @@ test.describe("full demo visuals", () => {
     );
     await page.getByRole("button", { name: "Apply Comparison" }).click();
     await compared;
-    await expect(page.getByText("Comparing…")).toHaveCount(0);
+    await expectNoBusyButton(page);
     await expect(page.getByText("No daily data for the selected campaigns.")).toHaveCount(0);
     // Displayed selections match the requested three-way comparison.
     await expect(page.getByRole("button", { name: /^Remove / })).toHaveCount(3);

@@ -19,10 +19,9 @@ import {
   fmtMoney,
   fmtMult,
   platformLabel,
-  useCompare,
+  useCompareState,
   useDaily,
   useScopedApi,
-  type CompareResp,
   type DayPoint,
 } from "@/components/product";
 
@@ -173,7 +172,7 @@ export function DashboardPage() {
   const [curve, setCurve] = useState<Array<[number, number]> | null>(null);
   const [curveError, setCurveError] = useState("");
 
-  const compare: CompareResp | null = useCompare(applied);
+  const { data: compare, error: compareError } = useCompareState(applied);
   const daily = useDaily(30, applied);
   const [rangeBooted, setRangeBooted] = useState(false);
   const campaigns = useScopedApi<Record<string, CampaignTotals>>("/api/campaigns", applied);
@@ -444,9 +443,6 @@ export function DashboardPage() {
 
   return (
     <div className="dashboard">
-      {/* Scoped density (theme.css is read-only): tighter table rows so
-        more of Top Creatives reads without scrolling. */}
-      <style>{`.dashboard .dash-table td{padding-top:7px;padding-bottom:7px}`}</style>
       <PageHeader
         title={`Good ${daypart}, ${firstName}`}
         sub="Your creative performance at a glance."
@@ -462,8 +458,18 @@ export function DashboardPage() {
           </>
         )}
       />
-      {/* Team stays in the global scope but hides on Dashboard only. */}
+      {/* Team stays in the global scope but hides on Dashboard only.
+        A hidden-yet-active scope is never silent: the chip below names
+        it and clears it deliberately. */}
       <FilterPanel actions="none" showTeam={false} />
+      {filters.team ? (
+        <div className="chip-row" style={{ margin: "10px 0 0" }}>
+          <span className="chip-static">Team scope active: {filters.team}</span>
+          <button type="button" className="link-teal" onClick={() => setFilter("team", "")}>
+            Clear team filter
+          </button>
+        </div>
+      ) : null}
       {/* Approved composition: the Insights rail spans the full right
         side from the KPI row down (KPIs | Insights, Charts | Insights,
         Top Creatives + Retention | Insights). */}
@@ -484,6 +490,8 @@ export function DashboardPage() {
             </div>
           ))}
         </div>
+      ) : compareError ? (
+        <div className="panel"><EmptyState text={compareError} /></div>
       ) : (
         <div className="kpi-grid">
           {[0, 1, 2, 3].map((i) => <Skeleton key={i} height={118} />)}

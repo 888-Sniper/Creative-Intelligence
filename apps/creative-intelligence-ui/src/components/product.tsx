@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, scopedPath } from "@/api/client";
 import { scopeParams, useFilters } from "@/state/FilterContext";
 import { KpiTrend } from "@/components/KpiTrend";
@@ -24,6 +24,13 @@ export function fmtMult(n: number): string {
 export function fmtPct(n: number, digits = 1): string {
   return `${n.toFixed(digits)}%`;
 }
+/** Count-aware unit: plural(1, "Campaign") is "1 Campaign",
+ *  plural(2, "Campaign") is "2 Campaigns". Pass an explicit plural
+ *  for irregular nouns (plural(1, "KPI", "KPIs")). */
+export function plural(n: number, one: string, many?: string): string {
+  const m = many ?? `${one}s`;
+  return `${n} ${n === 1 ? one : m}`;
+}
 
 /* ------------------------- backend data hooks -------------------------- */
 interface CompareMetric extends KpiComparison {
@@ -37,17 +44,28 @@ export interface CompareResp {
   comparison: string | null;
   metrics: Record<string, CompareMetric>;
 }
-export function useCompare(refreshKey = 0) {
+export function useCompareState(refreshKey = 0): {
+  data: CompareResp | null; error: string; loading: boolean;
+} {
   const { filters } = useFilters();
   const [data, setData] = useState<CompareResp | null>(null);
+  const [error, setError] = useState("");
   useEffect(() => {
     let live = true;
     api<CompareResp>("GET", scopedPath("/api/kpis/compare", scopeParams(filters)))
-      .then((r) => live && setData(r))
-      .catch(() => live && setData(null));
+      .then((r) => {
+        if (!live) return;
+        setData(r);
+        setError("");
+      })
+      .catch((e) => live && setError(e instanceof Error ? e.message : String(e)));
     return () => { live = false; };
   }, [filters, refreshKey]);
-  return data;
+  return { data, error, loading: data === null && error === "" };
+}
+
+export function useCompare(refreshKey = 0) {
+  return useCompareState(refreshKey).data;
 }
 export interface DayPoint {
   date: string; impressions: number; clicks: number; spend: number;
@@ -77,6 +95,9 @@ export function scopeBody(scope: URLSearchParams): Record<string, string[]> {
   return out;
 }
 
+/* Shared fetch states are explicit: loading / ready / empty / error.
+ * Hooks return all three signals so pages never render an API failure
+ * as a permanent skeleton. */
 export function useScopedApi<T>(path: string, refreshKey = 0) {
   const { filters } = useFilters();
   const scopeKey = scopeParams(filters).toString();
@@ -92,7 +113,7 @@ export function useScopedApi<T>(path: string, refreshKey = 0) {
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path, scopeKey, refreshKey]);
-  return { data, error };
+  return { data, error, loading: data === null && error === "" };
 }
 
 export function platformLabel(value: string | null | undefined): string {
@@ -164,34 +185,242 @@ export function PageHeader({ title, sub, actions }: {
 }
 
 /* ----------------------------- filter panel ---------------------------- */
-const PLATFORMS = ["All Platforms", "Meta", "TikTok"];
-const FUNNELS = ["All Stages", "Upper", "Mid", "Lower"];
-const OBJECTIVES = ["All Objectives", "Conversions", "Traffic", "Leads",
-  "Awareness", "Video Views", "App Installs"];
+/* Explicit {value,label} pairs for every selector axis. Machine values
+ * are the backend-compatible scope tokens; labels are display only.
+ * Never derive one from the other by case-folding (that produced the
+ * Meta/meta class of mismatch where the controlled select held a value
+ * no <option> carried). An empty value always means "All". */
+export interface AxisOption { value: string; label: string; }
+const PLATFORMS: AxisOption[] = [
+  { value: "", label: "All Platforms" },
+  { value: "meta", label: "Meta" },
+  { value: "tiktok", label: "TikTok" },
+];
+const FUNNELS: AxisOption[] = [
+  { value: "", label: "All Stages" },
+  { value: "upper", label: "Upper" },
+  { value: "mid", label: "Mid" },
+  { value: "lower", label: "Lower" },
+];
+const OBJECTIVES: AxisOption[] = [
+  { value: "", label: "All Objectives" },
+  { value: "conversions", label: "Conversions" },
+  { value: "traffic", label: "Traffic" },
+  { value: "leads", label: "Leads" },
+  { value: "awareness", label: "Awareness" },
+  { value: "video_views", label: "Video Views" },
+  { value: "app_installs", label: "App Installs" },
+];
+const HOOK_TYPES: AxisOption[] = [
+  { value: "", label: "All Hook Types" },
+  { value: "question", label: "Question" },
+  { value: "bold_claim", label: "Bold Claim" },
+  { value: "demo_open", label: "Demo Open" },
+  { value: "social_proof", label: "Social Proof" },
+  { value: "offer", label: "Offer" },
+  { value: "story", label: "Story" },
+  { value: "pattern_interrupt", label: "Pattern Interrupt" },
+  { value: "testimonial", label: "Testimonial" },
+  { value: "other", label: "Other" },
+];
+const CREATOR_MODES: AxisOption[] = [
+  { value: "", label: "All Creatives" },
+  { value: "creator", label: "Creator" },
+  { value: "branded", label: "Branded" },
+  { value: "hybrid", label: "Hybrid" },
+];
+const FORMATS: AxisOption[] = [
+  { value: "", label: "All Formats" },
+  { value: "9:16 Video", label: "9:16 Video" },
+  { value: "4:5 Video", label: "4:5 Video" },
+  { value: "1:1 Video", label: "1:1 Video" },
+  { value: "16:9 Video", label: "16:9 Video" },
+];
+const KPI_OPTIONS: AxisOption[] = [
+  { value: "", label: "All KPIs" },
+  { value: "impressions", label: "Impressions" },
+  { value: "clicks", label: "Clicks" },
+  { value: "spend", label: "Spend" },
+  { value: "conversions", label: "Conversions" },
+  { value: "revenue", label: "Revenue" },
+  { value: "ctr", label: "CTR" },
+  { value: "cpc", label: "CPC" },
+  { value: "cpa", label: "CPA" },
+  { value: "cpm", label: "CPM" },
+  { value: "roas", label: "ROAS" },
+  { value: "vtr", label: "VTR" },
+];
 
-function LiveSelect({ label, value, options, onPick, aria }: {
-  label: string; value: string; options: string[];
-  onPick: (v: string) => void; aria: string;
+/** Legacy "all" sentinel normalises to "" (no constraint) so the
+ *  controlled select always holds a value an <option> carries. */
+function normAll(v: string): string {
+  return v === "all" ? "" : v;
+}
+
+function LiveSelect({ label, value, options, onPick, aria, id }: {
+  label: string; value: string; options: AxisOption[];
+  onPick: (v: string) => void; aria: string; id?: string;
 }) {
   return (
     <div className="field">
-      <label>{label}</label>
-      <select aria-label={aria} value={value}
+      <label htmlFor={id}>{label}</label>
+      <select id={id} aria-label={aria} value={normAll(value)}
         onChange={(e) => onPick(e.target.value)}>
-        {options.map((o) => <option key={o} value={o}>{o}</option>)}
+        {options.map((o) => <option key={o.label} value={o.value}>{o.label}</option>)}
       </select>
     </div>
   );
 }
 
-const HOOK_TYPES = ["All Hook Types", "Question", "Bold Claim", "Demo Open",
-  "Social Proof", "Offer", "Story", "Pattern Interrupt", "Testimonial", "Other"];
-const CREATOR_MODES = ["All Creatives", "Creator", "Branded", "Hybrid"];
-const FORMATS = ["All Formats", "9:16 Video", "4:5 Video", "1:1 Video", "16:9 Video"];
+/** Selector populated from real /api/campaigns/meta attribute data.
+ *  A stored value missing from the list (stale scope, fresh data) is
+ *  appended so the control never silently drops an active filter. */
+export function MetaSelect({ id, label, allLabel, values, value, onPick }: {
+  id: string; label: string; allLabel: string; values: string[];
+  value: string; onPick: (v: string) => void;
+}) {
+  const v = normAll(value);
+  const opts = v && !values.includes(v) ? [...values, v] : values;
+  return (
+    <div className="field">
+      <label htmlFor={id}>{label}</label>
+      <select id={id} aria-label={label} value={v}
+        onChange={(e) => onPick(e.target.value)}>
+        <option value="">{allLabel}</option>
+        {opts.map((o) => <option key={o} value={o}>{o}</option>)}
+      </select>
+    </div>
+  );
+}
 
-function titleAxis(v: string, all: string): string {
+export interface CampaignMetaRow {
+  name: string; client: string; team: string; platforms: string[];
+  markets: string[]; objectives: string[]; verticals: string[];
+  projects: string[]; last_date: string; status: string;
+}
+
+export interface CampaignMeta {
+  campaigns: CampaignMetaRow[];
+  demo: boolean;
+}
+
+let metaPromise: Promise<CampaignMeta> | null = null;
+/** Test hook: drop the cached metadata so each test fetches fresh. */
+export function __resetCampaignMetaCache(): void {
+  metaPromise = null;
+}
+function fetchMeta(): Promise<CampaignMeta> {
+  if (!metaPromise) {
+    metaPromise = api<CampaignMeta>("GET", "/api/campaigns/meta")
+      .catch(() => ({ campaigns: [], demo: false }));
+  }
+  return metaPromise;
+}
+
+/** Shared campaign-attribute metadata (clients, projects, teams,
+ *  campaigns, verticals, markets) plus the demo-workspace flag.
+ *  Fetched once per app lifetime; every selector on every page reads
+ *  the same lists, and every synthetic showcase gates on `demo`. */
+export function useCampaignMeta(): {
+  data: CampaignMeta | null;
+  error: string; loading: boolean;
+} {
+  const [data, setData] = useState<CampaignMeta | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let live = true;
+    fetchMeta()
+      .then((r) => live && setData(r))
+      .catch((e) => live && setError(e instanceof Error ? e.message : String(e)));
+    return () => { live = false; };
+  }, []);
+  return { data, error, loading: data === null && error === "" };
+}
+
+function distinct(rows: CampaignMetaRow[], pick: (r: CampaignMetaRow) => string[]): string[] {
+  return [...new Set(rows.flatMap(pick).map((s) => s.trim()).filter(Boolean))].sort();
+}
+
+export function titleAxis(v: string, all: string): string {
   if (!v) return all;
   return v.split("_").map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w)).join(" ");
+}
+
+function fmtShortDate(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  if (!m) return "";
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${months[Number(m[2]) - 1] ?? m[2]} ${Number(m[3])}, ${m[1]}`;
+}
+
+/** ONE compact Date Range field: a single button shows the active range
+ *  (or All Time when unbounded) and opens a small popover with the
+ *  From/To inputs. Same setFilter writes as the old joined control —
+ *  only the presentation collapses to one grid cell. */
+export function DateRangeField({ id }: { id: string }) {
+  const { filters, setFilter } = useFilters();
+  const [open, setOpen] = useState(false);
+  const boxRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open ]);
+
+  const from = fmtShortDate(filters.date_from);
+  const to = fmtShortDate(filters.date_to);
+  /* Same-year ranges drop the first year ("Aug 13 – Sep 11, 2026") so
+   * the single field fits its grid cell without truncating. */
+  const yearOf = (s: string) => /,\s*(\d{4})$/.exec(s)?.[1] ?? "";
+  const sameYear = from !== "" && yearOf(from) !== "" && yearOf(from) === yearOf(to);
+  const shortFrom = sameYear ? from.replace(/,\s*\d{4}$/, "") : from;
+  const label = from || to ? `${shortFrom || "…"} – ${to || "…"}` : "All Time";
+  return (
+    <div className="field">
+      <label id={`${id}-label`}>Date Range</label>
+      <div className="daterange" ref={boxRef}>
+        <button type="button" className="daterange-btn" aria-labelledby={`${id}-label daterange-val-${id}`}
+          aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+          <Icon name="calendar" size={15} />
+          <span id={`daterange-val-${id}`}>{label}</span>
+        </button>
+        {open ? (
+          <div className="daterange-pop" role="group" aria-labelledby={`${id}-label`}>
+            <div className="field">
+              <label htmlFor={`${id}-from`}>From</label>
+              <input id={`${id}-from`} type="date" aria-label="From date" value={filters.date_from}
+                onChange={(e) => setFilter("date_from", e.target.value)} />
+            </div>
+            <div className="field">
+              <label htmlFor={`${id}-to`}>To</label>
+              <input id={`${id}-to`} type="date" aria-label="To date" value={filters.date_to}
+                onChange={(e) => setFilter("date_to", e.target.value)} />
+            </div>
+            <div className="daterange-actions">
+              <button type="button" className="link-teal"
+                onClick={() => { setFilter("date_from", ""); setFilter("date_to", ""); }}>
+                Clear
+              </button>
+              <button type="button" className="btn-primary" onClick={() => setOpen(false)}>
+                Done
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
 }
 
 export function FilterPanel({ onApply, kpi = true, creative = false, trailing, actions = "panel", showTeam = true }: {
@@ -202,49 +431,37 @@ export function FilterPanel({ onApply, kpi = true, creative = false, trailing, a
   showTeam?: boolean;
 }) {
   const { filters, setFilter, clearFilters } = useFilters();
-  const pick = (
-    key: "platform" | "funnel" | "objective" | "hook_type" | "creator_vs_branded" | "format",
-    all: string,
-  ) => (v: string) => setFilter(key, v === all ? "" : v.toLowerCase().replace(/ /g, "_"));
+  const meta = useCampaignMeta();
+  const rows = meta.data?.campaigns ?? [];
+  const clients = distinct(rows, (r) => [r.client]);
+  const campaigns = distinct(rows, (r) => [r.name]);
   if (creative) {
     return (
       <section className="panel" aria-label="Filters">
         <div className="filter-grid">
-          <div className="field">
-            <label htmlFor="f-client">Client</label>
-            <input id="f-client" placeholder="All Clients" value={filters.client}
-              onChange={(e) => setFilter("client", e.target.value)} />
-          </div>
-          <div className="field">
-            <label htmlFor="f-campaign">Campaign</label>
-            <input id="f-campaign" placeholder="All Campaigns" value={filters.campaign}
-              onChange={(e) => setFilter("campaign", e.target.value)} />
-          </div>
-          <LiveSelect label="Hook Type" aria="Hook Type"
-            value={titleAxis(filters.hook_type, "All Hook Types")} options={HOOK_TYPES}
-            onPick={pick("hook_type", "All Hook Types")} />
-          <LiveSelect label="Format" aria="Format"
-            value={filters.format || "All Formats"}
-            options={FORMATS} onPick={(v) => setFilter("format", v === "All Formats" ? "" : v)} />
-          <LiveSelect label="Creator vs Branded" aria="Creator vs Branded"
-            value={titleAxis(filters.creator_vs_branded, "All Creatives")} options={CREATOR_MODES}
-            onPick={pick("creator_vs_branded", "All Creatives")} />
-          <LiveSelect label="Platform" aria="Platform"
-            value={filters.platform || "All Platforms"} options={PLATFORMS}
-            onPick={pick("platform", "All Platforms")} />
-          <LiveSelect label="Funnel Stage" aria="Funnel Stage"
-            value={titleAxis(filters.funnel, "All Stages")} options={FUNNELS}
-            onPick={pick("funnel", "All Stages")} />
+          <MetaSelect id="f-client" label="Client" allLabel="All Clients"
+            values={clients} value={filters.client}
+            onPick={(v) => setFilter("client", v)} />
+          <MetaSelect id="f-campaign" label="Campaign" allLabel="All Campaigns"
+            values={campaigns} value={filters.campaign}
+            onPick={(v) => setFilter("campaign", v)} />
+          <LiveSelect id="f-hook" label="Hook Type" aria="Hook Type"
+            value={filters.hook_type} options={HOOK_TYPES}
+            onPick={(v) => setFilter("hook_type", v)} />
+          <LiveSelect id="f-format" label="Format" aria="Format"
+            value={filters.format} options={FORMATS}
+            onPick={(v) => setFilter("format", v)} />
+          <LiveSelect id="f-creator" label="Creator vs Branded" aria="Creator vs Branded"
+            value={filters.creator_vs_branded} options={CREATOR_MODES}
+            onPick={(v) => setFilter("creator_vs_branded", v)} />
+          <LiveSelect id="f-platform" label="Platform" aria="Platform"
+            value={filters.platform} options={PLATFORMS}
+            onPick={(v) => setFilter("platform", v)} />
+          <LiveSelect id="f-funnel" label="Funnel Stage" aria="Funnel Stage"
+            value={filters.funnel} options={FUNNELS}
+            onPick={(v) => setFilter("funnel", v)} />
           {trailing}
-          <div className="field">
-            <label id="f-date-label">Date Range</label>
-            <div className="date-pair" role="group" aria-labelledby="f-date-label" style={{ flexWrap: "nowrap" }}>
-              <input type="date" aria-label="From date" value={filters.date_from}
-                onChange={(e) => setFilter("date_from", e.target.value)} />
-              <input type="date" aria-label="To date" value={filters.date_to}
-                onChange={(e) => setFilter("date_to", e.target.value)} />
-            </div>
-          </div>
+          <DateRangeField id="f-date" />
         </div>
         {actions === "panel" ? (
           <div className="filter-actions">
@@ -261,68 +478,48 @@ export function FilterPanel({ onApply, kpi = true, creative = false, trailing, a
       </section>
     );
   }
+  const projects = distinct(rows, (r) => r.projects ?? []);
+  const teams = distinct(rows, (r) => [r.team]);
+  const verticals = distinct(rows, (r) => r.verticals ?? []);
+  const markets = distinct(rows, (r) => r.markets ?? []);
   return (
     <section className="panel" aria-label="Filters">
       <div className="filter-grid">
-        <div className="field">
-          <label htmlFor="f-client">Client</label>
-          <input id="f-client" placeholder="All Clients" value={filters.client}
-            onChange={(e) => setFilter("client", e.target.value)} />
-        </div>
-        <div className="field">
-          <label htmlFor="f-project">Project</label>
-          <input id="f-project" placeholder="All Projects" value={filters.project}
-            onChange={(e) => setFilter("project", e.target.value)} />
-        </div>
+        <MetaSelect id="f-client" label="Client" allLabel="All Clients"
+          values={clients} value={filters.client}
+          onPick={(v) => setFilter("client", v)} />
+        <MetaSelect id="f-project" label="Project" allLabel="All Projects"
+          values={projects} value={filters.project}
+          onPick={(v) => setFilter("project", v)} />
         {showTeam ? (
-          <div className="field">
-            <label htmlFor="f-team">Team</label>
-            <input id="f-team" placeholder="All Teams" value={filters.team}
-              onChange={(e) => setFilter("team", e.target.value)} />
-          </div>
+          <MetaSelect id="f-team" label="Team" allLabel="All Teams"
+            values={teams} value={filters.team}
+            onPick={(v) => setFilter("team", v)} />
         ) : null}
-        <div className="field">
-          <label htmlFor="f-campaign">Campaign</label>
-          <input id="f-campaign" placeholder="All Campaigns" value={filters.campaign}
-            onChange={(e) => setFilter("campaign", e.target.value)} />
-        </div>
-        <LiveSelect label="Platform" aria="Platform"
-          value={filters.platform || "All Platforms"} options={PLATFORMS}
-          onPick={pick("platform", "All Platforms")} />
-        <div className="field">
-          <label htmlFor="f-vertical">Vertical</label>
-          <input id="f-vertical" placeholder="All Verticals" value={filters.vertical}
-            onChange={(e) => setFilter("vertical", e.target.value)} />
-        </div>
-        <div className="field">
-          <label htmlFor="f-market">Market</label>
-          <input id="f-market" placeholder="All Markets" value={filters.market}
-            onChange={(e) => setFilter("market", e.target.value)} />
-        </div>
-        <LiveSelect label="Funnel Stage" aria="Funnel Stage"
-          value={titleAxis(filters.funnel, "All Stages")} options={FUNNELS}
-          onPick={pick("funnel", "All Stages")} />
-        <LiveSelect label="Campaign Objective" aria="Campaign Objective"
-          value={filters.objective || "All Objectives"} options={OBJECTIVES}
-          onPick={pick("objective", "All Objectives")} />
+        <MetaSelect id="f-campaign" label="Campaign" allLabel="All Campaigns"
+          values={campaigns} value={filters.campaign}
+          onPick={(v) => setFilter("campaign", v)} />
+        <LiveSelect id="f-platform" label="Platform" aria="Platform"
+          value={filters.platform} options={PLATFORMS}
+          onPick={(v) => setFilter("platform", v)} />
+        <MetaSelect id="f-vertical" label="Vertical" allLabel="All Verticals"
+          values={verticals} value={filters.vertical}
+          onPick={(v) => setFilter("vertical", v)} />
+        <MetaSelect id="f-market" label="Market" allLabel="All Markets"
+          values={markets} value={filters.market}
+          onPick={(v) => setFilter("market", v)} />
+        <LiveSelect id="f-funnel" label="Funnel Stage" aria="Funnel Stage"
+          value={filters.funnel} options={FUNNELS}
+          onPick={(v) => setFilter("funnel", v)} />
+        <LiveSelect id="f-objective" label="Campaign Objective" aria="Campaign Objective"
+          value={filters.objective} options={OBJECTIVES}
+          onPick={(v) => setFilter("objective", v)} />
         {kpi ? (
-          <div className="field">
-            <label htmlFor="f-kpi">KPI</label>
-            <input id="f-kpi" placeholder="All KPIs" value={filters.kpi}
-              onChange={(e) => setFilter("kpi", e.target.value)} />
-          </div>
+          <LiveSelect id="f-kpi" label="KPI" aria="KPI"
+            value={filters.kpi} options={KPI_OPTIONS}
+            onPick={(v) => setFilter("kpi", v)} />
         ) : <div />}
-        {/* ONE compact Date Range field: From/To share a single row
-          in one field (never two stacked date inputs). */}
-        <div className="field">
-          <label id="f-date-label">Date Range</label>
-          <div className="date-pair" role="group" aria-labelledby="f-date-label" style={{ flexWrap: "nowrap" }}>
-            <input type="date" aria-label="From date" value={filters.date_from}
-              onChange={(e) => setFilter("date_from", e.target.value)} />
-            <input type="date" aria-label="To date" value={filters.date_to}
-              onChange={(e) => setFilter("date_to", e.target.value)} />
-          </div>
-        </div>
+        <DateRangeField id="f-date" />
       </div>
       {actions === "panel" ? (
         <div className="filter-actions">
@@ -351,17 +548,18 @@ export function KpiCard({ label, display, icon, tint, metricLabel, compare }: {
   const metrics = compare?.metrics ?? {};
   const m = metrics[metricLabel] ?? metrics[metricLabel.toLowerCase()]
     ?? metrics[metricLabel.toUpperCase()];
-  // KPI hierarchy: Title Case softer label above a stronger, larger
-  // number. theme.css is read-only, so the emphasis lives here inline
-  // and hand-rolled cards on Campaigns/Creatives mirror these values.
+  // KPI hierarchy lives in theme.css (.kpi-label Title Case 13/600,
+  // .kpi-value 27/800): one authoritative definition shared by every
+  // KpiCard and hand-rolled card. Only the per-card icon tint stays
+  // inline because it is data, not system.
   return (
     <div className="kpi-card">
       <span className="kpi-ico" style={{ background: tint }}>
-        <Icon name={icon} size={22} />
+        <Icon name={icon} size={20} />
       </span>
       <div className="kpi-body">
-        <div className="kpi-label" style={{ fontSize: 13, fontWeight: 600, color: "var(--shell-muted)" }}>{label}</div>
-        <div className="kpi-value" style={{ fontSize: 27, fontWeight: 800 }}>{display}</div>
+        <div className="kpi-label">{label}</div>
+        <div className="kpi-value">{display}</div>
         {m && compare ? (
           <KpiTrend metricLabel={metricLabel}
             comparison={{
@@ -402,14 +600,56 @@ export function InsightList({ items }: { items: Insight[] }) {
   );
 }
 
-export function Panel({ title, action, sub, children }: {
+/* Accessible info explainer: hover, focus, keyboard, touch/click,
+ * Escape and outside-click all work. Never rely on the browser
+ * `title` attribute alone for meaning. */
+export function InfoTip({ label, text }: { label: string; text: string }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("mousedown", onDoc);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("mousedown", onDoc);
+    };
+  }, [open ]);
+  return (
+    <span className="trend-tooltip-anchor" ref={ref}>
+      <button type="button" className="trend-info" style={{ width: 18, height: 18, fontSize: 10 }}
+        aria-label={label} aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}
+        onFocus={() => setOpen(true)} onBlur={() => setOpen(false)}>
+        <span aria-hidden="true">i</span>
+      </button>
+      {open ? <span className="kpi-tip" role="status">{text}</span> : null}
+    </span>
+  );
+}
+
+export function Panel({ title, action, sub, icon, tint, children }: {
   title: string; action?: React.ReactNode; sub?: string;
+  icon?: string; tint?: string;
   children: React.ReactNode;
 }) {
   return (
     <section className="panel">
       <div className="panel-head">
-        <div>
+        {icon ? (
+          <span className="insight-ico" aria-hidden="true"
+            style={{ background: tint ?? "#E7F1FB", flex: "0 0 auto", marginRight: 2 }}>
+            <Icon name={icon} size={20} />
+          </span>
+        ) : null}
+        <div style={{ flex: "1 1 auto", minWidth: 0 }}>
           <h2 className="panel-title">{title}</h2>
           {sub ? <p className="panel-sub">{sub}</p> : null}
         </div>

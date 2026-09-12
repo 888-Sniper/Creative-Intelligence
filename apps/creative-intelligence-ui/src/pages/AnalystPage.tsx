@@ -6,11 +6,13 @@ import { LoadingButton } from "@/components/LoadingButton";
 import {
   CreativeThumb,
   EmptyState,
+  MetaSelect,
   Panel,
   Skeleton,
   compareDisplayed,
   fmtCompact,
   platformLabel,
+  useCampaignMeta,
   useScopedApi,
 } from "@/components/product";
 
@@ -317,8 +319,9 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
   const language = locale === "auto" ? undefined : locale;
   const [busy, setBusy] = useState(false);
   // Which action owns the in-flight request: only that button spins,
-  // the other stays merely disabled (per-button spinner requirement).
-  const [op, setOp] = useState<null | "run" | "ask">(null);
+  // the others stay merely disabled. "ask" and "three-points" are
+  // distinct actions so the 3 Points button never lights up Ask.
+  const [op, setOp] = useState<null | "run" | "ask" | "three-points">(null);
   const [exporting, setExporting] = useState<null | "one-pager" | "xlsx" | "workbook">(null);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -387,7 +390,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
     }
   }
 
-  async function send(kind: "run" | "ask", maxPoints?: number, override?: string) {
+  async function send(kind: "run" | "ask" | "three-points", maxPoints?: number, override?: string) {
     const question = (override ?? input).trim();
     if (!question || busy) return;
     // A07: stamp the owning identity; a late answer from the previous
@@ -795,6 +798,13 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
     () => Object.keys(campaignsRec.data ?? {}).sort(),
     [campaignsRec.data],
   );
+  const metaRows = useCampaignMeta().data?.campaigns ?? [];
+  const metaClients = useMemo(
+    () => [...new Set(metaRows.map((r) => r.client.trim()).filter(Boolean))].sort(),
+    [metaRows]);
+  const metaProjects = useMemo(
+    () => [...new Set(metaRows.flatMap((r) => r.projects ?? []).map((s) => s.trim()).filter(Boolean))].sort(),
+    [metaRows]);
 
   function renderTable(table: AnalystTable, key: number) {
     return (
@@ -895,15 +905,17 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
             <LoadingButton type="submit" className="btn-primary" loading={op === "ask"} loadingLabel="Analysing…" disabled={busy || !input.trim()}>
               Ask
             </LoadingButton>
-            <button
+            <LoadingButton
               type="button"
               className="btn-outline"
               disabled={busy || !input.trim()}
-              onClick={() => void send("ask", 3)}
+              loading={op === "three-points"}
+              loadingLabel="Condensing…"
+              onClick={() => void send("three-points", 3)}
               title="Condense The Answer To 3 Points"
             >
               3 Points
-            </button>
+            </LoadingButton>
           </div>
         </form>
         <div className="prompt-chips" aria-label="Try asking">
@@ -930,7 +942,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
           </button>
         )}
       >
-        <div className="filter-grid" style={{ gridTemplateColumns: "repeat(5,minmax(0,1fr))" }}>
+        <div className="filter-grid">
           <div className="field">
             <label htmlFor="a-campaign">Campaign</label>
             <select id="a-campaign" value={filters.campaign}
@@ -989,17 +1001,13 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
           <summary className="link-teal" style={{ cursor: "pointer", display: "inline-block" }}>
             More filters, conversations &amp; exports
           </summary>
-          <div className="filter-grid" style={{ gridTemplateColumns: "repeat(2,minmax(0,1fr))", marginTop: 10 }}>
-            <div className="field">
-              <label htmlFor="a-client">Client</label>
-              <input id="a-client" placeholder="All Clients" value={filters.client}
-                onChange={(e) => setFilter("client", e.target.value)} />
-            </div>
-            <div className="field">
-              <label htmlFor="a-project">Project</label>
-              <input id="a-project" placeholder="All Projects" value={filters.project}
-                onChange={(e) => setFilter("project", e.target.value)} />
-            </div>
+          <div className="cols-2-even" style={{ marginTop: 10 }}>
+            <MetaSelect id="a-client" label="Client" allLabel="All Clients"
+              values={metaClients} value={filters.client}
+              onPick={(v) => setFilter("client", v)} />
+            <MetaSelect id="a-project" label="Project" allLabel="All Projects"
+              values={metaProjects} value={filters.project}
+              onPick={(v) => setFilter("project", v)} />
           </div>
           <div className="chip-row" style={{ marginTop: 10 }}>
             <LoadingButton type="button" className="btn-outline" onClick={() => void startConversation()}
@@ -1071,12 +1079,12 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
               {statCards.map((s) => (
                 <div className="kpi-card" key={s.label}>
                   <span className="kpi-ico" style={{ background: s.tint }}>
-                    <Icon name={s.icon} size={22} />
+                    <Icon name={s.icon} size={20} />
                   </span>
                   <div className="kpi-body">
                     <div className="kpi-label">{s.label}</div>
                     <div className="kpi-value">{s.value}</div>
-                    <div className="kpi-label" style={{ textTransform: "none", letterSpacing: 0 }}>
+                    <div className="kpi-label">
                       {s.sub}
                     </div>
                   </div>

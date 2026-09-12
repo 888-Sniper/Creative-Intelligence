@@ -6,7 +6,9 @@ import { Icon } from "@/components/icons";
 import { LoadingButton } from "@/components/LoadingButton";
 import { GroupBars, TrendChart } from "@/components/charts";
 import {
+  DateRangeField,
   EmptyState,
+  InfoTip,
   InsightList,
   KpiCard,
   PageHeader,
@@ -16,7 +18,7 @@ import {
   fmtMoney,
   fmtMult,
   platformLabel,
-  useCompare,
+  useCompareState,
   useDaily,
   useScopedApi,
 } from "@/components/product";
@@ -35,7 +37,8 @@ interface CampaignRow {
  * (unscoped attribute data: client, platforms, derived status). */
 interface CampaignMeta {
   name: string; client: string; team: string; platforms: string[]; markets: string[];
-  objectives: string[]; verticals: string[]; last_date: string; status: string;
+  objectives: string[]; verticals: string[]; projects: string[];
+  last_date: string; status: string;
 }
 
 interface BenchSummary extends CampaignRow {
@@ -81,9 +84,12 @@ export function CampaignsPage() {
   const [applied, setApplied] = useState(0);
   const [moreFilters, setMoreFilters] = useState(false);
   const [platMetric, setPlatMetric] = useState<(typeof PLATFORM_METRICS)[number]["value"]>("spend");
-  const [search, setSearch] = useState("");
+  /* Global header search deep-links here: ?find= pre-fills the name
+   * search so the hit is visible immediately. */
+  const [search, setSearch] = useState(
+    () => new URLSearchParams(location.search).get("find") ?? "");
 
-  const compare = useCompare(applied);
+  const { data: compare, error: compareError } = useCompareState(applied);
   const [focus, setFocus] = useState<CompareLike | null>(null);
   const daily = useDaily(90, applied);
   const campaigns = useScopedApi<Record<string, CampaignRow>>("/api/campaigns", applied);
@@ -142,6 +148,12 @@ export function CampaignsPage() {
     [meta.data]);
   const metaObjectives = useMemo(
     () => [...new Set((meta.data?.campaigns ?? []).flatMap((c) => c.objectives))].sort(),
+    [meta.data]);
+  const metaProjects = useMemo(
+    () => [...new Set((meta.data?.campaigns ?? []).flatMap((c) => c.projects ?? []))].sort(),
+    [meta.data]);
+  const metaVerticals = useMemo(
+    () => [...new Set((meta.data?.campaigns ?? []).flatMap((c) => c.verticals))].sort(),
     [meta.data]);
 
   /* Table, KPI cards, charts and recommendations all read the same
@@ -277,7 +289,7 @@ export function CampaignsPage() {
         compare: {
           names,
           kind: "campaign" as const,
-          kpi: filters.kpi === "all" ? "roas" : filters.kpi,
+          kpi: !filters.kpi || filters.kpi === "all" ? "roas" : filters.kpi,
         },
       },
     });
@@ -329,18 +341,22 @@ export function CampaignsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expanded]);
 
+  const kpiKey = !filters.kpi || filters.kpi === "all" ? "roas" : filters.kpi;
   const benchName = initial.name ?? [...selected][0] ?? rows[0]?.name ?? null;
   const benchVal = focus && benchName
-    ? focus.metrics[filters.kpi === "all" ? "roas" : filters.kpi]?.current ?? null
+    ? focus.metrics[kpiKey]?.current ?? null
     : null;
 
+  /* Shared FilterPanel stores "no constraint" as ""; the legacy "all"
+   *  sentinel normalises to "" here so every controlled select always
+   *  holds a value one of its <option>s carries. */
   const selectProps = (key: "client" | "campaign" | "platform" | "objective" | "market" | "team" | "kpi") => ({
-    value: filters[key],
+    value: filters[key] === "all" ? "" : filters[key],
     onChange: (e: React.ChangeEvent<HTMLSelectElement>) => setFilter(key, e.target.value),
   });
   const fmtBench = (v: number | null) => {
     if (v == null) return "—";
-    const k = filters.kpi === "all" ? "roas" : filters.kpi;
+    const k = kpiKey;
     if (k === "roas") return `${v.toFixed(1)}x`;
     if (k === "spend" || k === "cpa" || k === "cpc") return fmtMoney(v);
     if (k === "ctr") return `${(v * 100).toFixed(1)}%`;
@@ -349,9 +365,6 @@ export function CampaignsPage() {
 
   return (
     <div className="campaigns">
-      {/* Scoped density (theme.css is read-only): shallower filter card,
-        tighter grid and table rows so the table reads higher. */}
-      <style>{`.campaigns .panel{padding:16px 18px}.campaigns .filter-grid{gap:8px 10px}.campaigns .tbl td{padding-top:7px;padding-bottom:7px}`}</style>
       <PageHeader
         title="Campaigns"
         sub="Plan, monitor, and optimize your creative campaigns with real-time insights."
@@ -367,12 +380,14 @@ export function CampaignsPage() {
           </>
         )}
       />
-      <Panel title="Campaign Filters">
+      {/* Approved composition goes straight into the controls:
+        no extra "Campaign Filters" heading. */}
+      <section className="panel" aria-label="Campaign filters">
         <div className="filter-grid">
           <div className="field">
             <label htmlFor="c-client">Client</label>
             <select id="c-client" {...selectProps("client")}>
-              <option value="all">All Clients</option>
+              <option value="">All Clients</option>
               {metaClients.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
           </div>
@@ -384,11 +399,8 @@ export function CampaignsPage() {
               exactly "Campaign Status". */}
             <span style={{ display: "flex", alignItems: "center", gap: 6, margin: "0 0 6px" }}>
               <label htmlFor="c-status" style={{ margin: 0 }}>Campaign Status</label>
-              <button type="button" className="trend-info" style={{ width: 18, height: 18, fontSize: 10 }}
-                title="Activity-derived status from recent ad activity — not the ad platform's own campaign status."
-                aria-label="How campaign status is determined">
-                <span aria-hidden="true">i</span>
-              </button>
+              <InfoTip label="How campaign status is determined"
+                text="Activity-derived status from recent ad activity — not the ad platform's own campaign status." />
             </span>
             <select id="c-status" value={filters.status || "all"}
               title="Activity-derived status from recent ad activity — not the ad platform's own campaign status."
@@ -401,7 +413,7 @@ export function CampaignsPage() {
           <div className="field">
             <label htmlFor="c-platform">Platform</label>
             <select id="c-platform" {...selectProps("platform")}>
-              <option value="all">All Platforms</option>
+              <option value="">All Platforms</option>
               <option value="meta">Meta</option>
               <option value="tiktok">TikTok</option>
             </select>
@@ -409,33 +421,25 @@ export function CampaignsPage() {
           <div className="field">
             <label htmlFor="c-objective">Campaign Objective</label>
             <select id="c-objective" {...selectProps("objective")}>
-              <option value="all">All Objectives</option>
+              <option value="">All Objectives</option>
               {metaObjectives.map((o) => <option key={o} value={o}>{o}</option>)}
             </select>
           </div>
           <div className="field">
             <label htmlFor="c-team">Team</label>
             <select id="c-team" {...selectProps("team")}>
-              <option value="all">All Teams</option>
+              <option value="">All Teams</option>
               {metaTeams.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
           </div>
           <div className="field">
             <label htmlFor="c-market">Market</label>
             <select id="c-market" {...selectProps("market")}>
-              <option value="all">All Markets</option>
+              <option value="">All Markets</option>
               {metaMarkets.map((m) => <option key={m} value={m}>{m}</option>)}
             </select>
           </div>
-          <div className="field">
-            <label id="c-date-label">Date Range</label>
-            <div className="date-pair" role="group" aria-labelledby="c-date-label" style={{ flexWrap: "nowrap" }}>
-              <input type="date" aria-label="From date" value={filters.date_from}
-                onChange={(e) => setFilter("date_from", e.target.value)} />
-              <input type="date" aria-label="To date" value={filters.date_to}
-                onChange={(e) => setFilter("date_to", e.target.value)} />
-            </div>
-          </div>
+          <DateRangeField id="c-date" />
           <div className="field">
             <label htmlFor="c-spend">Spend Range</label>
             <select id="c-spend" value={spendBand} onChange={(e) => setSpendBand(e.target.value)}>
@@ -447,8 +451,8 @@ export function CampaignsPage() {
           </div>
           <div className="field">
             <label htmlFor="c-kpi">KPI Focus</label>
-            <select id="c-kpi" {...selectProps("kpi")}>
-              <option value="all">All KPIs</option>
+            <select id="c-kpi" {...selectProps("kpi")} value={filters.kpi === "all" ? "" : filters.kpi}>
+              <option value="">All KPIs</option>
               <option value="impressions">Impressions</option>
               <option value="clicks">Clicks</option>
               <option value="spend">Spend</option>
@@ -469,20 +473,22 @@ export function CampaignsPage() {
             <>
               <div className="field">
                 <label htmlFor="c-project">Project</label>
-                <select id="c-project" value={filters.project} onChange={(e) => setFilter("project", e.target.value)}>
-                  <option value="all">All Projects</option>
+                <select id="c-project" value={filters.project === "all" ? "" : filters.project} onChange={(e) => setFilter("project", e.target.value)}>
+                  <option value="">All Projects</option>
+                  {metaProjects.map((p) => <option key={p} value={p}>{p}</option>)}
                 </select>
               </div>
               <div className="field">
                 <label htmlFor="c-vertical">Vertical</label>
-                <select id="c-vertical" value={filters.vertical} onChange={(e) => setFilter("vertical", e.target.value)}>
-                  <option value="all">All Verticals</option>
+                <select id="c-vertical" value={filters.vertical === "all" ? "" : filters.vertical} onChange={(e) => setFilter("vertical", e.target.value)}>
+                  <option value="">All Verticals</option>
+                  {metaVerticals.map((v) => <option key={v} value={v}>{v}</option>)}
                 </select>
               </div>
               <div className="field">
                 <label htmlFor="c-funnel">Funnel Stage</label>
-                <select id="c-funnel" value={filters.funnel} onChange={(e) => setFilter("funnel", e.target.value)}>
-                  <option value="all">All Stages</option>
+                <select id="c-funnel" value={filters.funnel === "all" ? "" : filters.funnel} onChange={(e) => setFilter("funnel", e.target.value)}>
+                  <option value="">All Stages</option>
                   <option value="upper">Upper</option>
                   <option value="mid">Mid</option>
                   <option value="lower">Lower</option>
@@ -491,7 +497,7 @@ export function CampaignsPage() {
             </>
           ) : null}
         </div>
-      </Panel>
+      </section>
       {banner ? <p className="panel-sub" role="status" style={{ margin: "12px 0 0" }}>{banner}</p> : null}
       <div className="main-rail" style={{ marginTop: 12 }}>
         <div className="rail-stack">
@@ -499,11 +505,11 @@ export function CampaignsPage() {
             <div className="kpi-grid">
               <div className="kpi-card">
                 <span className="kpi-ico" style={{ background: "#E4F4ED", color: "#0E7C5B" }}>
-                  <Icon name="users" size={22} />
+                  <Icon name="users" size={20} />
                 </span>
                 <div className="kpi-body">
-                  <p className="kpi-label" style={{ fontSize: 13, fontWeight: 600, color: "var(--shell-muted)", margin: 0 }}>Total Campaigns</p>
-                  <p className="kpi-value" style={{ fontSize: 27, fontWeight: 800, margin: 0 }}>{rows.length}</p>
+                  <div className="kpi-label">Total Campaigns</div>
+                  <div className="kpi-value">{rows.length}</div>
                 </div>
               </div>
               <KpiCard label="Total Impressions" display={fmtCompact(num(compare.metrics.impressions?.current))}
@@ -513,6 +519,8 @@ export function CampaignsPage() {
               <KpiCard label="Average ROAS" display={fmtMult(num(compare.metrics.roas?.current))}
                 icon="coin" tint="#E4F4ED" metricLabel="ROAS" compare={compare} />
             </div>
+          ) : compareError ? (
+            <div className="panel"><EmptyState text={compareError} /></div>
           ) : (
             <div className="kpi-grid">
               {[0, 1, 2, 3].map((i) => <Skeleton key={i} height={118} />)}

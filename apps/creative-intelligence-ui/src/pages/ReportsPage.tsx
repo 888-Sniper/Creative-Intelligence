@@ -3,7 +3,7 @@ import { api, scopedPath } from "@/api/client";
 import { useFilters } from "@/state/FilterContext";
 import { Icon } from "@/components/icons";
 import { LoadingButton } from "@/components/LoadingButton";
-import { EmptyState, PageHeader, Panel } from "@/components/product";
+import { EmptyState, PageHeader, Panel, Skeleton, plural, useCampaignMeta } from "@/components/product";
 
 const KPI_OPTIONS = [
   "spend",
@@ -206,7 +206,7 @@ function MultiCheck({
 }) {
   const [open, setOpen] = useState(false);
   const text = checked.length
-    ? `${checked.length} ${label} Selected`
+    ? `${plural(checked.length, label.replace(/s$/, ""), label)} Selected`
     : empty;
   return (
     <div className="field">
@@ -251,7 +251,11 @@ export function ReportsPage() {
   const [checkedCampaigns, setCheckedCampaigns] = useState<string[]>([]);
   const [kpis, setKpis] = useState<string[]>(["spend", "impressions", "clicks", "ctr", "roas"]);
   const [benchmark, setBenchmark] = useState("industry");
-  const [dateRange, setDateRange] = useState("Jan 1, 2024 – Mar 31, 2024");
+  /* Report-scoped range: validated From/To dates that override the
+   * global scope inside the generated report request. Empty follows
+   * the global scope (never a decorative free-text field). */
+  const [repFrom, setRepFrom] = useState("");
+  const [repTo, setRepTo] = useState("");
   const [format, setFormat] = useState<ReportFormat>("pptx");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
@@ -259,6 +263,11 @@ export function ReportsPage() {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("All Statuses");
   const [formatFilter, setFormatFilter] = useState("All Formats");
+  const [timeFilter, setTimeFilter] = useState("All Time");
+  /* Synthetic demo history renders ONLY in demo workspaces (backend
+   * source="demo" signal). A real workspace never sees fabricated
+   * report rows just because campaigns exist. */
+  const demoMode = useCampaignMeta().data?.demo === true;
 
   const hrefs = useRef<string[]>([]);
   useEffect(() => {
@@ -304,7 +313,9 @@ export function ReportsPage() {
     list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
 
   /** Legacy report_body(): unchecked-everything campaigns send null,
-   *  unchecked-everything KPIs fall back to cpa + ctr. */
+   *  unchecked-everything KPIs fall back to cpa + ctr. The visible
+   *  Date Range always lands in filters (report-scoped From/To win
+   *  over the global scope; empty follows the global scope). */
   const reportBody = (): Record<string, unknown> => ({
     campaigns: checkedCampaigns.length ? checkedCampaigns : null,
     kpis: kpis.length ? kpis : ["cpa", "ctr"],
@@ -313,7 +324,11 @@ export function ReportsPage() {
     rank_by: "cpa",
     override: false,
     strict_human: false,
-    filters: scopeFilterBody(scope),
+    filters: {
+      ...scopeFilterBody(scope),
+      ...(repFrom ? { date_from: [repFrom] } : {}),
+      ...(repTo ? { date_to: [repTo] } : {}),
+    },
   });
 
   const buildDownload = (fmt: ReportFormat, r: ReportResponse) => {
@@ -392,16 +407,21 @@ export function ReportsPage() {
   };
 
   const rows = useMemo(() => {
-    const demo = campaigns ? demoHistory(campaigns) : [];
+    const demo = demoMode && campaigns ? demoHistory(campaigns) : [];
     const merged = [...history.filter((h) => !h.isDemo), ...demo];
     const q = query.trim().toLowerCase();
+    const windowDays = timeFilter === "Last 7 Days" ? 7 : timeFilter === "Last 30 Days" ? 30 : 0;
     return merged.filter((r) => {
       if (statusFilter !== "All Statuses" && r.status !== statusFilter) return false;
       if (formatFilter !== "All Formats" && r.format !== formatFilter) return false;
+      if (windowDays) {
+        const t = new Date(r.created).getTime();
+        if (!Number.isFinite(t) || Date.now() - t > windowDays * 86400000) return false;
+      }
       if (q && !`${r.title} ${r.kind} ${r.by}`.toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [history, campaigns, query, statusFilter, formatFilter]);
+  }, [history, campaigns, demoMode, query, statusFilter, formatFilter, timeFilter]);
 
   const latest = useMemo(() => rows.filter((r) => r.status === "Completed").slice(0, 5), [rows]);
 
@@ -411,8 +431,8 @@ export function ReportsPage() {
         title="Generated Reports"
         sub="Create and download custom reports to share insights, track performance, and showcase results."
       />
-      <div className="main-rail" style={{ marginTop: 12, gap: 12 }}>
-        <div className="rail-stack" style={{ gap: 12 }}>
+      <div className="main-rail">
+        <div className="rail-stack">
           <Panel
             title="Generate a New Report"
             sub="Select your content, metrics, and format to create a custom report."
@@ -423,7 +443,7 @@ export function ReportsPage() {
             )}
           >
             {catalogError ? <EmptyState text={catalogError} /> : null}
-            <div className="filter-grid" style={{ gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: "10px 12px" }}>
+            <div className="filter-grid fg-4">
               <MultiCheck
                 id="rep-camp"
                 label="Campaigns"
@@ -446,13 +466,18 @@ export function ReportsPage() {
                   {BENCH_OPTIONS.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
                 </select>
               </div>
-              <div className="field">
-                <label htmlFor="rep-range">Date Range</label>
-                <input id="rep-range" value={dateRange} onChange={(e) => setDateRange(e.target.value)} />
+              <div className="field field-span-2">
+                <label id="rep-range-label">Date Range</label>
+                <div className="date-pair" role="group" aria-labelledby="rep-range-label">
+                  <input type="date" aria-label="Report from date" value={repFrom}
+                    onChange={(e) => setRepFrom(e.target.value)} />
+                  <input type="date" aria-label="Report to date" value={repTo}
+                    onChange={(e) => setRepTo(e.target.value)} />
+                </div>
               </div>
             </div>
             <p style={{ fontSize: 13, fontWeight: 700, margin: "10px 0 6px" }}>Output Format</p>
-            <div className="fmt-row" style={{ gap: 10 }}>
+            <div className="fmt-row">
               {FORMATS.map((f) => {
                 const on = format === f.id;
                 return (
@@ -462,7 +487,6 @@ export function ReportsPage() {
                     className={`fmt-card${on ? " on" : ""}`}
                     aria-pressed={on}
                     onClick={() => setFormat(f.id)}
-                    style={{ padding: "10px 12px" }}
                   >
                     <span className="fmt-ico"><Icon name="report" size={20} /></span>
                     <span>
@@ -499,7 +523,7 @@ export function ReportsPage() {
                 <select aria-label="Filter by format" value={formatFilter} onChange={(e) => setFormatFilter(e.target.value)}>
                   {["All Formats", "pptx", "xlsx", "one-pager"].map((o) => <option key={o}>{o}</option>)}
                 </select>
-                <select aria-label="Filter by time" defaultValue="All Time">
+                <select aria-label="Filter by time" value={timeFilter} onChange={(e) => setTimeFilter(e.target.value)}>
                   <option>All Time</option>
                   <option>Last 7 Days</option>
                   <option>Last 30 Days</option>
@@ -508,10 +532,10 @@ export function ReportsPage() {
             )}
           >
             {campaigns === null && !catalogError ? (
-              <EmptyState text="Loading Reports…" />
+              <Skeleton height={220} />
             ) : rows.length ? (
               <div className="tbl-wrap">
-                <table className="tbl rep-tbl" style={{ fontSize: 13 }}>
+                <table className="tbl rep-tbl">
                   <thead>
                     <tr>
                       <th scope="col">Report</th>
@@ -526,20 +550,27 @@ export function ReportsPage() {
                   <tbody>
                     {rows.map((r) => (
                       <tr key={r.id}>
-                        <td style={{ padding: "8px 10px" }}>
+                        <td>
                           <strong className="cell-main" style={{ display: "block" }}>{r.title}</strong>
                           <span className="panel-sub">{r.kind}</span>
                         </td>
-                        <td style={{ padding: "8px 10px" }}><StatusPill status={r.status} /></td>
-                        <td style={{ padding: "8px 10px" }}><FormatBadge format={r.format} /></td>
-                        <td style={{ padding: "8px 10px" }}>{r.created}</td>
-                        <td style={{ padding: "8px 10px" }}>{r.by}</td>
-                        <td style={{ padding: "8px 10px" }}>
+                        <td><StatusPill status={r.status} /></td>
+                        <td><FormatBadge format={r.format} /></td>
+                        <td>{r.created}</td>
+                        <td>
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 8, whiteSpace: "nowrap" }}>
+                            <span className="avatar" aria-hidden="true">
+                              {r.by.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase()}
+                            </span>
+                            {r.by}
+                          </span>
+                        </td>
+                        <td>
                           <span className="chip-row">
                             {r.chips.map((c) => <span key={c} className="chip-static">{c}</span>)}
                           </span>
                         </td>
-                        <td style={{ padding: "8px 10px" }}>
+                        <td>
                           <span className="row-actions">
                             {r.href ? (
                               <a className="icon-btn" download={r.filename ?? "report"} href={r.href} aria-label={`Download ${r.title}`}>
@@ -560,9 +591,6 @@ export function ReportsPage() {
                                 <Icon name="download" size={16} />
                               </button>
                             )}
-                            <button type="button" className="icon-btn" aria-label={`More actions for ${r.title}`}>
-                              <Icon name="dots" size={16} />
-                            </button>
                           </span>
                         </td>
                       </tr>
@@ -571,32 +599,32 @@ export function ReportsPage() {
                 </table>
               </div>
             ) : (
-              <EmptyState text={query || statusFilter !== "All Statuses" || formatFilter !== "All Formats" ? "No reports match these filters." : "No reports yet. Configure the generator above to create your first report."} />
+              <EmptyState text={query || statusFilter !== "All Statuses" || formatFilter !== "All Formats" || timeFilter !== "All Time" ? "No reports match these filters." : "No reports yet. Configure the generator above to create your first report."} />
             )}
           </Panel>
         </div>
-        <div className="rail-stack" style={{ gap: 12 }}>
-          <Panel title="Reporting Tips" action={<span className="link-teal">See All</span>}>
+        <div className="rail-stack">
+          <Panel title="Reporting Tips">
             <ul className="tips-list">
-              <li style={{ padding: "10px 0" }}>
+              <li>
                 <span className="insight-ico" style={{ background: "#E7F1FB" }}><Icon name="bars" size={18} /></span>
                 <div><h4>Focus on Key KPIs</h4><p>Include 3–5 core metrics to keep your report clear and impactful.</p></div>
               </li>
-              <li style={{ padding: "10px 0" }}>
+              <li>
                 <span className="insight-ico" style={{ background: "#E5F5EC" }}><Icon name="users" size={18} /></span>
                 <div><h4>Use Benchmarks for Context</h4><p>Compare against workspace benchmarks to highlight performance.</p></div>
               </li>
-              <li style={{ padding: "10px 0" }}>
+              <li>
                 <span className="insight-ico" style={{ background: "#E7F1FB" }}><Icon name="report" size={18} /></span>
                 <div><h4>Choose the Right Format</h4><p>Use a deck for presentations, XLSX for deep analysis, or a one-pager for quick sharing.</p></div>
               </li>
-              <li style={{ padding: "10px 0" }}>
+              <li>
                 <span className="insight-ico" style={{ background: "#E5F5EC" }}><Icon name="target" size={18} /></span>
                 <div><h4>Tailor to Your Audience</h4><p>Customize your report based on stakeholders – from creative teams to executive leadership.</p></div>
               </li>
             </ul>
           </Panel>
-          <Panel title="Latest Generated Files" action={<span className="link-teal">See All</span>}>
+          <Panel title="Latest Generated Files">
             {latest.length ? (
               <ul className="tips-list">
                 {latest.map((r) => (
@@ -613,7 +641,8 @@ export function ReportsPage() {
             ) : (
               <EmptyState text="No generated files yet." />
             )}
-            <button type="button" className="btn-outline" style={{ width: "100%", marginTop: 8 }}>
+            <button type="button" className="btn-outline" style={{ width: "100%", marginTop: 8 }}
+              onClick={() => { setQuery(""); setStatusFilter("All Statuses"); setFormatFilter("All Formats"); setTimeFilter("All Time"); }}>
               View All Generated Reports <Icon name="chev" size={14} />
             </button>
           </Panel>

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { DashboardPage } from "@/pages/DashboardPage";
 import { FilterProvider } from "@/state/FilterContext";
@@ -74,9 +74,11 @@ describe("DashboardPage precision pass", () => {
     });
     expect(screen.queryByLabelText("Team")).toBeNull();
     expect(screen.getAllByText("Date Range")).toHaveLength(1);
+    expect(screen.queryByLabelText("From date")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /All Time|–/ }));
     const from = screen.getByLabelText("From date");
     const to = screen.getByLabelText("To date");
-    expect(from.closest(".field")).toBe(to.closest(".field"));
+    expect(from.closest(".daterange-pop")).toBe(to.closest(".daterange-pop"));
   });
 
   it("keeps the trailing-30-day default scope", async () => {

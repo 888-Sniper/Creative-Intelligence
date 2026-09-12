@@ -262,8 +262,8 @@ def campaign_meta(conn):
 
     Returns ``{"campaigns": [...]}`` with one entry per distinct
     campaign: name, client (most frequent non-blank value), distinct
-    platforms / markets / objectives / verticals, last activity date,
-    and a derived ``status``. Status is deliberately derived, not
+    platforms / markets / objectives / verticals / projects, last
+    activity date, and a derived ``status``. Status is deliberately derived, not
     stored: "Active" when the campaign's latest activity date falls
     within ``CAMPAIGN_ACTIVE_WINDOW_DAYS`` of the newest date in the
     database, otherwise "Completed". Campaigns with no dated rows
@@ -310,9 +310,16 @@ def campaign_meta(conn):
                     "markets": _distinct("market"),
                     "objectives": _distinct("objective"),
                     "verticals": _distinct("vertical"),
+                    "projects": _distinct("project"),
                     "last_date": last,
                     "status": status})
-    return {"campaigns": out}
+    # Demo-workspace signal: demo-seeded ad rows carry source "demo".
+    # The frontend gates ALL synthetic showcase content (sample report
+    # history, auto-run sample questions) on this flag so a real
+    # workspace never sees fabricated demo artifacts.
+    demo = any(str(r.get("source") or "").strip().lower() == "demo"
+               for r in rows)
+    return {"campaigns": out, "demo": demo}
 
 
 def resolve_scope(conn, scope):
@@ -911,6 +918,25 @@ def compare_periods(conn, a_from, a_to, b_from, b_to, filters=None,
             "scope": scope.describe()}
 
 
+def _fmt_elements(values) -> str:
+    """Human-readable element list for why-text (no Python repr)."""
+    items = [str(v).replace("_", " ") for v in (values or []) if v not in (None, "")]
+    return ", ".join(items) if items else "(none)"
+
+
+def _compact_money(value) -> str:
+    """Compact spend for why-text ($53.3K, not $53364.56)."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    for unit, factor in (("M", 1_000_000.0), ("K", 1_000.0)):
+        if abs(v) >= factor:
+            text = f"{v / factor:.1f}".rstrip("0").rstrip(".")
+            return f"${text}{unit}"
+    return f"${v:.2f}"
+
+
 def compare_campaigns(conn, campaigns=None, rank_by="cpa", filters=None):
     """Compare campaigns: per-campaign KPIs plus a why-analysis.
 
@@ -964,24 +990,24 @@ def compare_campaigns(conn, campaigns=None, rank_by="cpa", filters=None):
     if len(per) >= 2:
         el_top = _campaign_elements(conn, top, scope)
         el_bottom = _campaign_elements(conn, bottom, scope)
-        for label, key in (("hook_type", "hook_types"),
-                           ("creator mode", "creator_modes"),
-                           ("platform mix", "platforms")):
+        for label, key in (("Hook type", "hook_types"),
+                           ("Creator mode", "creator_modes"),
+                           ("Platform mix", "platforms")):
             a, b = el_top[key], el_bottom[key]
             if a != b:
                 only_top = sorted(set(a) - set(b))
                 only_bottom = sorted(set(b) - set(a))
                 why["differences"].append(
-                    "%s differs: %s has %s; %s has %s" % (
-                        label, top, only_top or a or ["(none)"],
-                        bottom, only_bottom or b or ["(none)"]))
+                    "%s differs: %s uses %s; %s uses %s" % (
+                        label, top, _fmt_elements(only_top or a),
+                        bottom, _fmt_elements(only_bottom or b)))
             why["details"][key] = {"top": a, "bottom": b}
         st, sb = per[top]["spend"], per[bottom]["spend"]
         if st != sb:
             bigger = top if st > sb else bottom
             why["differences"].append(
-                "scale differs: %s spent $%.2f vs %s $%.2f (%s carries more weight)"
-                % (top, st, bottom, sb, bigger))
+                "Scale differs: %s spent %s vs %s %s (%s carries more weight)"
+                % (top, _compact_money(st), bottom, _compact_money(sb), bigger))
             why["details"]["spend"] = {"top": st, "bottom": sb}
         if not why["differences"]:
             why["differences"].append(

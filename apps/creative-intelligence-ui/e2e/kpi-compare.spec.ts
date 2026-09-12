@@ -1,6 +1,15 @@
 import { expect, test } from "@playwright/test";
 import { loginAs, readSeeds } from "./helpers";
 
+/** Date Range is a single-field popover: open it, fill From/To,
+//  confirm with Done, then Apply Filters. */
+async function setDateRange(page, from: string, to: string) {
+  await page.getByRole("button", { name: /^Date Range/ }).click();
+  await page.getByLabel("From date").fill(from);
+  await page.getByLabel("To date").fill(to);
+  await page.getByRole("button", { name: "Done" }).click();
+}
+
 /** Real previous-period KPI comparisons on deterministic seeded data.
 
  *  Seed weeks: current 2024-01-01..2024-01-07 vs previous
@@ -26,8 +35,7 @@ test.describe("kpi period comparison", () => {
     ).toHaveCount(0);
 
     // Selecting a real range recalculates both periods (explicit Apply).
-    await page.getByLabel("From date").fill("2024-01-01");
-    await page.getByLabel("To date").fill("2024-01-07");
+    await setDateRange(page, "2024-01-01", "2024-01-07");
     await page.getByRole("button", { name: "Apply Filters" }).click();
     await expect(kpis.getByText("25.0K")).toBeVisible();
     // Both weekly windows are in scope: impressions +25%, clicks and
@@ -75,8 +83,7 @@ test.describe("kpi period comparison", () => {
     // A one-day range pins a one-day current period (Jan 5 here, whose
     // previous day has no rows): graceful no-comparison state.
     await page.getByRole("button", { name: "Reset Filters" }).click();
-    await page.getByLabel("From date").fill("2024-01-05");
-    await page.getByLabel("To date").fill("2024-01-05");
+    await setDateRange(page, "2024-01-05", "2024-01-05");
     await page.getByRole("button", { name: "Apply Filters" }).click();
     await expect(kpis.getByText("12.5K")).toBeVisible();
     await expect(
@@ -93,8 +100,7 @@ test.describe("kpi period comparison", () => {
     test("tap opens tooltip without overflow", async ({ page, context }) => {
     const seeds = readSeeds();
     await loginAs(context, page, seeds.kpi, "/");
-    await page.getByLabel("From date").fill("2024-01-01");
-    await page.getByLabel("To date").fill("2024-01-07");
+    await setDateRange(page, "2024-01-01", "2024-01-07");
     await page.getByRole("button", { name: "Apply Filters" }).click();
     const kpis = page.locator(".kpi-grid");
     await expect(kpis.getByText("25.0K")).toBeVisible();

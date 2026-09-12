@@ -86,7 +86,9 @@ describe("CampaignsPage", () => {
     ) as unknown as typeof fetch;
     renderPage();
     await waitFor(() => {
-      expect(screen.getByText("db is locked")).toBeDefined();
+      // API failures surface as real error copy (KPI + table blocks),
+      // never as permanent skeletons.
+      expect(screen.getAllByText("db is locked").length).toBeGreaterThanOrEqual(2);
     });
   });
 
@@ -105,7 +107,7 @@ describe("CampaignsPage", () => {
     });
     const team = screen.getByLabelText("Team") as HTMLSelectElement;
     expect(team.disabled).toBe(false);
-    expect([...team.options].map((o) => o.value)).toEqual(["all", "Brand", "Growth"]);
+    expect([...team.options].map((o) => o.value)).toEqual(["", "Brand", "Growth"]);
     fireEvent.change(team, { target: { value: "Growth" } });
     await waitFor(() => {
       const calls = fetchMock.mock.calls.map((c) => String(c[0]));
@@ -122,7 +124,12 @@ describe("CampaignsPage", () => {
     expect(screen.getByLabelText("Campaign Status")).toBeDefined();
     expect(screen.queryByText(/activity-based/)).toBeNull();
     const info = screen.getByRole("button", { name: "How campaign status is determined" });
-    expect(info.getAttribute("title")).toMatch(/Activity-derived/);
+    // Explainer opens on click (touch/keyboard path) and closes on Escape.
+    expect(screen.queryByText(/Activity-derived status/)).toBeNull();
+    fireEvent.click(info);
+    expect(screen.getByText(/Activity-derived status/)).toBeDefined();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByText(/Activity-derived status/)).toBeNull();
   });
 
   it("presents a single Date Range group for From/To", async () => {
@@ -132,9 +139,11 @@ describe("CampaignsPage", () => {
       expect(screen.getByText("All Campaigns (2)")).toBeDefined();
     });
     expect(screen.getAllByText("Date Range")).toHaveLength(1);
+    expect(screen.queryByLabelText("From date")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /All Time|–/ }));
     const from = screen.getByLabelText("From date");
     const to = screen.getByLabelText("To date");
-    expect(from.closest(".field")).toBe(to.closest(".field"));
+    expect(from.closest(".daterange-pop")).toBe(to.closest(".daterange-pop"));
   });
 
   it("opens campaign details with totals and recommendations", async () => {

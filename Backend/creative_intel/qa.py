@@ -602,7 +602,10 @@ def answer(conn, question, llm=None, scope=None):
                 parts.append("Top %s by spend is %s at $%s."
                              % (_lname, shown, f"{spend:,.2f}"))
             elif len(leaders) > 1:
-                parts.append("Top %s by %s is tied: %s at %s."
+                if len(leaders) == 2:
+                    shown = "%s and %s" % (_group_label(leaders[0]),
+                                           _group_label(leaders[1]))
+                parts.append("Top %ss by %s are tied: %s at %s."
                              % (_lname, _metric_name, shown, top_disp))
             else:
                 parts.append("Top %s by %s is %s at %s."

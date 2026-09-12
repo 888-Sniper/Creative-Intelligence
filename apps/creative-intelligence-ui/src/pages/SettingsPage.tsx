@@ -25,6 +25,7 @@ const PROVIDER_LABELS: Record<string, string> = {
 interface Prefs {
   workspace: string;
   timezone: string;
+  theme: ThemeMode;
   defaultView: string;
   currency: string;
   dateRange: string;
@@ -40,9 +41,17 @@ interface Prefs {
   density: string;
 }
 
+const TIMEZONES = [
+  "(GMT-08:00) Pacific Time (US & Canada)",
+  "(GMT-05:00) Eastern Time (US & Canada)",
+  "(GMT+00:00) London",
+  "(GMT+10:00) Sydney",
+];
+
 const DEFAULTS: Prefs = {
   workspace: "Alex's Workspace",
   timezone: "(GMT-05:00) Eastern Time (US & Canada)",
+  theme: "light",
   defaultView: "Dashboard",
   currency: "USD – US Dollar",
   dateRange: "Last 30 Days",
@@ -132,20 +141,20 @@ function Toggle({ label, body, checked, onChange }: {
   );
 }
 
-/** Recognizable brand mark for integrations with no backend connection
- *  endpoint. The mark is iconography only — connection state stays
- *  honest ("Not Connected") and is never implied by the icon. */
+/** Provider mark for integrations with no backend connection endpoint.
+ *  Uses the shared stroke icon set (never letter placeholders) tinted per
+ *  provider. The mark is iconography only — connection state stays honest
+ *  ("Not Connected") and is never implied by the icon. */
 function IntegrationMark({ name }: { name: string }) {
-  const mark: Record<string, { bg: string; fg: string; glyph: string }> = {
-    "Meta": { bg: "#E7F1FB", fg: "#2F6FBE", glyph: "M" },
-    "TikTok": { bg: "#F0E9FA", fg: "#1F2A37", glyph: "♪" },
-    "Google Analytics 4": { bg: "#FBF3E2", fg: "#C2521F", glyph: "GA" },
+  const mark: Record<string, { bg: string; fg: string; icon: string }> = {
+    "Meta": { bg: "#E7F1FB", fg: "#2F6FBE", icon: "meta" },
+    "TikTok": { bg: "#F0E9FA", fg: "#1F2A37", icon: "tiktok" },
+    "Google Analytics 4": { bg: "#FBF3E2", fg: "#C2521F", icon: "google" },
   };
-  const m = mark[name] ?? { bg: "#EDF1F6", fg: "#5C6B7A", glyph: "◦" };
+  const m = mark[name] ?? { bg: "#EDF1F6", fg: "#5C6B7A", icon: "grid" };
   return (
-    <span className="insight-ico" aria-hidden="true"
-      style={{ background: m.bg, color: m.fg, fontWeight: 800, fontSize: m.glyph.length > 1 ? 12 : 16 }}>
-      {m.glyph}
+    <span className="insight-ico" aria-hidden="true" style={{ background: m.bg, color: m.fg }}>
+      <Icon name={m.icon} size={18} />
     </span>
   );
 }
@@ -173,9 +182,13 @@ function AppearancePreview({ accent, density, mode }: { accent: string; density:
       </div>
       <div style={{ flex: 1, padding: pad, display: "grid", gap: 4, alignContent: "start" }}>
         <div style={{ height: 10, borderRadius: 4, background: color, width: "55%" }} />
-        {[0, 1].map((i) => (
-          <div key={i} style={{ height: 8, borderRadius: 4, background: dark ? "#3A465E" : "#fff", border: `1px solid ${dark ? "#3A465E" : "#E3E9F0"}` }} />
-        ))}
+        <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 34, padding: "4px 6px",
+          background: dark ? "#2B3448" : "#fff", border: `1px solid ${dark ? "#3A465E" : "#E3E9F0"}`, borderRadius: 6 }}>
+          {[10, 18, 14, 24, 20, 30].map((h, i) => (
+            <div key={i} style={{ flex: 1, height: h, borderRadius: 2, background: i === 5 ? color : dark ? "#3A465E" : "#C9D6E2" }} />
+          ))}
+        </div>
+        <div style={{ height: 8, borderRadius: 4, background: dark ? "#3A465E" : "#fff", border: `1px solid ${dark ? "#3A465E" : "#E3E9F0"}` }} />
       </div>
     </div>
   );
@@ -183,20 +196,23 @@ function AppearancePreview({ accent, density, mode }: { accent: string; density:
 
 export function SettingsPage() {
   const { me, logout, refresh } = useAuth();
-  const { mode, set } = useTheme();
-  const [prefs, setPrefs] = useState<Prefs>(loadPrefs);
-  const [saved, setSaved] = useState<Prefs>(loadPrefs);
+  const { mode, theme: resolvedTheme, set } = useTheme();
+  /* Staged edits (prefs) vs applied state (saved): accent, density, and
+   * theme apply only when Save Changes is clicked, so leaving the page
+   * with unsaved edits never mutates the live app appearance. */
+  const [prefs, setPrefs] = useState<Prefs>(() => ({ ...loadPrefs(), theme: mode }));
+  const [saved, setSaved] = useState<Prefs>(() => ({ ...loadPrefs(), theme: mode }));
   const [status, setStatus] = useState("");
   const [sessionOp, setSessionOp] = useState<null | "password" | "logout" | "logout-all">(null);
   const employee = me?.employee;
   const dirty = JSON.stringify(prefs) !== JSON.stringify(saved);
 
   useEffect(() => {
-    const accent = ACCENTS[prefs.accent] ?? ACCENTS["Teal (Default)"];
+    const accent = ACCENTS[saved.accent] ?? ACCENTS["Teal (Default)"];
     document.documentElement.style.setProperty("--shell-teal", accent.teal);
     document.documentElement.style.setProperty("--shell-teal-dark", accent.dark);
-    document.body.dataset.density = prefs.density === "Compact" ? "compact" : "";
-  }, [prefs.accent, prefs.density]);
+    document.body.dataset.density = saved.density === "Compact" ? "compact" : "";
+  }, [saved.accent, saved.density]);
 
   if (!employee) return <p className="muted">Sign In To Manage Settings.</p>;
   const name = `${employee.first_name} ${employee.last_name}`.trim() || employee.email;
@@ -209,11 +225,16 @@ export function SettingsPage() {
       return;
     }
     setSaved(prefs);
+    /* Theme persists in its own key via the theme hook: apply the staged
+     * choice here so Save is the single commit point for appearance. */
+    set(prefs.theme);
     setStatus("Settings Saved.");
   };
   const reset = () => {
-    setPrefs({ ...DEFAULTS });
-    setSaved({ ...DEFAULTS });
+    const next = { ...DEFAULTS, theme: "light" as const };
+    setPrefs(next);
+    setSaved(next);
+    set("light");
     storageRemove();
     setStatus("Defaults Restored.");
   };
@@ -276,8 +297,8 @@ export function SettingsPage() {
         title="Settings"
         sub="Control your workspace, data, integrations, and application preferences."
       />
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(340px,1fr))", gap: 12, marginTop: 12 }}>
-          <Panel title="General Settings" sub="Manage your workspace details and default preferences.">
+      <div className="cols-2-even" style={{ marginTop: 12 }}>
+          <Panel title="General Settings" icon="gear" sub="Manage your workspace details and default preferences.">
             <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 12 }}>
               <Avatar url={employee.avatar_url} label={name} />
               <div>
@@ -293,11 +314,8 @@ export function SettingsPage() {
               <div className="field">
                 <label htmlFor="s-tz">Time Zone</label>
                 <select id="s-tz" value={prefs.timezone} onChange={(e) => setPref("timezone", e.target.value)}>
-                  <option>{prefs.timezone}</option>
-                  <option>(GMT-08:00) Pacific Time (US &amp; Canada)</option>
-                  <option>(GMT-05:00) Eastern Time (US &amp; Canada)</option>
-                  <option>(GMT+00:00) London</option>
-                  <option>(GMT+10:00) Sydney</option>
+                  {TIMEZONES.includes(prefs.timezone) ? null : <option>{prefs.timezone}</option>}
+                  {TIMEZONES.map((o) => <option key={o}>{o}</option>)}
                 </select>
               </div>
               <div className="field">
@@ -326,7 +344,7 @@ export function SettingsPage() {
               </div>
             </div>
           </Panel>
-          <Panel title="Notifications" sub="Choose what you want to be notified about. Stored in this browser only — workspace policies are set by your administrator.">
+          <Panel title="Notifications" icon="bell" sub="Choose what you want to be notified about. Stored in this browser only — workspace policies are set by your administrator.">
             <Toggle label="Email Reports" body="Receive scheduled reports and key insights via email."
               checked={prefs.emailReports} onChange={(v) => setPref("emailReports", v)} />
             <Toggle label="Campaign Updates" body="Get notified when campaigns are completed or updated."
@@ -336,7 +354,7 @@ export function SettingsPage() {
             <Toggle label="Product Updates" body="Be the first to know about new features and improvements."
               checked={prefs.productUpdates} onChange={(v) => setPref("productUpdates", v)} />
           </Panel>
-          <Panel title="Data & Privacy" sub="Manage how your data is used and your privacy preferences. These preferences live in this browser; workspace policy is set by your administrator.">
+          <Panel title="Data & Privacy" icon="eye" sub="Manage how your data is used and your privacy preferences. These preferences live in this browser; workspace policy is set by your administrator.">
             <Toggle label="Data Usage" body="Help improve Foap by allowing anonymized usage data."
               checked={prefs.dataUsage} onChange={(v) => setPref("dataUsage", v)} />
             <Toggle label="Share Analytics Data" body="Allow aggregated, anonymized data to contribute to workspace benchmark averages."
@@ -360,7 +378,7 @@ export function SettingsPage() {
               </button>
             </div>
           </Panel>
-          <Panel title="Integrations" sub="Connect your data sources to unlock deeper insights."
+          <Panel title="Integrations" icon="grid" sub="Connect your data sources to unlock deeper insights."
             action={<a className="link-teal" href="#integration-google">Manage Integrations</a>}>
             <GoogleDriveCard />
             {[["Meta", "Import campaign performance data from Meta Ads."],
@@ -376,11 +394,11 @@ export function SettingsPage() {
               </div>
             ))}
           </Panel>
-          <Panel title="Appearance" sub="Customize how Foap looks and feels.">
+          <Panel title="Appearance" icon="spark" sub="Customize how Foap looks and feels.">
             <div className="filter-grid" style={{ gridTemplateColumns: "repeat(2,minmax(0,1fr))" }}>
               <div className="field">
                 <label htmlFor="s-theme">Theme</label>
-                <select id="s-theme" value={mode} onChange={(e) => set(e.target.value as ThemeMode)}>
+                <select id="s-theme" value={prefs.theme} onChange={(e) => setPref("theme", e.target.value as ThemeMode)}>
                   {modes.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
                 </select>
               </div>
@@ -397,10 +415,15 @@ export function SettingsPage() {
                 </select>
               </div>
             </div>
-            <p className="panel-sub" style={{ marginTop: 10 }}>Preview</p>
-            <AppearancePreview accent={prefs.accent} density={prefs.density} mode={mode} />
+            <p className="panel-sub" style={{ marginTop: 10 }}>Preview — shows your staged choices before you save.</p>
+            <AppearancePreview
+              accent={prefs.accent}
+              density={prefs.density}
+              mode={prefs.theme === "system" ? resolvedTheme : prefs.theme}
+            />
+            {dirty ? <p className="panel-sub">Unsaved changes — click Save Changes to apply.</p> : null}
           </Panel>
-          <Panel title="Security" sub="Keep your account and workspace secure.">
+          <Panel title="Security" icon="lock" sub="Keep your account and workspace secure.">
             <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", padding: "10px 0", borderBottom: "1px solid var(--shell-line)" }}>
               <div>
                 <strong style={{ display: "block", fontSize: 13.5 }}>Password</strong>
@@ -436,22 +459,25 @@ export function SettingsPage() {
             </div>
           </Panel>
       </div>
-      <div style={{ marginTop: 12 }}>
-        <Panel title="Data Tools" sub="Advanced analysis tooling for power users.">
+      <details className="panel" style={{ marginTop: 12 }}>
+        <summary style={{ cursor: "pointer", fontSize: 15.5, fontWeight: 700, color: "var(--shell-navy)" }}>
+          Advanced
+        </summary>
+        <p className="panel-sub">Power-user analysis tooling.</p>
+        <div style={{ marginTop: 12 }}>
           <RetentionPatterns />
-          <div style={{ marginTop: 16 }}>
-            <CohortBuilder />
-          </div>
-        </Panel>
-      </div>
-      {status ? <p className="panel-sub" role="status" style={{ marginTop: 12 }}>{status}</p> : null}
-      <Panel title="Save Preferences">
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-          <button type="button" className="btn-outline" onClick={reset}>Reset Defaults</button>
-          <button type="button" className="btn-primary" disabled={!dirty} onClick={save}>Save Changes</button>
         </div>
-        {!dirty ? <p className="panel-sub">No unsaved changes.</p> : null}
-      </Panel>
+        <div style={{ marginTop: 16 }}>
+          <CohortBuilder />
+        </div>
+      </details>
+      <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10, marginTop: 12 }}>
+        <span className="panel-sub" role="status" style={{ marginRight: "auto" }}>
+          {status || (!dirty ? "No unsaved changes." : "Unsaved changes.")}
+        </span>
+        <button type="button" className="btn-outline" onClick={reset}>Reset Defaults</button>
+        <button type="button" className="btn-primary" disabled={!dirty} onClick={save}>Save Changes</button>
+      </div>
     </>
   );
 }

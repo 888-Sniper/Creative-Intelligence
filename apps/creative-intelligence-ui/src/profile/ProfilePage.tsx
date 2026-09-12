@@ -216,35 +216,39 @@ export function ProfilePage() {
       {!loading && !loadError && employee && (
         <>
           <Panel title="Profile Card" sub="How you appear across the workspace.">
-            <div style={{ display: "flex", gap: 20, alignItems: "flex-start", flexWrap: "wrap" }}>
-              <ProfileAvatar employee={employee} size={140} />
-              <div style={{ flex: "1 1 240px", minWidth: 0 }}>
+            {/* Hero: left = avatar + identity + actions, right =
+              greeting + account stats (not a full-width row below). */}
+            <div className="profile-hero">
+              <div className="profile-hero-left">
+                <ProfileAvatar employee={employee} size={140} />
+                <div style={{ minWidth: 0 }}>
+                  <p style={{ margin: "2px 0 0", fontSize: 22, fontWeight: 800, color: "var(--shell-navy)" }}>
+                    {displayName(employee)}
+                  </p>
+                  <p className="panel-sub" style={{ marginTop: 4 }}>
+                    {`${employee.role} · ${employee.status}`}
+                  </p>
+                  <p className="panel-sub" style={{ marginTop: 2 }}>{employee.email}</p>
+                  <p className="panel-sub" style={{ marginTop: 2 }}>
+                    Team unavailable · Member since {employee.created_at ? friendlyDate(employee.created_at) : "unavailable"}
+                    {employee.provider ? ` · Signed in via ${employee.provider}` : ""}
+                  </p>
+                  <div className="chip-row" style={{ marginTop: 12 }}>
+                    <button type="button" className="btn-outline" onClick={() => firstRef.current?.focus()}>
+                      <Icon name="user" size={14} /> Edit Profile
+                    </button>
+                    <button type="button" className="btn-outline" onClick={() => fileRef.current?.click()}>
+                      <Icon name="download" size={14} /> Upload Photo
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div className="profile-hero-right">
                 <p style={{ margin: 0, fontSize: 15, color: "var(--shell-muted)" }}>
                   {daypart()}, {employee.first_name || displayName(employee)}
                 </p>
-                <p style={{ margin: "2px 0 0", fontSize: 22, fontWeight: 800, color: "var(--shell-navy)" }}>
-                  {displayName(employee)}
-                </p>
-                <p className="panel-sub" style={{ marginTop: 4 }}>
-                  {`${employee.role} · ${employee.status}`}
-                </p>
-                <p className="panel-sub" style={{ marginTop: 2 }}>{employee.email}</p>
-                <p className="panel-sub" style={{ marginTop: 2 }}>
-                  Team unavailable · Member since {employee.created_at ? friendlyDate(employee.created_at) : "unavailable"}
-                  {employee.provider ? ` · Signed in via ${employee.provider}` : ""}
-                </p>
-                <div className="chip-row" style={{ marginTop: 12 }}>
-                  <button type="button" className="btn-outline" onClick={() => firstRef.current?.focus()}>
-                    <Icon name="user" size={14} /> Edit Profile
-                  </button>
-                  <button type="button" className="btn-outline" onClick={() => fileRef.current?.click()}>
-                    <Icon name="download" size={14} /> Upload Photo
-                  </button>
-                </div>
-              </div>
-              <div style={{ display: "flex", gap: 10, flex: "1 1 100%", marginTop: 4 }}>
                 {heroStats.map((s) => (
-                  <div key={s.label} style={{ flex: "1 1 0", background: "var(--shell-bg)", border: "1px solid var(--shell-line)", borderRadius: 10, padding: "10px 12px", minWidth: 0 }}>
+                  <div key={s.label} style={{ background: "var(--shell-bg)", border: "1px solid var(--shell-line)", borderRadius: 10, padding: "10px 12px", minWidth: 0 }}>
                     <p className="panel-sub" style={{ margin: 0, fontSize: 11.5 }}>{s.label}</p>
                     <p style={{ margin: "2px 0 0", fontSize: 14, fontWeight: 700, color: "var(--shell-navy)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                       {s.value}
@@ -265,7 +269,7 @@ export function ProfilePage() {
           <div className="section-gap" />
           <div className="cols-3">
             <Panel title="Personal Information" sub="Name and avatar for your account.">
-              <div className="filter-grid" style={{ gridTemplateColumns: "1fr 1fr", marginTop: 0 }}>
+              <div className="cols-2-even" style={{ marginTop: 0 }}>
                 <div className="field">
                   <label htmlFor="p-first">First Name</label>
                   <input

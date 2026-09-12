@@ -10,6 +10,7 @@ import {
   PageHeader,
   Panel,
   Skeleton,
+  fmtCompact,
   fmtMoney,
   platformLabel,
   useScopedApi,
@@ -136,6 +137,23 @@ function fmtCard(kpi: (typeof CARD_KPIS)[number], v: number | null | undefined):
   if (kpi === "cpm" || kpi === "cpa") return fmtMoney(v);
   if (kpi === "roas") return `${v.toFixed(1)}x`;
   return fmtPct(v);
+}
+
+/* Period table values are formatted by unit — never dumped raw. Deltas
+ * are absolute B−A differences with an explicit sign. */
+function fmtPeriod(kpi: string, v: number | null | undefined): string {
+  if (v == null || !Number.isFinite(v)) return "—";
+  if (kpi === "spend" || kpi === "cpm" || kpi === "cpc" || kpi === "cpa") return fmtMoney(v);
+  if (kpi === "roas") return `${v.toFixed(2)}x`;
+  if (kpi === "ctr" || kpi === "vtr" || kpi === "view_rate") return fmtPct(v);
+  return fmtCompact(v);
+}
+
+function fmtDelta(kpi: string, v: number | null | undefined): string {
+  if (v == null || !Number.isFinite(v)) return "—";
+  if (v === 0) return fmtPeriod(kpi, 0);
+  const sign = v > 0 ? "+" : "−";
+  return `${sign}${fmtPeriod(kpi, Math.abs(v))}`;
 }
 
 function sideOf(data: CompareResponse, key: string): CreativeSide {
@@ -589,8 +607,8 @@ export function ComparePage() {
         title="Compare"
         sub="Compare campaigns or creatives side by side to find what drives the best performance."
       />
-      <Panel title="Comparison Setup">
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,2fr) minmax(0,1fr) auto", gap: 12, alignItems: "end" }}>
+      <div className="cmp-setup-bar" role="group" aria-label="Comparison setup">
+        <div className="cmp-setup">
           <div className="field">
             <label htmlFor="cmp-mode">Compare By</label>
             <select id="cmp-mode" value={mode} onChange={(e) => switchMode(e.target.value as typeof mode)}>
@@ -636,16 +654,16 @@ export function ComparePage() {
             Apply Comparison
           </LoadingButton>
         </div>
-      </Panel>
+      </div>
       {error ? <p className="panel-sub" role="alert" style={{ margin: "12px 0 0" }}>{error}</p> : null}
       {loading && !items.length ? (
-        <div className="cmp-grid" style={{ marginTop: 16 }}>
+        <div className="cmp-grid-4" style={{ marginTop: 16 }}>
           {[0, 1, 2, 3].map((i) => <Skeleton key={i} height={300} />)}
         </div>
       ) : null}
       {items.length ? (
         <>
-          <div className="cmp-grid" style={{ marginTop: 12 }}>
+          <div className="cmp-grid-4" style={{ marginTop: 12 }}>
             {items.map((item, i) => (
               <div className="cmp-card" key={item.key} style={{ borderTop: `4px solid ${COLORS[i % COLORS.length]}`, padding: 14 }}>
                 <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 8 }}>
@@ -660,7 +678,7 @@ export function ComparePage() {
                   <tbody>
                     {CARD_KPIS.map((k) => (
                       <tr key={k}>
-                        <th scope="row" style={{ border: 0, padding: "3px 0" }}>{kpiLabel(k)}</th>
+                        <th scope="row" style={{ border: 0, padding: "3px 0", textTransform: "none", letterSpacing: 0 }}>{kpiLabel(k)}</th>
                         <td className="num" style={{ border: 0, padding: "3px 0", fontWeight: 700 }}>{fmtCard(k, item.values[k])}</td>
                       </tr>
                     ))}
@@ -669,7 +687,7 @@ export function ComparePage() {
               </div>
             ))}
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1.2fr) minmax(0,1fr) minmax(0,1fr)", gap: 12, marginTop: 12 }}>
+          <div className="cmp-trio">
             <Panel
               title={mode === "campaigns" ? "Performance Over Time" : "Retention Curves"}
               action={mode === "campaigns" ? (
@@ -747,7 +765,7 @@ export function ComparePage() {
               ) : <EmptyState text="Select a baseline to compare differences." />}
             </Panel>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1.2fr) minmax(0,1fr) minmax(0,1fr)", gap: 12, marginTop: 12 }}>
+          <div className="cmp-trio">
             <Panel title="Creative Attributes Comparison">
               <div className="tbl-wrap">
                 <table className="tbl">
@@ -815,7 +833,7 @@ export function ComparePage() {
             Period A vs Period B over the identical scoped population.
           </span>
         </summary>
-        <div className="filter-grid" style={{ gridTemplateColumns: "repeat(4,minmax(0,1fr))", marginTop: 12 }}>
+        <div className="filter-grid fg-4" style={{ marginTop: 12 }}>
           <div className="field">
             <label htmlFor="cp-afrom">A From</label>
             <input id="cp-afrom" type="date" value={aFrom} onChange={(e) => setAFrom(e.target.value)} />
@@ -834,7 +852,7 @@ export function ComparePage() {
           </div>
         </div>
         <div className="filter-actions">
-          <LoadingButton type="button" className="btn-primary" loading={periodLoading} loadingLabel="Comparing…" disabled={periodLoading} onClick={() => void comparePeriods()}>
+          <LoadingButton type="button" className="btn-primary" loading={periodLoading} loadingLabel="Comparing Periods…" disabled={periodLoading} onClick={() => void comparePeriods()}>
             Compare Periods
           </LoadingButton>
         </div>
@@ -856,9 +874,9 @@ export function ComparePage() {
                   {PERIOD_KPIS.map((m) => (
                     <tr key={m}>
                       <th scope="row">{kpiLabel(m)}</th>
-                      <td>{String(periodData.a.kpis[m] ?? "—")}</td>
-                      <td>{String(periodData.b.kpis[m] ?? "—")}</td>
-                      <td className="num">{String(periodData.delta[m] ?? "—")}</td>
+                      <td>{fmtPeriod(m, periodData.a.kpis[m])}</td>
+                      <td>{fmtPeriod(m, periodData.b.kpis[m])}</td>
+                      <td className="num">{fmtDelta(m, periodData.delta[m])}</td>
                     </tr>
                   ))}
                 </tbody>

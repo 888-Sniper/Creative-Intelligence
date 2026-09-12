@@ -976,11 +976,25 @@ def analyst_creatives(request: Request,
 
 
 @router.get("/api/analyst/workbook")
-def analyst_workbook_download(conn=Depends(get_product_conn),
+def analyst_workbook_download(request: Request, conn=Depends(get_product_conn),
                               who=Depends(get_current_employee),
                               _limited=Depends(ai_rate_limit)):
     _ = (conn, who, _limited)
-    blob = analyst_workbook.build_blank_workbook()
+    # Workbook configuration travels as query params so the export
+    # reflects the user's name / description / modules / KPIs on a
+    # cover sheet. Absent params yield the historical seven-sheet file.
+    qp = request.query_params
+    name = (qp.get("name") or "")[:120]
+    description = (qp.get("description") or "")[:200]
+    modules = [m.strip() for m in (qp.get("modules") or "").split(",")
+               if m.strip()][:50]
+    kpis = [k.strip() for k in (qp.get("kpis") or "").split(",")
+            if k.strip()][:50]
+    cover = None
+    if name or description or modules or kpis:
+        cover = {"name": name, "description": description,
+                 "modules": modules, "kpis": kpis}
+    blob = analyst_workbook.build_blank_workbook(cover=cover)
     return Response(
         content=blob,
         media_type="application/vnd.openxmlformats-officedocument"

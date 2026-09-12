@@ -15,6 +15,9 @@ test.describe("analyst journey", () => {
     });
     await expect(controls.getByLabel("Objective")).toBeVisible();
     await expect(controls.getByLabel("Language")).toBeVisible();
+    // Conversation and export actions live in the overflow disclosure
+    // (approved composition keeps the primary screen compact).
+    await controls.getByText("More filters, conversations & exports").click();
     await expect(
       page.getByRole("button", { name: "New Conversation" }),
     ).toBeVisible();

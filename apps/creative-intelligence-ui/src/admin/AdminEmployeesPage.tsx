@@ -68,6 +68,13 @@ function displayName(e: AdminEmployee): string {
 
 /** Friendly date for admin surfaces: never a raw ISO string. Empty or
  *  unparseable input renders as "—", never invented. */
+/** Audit action codes (EMPLOYEE_CREATED) render Title Cased for
+ *  readability. Unknown codes render as-is — never hidden. */
+export function auditAction(code: string): string {
+  if (!code) return "—";
+  return code.split("_").map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
+}
+
 export function friendlyDate(raw: string): string {
   if (!raw) return "—";
   const d = new Date(raw.length <= 10 ? `${raw}T00:00:00` : raw);
@@ -153,6 +160,9 @@ export function AdminEmployeesPage() {
   const [localTeams, setLocalTeams] = useState<string[]>(loadLocalTeams);
   const [seedBusy, setSeedBusy] = useState(false);
   const [seedResult, setSeedResult] = useState("");
+  /* One in-flight admin mutation at a time: every async action sets
+   * its key so repeated clicks cannot double-submit while slow. */
+  const [busyKey, setBusyKey] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -194,11 +204,15 @@ export function AdminEmployeesPage() {
   }
 
   async function refreshAll(): Promise<void> {
+    if (busyKey) return;
+    setBusyKey("refresh");
     try {
       await reloadLists();
       setNotice("");
     } catch (e) {
       setNotice(msg(e));
+    } finally {
+      setBusyKey((cur) => (cur === "refresh" ? null : cur));
     }
   }
 
@@ -218,6 +232,9 @@ export function AdminEmployeesPage() {
       !window.confirm(DEMOTE_ADMIN_CONFIRM)
     )
       return;
+    const key = `${act}:${id}`;
+    if (busyKey) return;
+    setBusyKey(key);
     try {
       if (act === "role") {
         await api(
@@ -236,11 +253,16 @@ export function AdminEmployeesPage() {
       setNotice("");
     } catch (e) {
       setNotice(msg(e));
+    } finally {
+      setBusyKey((cur) => (cur === key ? null : cur));
     }
   }
 
   async function invalidateSessions(id: string): Promise<void> {
     if (!window.confirm(INVALIDATE_CONFIRM)) return;
+    const key = `invalidate:${id}`;
+    if (busyKey) return;
+    setBusyKey(key);
     try {
       const r = await api<{ revoked: number }>(
         "POST",
@@ -251,6 +273,8 @@ export function AdminEmployeesPage() {
       setNotice(`${Number(r.revoked) || 0} Session(s) Revoked.`);
     } catch (e) {
       setNotice(msg(e));
+    } finally {
+      setBusyKey((cur) => (cur === key ? null : cur));
     }
   }
 
@@ -271,7 +295,12 @@ export function AdminEmployeesPage() {
     }
   }
 
+  /* Direct creation, honestly named: the backend pre-adds staff as
+   *  Active (admin_create) — no invitation email exists. The dialog
+   *  says "Add Employee", never "Invite". */
   async function addEmployee(): Promise<void> {
+    if (busyKey) return;
+    setBusyKey("add");
     try {
       await api("POST", "/api/admin/employees", {
         email: addEmail.trim(),
@@ -287,6 +316,8 @@ export function AdminEmployeesPage() {
       setNotice("Employee Added As Active.");
     } catch (e) {
       setNotice(msg(e));
+    } finally {
+      setBusyKey((cur) => (cur === "add" ? null : cur));
     }
   }
 
@@ -351,7 +382,9 @@ export function AdminEmployeesPage() {
     return [
       { label: "Total Employees", value: String(total), icon: "users", tint: "#E7F1FB", trend: total ? `${rows.filter((e) => e.role !== "admin").length} employees · ${admins} admins` : "No employees yet" },
       { label: "Active Users", value: String(active), icon: "check", tint: "#E5F5EC", trend: pct(active) },
-      { label: "Pending Invites", value: String(pending), icon: "clock", tint: "#FBF3E2", trend: pending ? "Awaiting approval" : "Inbox zero" },
+      /* "Pending Approvals", not "Pending Invites": no invitation
+       *  email exists — pending rows await an approval decision. */
+      { label: "Pending Approvals", value: String(pending), icon: "clock", tint: "#FBF3E2", trend: pending ? "Awaiting approval" : "Inbox zero" },
       { label: "Admins", value: String(admins), icon: "lock", tint: "#EFEAFB", trend: pct(admins) },
     ];
   }, [employees]);
@@ -380,7 +413,7 @@ export function AdminEmployeesPage() {
               <Icon name="plus" size={14} /> Create Team
             </button>
             <button type="button" className="btn-primary" onClick={() => setInviteOpen(true)}>
-              <Icon name="plus" size={14} /> Invite
+              <Icon name="plus" size={14} /> Add Employee
             </button>
           </>
         )}
@@ -389,7 +422,7 @@ export function AdminEmployeesPage() {
         {stats.map((s) => (
           <div className="kpi-card" key={s.label}>
             <span className="kpi-ico" style={{ background: s.tint }}>
-              <Icon name={s.icon} size={22} />
+              <Icon name={s.icon} size={20} />
             </span>
             <div className="kpi-body">
               <div className="kpi-label">{s.label}</div>
@@ -437,7 +470,7 @@ export function AdminEmployeesPage() {
             <option value="admin">Admin</option>
             <option value="employee">Employee</option>
           </select>
-          <button type="button" className="btn-outline" onClick={() => void refreshAll()}>
+          <button type="button" className="btn-outline" disabled={busyKey !== null} onClick={() => void refreshAll()}>
             <Icon name="reset" size={14} /> Refresh
           </button>
           {notice !== "" && (
@@ -507,6 +540,7 @@ export function AdminEmployeesPage() {
                               <button
                                 type="button"
                                 className="link-teal"
+                                disabled={busyKey !== null}
                                 onClick={() =>
                                   void runAction("approve", e.id, e.role, "")
                                 }
@@ -518,6 +552,7 @@ export function AdminEmployeesPage() {
                               <button
                                 type="button"
                                 className="link-teal"
+                                disabled={busyKey !== null}
                                 onClick={() =>
                                   void runAction("suspend", e.id, e.role, "")
                                 }
@@ -529,6 +564,7 @@ export function AdminEmployeesPage() {
                               <button
                                 type="button"
                                 className="link-teal"
+                                disabled={busyKey !== null}
                                 onClick={() =>
                                   void runAction(
                                     "reactivate",
@@ -545,6 +581,7 @@ export function AdminEmployeesPage() {
                               <button
                                 type="button"
                                 className="link-teal"
+                                disabled={busyKey !== null}
                                 onClick={() =>
                                   void runAction("revoke", e.id, e.role, "")
                                 }
@@ -555,6 +592,7 @@ export function AdminEmployeesPage() {
                             <button
                               type="button"
                               className="link-teal"
+                                disabled={busyKey !== null}
                               onClick={() =>
                                 void runAction("role", e.id, e.role, nextRole)
                               }
@@ -564,6 +602,7 @@ export function AdminEmployeesPage() {
                             <button
                               type="button"
                               className="link-teal"
+                              disabled={busyKey !== null}
                               onClick={() => void invalidateSessions(e.id)}
                             >
                               Invalidate Sessions
@@ -616,7 +655,7 @@ export function AdminEmployeesPage() {
             ))}
             {teams === null ? <Skeleton height={60} /> : null}
             {teams !== null && allTeams.length === 0 ? (
-              <EmptyState text="No Teams Yet — Teams Appear When Campaigns Carry A Team Name." />
+              <EmptyState text="No teams yet — teams appear when campaigns carry a team name." />
             ) : null}
           </div>
         </Panel>
@@ -696,7 +735,7 @@ export function AdminEmployeesPage() {
                 {events.map((v) => (
                   <tr key={v.id}>
                     <td>{friendlyDate(v.created_at)}</td>
-                    <td className="cell-main">{v.action}</td>
+                    <td className="cell-main">{auditAction(v.action)}</td>
                     <td>{(v.target_id || "").slice(0, 8)}</td>
                     <td>{(v.admin_id || "").slice(0, 8)}</td>
                     <td>
@@ -714,7 +753,7 @@ export function AdminEmployeesPage() {
         <div
           role="dialog"
           aria-modal="true"
-          aria-label="Invite Employee"
+          aria-label="Add Employee"
           onClick={() => setInviteOpen(false)}
           style={{ position: "fixed", inset: 0, zIndex: 80, background: "rgba(15,23,42,.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
         >
@@ -725,8 +764,8 @@ export function AdminEmployeesPage() {
           >
             <div className="panel-head">
               <div>
-                <h2 className="panel-title">Invite Employee</h2>
-                <p className="panel-sub">New employees join as Active immediately.</p>
+                <h2 className="panel-title">Add Employee</h2>
+                <p className="panel-sub">New employees join as Active immediately — no invitation email is sent.</p>
               </div>
               <button type="button" className="link-teal" onClick={() => setInviteOpen(false)}>
                 Close
@@ -762,9 +801,11 @@ export function AdminEmployeesPage() {
                 <option value="employee">Employee</option>
                 <option value="admin">Admin</option>
               </select>
-              <button type="button" className="btn-primary" onClick={() => void addEmployee()}>
+              <LoadingButton type="button" className="btn-primary"
+                loading={busyKey === "add"} loadingLabel="Adding…"
+                disabled={busyKey !== null} onClick={() => void addEmployee()}>
                 <Icon name="plus" size={14} /> Add (Active)
-              </button>
+              </LoadingButton>
             </div>
           </div>
         </div>

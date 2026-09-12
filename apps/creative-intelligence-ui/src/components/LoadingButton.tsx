@@ -17,7 +17,11 @@ interface LoadingButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 /** One global async-button system: spinner + loading label while this
- *  button's action runs, automatic disable to avoid double submit. */
+ *  button's action runs, automatic disable to avoid double submit.
+ *  Dimension stability: idle and loading faces share one grid cell and
+ *  the hidden face stays in layout (visibility, not display), so the
+ *  button keeps max(idle, loading) width and never shrinks or shifts
+ *  surrounding content mid-request. */
 export function LoadingButton({
   loading,
   loadingLabel,
@@ -28,14 +32,15 @@ export function LoadingButton({
   const { disabled, ...rest } = buttonProps;
   return (
     <button {...rest} disabled={disabled || loading} aria-busy={loading}>
-      {loading ? (
-        <>
+      <span className="lb-stack">
+        <span className="lb-face" aria-hidden={loading || undefined}>
+          {children}
+        </span>
+        <span className="lb-face" aria-hidden={loading ? undefined : true}>
           <span className={spinnerClass} aria-hidden="true" />
           <span>{loadingLabel}</span>
-        </>
-      ) : (
-        children
-      )}
+        </span>
+      </span>
     </button>
   );
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, scopedPath } from "@/api/client";
 import { useFilters } from "@/state/FilterContext";
@@ -6,11 +6,13 @@ import { Icon } from "@/components/icons";
 import { LoadingButton } from "@/components/LoadingButton";
 import {
   EmptyState,
+  MetaSelect,
   PageHeader,
   Panel,
   Skeleton,
   fmtMoney,
   platformLabel,
+  useCampaignMeta,
   useScopedApi,
 } from "@/components/product";
 
@@ -71,6 +73,17 @@ function MiniBars({ values, format }: { values: number[]; format: (v: number) =>
   );
 }
 
+function BenchmarkViewSub({ view }: { view: SavedView }) {
+  const axes = Object.keys(view.state?.filters ?? {}).length;
+  const dest = view.state?.view ? (VIEW_ROUTES[view.state.view] ?? view.state.view) : "";
+  return (
+    <span className="panel-sub">
+      {axes ? `${axes} filter ${axes === 1 ? "axis" : "axes"}` : "Saved setup"}
+      {dest ? ` · Opens ${dest}` : ""}
+    </span>
+  );
+}
+
 export function BenchmarksPage() {
   const { filters, setFilter, clearFilters } = useFilters();
   const [axis, setAxis] = useState<Axis>("platform");
@@ -84,6 +97,11 @@ export function BenchmarksPage() {
   const benchmarks = useScopedApi<Record<string, BenchRow>>(`/api/benchmarks?group_by=${axis}`, applied);
   const platCount = useScopedApi<Record<string, BenchRow>>("/api/benchmarks?group_by=platform", applied);
   const vertCount = useScopedApi<Record<string, BenchRow>>("/api/benchmarks?group_by=vertical", applied);
+  const metaRows = useCampaignMeta().data?.campaigns ?? [];
+  const metaClients = [...new Set(metaRows.map((r) => r.client.trim()).filter(Boolean))].sort();
+  const metaVerticals = [...new Set(metaRows.flatMap((r) => r.verticals).map((s) => s.trim()).filter(Boolean))].sort();
+  const metaMarkets = [...new Set(metaRows.flatMap((r) => r.markets).map((s) => s.trim()).filter(Boolean))].sort();
+  const metaObjectives = [...new Set(metaRows.flatMap((r) => r.objectives).map((s) => s.trim()).filter(Boolean))].sort();
 
   useEffect(() => {
     let live = true;
@@ -105,6 +123,17 @@ export function BenchmarksPage() {
     [rows, selected],
   );
 
+  /* Preselect the first two rows so Compare Benchmarks opens populated
+   * with real mini charts (mirrors Compare's four-way auto-run). Users
+   * can clear or change the selection; switching Group By reselects. */
+  const autoSel = useRef("");
+  useEffect(() => {
+    if (autoSel.current !== axis && rows.length >= 2 && selected.size === 0) {
+      autoSel.current = axis;
+      setSelected(new Set(rows.slice(0, 2).map((r) => r.key)));
+    }
+  }, [axis, rows, selected.size]);
+
   const coverage = useMemo(() => {
     const total = Object.values(benchmarks.data ?? {}).reduce((t, g) => t + num(g.n_ads), 0);
     return {
@@ -123,11 +152,18 @@ export function BenchmarksPage() {
       return next;
     });
 
+  /* Saved views restore the FULL saved scope (every stored axis plus
+   *  the saved KPI). The global scope model is single-value per axis,
+   *  so the first stored value wins when several were saved. */
   const applyView = (v: SavedView) => {
     const f = v.state?.filters ?? {};
-    for (const k of ["client", "project", "campaign", "platform", "vertical", "market", "objective", "date", "date_from", "date_to"] as const) {
+    for (const k of ["client", "project", "team", "campaign", "platform",
+      "vertical", "market", "funnel", "objective", "status", "spend_min",
+      "spend_max", "hook_type", "creator_vs_branded", "format", "date",
+      "date_from", "date_to"] as const) {
       setFilter(k, (f[k] ?? [])[0] ?? "");
     }
+    if (v.state?.kpi) setFilter("kpi", v.state.kpi);
     window.location.assign(v.state?.view ? (VIEW_ROUTES[v.state.view] ?? "/") : "/");
   };
 
@@ -198,46 +234,32 @@ export function BenchmarksPage() {
           </LoadingButton>
         )}
       />
-      <section className="panel" aria-label="Benchmark filters" style={{ padding: "12px 16px" }}>
-        <div className="filter-grid" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", marginTop: 0 }}>
-          <div className="field">
-            <label htmlFor="b-client">Client</label>
-            <select id="b-client" value={filters.client} onChange={(e) => setFilter("client", e.target.value)}>
-              <option value="all">All Clients</option>
-            </select>
-          </div>
-          <div className="field">
-            <label htmlFor="b-vertical">Vertical</label>
-            <select id="b-vertical" value={filters.vertical} onChange={(e) => setFilter("vertical", e.target.value)}>
-              <option value="all">All Verticals</option>
-            </select>
-          </div>
+      <section className="panel" aria-label="Benchmark filters">
+        <div className="filter-grid fg-6">
+          <MetaSelect id="b-client" label="Client" allLabel="All Clients"
+            values={metaClients} value={filters.client}
+            onPick={(v) => setFilter("client", v)} />
+          <MetaSelect id="b-vertical" label="Vertical" allLabel="All Verticals"
+            values={metaVerticals} value={filters.vertical}
+            onPick={(v) => setFilter("vertical", v)} />
           <div className="field">
             <label htmlFor="b-platform">Platform</label>
-            <select id="b-platform" value={filters.platform} onChange={(e) => setFilter("platform", e.target.value)}>
-              <option value="all">All Platforms</option>
+            <select id="b-platform" aria-label="Platform" value={filters.platform === "all" ? "" : filters.platform} onChange={(e) => setFilter("platform", e.target.value)}>
+              <option value="">All Platforms</option>
               <option value="meta">Meta</option>
               <option value="tiktok">TikTok</option>
             </select>
           </div>
-          <div className="field">
-            <label htmlFor="b-market">Market</label>
-            <select id="b-market" value={filters.market} onChange={(e) => setFilter("market", e.target.value)}>
-              <option value="all">All Markets</option>
-            </select>
-          </div>
-          <div className="field">
-            <label htmlFor="b-objective">Campaign Objective</label>
-            <select id="b-objective" value={filters.objective} onChange={(e) => setFilter("objective", e.target.value)}>
-              <option value="all">All Objectives</option>
-              <option value="awareness">Awareness</option>
-              <option value="conversions">Conversions</option>
-            </select>
-          </div>
+          <MetaSelect id="b-market" label="Market" allLabel="All Markets"
+            values={metaMarkets} value={filters.market}
+            onPick={(v) => setFilter("market", v)} />
+          <MetaSelect id="b-objective" label="Campaign Objective" allLabel="All Objectives"
+            values={metaObjectives} value={filters.objective}
+            onPick={(v) => setFilter("objective", v)} />
           <div className="field">
             <label htmlFor="b-funnel">Funnel Stage</label>
-            <select id="b-funnel" value={filters.funnel} onChange={(e) => setFilter("funnel", e.target.value)}>
-              <option value="all">All Stages</option>
+            <select id="b-funnel" aria-label="Funnel Stage" value={filters.funnel === "all" ? "" : filters.funnel} onChange={(e) => setFilter("funnel", e.target.value)}>
+              <option value="">All Stages</option>
               <option value="upper">Upper</option>
               <option value="mid">Mid</option>
               <option value="lower">Lower</option>
@@ -257,13 +279,13 @@ export function BenchmarksPage() {
         </div>
       </section>
       {status ? <p className="panel-sub" role="status" style={{ margin: "8px 0 0" }}>{status}</p> : null}
-      <div className="main-rail" style={{ marginTop: 12, gap: 12 }}>
-        <div className="rail-stack" style={{ gap: 12 }}>
+      <div className="main-rail">
+        <div className="rail-stack">
           <Panel title="Saved Benchmarks" sub="Quick access to your saved benchmark sets."
             action={<Link className="link-teal" to="/insights">View All</Link>}>
             {views === null ? <Skeleton height={90} /> : (
               views.length ? (
-                <div className="cards-4" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))" }}>
+                <div className="cards-4">
                   {views.slice(0, 4).map((v) => (
                     <button key={v.id} type="button" className="cmp-card" onClick={() => applyView(v)}
                       style={{ textAlign: "left", cursor: "pointer", padding: 12 }}>
@@ -271,7 +293,7 @@ export function BenchmarksPage() {
                         <Icon name="bookmark" size={18} />
                       </span>
                       <strong style={{ display: "block", fontSize: 13 }}>{v.name}</strong>
-                      <span className="panel-sub">{Object.keys(v.state?.filters ?? {}).length} filter axes · Opens {(VIEW_ROUTES[v.state?.view ?? ""] ?? "/")}</span>
+                      <BenchmarkViewSub view={v} />
                     </button>
                   ))}
                 </div>
@@ -344,7 +366,7 @@ export function BenchmarksPage() {
               <button type="button" className="link-teal" onClick={() => setSelected(new Set())}>Clear All</button>
             ) : undefined}>
             {compared.length >= 2 ? (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: 12 }}>
+              <div className="cards-4">
                 {(["cpm", "ctr", "cpa", "roas"] as const).map((m) => (
                   <div key={m} className="cmp-card" style={{ padding: 12 }}>
                     <strong style={{ fontSize: 13 }}>{m.toUpperCase()}</strong>
@@ -361,7 +383,7 @@ export function BenchmarksPage() {
             ) : <EmptyState text="Tick at least two benchmark rows above to compare them here." />}
           </Panel>
         </div>
-        <div className="rail-stack" style={{ gap: 12 }}>
+        <div className="rail-stack">
           <Panel title="Benchmark Insights" sub="Understand the data behind these benchmarks.">
             <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 10 }}>
               <span className="insight-ico" style={{ background: "#DFF5F1" }}>
@@ -376,15 +398,15 @@ export function BenchmarksPage() {
             <div style={{ display: "flex", gap: 8 }}>
               <div className="cmp-card" style={{ flex: 1, textAlign: "center" }}>
                 <strong>{coverage.platforms}</strong>
-                <p className="panel-sub" style={{ margin: 0 }}>Platforms</p>
+                <p className="panel-sub" style={{ margin: 0 }}>{coverage.platforms === 1 ? "Platform" : "Platforms"}</p>
+              </div>
+              <div className="cmp-card" style={{ flex: 1, textAlign: "center" }}>
+                <strong>{metaRows.length}</strong>
+                <p className="panel-sub" style={{ margin: 0 }}>{metaRows.length === 1 ? "Campaign" : "Campaigns"}</p>
               </div>
               <div className="cmp-card" style={{ flex: 1, textAlign: "center" }}>
                 <strong>{coverage.verticals}</strong>
-                <p className="panel-sub" style={{ margin: 0 }}>Verticals</p>
-              </div>
-              <div className="cmp-card" style={{ flex: 1, textAlign: "center" }}>
-                <strong>{AXES.length}</strong>
-                <p className="panel-sub" style={{ margin: 0 }}>Groupings</p>
+                <p className="panel-sub" style={{ margin: 0 }}>{coverage.verticals === 1 ? "Vertical" : "Verticals"}</p>
               </div>
             </div>
           </Panel>

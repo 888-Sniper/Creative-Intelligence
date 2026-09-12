@@ -15,7 +15,8 @@ import {
   fmtMoney,
   fmtMult,
   scopeBody,
-  useCompare,
+  useCampaignMeta,
+  useCompareState,
   useDaily,
   useScopedApi,
 } from "@/components/product";
@@ -120,10 +121,13 @@ export function AskPage() {
   // The opening answered example fires exactly once per mount.
   const autoRan = useRef(false);
 
-  const compare = useCompare();
+  const { data: compare, error: compareError } = useCompareState();
   const daily = useDaily(90);
   const platforms = useScopedApi<Record<string, BenchGroup>>("/api/benchmarks?group_by=platform");
   const hooks = useScopedApi<Record<string, BenchGroup>>("/api/benchmarks?group_by=hook_type");
+  /* The opening sample auto-runs in DEMO workspaces only: a normal
+   * production visit must never POST /api/ask on its own. */
+  const demoMode = useCampaignMeta().data?.demo === true;
 
   useEffect(() => {
     let live = true;
@@ -155,14 +159,16 @@ export function AskPage() {
   const askRef = useRef(ask);
   askRef.current = ask;
 
-  // Demo opens with a representative answered example already on
-  // screen; everything shown comes from the live backend scope.
+  // Demo workspaces open with a representative answered example
+  // already on screen; everything shown comes from the live backend
+  // scope. Production workspaces open on the empty composer. The demo
+  // flag resolves asynchronously, so this fires when it turns true.
   useEffect(() => {
-    if (autoRan.current) return;
+    if (autoRan.current || !demoMode) return;
     autoRan.current = true;
     void askRef.current(DEFAULT_QUESTION);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [demoMode]);
 
   const roi = useMemo(() => bucket(daily ?? []), [daily]);
 
@@ -187,7 +193,8 @@ export function AskPage() {
       .filter((r) => r.ctr != null)
       .sort((a, b) => (b.ctr ?? 0) - (a.ctr ?? 0));
     if (hookRows[0]?.ctr != null) {
-      out.push(`${hookRows[0].key.replace(/_/g, " ")} hooks average ${(hookRows[0].ctr ?? 0).toFixed(1)}% CTR across the current scope.`);
+      const hook = hookRows[0].key.replace(/_/g, " ");
+      out.push(`${hook.charAt(0).toUpperCase()}${hook.slice(1)} hooks average ${(hookRows[0].ctr ?? 0).toFixed(1)}% CTR across the current scope.`);
     }
     if (answer?.sources?.length) {
       out.push(`Grounded in ${answer.sources.join(", ")} for the scope “${answer.scope || "All data"}”.`);
@@ -217,15 +224,16 @@ export function AskPage() {
                 void ask();
               }}
             >
-              <div className="composer">
+              <div className="composer ask-composer">
+                <Icon name="chat" size={18} />
                 <input
                   value={question}
                   onChange={(e) => setQuestion(e.target.value)}
                   placeholder="Ask a question about your marketing data…"
                   aria-label="Ask a question about your marketing data"
                 />
-                <LoadingButton type="submit" className="btn-primary" loading={busy} loadingLabel="Asking…" disabled={busy || !question.trim()} aria-label="Ask">
-                  <Icon name="chat" size={16} /> Ask
+                <LoadingButton type="submit" className="btn-send" loading={busy} loadingLabel="Sending…" spinnerClass="spinner" disabled={busy || !question.trim()} aria-label="Ask">
+                  <Icon name="send" size={17} />
                 </LoadingButton>
               </div>
             </form>
@@ -239,27 +247,28 @@ export function AskPage() {
           </section>
           {asked ? (
             <Panel title={asked} sub="Today">
-              <p style={{ fontSize: 13, fontWeight: 700, margin: "0 0 6px", color: "var(--shell-navy)" }}>
-                {asked}
-              </p>
               {busy ? <Skeleton height={120} /> : error ? (
                 <EmptyState text={error} />
               ) : answer ? (
                 <>
                   <p style={{ fontSize: 14, lineHeight: 1.6, marginTop: 0 }}>{answer.answer}</p>
-                  <div className="kpi-grid">
-                    {kpis.map((k) => (
-                      <KpiCard
-                        key={k.metric}
-                        label={k.label}
-                        display={k.display}
-                        icon={k.metric === "spend" ? "coin" : k.metric === "conversions" ? "click" : k.metric === "cpa" ? "users" : "bars"}
-                        tint="#E7F1FB"
-                        metricLabel={k.metric === "roas" ? "ROAS" : k.metric === "cpa" ? "CPA" : k.label.replace("Average ", "").replace("Total ", "")}
-                        compare={compare}
-                      />
-                    ))}
-                  </div>
+                  {compare ? (
+                    <div className="kpi-grid">
+                      {kpis.map((k) => (
+                        <KpiCard
+                          key={k.metric}
+                          label={k.label}
+                          display={k.display}
+                          icon={k.metric === "spend" ? "coin" : k.metric === "conversions" ? "click" : k.metric === "cpa" ? "users" : "bars"}
+                          tint="#E7F1FB"
+                          metricLabel={k.metric === "roas" ? "ROAS" : k.metric === "cpa" ? "CPA" : k.label.replace("Average ", "").replace("Total ", "")}
+                          compare={compare}
+                        />
+                      ))}
+                    </div>
+                  ) : compareError ? (
+                    <EmptyState text={compareError} />
+                  ) : <Skeleton height={118} />}
                   <Panel title="Revenue Trend">
                     {daily ? (
                       <TrendChart
@@ -268,11 +277,11 @@ export function AskPage() {
                       />
                     ) : <Skeleton height={200} />}
                   </Panel>
-                  <div className="cols-2" style={{ marginTop: 12 }}>
+                  <div className="cols-2">
                     <Panel title="Source & Data Context">
                       <p className="panel-sub">Sources: {(answer.sources ?? []).join(", ") || "—"}</p>
                       <p className="panel-sub">Scope: {answer.scope || "All data"}</p>
-                      {answer.review_id ? <p className="panel-sub">Review #{answer.review_id} opened.</p> : null}
+                      {answer.review_id ? <p className="panel-sub">Saved for review (#{answer.review_id}).</p> : null}
                     </Panel>
                     <Panel title="Benchmark Context">
                       {platforms.data ? (
@@ -285,7 +294,7 @@ export function AskPage() {
                     </Panel>
                   </div>
                   {takeaways.length ? (
-                    <div className="takeaways" style={{ marginTop: 12 }}>
+                    <div className="takeaways">
                       <h5>Key Takeaways</h5>
                       <ul>
                         {takeaways.map((t) => (

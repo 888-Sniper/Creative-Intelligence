@@ -113,7 +113,7 @@ describe("SettingsPage", () => {
     expect(screen.getByText("Notifications")).toBeDefined();
     expect(screen.getByText("Integrations")).toBeDefined();
     expect(screen.getByText("Security")).toBeDefined();
-    expect(screen.getByText("Data Tools")).toBeDefined();
+    expect(screen.getByText("Advanced")).toBeDefined();
     expect(screen.getByRole("button", { name: "Save Changes" })).toBeDefined();
     expect(screen.getByText("No unsaved changes.")).toBeDefined();
   });
@@ -137,6 +137,28 @@ describe("SettingsPage", () => {
       expect(screen.getByText("Defaults Restored.")).toBeDefined();
     });
     expect((screen.getByLabelText("Workspace Name") as HTMLInputElement).value).toBe("Alex's Workspace");
+  });
+
+  it("stages appearance choices and applies them only on Save", async () => {
+    mockFetch();
+    renderSettings();
+    await waitFor(() => {
+      expect(screen.getByLabelText("Theme")).toBeDefined();
+    });
+    const appliedTeal = document.documentElement.style.getPropertyValue("--shell-teal");
+    fireEvent.change(screen.getByLabelText("Accent Color"), { target: { value: "Blue" } });
+    fireEvent.change(screen.getByLabelText("Theme"), { target: { value: "dark" } });
+    // Staged only: live appearance is untouched until Save.
+    expect(document.documentElement.style.getPropertyValue("--shell-teal")).toBe(appliedTeal);
+    expect(document.documentElement.dataset["theme"] ?? "").not.toBe("dark");
+    const save = screen.getByRole("button", { name: "Save Changes" }) as HTMLButtonElement;
+    expect(save.disabled).toBe(false);
+    fireEvent.click(save);
+    await waitFor(() => {
+      expect(screen.getByText("Settings Saved.")).toBeDefined();
+    });
+    expect(document.documentElement.style.getPropertyValue("--shell-teal")).toBe("#2F6FBE");
+    expect(document.documentElement.dataset["theme"]).toBe("dark");
   });
 
   it("sends a password reset email from Security", async () => {

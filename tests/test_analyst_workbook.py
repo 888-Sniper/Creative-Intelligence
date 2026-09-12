@@ -551,6 +551,27 @@ class WorkbookStructureTest(unittest.TestCase):
         self.assertIn("Input!E6", metrics_cells["B6"][1])
         self.assertIn("Input!B6", metrics_cells["B6"][1])
 
+    def test_cover_sheet_records_configuration(self):
+        blob = wb.build_blank_workbook(cover={
+            "name": "Q1 Report", "description": "Quarterly read.",
+            "modules": ["summary", "breakdown"],
+            "kpis": ["Impressions", "ROAS"]})
+        sheets = _sheets_xml(blob)
+        self.assertEqual(
+            list(sheets),
+            ["Workbook", "Input", "Metrics", "Benchmarks", "Hypotheses",
+             "Creative Summary", "Test Plan", "Definitions"])
+        cells = _cell_grid(*sheets["Workbook"])
+        text = " ".join(v for _, v in cells.values())
+        self.assertIn("Q1 Report", text)
+        self.assertIn("summary, breakdown", text)
+        self.assertIn("Impressions, ROAS", text)
+
+    def test_no_cover_without_configuration(self):
+        blob = wb.build_blank_workbook()
+        sheets = _sheets_xml(blob)
+        self.assertNotIn("Workbook", list(sheets))
+
     def test_definitions_come_from_shared_registry(self):
         blob = wb.build_blank_workbook()
         sheets = _sheets_xml(blob)

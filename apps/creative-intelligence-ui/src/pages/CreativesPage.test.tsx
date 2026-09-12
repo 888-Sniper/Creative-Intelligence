@@ -118,7 +118,10 @@ describe("CreativesPage", () => {
     ) as unknown as typeof fetch;
     renderPage();
     await waitFor(() => {
-      expect(screen.getByText("boom")).toBeDefined();
+      /* Both scoped sections report their own failure (KPI strip reads
+       * compare state, the table reads creatives) instead of hanging on
+       * skeletons when the backend is down. */
+      expect(screen.getAllByText("boom")).toHaveLength(2);
     });
   });
 

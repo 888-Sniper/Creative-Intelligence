@@ -171,7 +171,7 @@ describe("AdminEmployeesPage", () => {
     expect(screen.queryByText("2026-09-01")).toBeNull();
     expect(screen.getByText("Never signed in")).toBeDefined();
     expect(screen.getByText("Audit Trail")).toBeDefined();
-    expect(screen.getByText("EMPLOYEE_APPROVED")).toBeDefined();
+    expect(screen.getByText("Employee Approved")).toBeDefined();
     expect(screen.getByText("pending → active")).toBeDefined();
   });
 
@@ -248,7 +248,7 @@ describe("AdminEmployeesPage", () => {
     ).toBe(false);
   });
 
-  it("adds an employee through the invite modal and reports success", async () => {
+  it("adds an employee through the add-employee dialog and reports success", async () => {
     const calls = setupFetch();
     render(<AdminEmployeesPage />);
     await waitFor(() => {
@@ -256,7 +256,7 @@ describe("AdminEmployeesPage", () => {
     });
     // The permanent Add Employee panel is gone: inviting happens in a modal.
     expect(screen.queryByPlaceholderText("email")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Invite" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Employee" }));
     fireEvent.change(screen.getByPlaceholderText("email"), {
       target: { value: "new@foap.test" },
     });
@@ -354,7 +354,7 @@ describe("AdminEmployeesPage", () => {
       expect(screen.getByText("Total Employees")).toBeDefined();
     });
     expect(screen.getByText("Active Users")).toBeDefined();
-    expect(screen.getByText("Pending Invites")).toBeDefined();
+    expect(screen.getByText("Pending Approvals")).toBeDefined();
     expect(screen.getByText("Admins")).toBeDefined();
   });
 

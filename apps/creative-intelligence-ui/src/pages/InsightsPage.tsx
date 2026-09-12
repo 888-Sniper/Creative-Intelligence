@@ -1,15 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { api } from "@/api/client";
 import { useFilters } from "@/state/FilterContext";
 import { Icon } from "@/components/icons";
 import { LoadingButton } from "@/components/LoadingButton";
 import {
   EmptyState,
+  MetaSelect,
   PageHeader,
   Panel,
   Skeleton,
   scopeBody,
+  useCampaignMeta,
   useScopedApi,
 } from "@/components/product";
 
@@ -62,6 +64,14 @@ function dayLabel(iso: string | null | undefined): string {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
+/** Finding titles come from backend signal copy (lowercase by
+ *  convention): display them sentence-cased so cards read like titles
+ *  without altering the underlying data. */
+export function signalTitle(s: string | null | undefined): string {
+  if (!s) return "Untitled Finding";
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
 function withinDays(iso: string | null | undefined, days: number): boolean {
   if (!iso) return false;
   const t = new Date(iso).getTime();
@@ -72,10 +82,14 @@ function withinDays(iso: string | null | undefined, days: number): boolean {
 export function InsightsPage() {
   const { filters, setFilter, scope } = useFilters();
   const navigate = useNavigate();
-  const [search, setSearch] = useState("");
-  const [client, setClient] = useState("All Clients");
-  const [platform, setPlatform] = useState("All Platforms");
-  const [market, setMarket] = useState("All Markets");
+  const location = useLocation();
+  /* Global header search deep-links here: ?find= pre-fills the search
+   * so the hit is visible immediately. */
+  const [search, setSearch] = useState(
+    () => new URLSearchParams(location.search).get("find") ?? "");
+  const [client, setClient] = useState("");
+  const [platform, setPlatform] = useState("");
+  const [market, setMarket] = useState("");
   const [itype, setItype] = useState("All Types");
   const [dateSaved, setDateSaved] = useState("All Time");
   const [conversations, setConversations] = useState<Conversation[] | null>(null);
@@ -83,6 +97,17 @@ export function InsightsPage() {
   const [saving, setSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState("");
   const cards = useScopedApi<{ creatives: AnalystCard[] }>("/api/analyst/creatives?objective=reach");
+  const meta = useCampaignMeta();
+  const metaRows = meta.data?.campaigns ?? [];
+  const metaClients = [...new Set(metaRows.map((r) => r.client.trim()).filter(Boolean))].sort();
+  const metaMarkets = [...new Set(metaRows.flatMap((r) => r.markets).map((s) => s.trim()).filter(Boolean))].sort();
+  const metaByCampaign = useMemo(() => {
+    const m = new Map<string, { client: string; markets: string[] }>();
+    for (const r of metaRows) {
+      if (!m.has(r.name)) m.set(r.name, { client: r.client, markets: r.markets });
+    }
+    return m;
+  }, [metaRows]);
 
   useEffect(() => {
     let live = true;
@@ -108,16 +133,30 @@ export function InsightsPage() {
     if (dateSaved === "All Time") return true;
     return withinDays(iso, dateSaved === "Last 7 Days" ? 7 : 30);
   };
+  /* Every visible axis filter affects content. Creative findings
+   *  carry platform + campaign, so client/market resolve through the
+   *  campaign metadata (honest: no invented per-finding attributes). */
   const matchAxes = (c: AnalystCard) => {
-    if (platform !== "All Platforms" && (c.platform ?? "").toLowerCase() !== platform.toLowerCase()) {
-      if (platform !== "All Platforms") {
-        const want = platform.toLowerCase();
-        if ((c.platform ?? "").toLowerCase() !== want) return false;
-      }
+    if (platform && (c.platform ?? "").toLowerCase() !== platform.toLowerCase()) return false;
+    if (client || market) {
+      const attr = c.campaign ? metaByCampaign.get(c.campaign) : undefined;
+      if (client && (attr?.client ?? "").toLowerCase() !== client.toLowerCase()) return false;
+      if (market && !(attr?.markets ?? []).some((m) => m.toLowerCase() === market.toLowerCase())) return false;
     }
-    void client;
-    void market;
     return true;
+  };
+
+  /* Saved views match by their stored filter state: a view with no
+   * constraint on an axis covers every value of that axis. */
+  const matchViewAxes = (v: SavedView) => {
+    const f = v.state?.filters ?? {};
+    const has = (axis: string, want: string) => {
+      if (!want) return true;
+      const vals = f[axis] ?? [];
+      if (!vals.length) return true;
+      return vals.some((x) => x.toLowerCase() === want.toLowerCase() || x.toLowerCase() === "all");
+    };
+    return has("client", client) && has("platform", platform) && has("market", market);
   };
 
   const savedCards = useMemo(() => {
@@ -139,28 +178,39 @@ export function InsightsPage() {
     }
     if (itype === "All Types" || itype === "Saved Views") {
       for (const v of views ?? []) {
+        if (!matchViewAxes(v)) continue;
         if (needle && !v.name.toLowerCase().includes(needle)) continue;
         const axes = Object.keys(v.state?.filters ?? {}).length;
+        const route = v.state?.view ? (VIEW_ROUTES[v.state.view] ?? v.state.view) : "";
         out.push({
           key: `v-${v.id}`,
           badge: "Saved View",
           title: v.name,
-          body: `Saved analysis setup${axes ? ` across ${axes} filter axes` : ""}.`,
-          meta: v.state?.view ? `Opens ${(VIEW_ROUTES[v.state.view] ?? v.state.view)}` : "",
-          to: v.state?.view ? (VIEW_ROUTES[v.state.view] ?? "/") : "/",
+          body: `Saved analysis setup${axes ? ` across ${axes} filter ${axes === 1 ? "axis" : "axes"}` : ""}.`,
+          meta: route ? `Opens ${route}` : "",
+          to: route || "/",
           apply: v,
         });
       }
     }
     return out;
-  }, [conversations, views, itype, needle, dateSaved]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversations, views, itype, needle, dateSaved, client, platform, market]);
 
+  /* Saved views restore the FULL saved scope: every stored axis plus
+   * the saved KPI. The global scope model is single-value per axis,
+   * so the first stored value wins when several were saved (documented
+   * here, not silently dropped elsewhere). */
+  const SCOPE_KEYS = ["client", "project", "team", "campaign", "platform",
+    "vertical", "market", "funnel", "objective", "status", "spend_min",
+    "spend_max", "hook_type", "creator_vs_branded", "format", "date",
+    "date_from", "date_to"] as const;
   const applyView = (v: SavedView) => {
     const f = v.state?.filters ?? {};
-    for (const k of ["client", "project", "campaign", "platform", "vertical", "market", "objective", "date", "date_from", "date_to"] as const) {
-      const val = (f[k] ?? [])[0] ?? "";
-      setFilter(k, k === "platform" && val && !["all", "meta", "tiktok"].includes(val) ? "all" : val);
+    for (const k of SCOPE_KEYS) {
+      setFilter(k, (f[k] ?? [])[0] ?? "");
     }
+    if (v.state?.kpi) setFilter("kpi", v.state.kpi);
     navigate(v.state?.view ? (VIEW_ROUTES[v.state.view] ?? "/") : "/");
   };
 
@@ -197,31 +247,25 @@ export function InsightsPage() {
         )}
       />
       {saveStatus ? <p className="panel-sub" role="status" style={{ margin: "0 0 12px" }}>{saveStatus}</p> : null}
-      <section className="panel" aria-label="Find insights" style={{ padding: "12px 16px" }}>
-        <div className="filter-grid" style={{ gridTemplateColumns: "repeat(6,minmax(0,1fr))", marginTop: 0 }}>
+      <section className="panel" aria-label="Find insights">
+        <div className="filter-grid fg-6">
           <div className="field">
             <label htmlFor="in-search">Search</label>
             <input id="in-search" placeholder="Search saved insights…" value={search}
               onChange={(e) => setSearch(e.target.value)} />
           </div>
-          <div className="field">
-            <label htmlFor="in-client">Client</label>
-            <select id="in-client" value={client} onChange={(e) => setClient(e.target.value)}>
-              {["All Clients"].map((o) => <option key={o}>{o}</option>)}
-            </select>
-          </div>
+          <MetaSelect id="in-client" label="Client" allLabel="All Clients"
+            values={metaClients} value={client} onPick={setClient} />
           <div className="field">
             <label htmlFor="in-platform">Platform</label>
-            <select id="in-platform" value={platform} onChange={(e) => setPlatform(e.target.value)}>
-              {["All Platforms", "Meta", "TikTok"].map((o) => <option key={o}>{o}</option>)}
+            <select id="in-platform" aria-label="Platform" value={platform} onChange={(e) => setPlatform(e.target.value)}>
+              <option value="">All Platforms</option>
+              <option value="meta">Meta</option>
+              <option value="tiktok">TikTok</option>
             </select>
           </div>
-          <div className="field">
-            <label htmlFor="in-market">Market</label>
-            <select id="in-market" value={market} onChange={(e) => setMarket(e.target.value)}>
-              {["All Markets"].map((o) => <option key={o}>{o}</option>)}
-            </select>
-          </div>
+          <MetaSelect id="in-market" label="Market" allLabel="All Markets"
+            values={metaMarkets} value={market} onPick={setMarket} />
           <div className="field">
             <label htmlFor="in-type">Insight Type</label>
             <select id="in-type" value={itype} onChange={(e) => setItype(e.target.value)}>
@@ -236,16 +280,16 @@ export function InsightsPage() {
           </div>
         </div>
       </section>
-      <div className="main-rail" style={{ marginTop: 12, gap: 12 }}>
-        <div className="rail-stack" style={{ gap: 12 }}>
+      <div className="main-rail">
+        <div className="rail-stack">
           <Panel title="Pinned Learnings" sub="Your most important insights, always within reach.">
             {cards.data ? (
-              findings.pinned.length ? (
+              findings.pinned.filter(matchAxes).length ? (
                 <div style={{ background: "#DFF5F1", borderRadius: 10, padding: 10 }}>
-                  <div className="cards-4" style={{ gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 10 }}>
-                    {findings.pinned.map((c) => (
+                  <div className="cards-3" style={{ gap: 10 }}>
+                    {findings.pinned.filter(matchAxes).map((c) => (
                       <div className="cmp-card" key={c.creative_key} style={{ padding: 12 }}>
-                        <h4 style={{ margin: "0 0 6px", fontSize: 13.5 }}>{c.finding?.primary_signal}</h4>
+                        <h4 style={{ margin: "0 0 6px", fontSize: 13.5 }}>{signalTitle(c.finding?.primary_signal)}</h4>
                         <p className="panel-sub" style={{ margin: 0 }}>{c.finding?.diagnosis}</p>
                         <p className="panel-sub" style={{ margin: "4px 0 0" }}>{[c.platform, c.campaign].filter(Boolean).join(" · ")}</p>
                       </div>
@@ -258,7 +302,7 @@ export function InsightsPage() {
           <Panel title={`Your Saved Insights (${savedCards.length})`}>
             {conversations === null || views === null ? <Skeleton height={160} /> : (
               savedCards.length ? (
-                <div className="cards-4" style={{ gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 12 }}>
+                <div className="cards-3">
                   {savedCards.map((s) => (
                     <div className="cmp-card" key={s.key} style={{ padding: 14 }}>
                       <span className="badge-demo">{s.badge}</span>
@@ -280,11 +324,11 @@ export function InsightsPage() {
           </Panel>
           {(itype === "All Types" || itype === "Creative Findings") && findings.rest.filter(matchAxes).length ? (
             <Panel title="Creative Findings">
-              <div className="cards-4" style={{ gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 12 }}>
+              <div className="cards-3">
                 {findings.rest.filter(matchAxes).slice(0, 6).map((c) => (
                   <div className="cmp-card" key={c.creative_key} style={{ padding: 14 }}>
                     <span className="badge-demo">Creative Finding</span>
-                    <h4 style={{ margin: "8px 0 6px", fontSize: 13.5 }}>{c.finding?.primary_signal}</h4>
+                    <h4 style={{ margin: "8px 0 6px", fontSize: 13.5 }}>{signalTitle(c.finding?.primary_signal)}</h4>
                     <p className="panel-sub" style={{ margin: "0 0 8px" }}>{c.finding?.diagnosis}</p>
                     <Link className="btn-soft" to="/analyst">Open in Analyst →</Link>
                   </div>
@@ -293,7 +337,7 @@ export function InsightsPage() {
             </Panel>
           ) : null}
         </div>
-        <div className="rail-stack" style={{ gap: 12 }}>
+        <div className="rail-stack">
           <Panel title="Recent Activity">
             {conversations === null ? <Skeleton height={160} /> : (
               recent.length ? (
@@ -315,19 +359,21 @@ export function InsightsPage() {
           </Panel>
           <Panel title="Recommended Related Insights">
             {cards.data ? (
+              findings.rest.filter(matchAxes).length ? (
               <div>
-                {findings.rest.slice(0, 4).map((c) => (
+                {findings.rest.filter(matchAxes).slice(0, 4).map((c) => (
                   <div className="insight" key={c.creative_key}>
                     <span className="insight-ico" style={{ background: "#DFF5F1" }}>
                       <Icon name="spark" size={20} />
                     </span>
                     <div>
-                      <h4>{c.finding?.primary_signal}</h4>
+                      <h4>{signalTitle(c.finding?.primary_signal)}</h4>
                       <p>{c.finding?.recommended_iteration ?? c.finding?.diagnosis}</p>
                     </div>
                   </div>
                 ))}
               </div>
+              ) : <EmptyState text="No recommendations match the current filters." />
             ) : <Skeleton height={160} />}
           </Panel>
         </div>

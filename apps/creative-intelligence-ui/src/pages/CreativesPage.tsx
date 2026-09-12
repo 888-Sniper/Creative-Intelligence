@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { api } from "@/api/client";
 import { useFilters } from "@/state/FilterContext";
 import { Icon } from "@/components/icons";
@@ -15,8 +15,9 @@ import {
   Skeleton,
   compareDisplayed,
   fmtCompact,
+  formatDuration,
   platformLabel,
-  useCompare,
+  useCompareState,
   useScopedApi,
 } from "@/components/product";
 
@@ -110,7 +111,7 @@ function CreativeDetail({ datum }: { datum: CreativeRowDatum }) {
     ["Campaigns", (datum.campaigns ?? []).join(", ") || "—"],
   ];
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 16 }}>
+    <div className="detail-cols-2">
       <dl className="detail-list">
         {facts.map(([k, v]) => (
           <div key={k}>
@@ -165,8 +166,26 @@ export function CreativesPage() {
   const [exportBusy, setExportBusy] = useState(false);
   const [banner, setBanner] = useState("");
 
-  const compare = useCompare(applied);
+  const { data: compare, error: compareError } = useCompareState(applied);
   const creatives = useScopedApi<CreativeRowDatum[]>("/api/creatives", applied);
+  const location = useLocation();
+
+  /* Global header search deep-links here: ?find= opens the matching
+   * creative's detail (by key or name) once rows load, and scrolls it
+   * into view. Cleared by collapsing the detail. */
+  useEffect(() => {
+    const needle = new URLSearchParams(location.search).get("find")?.trim().toLowerCase();
+    if (!needle || !creatives.data) return;
+    const hit = creatives.data.find((c) =>
+      c.creative_key.toLowerCase() === needle
+      || (c.name ?? "").toLowerCase().includes(needle));
+    if (hit) {
+      setExpandedKey(hit.creative_key);
+      requestAnimationFrame(() => {
+        document.getElementById("creative-detail")?.scrollIntoView?.({ block: "nearest" });
+      });
+    }
+  }, [location.search, creatives.data]);
 
   // Every section below reads lengthRows: the Video Length filter is a
   // page-level scope, so top cards, KPIs, baseline and learnings all
@@ -375,9 +394,6 @@ export function CreativesPage() {
 
   return (
     <div className="creatives">
-      {/* Scoped density (theme.css is read-only): shallower cards,
-        tighter grid, cards and table rows so the table reads higher. */}
-      <style>{`.creatives .panel{padding:16px 18px}.creatives .filter-grid{gap:8px 10px}.creatives .creative-card{padding:8px}.creatives .tbl td{padding-top:7px;padding-bottom:7px}`}</style>
       <PageHeader
         title="Creatives"
         sub="Explore top performing creatives, analyze what works, and get AI-powered recommendations."
@@ -442,11 +458,11 @@ export function CreativesPage() {
               <div className="kpi-grid">
                 <div className="kpi-card">
                   <span className="kpi-ico" style={{ background: "#DFF5F1", color: "#009485" }}>
-                    <Icon name="play" size={22} />
+                    <Icon name="play" size={20} />
                   </span>
                   <div className="kpi-body">
-                    <p className="kpi-label" style={{ fontSize: 13, fontWeight: 600, color: "var(--shell-muted)", margin: 0 }}>Total Creatives</p>
-                    <p className="kpi-value" style={{ fontSize: 27, fontWeight: 800, margin: 0 }}>{fmtCompact(rows.length)}</p>
+                    <div className="kpi-label">Total Creatives</div>
+                    <div className="kpi-value">{fmtCompact(rows.length)}</div>
                   </div>
                 </div>
                 {length === "all" && compare ? (
@@ -470,6 +486,8 @@ export function CreativesPage() {
                 )}
               </div>
             </>
+          ) : compareError ? (
+            <div className="panel"><EmptyState text={compareError} /></div>
           ) : (
             <div className="kpi-grid">
               {[0, 1, 2, 3].map((i) => <Skeleton key={i} height={118} />)}
@@ -492,9 +510,10 @@ export function CreativesPage() {
                         <div className="creative-thumb-lg">
                           <CreativeThumb seed={c.creative_key} label={c.name || c.creative_key} />
                           <span className="creative-badge">{badge}</span>
-                          {s ? <span className="thumb-dur">0:{String(s).padStart(2, "0")}</span> : null}
+                          {s ? <span className="thumb-dur">{formatDuration(s)}</span> : null}
+                          <span className="creative-scrim">{c.name || c.creative_key}</span>
                         </div>
-                        <p className="creative-name">{c.name || c.creative_key}</p>
+                        <p className="creative-name">{[(c.campaigns ?? [])[0], c.format].filter(Boolean).join(" • ") || "—"}</p>
                         <div className="creative-stats">
                           <span><Icon name="play" size={12} /> {fmtCompact(num(c.metrics.impressions))}</span>
                           <span><Icon name="click" size={12} /> {c.metrics.ctr == null ? "—" : `${(c.metrics.ctr * 100).toFixed(1)}%`}</span>
@@ -604,9 +623,10 @@ export function CreativesPage() {
                         <div className="creative-card" key={c.creative_key}>
                           <div className="creative-thumb-lg">
                             <CreativeThumb seed={c.creative_key} label={c.name || c.creative_key} />
-                            {s ? <span className="thumb-dur">0:{String(s).padStart(2, "0")}</span> : null}
+                            {s ? <span className="thumb-dur">{formatDuration(s)}</span> : null}
+                            <span className="creative-scrim">{c.name || c.creative_key}</span>
                           </div>
-                          <p className="creative-name">{c.name || c.creative_key}</p>
+                          <p className="creative-name">{[(c.campaigns ?? [])[0], c.format].filter(Boolean).join(" • ") || "—"}</p>
                           <div className="creative-stats">
                             <span>{fmtCompact(num(c.metrics.impressions))}</span>
                             <span>{c.metrics.ctr == null ? "—" : `${(c.metrics.ctr * 100).toFixed(1)}%`}</span>
@@ -623,9 +643,11 @@ export function CreativesPage() {
             ) : <Skeleton height={220} />}
           </Panel>
           {expandedKey && rows.find((r) => r.creative_key === expandedKey) ? (
-            <Panel title={rows.find((r) => r.creative_key === expandedKey)?.name || expandedKey}>
-              <CreativeDetail datum={rows.find((r) => r.creative_key === expandedKey) as CreativeRowDatum} />
-            </Panel>
+            <div id="creative-detail">
+              <Panel title={rows.find((r) => r.creative_key === expandedKey)?.name || expandedKey}>
+                <CreativeDetail datum={rows.find((r) => r.creative_key === expandedKey) as CreativeRowDatum} />
+              </Panel>
+            </div>
           ) : null}
         </div>
         <div className="rail-stack">

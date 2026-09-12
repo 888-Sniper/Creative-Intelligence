@@ -17,6 +17,8 @@ test.describe("populated states", () => {
   test("compare runs a period comparison", async ({ page, context }) => {
     const seeds = readSeeds();
     await loginAs(context, page, seeds.admin, "/compare");
+    // Period comparison lives in the collapsed Advanced section.
+    await page.locator("details.panel summary").click();
     await page.getByLabel("A From").fill("2023-12-25");
     await page.getByLabel("A To").fill("2023-12-31");
     await page.getByLabel("B From").fill("2024-01-01");

@@ -16,7 +16,10 @@ describe("LoadingButton", () => {
     const btn = screen.getByRole("button", { name: "Save Insight" });
     expect(btn.getAttribute("disabled")).toBeNull();
     expect(btn.getAttribute("aria-busy")).toBe("false");
-    expect(btn.querySelector(".spinner")).toBeNull();
+    // The loading face stays mounted (hidden) to reserve button width,
+    // so assert no VISIBLE spinner rather than no spinner node.
+    expect(btn.querySelector(".spinner")?.closest('[aria-hidden="true"]')).not.toBeNull();
+    expect(btn.querySelector(".lb-face:not([aria-hidden]) .spinner")).toBeNull();
   });
 
   it("shows only its own spinner and label while loading", () => {
@@ -41,6 +44,19 @@ describe("LoadingButton", () => {
       </LoadingButton>,
     );
     expect(screen.getByRole("button", { name: "Save Insight" }).getAttribute("disabled")).not.toBeNull();
+  });
+
+  it("reserves width for both labels so loading never shrinks the button", () => {
+    render(
+      <LoadingButton type="button" loading loadingLabel="Generating…">
+        Generate Report
+      </LoadingButton>,
+    );
+    const btn = screen.getByRole("button", { name: "Generating…" });
+    // The hidden idle label stays in layout to hold the button width.
+    expect(btn.textContent).toContain("Generate Report");
+    expect(btn.querySelector('.lb-face[aria-hidden="true"]')).not.toBeNull();
+    expect(btn.querySelector(".spinner")).not.toBeNull();
   });
 
   it("keeps the same button element across the loading swap", () => {

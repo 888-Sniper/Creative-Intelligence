@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
+import { Link, NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "@/auth/AuthProvider";
 import { AccountMenu } from "@/auth/AccountMenu";
 import { Icon } from "@/components/icons";
+import { GlobalSearch } from "@/components/GlobalSearch";
 
 const NAV = [
   { to: "/", label: "Dashboard", icon: "dashboard", end: true },
@@ -25,9 +26,7 @@ const NAV_ACCOUNT = [
 
 export function AppShell() {
   const { me } = useAuth();
-  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
   const close = () => setOpen(false);
   return (
     <div className="shell">
@@ -66,19 +65,7 @@ export function AppShell() {
               aria-label="Open menu" onClick={() => setOpen(true)}>
               <Icon name="menu" size={20} />
             </button>
-            <form className="globalsearch" role="search"
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (query.trim()) {
-                  navigate(`/campaigns?find=${encodeURIComponent(query.trim())}`);
-                  setQuery("");
-                }
-              }}>
-              <Icon name="search" size={17} />
-              <input value={query} onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search for campaigns, creatives, or insights…"
-                aria-label="Search campaigns, creatives, or insights" />
-            </form>
+            <GlobalSearch />
             <Link to="/insights" className="icon-btn" aria-label="Recent activity">
               <Icon name="bell" size={20} />
               <span className="dot" aria-hidden="true" />

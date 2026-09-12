@@ -69,12 +69,18 @@ function mockFetch() {
 }
 
 describe("AnalystPage", () => {
+  // Advanced controls live in the disclosure; tests follow the UX.
+  function openMore() {
+    fireEvent.click(screen.getByText("More filters, conversations & exports"));
+  }
+
   it("renders controls and composer", () => {
     mockFetch();
     renderPage();
     expect(screen.getByLabelText("Ask Foap Analyst")).toBeDefined();
     expect(screen.getByText("Objective")).toBeDefined();
     expect(screen.getByText("Language")).toBeDefined();
+    openMore();
     expect(screen.getByRole("button", { name: "New Conversation" })).toBeDefined();
   });
 
@@ -96,6 +102,31 @@ describe("AnalystPage", () => {
     expect(screen.getByRole("button", { name: "3 Points" })).toBeDefined();
   });
 
+  it("spins only the clicked action (3 Points never lights up Ask)", async () => {
+    // Hang the ask request so the loading state is observable.
+    window.fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.startsWith("/api/analyst/ask")) return new Promise<Response>(() => {});
+      if (url.startsWith("/api/benchmarks")) return Response.json({});
+      if (url.startsWith("/api/campaigns")) return Response.json({});
+      if (url.startsWith("/api/creatives")) return Response.json([]);
+      if (url.startsWith("/api/campaigns/meta")) return Response.json({ campaigns: [], demo: false });
+      if (url.startsWith("/api/analyst/conversations")) return Response.json({ conversations: [] });
+      return Response.json({ error: "not found" }, { status: 404 });
+    }) as unknown as typeof fetch;
+    renderPage();
+    fireEvent.change(screen.getByLabelText("Ask Foap Analyst"), {
+      target: { value: "condense this" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "3 Points" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Condensing…" })).toBeDefined();
+    });
+    // Ask stays idle (disabled but not spinning).
+    expect(screen.queryByRole("button", { name: "Analysing…" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Ask" })).toBeDefined();
+  });
+
   it("renders the partner heading and supporting copy", () => {
     mockFetch();
     renderPage();
@@ -108,6 +139,7 @@ describe("AnalystPage", () => {
   it("exposes report and workbook exports", async () => {
     mockFetch();
     renderPage();
+    openMore();
     expect(screen.getByRole("button", { name: "Report" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Report XLSX" })).toBeDefined();
     // The workbook is built server-side on demand, so it downloads

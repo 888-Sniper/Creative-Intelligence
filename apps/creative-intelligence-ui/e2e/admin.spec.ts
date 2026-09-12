@@ -12,6 +12,8 @@ test.describe("admin journey", () => {
     await expect(page.getByRole("heading", { name: "Admin", exact: true })).toBeVisible();
 
     const email = `e2e-${Date.now()}@foap.test`;
+    // Employee creation lives in the Add Employee dialog, not inline.
+    await page.getByRole("button", { name: "Add Employee" }).click();
     await page.getByLabel("New employee email").fill(email);
     await page.getByLabel("New employee first name").fill("E2E");
     await page.getByRole("button", { name: "Add (active)" }).click();
@@ -29,8 +31,8 @@ test.describe("admin journey", () => {
     await expect(row.getByRole("button", { name: "Make employee" })).toBeVisible();
     await row.getByRole("button", { name: "Make employee" }).click();
     await expect(row.getByRole("button", { name: "Make admin" })).toBeVisible();
-    // Audit trail records the lifecycle.
-    await expect(page.getByText("EMPLOYEE_CREATED").first()).toBeVisible();
+    // Audit trail records the lifecycle (codes render Title Cased).
+    await expect(page.getByText("Employee Created").first()).toBeVisible();
   });
 
   test("foreign installation sees no accounts to switch to", async ({ page, context }) => {

@@ -323,8 +323,9 @@ class CompareTest(unittest.TestCase):
         conn = seeded_db()
         comp = benchmarks.compare_campaigns(conn, ["Alpha", "Beta"], rank_by="cpa")
         text = " ".join(comp["why"]["differences"])
-        self.assertIn("hook_type", text)
-        self.assertIn("creator mode", text)
+        # User-facing attribute names are human words, not column keys.
+        self.assertIn("Hook type", text)
+        self.assertIn("Creator mode", text)
         self.assertEqual(comp["why"]["top"], "Alpha")
         self.assertEqual(comp["why"]["bottom"], "Beta")
         conn.close()

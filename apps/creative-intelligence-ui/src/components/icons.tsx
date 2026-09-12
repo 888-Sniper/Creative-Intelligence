@@ -40,6 +40,7 @@ const PATHS: Record<string, React.ReactNode> = {
     </>
   ),
   chat: <path d="M4 5h16v11H9l-5 4V5Z" />,
+  send: <path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7Z" />,
   spark: <path d="M12 2v6m0 0 2.5-2.5M12 8 9.5 5.5M4 20l4.5-4.5M20 20l-4.5-4.5M12 8c-3 0-5 2.5-5 6l-1 4 4-1c.8.2 1.4.2 2 .2 3 0 5-2.5 5-6" />,
   users: (
     <>
@@ -108,6 +109,7 @@ const PATHS: Record<string, React.ReactNode> = {
     </>
   ),
   tiktok: <path d="M9 8v8.5a3.5 3.5 0 1 0 3.5-3.5M9 8V4c.5 2.5 2.5 4 5 4" />,
+  meta: <path d="M12 12c-1.8-2.4-4.2-3.8-6.8-3.8a4.3 4.3 0 1 0 0 8.6c2.6 0 5-1.4 6.8-3.8Zm0 0c1.8 2.4 4.2 3.8 6.8 3.8a4.3 4.3 0 1 0 0-8.6c-2.6 0-5 1.4-6.8 3.8Z" />,
   menu: <path d="M4 7h16M4 12h16M4 17h16" />,
   chev: <path d="m9 6 6 6-6 6" />,
   x: <path d="M6 6l12 12M18 6 6 18" />,

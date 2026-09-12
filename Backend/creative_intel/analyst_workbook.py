@@ -368,14 +368,38 @@ def _definitions_sheet():
     return {"name": "Definitions", "header": [], "rows": rows}
 
 
-def build_blank_workbook(prefill=None):
+def _cover_sheet(name, description, modules, kpis):
+    """First-sheet cover recording the workbook configuration.
+
+    The seven analysis sheets stay blank and reusable; this sheet
+    makes the export reflect the name, description, modules and KPIs
+    the user selected in the app (Workbook page, option A).
+    """
+    rows = _title_block(name or "Foap Analyst Workbook", [
+        (description or "Custom analyst workbook.").strip(),
+        "Seven blank analysis sheets follow this cover.",
+    ])
+    rows.append(["Selected modules", ", ".join(modules) if modules else "none"])
+    rows.append(["Selected KPIs", ", ".join(kpis) if kpis else "none"])
+    rows.append(["Generated in", "Foap Creative Intelligence (Blank Workbook)"])
+    return {"name": "Workbook", "header": [], "rows": rows}
+
+
+def build_blank_workbook(prefill=None, cover=None):
     """Blank reusable workbook as .xlsx bytes.
 
     prefill: optional list of (creative_key, {input_field: value}) used
     by tests to fill Input rows; production callers omit it.
+    cover: optional {"name", "description", "modules", "kpis"} mapping
+    prepended as a "Workbook" cover sheet; omitted callers get the
+    exact historical seven-sheet file.
     """
     sheets = [_input_sheet(prefill), _metrics_sheet(),
               _benchmarks_sheet(), _hypotheses_sheet(),
               _summary_sheet(), _test_plan_sheet(),
               _definitions_sheet()]
+    if cover:
+        sheets.insert(0, _cover_sheet(
+            cover.get("name") or "", cover.get("description") or "",
+            list(cover.get("modules") or []), list(cover.get("kpis") or [])))
     return ooxml.build_xlsx(sheets)

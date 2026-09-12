@@ -272,6 +272,11 @@ export function FilterPanel({ onApply, kpi = true, creative = false, trailing, a
             onChange={(e) => setFilter("project", e.target.value)} />
         </div>
         <div className="field">
+          <label htmlFor="f-team">Team</label>
+          <input id="f-team" placeholder="All Teams" value={filters.team}
+            onChange={(e) => setFilter("team", e.target.value)} />
+        </div>
+        <div className="field">
           <label htmlFor="f-campaign">Campaign</label>
           <input id="f-campaign" placeholder="All Campaigns" value={filters.campaign}
             onChange={(e) => setFilter("campaign", e.target.value)} />

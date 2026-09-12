@@ -785,26 +785,26 @@ def load_fixtures(db_path):
 # ---------------------------------------------------------------------------
 
 _DEMO_CAMPAIGNS = (
-    # name, client, platforms+share, vertical, market, weight, objective
-    ("Spring Skincare Launch", "GlowNaturally",
+    # name, client, team, platforms+share, vertical, market, weight, objective
+    ("Spring Skincare Launch", "GlowNaturally", "Growth",
      (("meta", 0.55), ("tiktok", 0.45)), "Beauty", "UK", 0.16, "Conversions"),
-    ("Built For Real Life", "Everyday Essentials",
+    ("Built For Real Life", "Everyday Essentials", "Growth",
      (("meta", 0.6), ("tiktok", 0.4)), "Consumer Goods", "Australia", 0.13, "Conversions"),
-    ("Everyday Energy", "VitaWell",
+    ("Everyday Energy", "VitaWell", "Growth",
      (("tiktok", 1.0),), "Wellness", "US", 0.12, "Traffic"),
-    ("Adventure Awaits", "TrailNorth",
+    ("Adventure Awaits", "TrailNorth", "Brand",
      (("meta", 0.5), ("tiktok", 0.5)), "Travel", "Canada", 0.11, "Conversions"),
-    ("Your Routine Simplified", "WellnessCo",
+    ("Your Routine Simplified", "WellnessCo", "Brand",
      (("meta", 1.0),), "Wellness", "UK", 0.10, "Leads"),
-    ("Better Coffee Mornings", "Morning Brew Co",
+    ("Better Coffee Mornings", "Morning Brew Co", "Brand",
      (("tiktok", 0.6), ("meta", 0.4)), "Food & Beverage", "Australia", 0.10, "Conversions"),
-    ("Move More", "Motion",
+    ("Move More", "Motion", "Performance",
      (("tiktok", 0.55), ("meta", 0.45)), "Fitness", "US", 0.09, "Traffic"),
-    ("Smarter Home Living", "Nook",
+    ("Smarter Home Living", "Nook", "Performance",
      (("meta", 0.6), ("tiktok", 0.4)), "Technology", "Germany", 0.08, "Conversions"),
-    ("Everyday Style", "Thread",
+    ("Everyday Style", "Thread", "Performance",
      (("meta", 0.5), ("tiktok", 0.5)), "Fashion", "France", 0.06, "Conversions"),
-    ("Discover Something New", "Wander",
+    ("Discover Something New", "Wander", "Performance",
      (("tiktok", 0.6), ("meta", 0.4)), "Travel", "Singapore", 0.05, "Traffic"),
 )
 
@@ -907,7 +907,7 @@ def load_demo_dataset(db_path, media_dir=None):
             for i in range(_DEMO_DAYS)]
     day_iso = [_dt.date.fromordinal(o).isoformat() for o in days]
 
-    header = ["Campaign", "Ad Name", "Creative Key", "Client", "Project",
+    header = ["Campaign", "Ad Name", "Creative Key", "Client", "Team", "Project",
               "Vertical", "Market", "Objective", "Funnel Stage", "Date",
               "Spend", "Impressions", "Clicks", "Conversions",
               "Video Views", "Revenue", "Creative Format", "Campaign Id"]
@@ -919,7 +919,7 @@ def load_demo_dataset(db_path, media_dir=None):
         for day_i, iso in enumerate(day_iso):
             t = day_i / (_DEMO_DAYS - 1)
             for ci, camp in enumerate(_DEMO_CAMPAIGNS):
-                (name, client, plats, vertical, market, weight,
+                (name, client, team, plats, vertical, market, weight,
                  objective) = camp
                 share = dict(plats).get(platform)
                 if not share:
@@ -944,7 +944,7 @@ def load_demo_dataset(db_path, media_dir=None):
                 views = impr * 0.35 * (1.0 + rng.uniform(-0.1, 0.1))
                 spec = _DEMO_CREATIVES[ci]
                 writer.writerow([
-                    name, spec[1], spec[0], client, client + " FY26",
+                    name, spec[1], spec[0], client, team, client + " FY26",
                     vertical, market, objective, "Lower", iso,
                     round(spend, 2), int(impr), int(clicks), round(conv, 1),
                     int(views), round(revenue, 2), spec[4],

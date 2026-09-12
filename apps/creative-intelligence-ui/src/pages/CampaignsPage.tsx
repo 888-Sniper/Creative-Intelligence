@@ -34,7 +34,7 @@ interface CampaignRow {
 /* Per-campaign display metadata from GET /api/campaigns/meta
  * (unscoped attribute data: client, platforms, derived status). */
 interface CampaignMeta {
-  name: string; client: string; platforms: string[]; markets: string[];
+  name: string; client: string; team: string; platforms: string[]; markets: string[];
   objectives: string[]; verticals: string[]; last_date: string; status: string;
 }
 
@@ -133,6 +133,9 @@ export function CampaignsPage() {
   }, [meta.data]);
   const metaClients = useMemo(
     () => [...new Set((meta.data?.campaigns ?? []).map((c) => c.client).filter(Boolean))].sort(),
+    [meta.data]);
+  const metaTeams = useMemo(
+    () => [...new Set((meta.data?.campaigns ?? []).map((c) => c.team).filter(Boolean))].sort(),
     [meta.data]);
   const metaMarkets = useMemo(
     () => [...new Set((meta.data?.campaigns ?? []).flatMap((c) => c.markets))].sort(),
@@ -331,7 +334,7 @@ export function CampaignsPage() {
     ? focus.metrics[filters.kpi === "all" ? "roas" : filters.kpi]?.current ?? null
     : null;
 
-  const selectProps = (key: "client" | "campaign" | "platform" | "objective" | "market" | "kpi") => ({
+  const selectProps = (key: "client" | "campaign" | "platform" | "objective" | "market" | "team" | "kpi") => ({
     value: filters[key],
     onChange: (e: React.ChangeEvent<HTMLSelectElement>) => setFilter(key, e.target.value),
   });
@@ -397,14 +400,11 @@ export function CampaignsPage() {
               {metaObjectives.map((o) => <option key={o} value={o}>{o}</option>)}
             </select>
           </div>
-          {/* Team attribution does not exist in the ads dataset, so this
-            control is explicitly unavailable (All Teams only) until
-            team data exists — never a silently dead filter. */}
           <div className="field">
             <label htmlFor="c-team">Team</label>
-            <select id="c-team" value="all" aria-label="Team (unavailable: no team data)" disabled
-              title="Team filtering is unavailable: the dataset carries no team attribution.">
+            <select id="c-team" {...selectProps("team")}>
               <option value="all">All Teams</option>
+              {metaTeams.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
           </div>
           <div className="field">

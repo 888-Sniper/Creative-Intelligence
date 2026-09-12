@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 export interface FilterValues {
   client: string;
   project: string;
+  team: string;
   campaign: string;
   platform: string;
   vertical: string;
@@ -25,6 +26,7 @@ export interface FilterValues {
 export const EMPTY_FILTERS: FilterValues = {
   client: "",
   project: "",
+  team: "",
   campaign: "",
   platform: "all",
   vertical: "",

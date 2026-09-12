@@ -151,6 +151,41 @@ def test_meta_demo_dataset_shape(tmp_path, monkeypatch):
     assert {c["status"] for c in campaigns} == {"Active"}
 
 
+def test_team_axis_filters_every_surface(tmp_path, monkeypatch):
+    # Team is a real row-level dimension: meta exposes it, ?team=
+    # scopes campaigns/compare/creatives identically, and an unknown
+    # team honestly matches nothing everywhere.
+    db = str(tmp_path / "team.db")
+    assert load_demo_dataset(db, media_dir=str(tmp_path / "media")) > 0
+    http = _authed_client(tmp_path, db, monkeypatch)
+    r = http.get("/api/campaigns/meta")
+    assert r.status_code == 200, r.text
+    by_name = {c["name"]: c for c in r.json()["campaigns"]}
+    assert by_name["Spring Skincare Launch"]["team"] == "Growth"
+    assert by_name["Adventure Awaits"]["team"] == "Brand"
+    assert by_name["Move More"]["team"] == "Performance"
+    assert {c["team"] for c in by_name.values()} == {"Growth", "Brand", "Performance"}
+    r = http.get("/api/campaigns", params={"team": "Growth"})
+    assert r.status_code == 200, r.text
+    assert sorted(r.json()) == ["Built For Real Life", "Everyday Energy",
+                                "Spring Skincare Launch"]
+    r = http.get("/api/kpis/compare", params={"team": "Growth"})
+    assert r.status_code == 200, r.text
+    assert r.json()["comparison"] == "previous_period"
+    r = http.get("/api/creatives", params={"team": "Brand"})
+    assert r.status_code == 200, r.text
+    assert {c["name"] for c in r.json()} == {"Problem / Solution",
+                                            "Creator Testimonial",
+                                            "Quick Product Demo"}
+    for params in ({"team": "No Such Team"},):
+        r = http.get("/api/campaigns", params=params)
+        assert r.status_code == 200, r.text
+        assert r.json() == {}
+        r = http.get("/api/kpis/compare", params=params)
+        assert r.status_code == 200, r.text
+        assert r.json()["comparison"] is None
+
+
 def test_scope_construction_preserves_explicit_empty_campaign():
     scope = benchmarks.Scope({"campaign": []})
     assert scope.axes == {"campaign": []}

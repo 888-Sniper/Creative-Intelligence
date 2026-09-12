@@ -29,15 +29,17 @@ const detail = {
 };
 
 function fetchFor(full: Record<string, unknown>) {
-  return vi.fn(async (input: string | URL | Request) => {
+  const mock = vi.fn(async (input: string | URL | Request) => {
     const url = String(input);
     if (url.startsWith("/api/campaigns/Alpha")) return Response.json(full.detail);
+    if (url.startsWith("/api/campaigns/meta")) return Response.json(full.meta ?? { campaigns: [] });
     if (url.startsWith("/api/kpis/compare")) return Response.json(full.comparePayload);
     if (url.startsWith("/api/kpis/daily")) return Response.json({ days: [] });
     if (url.startsWith("/api/benchmarks")) return Response.json({});
     if (url.startsWith("/api/campaigns")) return Response.json(full.campaigns);
     return Response.json({});
-  }) as unknown as typeof fetch;
+  });
+  return { fetch: mock as unknown as typeof fetch, mock };
 }
 
 function renderPage() {
@@ -57,7 +59,7 @@ describe("CampaignsPage", () => {
   });
 
   it("renders the campaign table with mocked data", async () => {
-    window.fetch = fetchFor({ campaigns, comparePayload, detail });
+    window.fetch = fetchFor({ campaigns, comparePayload, detail }).fetch;
     renderPage();
     await waitFor(() => {
       expect(screen.getByText("All Campaigns (2)")).toBeDefined();
@@ -88,8 +90,31 @@ describe("CampaignsPage", () => {
     });
   });
 
+  it("offers real team options and scopes requests on pick", async () => {
+    const meta = {
+      campaigns: [
+        { name: "Alpha", client: "Acme", team: "Growth", platforms: ["meta"], markets: [], objectives: [], verticals: [], last_date: "2026-08-01", status: "Active" },
+        { name: "Beta", client: "Acme", team: "Brand", platforms: ["tiktok"], markets: [], objectives: [], verticals: [], last_date: "2026-08-01", status: "Active" },
+      ],
+    };
+    const { fetch, mock: fetchMock } = fetchFor({ campaigns, comparePayload, detail, meta });
+    window.fetch = fetch;
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("All Campaigns (2)")).toBeDefined();
+    });
+    const team = screen.getByLabelText("Team") as HTMLSelectElement;
+    expect(team.disabled).toBe(false);
+    expect([...team.options].map((o) => o.value)).toEqual(["all", "Brand", "Growth"]);
+    fireEvent.change(team, { target: { value: "Growth" } });
+    await waitFor(() => {
+      const calls = fetchMock.mock.calls.map((c) => String(c[0]));
+      expect(calls.some((u: string) => u.includes("/api/campaigns?") && u.includes("team=Growth"))).toBe(true);
+    });
+  });
+
   it("opens campaign details with totals and recommendations", async () => {
-    window.fetch = fetchFor({ campaigns, comparePayload, detail });
+    window.fetch = fetchFor({ campaigns, comparePayload, detail }).fetch;
     renderPage();
     await waitFor(() => {
       expect(screen.getByText("All Campaigns (2)")).toBeDefined();

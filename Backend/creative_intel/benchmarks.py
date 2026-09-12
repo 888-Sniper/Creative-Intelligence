@@ -292,6 +292,8 @@ def campaign_meta(conn):
 
         client = Counter(str(r.get("client") or "").strip() for r in sub
                          if str(r.get("client") or "").strip()).most_common(1)
+        team = Counter(str(r.get("team") or "").strip() for r in sub
+                       if str(r.get("team") or "").strip()).most_common(1)
         lasts = sorted({str(r.get("date") or "") for r in sub} - {""})
         last = lasts[-1] if lasts else ""
         status = "Completed"
@@ -303,6 +305,7 @@ def campaign_meta(conn):
                 status = "Completed"
         out.append({"name": name,
                     "client": client[0][0] if client else "",
+                    "team": team[0][0] if team else "",
                     "platforms": _distinct("platform"),
                     "markets": _distinct("market"),
                     "objectives": _distinct("objective"),
@@ -358,7 +361,7 @@ Project identity is row["project"] when present, else row["campaign"].
 """
 
 FILTER_KEYS = ("vertical", "platform", "funnel", "objective", "market",
-               "client", "date", "campaign", "hook_type",
+               "client", "team", "date", "campaign", "hook_type",
                "creator_vs_branded", "format")
 
 KPI_KEYS = ("cpm", "vtr", "view_rate", "ctr", "cpc", "cpa", "roas")
@@ -579,7 +582,7 @@ def match_filters(row, filters):
 # ads-column behind each scope axis ("funnel" reads funnel_stage;
 # "project" is matched Python-side via project_of, which falls back
 # to campaign, so it is deliberately absent here).
-SCOPE_COLUMNS = {"client": "client",
+SCOPE_COLUMNS = {"client": "client", "team": "team",
                  "campaign": "campaign", "platform": "platform",
                  "vertical": "vertical", "market": "market",
                  "funnel": "funnel_stage", "objective": "objective",
@@ -598,7 +601,7 @@ class Scope:
     silently analyse a broader dataset.
     """
 
-    AXES = ("client", "project", "campaign", "platform", "vertical",
+    AXES = ("client", "project", "team", "campaign", "platform", "vertical",
             "market", "funnel", "objective", "hook_type",
             "creator_vs_branded", "format", "date", "date_from",
             "date_to", "status", "spend_min", "spend_max")

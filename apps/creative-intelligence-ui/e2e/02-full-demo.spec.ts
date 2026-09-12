@@ -22,10 +22,27 @@ async function expectCleanDemo(page: Page) {
   await expect(page.getByText("Seeded", { exact: true })).toHaveCount(0);
 }
 
-/** Every async area finished: no loading skeleton may remain when the
- *  capture is taken. */
+/** Every async area finished: no loading skeleton may remain, and no
+ *  button may be stuck in its loading state, when the capture is taken.
+ *  (Status spinners elsewhere — e.g. background report jobs — are
+ *  legitimate settled content, so only button spinners count.) */
 async function expectReady(page: Page) {
   await expect(page.locator(".skel")).toHaveCount(0, { timeout: 30000 });
+  await expect(page.locator("button .spinner")).toHaveCount(0, { timeout: 30000 });
+}
+
+/** Every rendered <img> under the selector decoded to real pixels
+ *  (complete with a nonzero natural size) — a visible-but-broken
+ *  image must never pass as settled content. */
+async function expectImagesDecoded(page: Page, selector = "img") {
+  await expect.poll(async () => {
+    const states: boolean[] = await page.locator(selector).evaluateAll((els) =>
+      els.map((el) => {
+        const img = el as HTMLImageElement;
+        return img.complete && img.naturalWidth > 0;
+      }));
+    return states.length > 0 && states.every(Boolean);
+  }, { timeout: 30000 }).toBe(true);
 }
 
 test.describe("full demo visuals", () => {
@@ -49,6 +66,10 @@ test.describe("full demo visuals", () => {
     // so the rail crowns Meta instead of declaring a tie.
     await expect(page.getByText("Meta Leads On ROAS")).toBeVisible();
     await expect(page.getByText("Tie on ROAS")).toHaveCount(0);
+    // Charts populated, thumbnails decoded: the capture is settled.
+    await expect(page.getByRole("img", { name: "Trend chart" })).toBeVisible({ timeout: 30000 });
+    await expect(page.getByRole("img", { name: "Comparison bar chart" })).toBeVisible({ timeout: 30000 });
+    await expectImagesDecoded(page, 'img[src*="/thumbnail"]');
     await expectCleanDemo(page);
     await expectReady(page);
     await page.screenshot({ path: `${SHOTS}/d-dashboard.png`, fullPage: true, animations: "disabled" });
@@ -65,23 +86,35 @@ test.describe("full demo visuals", () => {
     await expect(page.getByText("All Creatives (10)")).toBeVisible({ timeout: 30000 });
     await expect(page.locator("table.tbl tbody tr")).toHaveCount(10, { timeout: 30000 });
     await expect(thumbs).toHaveCount(15, { timeout: 30000 });
+    await expectImagesDecoded(page, 'img[src*="/thumbnail"]');
     await expectCleanDemo(page);
     await expectReady(page);
     await page.screenshot({ path: `${SHOTS}/d-creatives.png`, fullPage: true, animations: "disabled" });
   });
 
-  test("compare completes a multi-campaign comparison", async ({ page, context }) => {
+  test("compare completes a four-way campaign comparison", async ({ page, context }) => {
     const seeds = readSeeds();
     await loginAs(context, page, seeds.admin, "/compare");
-    // The page auto-runs the top 4 campaigns by spend on load, so the
-    // multi-campaign layout is already complete under the full demo;
-    // the heaviest demo campaigns lead it.
-    await expect(page.getByRole("img", { name: /comparison chart/ }).first()).toBeVisible({ timeout: 60000 });
+    // The page auto-runs the top 4 campaigns by spend on load. The
+    // acceptance capture is that completed four-way state: all four
+    // cards plus every result section fully loaded.
+    await expect(page.getByRole("button", { name: /^Remove / })).toHaveCount(4, { timeout: 60000 });
     await expect(page.getByText("Spring Skincare Launch").first()).toBeVisible();
-    // Exercise the picker flow too: drop one campaign and re-apply,
-    // keeping a completed (three-way) comparison on screen. Completion
-    // is proven by the comparison response itself — layout absence
-    // alone can catch a mid-transition frame with stale cards.
+    await expect(page.getByText("Comparing…")).toHaveCount(0);
+    await expect(page.getByText("Select two to four campaigns or creatives, then Apply Comparison.")).toHaveCount(0);
+    await expect(page.getByText("No daily data for the selected campaigns.")).toHaveCount(0);
+    await expect(page.getByRole("img", { name: /comparison chart/ }).first()).toBeVisible({ timeout: 60000 });
+    for (const heading of ["Performance Over Time", "KPI Comparison", "Difference Summary",
+      "Creative Attributes Comparison", "Key Takeaways", "Recommended Next Tests"]) {
+      await expect(page.getByRole("heading", { name: heading })).toBeVisible();
+    }
+    await expectImagesDecoded(page, 'img[src*="/thumbnail"]');
+    await expectCleanDemo(page);
+    await expectReady(page);
+    await page.screenshot({ path: `${SHOTS}/d-compare.png`, fullPage: true, animations: "disabled" });
+    // Exercise the picker flow too: drop one campaign and re-apply.
+    // Completion is proven by the comparison response itself — layout
+    // absence alone can catch a mid-transition frame with stale cards.
     await page.getByRole("button", { name: "Remove Adventure Awaits" }).click();
     const compared = page.waitForResponse(
       (r) => r.request().method() === "GET" && r.url().includes("/api/compare/campaigns"),
@@ -90,15 +123,12 @@ test.describe("full demo visuals", () => {
     await page.getByRole("button", { name: "Apply Comparison" }).click();
     await compared;
     await expect(page.getByText("Comparing…")).toHaveCount(0);
-    await expect(page.getByText("Select two to four campaigns or creatives, then Apply Comparison.")).toHaveCount(0);
     await expect(page.getByText("No daily data for the selected campaigns.")).toHaveCount(0);
     // Displayed selections match the requested three-way comparison.
     await expect(page.getByRole("button", { name: /^Remove / })).toHaveCount(3);
     await expect(page.getByRole("button", { name: "Remove Adventure Awaits" })).toHaveCount(0);
     await expect(page.getByRole("img", { name: /comparison chart/ }).first()).toBeVisible({ timeout: 60000 });
-    await expectCleanDemo(page);
     await expectReady(page);
-    await page.screenshot({ path: `${SHOTS}/d-compare.png`, fullPage: true, animations: "disabled" });
   });
 
   test("insights saves and lists a finding on demo data", async ({ page, context }) => {

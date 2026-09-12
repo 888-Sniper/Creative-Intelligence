@@ -31,6 +31,52 @@ describe("GroupedBars single-metric scale", () => {
     expect(roas.container.textContent).toContain("x");
   });
 
+  it("renders every KPI in its own unit with no clipped bars", () => {
+    // CPM/CPA money, CTR/VTR percent, ROAS multiplier: each metric
+    // gets its own scale, so no bar can escape the plot area.
+    const full = [
+      { label: "Alpha Campaign", color: "#2F6FBE", values: { cpm: 8.4, ctr: 0.022, vtr: 0.31, cpa: 11.4, roas: 3.6 } },
+      { label: "Beta Campaign", color: "#0E9F6E", values: { cpm: 6.1, ctr: 0.015, vtr: 0.27, cpa: 9.1, roas: 4.2 } },
+    ];
+    const units: Array<[string, string, string[]]> = [
+      ["cpm", "$", ["%"]],
+      ["ctr", "%", ["$", "x"]],
+      ["vtr", "%", ["$", "x"]],
+      ["cpa", "$", ["%"]],
+      ["roas", "x", ["$", "%"]],
+    ];
+    for (const [metric, unit, banned] of units) {
+      const { container, unmount } = render(<GroupedBars series={full} metric={metric} />);
+      expect(container.textContent).toContain(unit);
+      for (const b of banned) expect(container.textContent).not.toContain(b);
+      expect(container.querySelectorAll("rect")).toHaveLength(2);
+      container.querySelectorAll("rect").forEach((r) => {
+        const y = Number(r.getAttribute("y"));
+        const bottom = y + Number(r.getAttribute("height"));
+        expect(y).toBeGreaterThanOrEqual(10);
+        expect(bottom).toBeLessThanOrEqual(200 - 34 + 1);
+      });
+      unmount();
+    }
+  });
+
+  it("draws zero values as baseline ticks and keeps labels accurate", () => {
+    const { container } = render(
+      <GroupedBars
+        series={[
+          { label: "Alpha Campaign", color: "#2F6FBE", values: { ctr: 0 } },
+          { label: "Beta Campaign With A Very Long Name", color: "#0E9F6E", values: { ctr: 0.03 } },
+        ]}
+        metric="ctr"
+      />,
+    );
+    // Zero still draws a (minimal) bar rather than a missing marker.
+    expect(container.querySelectorAll("rect")).toHaveLength(2);
+    expect(container.textContent).not.toContain("—");
+    // Long campaign labels shorten with an ellipsis, never clipped raw.
+    expect(container.textContent).toContain("…");
+  });
+
   it("marks missing values without breaking the scale", () => {
     const { container } = render(
       <GroupedBars

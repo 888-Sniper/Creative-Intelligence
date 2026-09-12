@@ -41,7 +41,7 @@ def safe_creative_key(name):
 CANONICAL_FIELDS = ("platform", "campaign", "adset", "ad_name",
                     "creative_key", "spend", "impressions", "clicks",
                     "conversions", "video_views", "views_25", "views_50",
-                    "views_75", "views_100", "client", "project",
+                    "views_75", "views_100", "client", "project", "team",
                     "vertical", "market", "objective", "funnel_stage",
                     "date", "revenue",
                     # Foap Analyst measurement families (spec section 4).
@@ -77,6 +77,7 @@ _ALIASES = {
     "client": {"client", "client name", "account", "account name",
                "advertiser", "klient"},
     "project": {"project", "project name"},
+    "team": {"team", "team name", "zespol", "zespół"},
     "vertical": {"vertical", "industry", "category"},
     "market": {"market", "market name", "country", "region", "geo",
                "rynek", "kraj"},
@@ -490,7 +491,7 @@ STORED_COLUMNS = (
     "platform", "source", "campaign", "adset", "ad_name",
     "creative_key", "spend", "impressions", "clicks", "conversions",
     "video_views", "views_25", "views_50", "views_75", "views_100",
-    "client", "project", "vertical", "market", "objective",
+    "client", "project", "team", "vertical", "market", "objective",
     "funnel_stage", "date", "revenue", "revenue_reported",
     "account_id", "campaign_id", "ad_id", "import_id", "reach",
     "frequency", "currency", "video_starts", "views_2s", "views_3s",
@@ -502,7 +503,7 @@ STORED_COLUMNS = (
 
 
 def _normalise(rows):
-    defaults = {"client": "", "project": "", "vertical": "", "market": "",
+    defaults = {"client": "", "project": "", "team": "", "vertical": "", "market": "",
                 "objective": "", "funnel_stage": "", "date": "",
                 "revenue": 0.0, "revenue_reported": False,
                 "account_id": "", "campaign_id": "", "ad_id": "",

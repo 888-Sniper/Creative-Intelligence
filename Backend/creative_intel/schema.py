@@ -20,6 +20,7 @@ pre-existing rows and fixtures keep passing without a backfill.
 NEW_DIMENSIONS = (
     ("client", "TEXT NOT NULL DEFAULT ''"),
     ("project", "TEXT NOT NULL DEFAULT ''"),
+    ("team", "TEXT NOT NULL DEFAULT ''"),
     ("vertical", "TEXT NOT NULL DEFAULT ''"),
     ("market", "TEXT NOT NULL DEFAULT ''"),
     ("objective", "TEXT NOT NULL DEFAULT ''"),
@@ -99,6 +100,7 @@ CREATE TABLE IF NOT EXISTS ads (
     views_100 INTEGER NOT NULL DEFAULT 0,
     client TEXT NOT NULL DEFAULT '',
     project TEXT NOT NULL DEFAULT '',
+    team TEXT NOT NULL DEFAULT '',
     vertical TEXT NOT NULL DEFAULT '',
     market TEXT NOT NULL DEFAULT '',
     objective TEXT NOT NULL DEFAULT '',

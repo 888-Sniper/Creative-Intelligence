@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { AdminEmployeesPage } from "@/admin/AdminEmployeesPage";
+import { AdminEmployeesPage, friendlyDate } from "@/admin/AdminEmployeesPage";
 
 interface Call {
   url: string;
@@ -108,6 +108,14 @@ function setupFetch(opts?: { error?: string; revoked?: number }): Call[] {
       if (method === "GET" && url.startsWith("/api/admin/audit")) {
         return Response.json({ events: auditEvents });
       }
+      if (method === "GET" && url.startsWith("/api/campaigns/meta")) {
+        return Response.json({
+          campaigns: [
+            { name: "Alpha", client: "Acme", team: "Growth" },
+            { name: "Beta", client: "Acme", team: "Brand" },
+          ],
+        });
+      }
       if (method === "POST" && url.endsWith("/sessions/revoke")) {
         return Response.json({ ok: true, revoked: opts?.revoked ?? 2 });
       }
@@ -154,9 +162,14 @@ describe("AdminEmployeesPage", () => {
     expect(screen.getAllByRole("button", { name: "Revoke" })).toHaveLength(3);
     expect(screen.getByRole("button", { name: "Make Employee" })).toBeDefined();
     expect(screen.getAllByRole("button", { name: "Make Admin" })).toHaveLength(3);
-    expect(screen.getByText("Last Login")).toBeDefined();
-    expect(screen.getByText("Approval")).toBeDefined();
-    expect(screen.getByText("2026-09-01")).toBeDefined();
+    expect(screen.getByText("Last Active")).toBeDefined();
+    expect(screen.getByText("Team")).toBeDefined();
+    // No Approval column: access state lives in Status only.
+    expect(screen.queryByText("Approval")).toBeNull();
+    // Friendly dates, never raw ISO.
+    expect(screen.getByText(/Sep 1, 2026/)).toBeDefined();
+    expect(screen.queryByText("2026-09-01")).toBeNull();
+    expect(screen.getByText("Never signed in")).toBeDefined();
     expect(screen.getByText("Audit Trail")).toBeDefined();
     expect(screen.getByText("EMPLOYEE_APPROVED")).toBeDefined();
     expect(screen.getByText("pending → active")).toBeDefined();
@@ -235,12 +248,15 @@ describe("AdminEmployeesPage", () => {
     ).toBe(false);
   });
 
-  it("adds an employee and reports success", async () => {
+  it("adds an employee through the invite modal and reports success", async () => {
     const calls = setupFetch();
     render(<AdminEmployeesPage />);
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Approve" })).toBeDefined();
     });
+    // The permanent Add Employee panel is gone: inviting happens in a modal.
+    expect(screen.queryByPlaceholderText("email")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Invite" }));
     fireEvent.change(screen.getByPlaceholderText("email"), {
       target: { value: "new@foap.test" },
     });
@@ -329,5 +345,48 @@ describe("AdminEmployeesPage", () => {
         ),
       ).toBe(true);
     });
+  });
+
+  it("shows the four KPI cards with honest sub-lines", async () => {
+    setupFetch();
+    render(<AdminEmployeesPage />);
+    await waitFor(() => {
+      expect(screen.getByText("Total Employees")).toBeDefined();
+    });
+    expect(screen.getByText("Active Users")).toBeDefined();
+    expect(screen.getByText("Pending Invites")).toBeDefined();
+    expect(screen.getByText("Admins")).toBeDefined();
+  });
+
+  it("lists multiple real teams from campaign metadata", async () => {
+    setupFetch();
+    render(<AdminEmployeesPage />);
+    await waitFor(() => {
+      expect(screen.getByText("Growth")).toBeDefined();
+    });
+    expect(screen.getByText("Brand")).toBeDefined();
+  });
+
+  it("exports an access report from real employee and audit data", async () => {
+    setupFetch();
+    const createSpy = vi.fn(() => "blob:mock");
+    window.URL.createObjectURL = createSpy;
+    window.URL.revokeObjectURL = vi.fn();
+    render(<AdminEmployeesPage />);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Approve" })).toBeDefined();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Export Access Report" }));
+    await waitFor(() => {
+      expect(screen.getByText("Access Report Exported.")).toBeDefined();
+    });
+    expect(createSpy).toHaveBeenCalled();
+  });
+
+  it("formats friendly dates without raw ISO", () => {
+    expect(friendlyDate("")).toBe("—");
+    expect(friendlyDate("not-a-date")).toBe("—");
+    expect(friendlyDate("2026-09-01")).toContain("Sep 1, 2026");
+    expect(friendlyDate("2026-09-01")).not.toContain("2026-09-01");
   });
 });

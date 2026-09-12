@@ -197,8 +197,8 @@ export function InsightsPage() {
         )}
       />
       {saveStatus ? <p className="panel-sub" role="status" style={{ margin: "0 0 12px" }}>{saveStatus}</p> : null}
-      <Panel title="Find Insights">
-        <div className="filter-grid" style={{ gridTemplateColumns: "repeat(6,minmax(0,1fr))" }}>
+      <section className="panel" aria-label="Find insights" style={{ padding: "12px 16px" }}>
+        <div className="filter-grid" style={{ gridTemplateColumns: "repeat(6,minmax(0,1fr))", marginTop: 0 }}>
           <div className="field">
             <label htmlFor="in-search">Search</label>
             <input id="in-search" placeholder="Search saved insights…" value={search}
@@ -235,20 +235,22 @@ export function InsightsPage() {
             </select>
           </div>
         </div>
-      </Panel>
-      <div className="main-rail" style={{ marginTop: 16 }}>
-        <div className="rail-stack">
+      </section>
+      <div className="main-rail" style={{ marginTop: 12, gap: 12 }}>
+        <div className="rail-stack" style={{ gap: 12 }}>
           <Panel title="Pinned Learnings" sub="Your most important insights, always within reach.">
             {cards.data ? (
               findings.pinned.length ? (
-                <div className="cards-4" style={{ gridTemplateColumns: "repeat(3,minmax(0,1fr))" }}>
-                  {findings.pinned.map((c) => (
-                    <div className="cmp-card" key={c.creative_key}>
-                      <h4 style={{ margin: "0 0 6px", fontSize: 14 }}>{c.finding?.primary_signal}</h4>
-                      <p className="panel-sub">{c.finding?.diagnosis}</p>
-                      <p className="panel-sub">{[c.platform, c.campaign].filter(Boolean).join(" · ")}</p>
-                    </div>
-                  ))}
+                <div style={{ background: "#DFF5F1", borderRadius: 10, padding: 10 }}>
+                  <div className="cards-4" style={{ gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 10 }}>
+                    {findings.pinned.map((c) => (
+                      <div className="cmp-card" key={c.creative_key} style={{ padding: 12 }}>
+                        <h4 style={{ margin: "0 0 6px", fontSize: 13.5 }}>{c.finding?.primary_signal}</h4>
+                        <p className="panel-sub" style={{ margin: 0 }}>{c.finding?.diagnosis}</p>
+                        <p className="panel-sub" style={{ margin: "4px 0 0" }}>{[c.platform, c.campaign].filter(Boolean).join(" · ")}</p>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               ) : <EmptyState text="No pinned learnings yet. Run the AI Analyst to generate findings." />
             ) : <Skeleton height={120} />}
@@ -256,13 +258,13 @@ export function InsightsPage() {
           <Panel title={`Your Saved Insights (${savedCards.length})`}>
             {conversations === null || views === null ? <Skeleton height={160} /> : (
               savedCards.length ? (
-                <div className="cards-4" style={{ gridTemplateColumns: "repeat(3,minmax(0,1fr))" }}>
+                <div className="cards-4" style={{ gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 12 }}>
                   {savedCards.map((s) => (
-                    <div className="cmp-card" key={s.key}>
+                    <div className="cmp-card" key={s.key} style={{ padding: 14 }}>
                       <span className="badge-demo">{s.badge}</span>
-                      <h4 style={{ margin: "8px 0 6px", fontSize: 14 }}>{s.title}</h4>
-                      <p className="panel-sub">{s.body}</p>
-                      <p className="panel-sub">{s.meta}</p>
+                      <h4 style={{ margin: "8px 0 6px", fontSize: 13.5 }}>{s.title}</h4>
+                      <p className="panel-sub" style={{ margin: 0 }}>{s.body}</p>
+                      <p className="panel-sub" style={{ margin: "4px 0 8px" }}>{s.meta}</p>
                       {s.apply ? (
                         <button type="button" className="btn-soft" onClick={() => applyView(s.apply as SavedView)}>
                           Open Insight →
@@ -278,12 +280,12 @@ export function InsightsPage() {
           </Panel>
           {(itype === "All Types" || itype === "Creative Findings") && findings.rest.filter(matchAxes).length ? (
             <Panel title="Creative Findings">
-              <div className="cards-4" style={{ gridTemplateColumns: "repeat(3,minmax(0,1fr))" }}>
+              <div className="cards-4" style={{ gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 12 }}>
                 {findings.rest.filter(matchAxes).slice(0, 6).map((c) => (
-                  <div className="cmp-card" key={c.creative_key}>
+                  <div className="cmp-card" key={c.creative_key} style={{ padding: 14 }}>
                     <span className="badge-demo">Creative Finding</span>
-                    <h4 style={{ margin: "8px 0 6px", fontSize: 14 }}>{c.finding?.primary_signal}</h4>
-                    <p className="panel-sub">{c.finding?.diagnosis}</p>
+                    <h4 style={{ margin: "8px 0 6px", fontSize: 13.5 }}>{c.finding?.primary_signal}</h4>
+                    <p className="panel-sub" style={{ margin: "0 0 8px" }}>{c.finding?.diagnosis}</p>
                     <Link className="btn-soft" to="/analyst">Open in Analyst →</Link>
                   </div>
                 ))}
@@ -291,7 +293,7 @@ export function InsightsPage() {
             </Panel>
           ) : null}
         </div>
-        <div className="rail-stack">
+        <div className="rail-stack" style={{ gap: 12 }}>
           <Panel title="Recent Activity">
             {conversations === null ? <Skeleton height={160} /> : (
               recent.length ? (

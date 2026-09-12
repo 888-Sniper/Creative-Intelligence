@@ -60,7 +60,7 @@ function MiniBars({ values, format }: { values: number[]; format: (v: number) =>
   const max = Math.max(1, ...values);
   const colors = ["#2F6FBE", "#0E9F6E", "#7C6BD6"];
   return (
-    <div style={{ display: "flex", alignItems: "flex-end", gap: 10, height: 110, paddingTop: 18 }}>
+    <div style={{ display: "flex", alignItems: "flex-end", gap: 10, height: 96, paddingTop: 14 }}>
       {values.map((v, i) => (
         <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, height: "100%", justifyContent: "flex-end" }}>
           <span style={{ fontSize: 11, fontWeight: 700, color: "var(--shell-navy)" }}>{format(v)}</span>
@@ -198,8 +198,8 @@ export function BenchmarksPage() {
           </LoadingButton>
         )}
       />
-      <Panel title="Benchmark Filters">
-        <div className="filter-grid" style={{ gridTemplateColumns: "repeat(4,minmax(0,1fr))" }}>
+      <section className="panel" aria-label="Benchmark filters" style={{ padding: "12px 16px" }}>
+        <div className="filter-grid" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", marginTop: 0 }}>
           <div className="field">
             <label htmlFor="b-client">Client</label>
             <select id="b-client" value={filters.client} onChange={(e) => setFilter("client", e.target.value)}>
@@ -243,14 +243,7 @@ export function BenchmarksPage() {
               <option value="lower">Lower</option>
             </select>
           </div>
-          <div className="field">
-            <label htmlFor="b-axis">Group By</label>
-            <select id="b-axis" value={axis} onChange={(e) => { setAxis(e.target.value as Axis); setSelected(new Set()); }}>
-              {AXES.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
-            </select>
-          </div>
-          <div className="field">
-            <span className="field-label" aria-hidden="true">&nbsp;</span>
+          <div className="field" style={{ gridColumn: "1 / -1" }}>
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
               <button type="button" className="link-teal" onClick={clearFilters}
                 style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -262,22 +255,22 @@ export function BenchmarksPage() {
             </div>
           </div>
         </div>
-      </Panel>
-      {status ? <p className="panel-sub" role="status" style={{ margin: "12px 0 0" }}>{status}</p> : null}
-      <div className="main-rail" style={{ marginTop: 16 }}>
-        <div className="rail-stack">
+      </section>
+      {status ? <p className="panel-sub" role="status" style={{ margin: "8px 0 0" }}>{status}</p> : null}
+      <div className="main-rail" style={{ marginTop: 12, gap: 12 }}>
+        <div className="rail-stack" style={{ gap: 12 }}>
           <Panel title="Saved Benchmarks" sub="Quick access to your saved benchmark sets."
             action={<Link className="link-teal" to="/insights">View All</Link>}>
             {views === null ? <Skeleton height={90} /> : (
               views.length ? (
-                <div className="cards-4" style={{ gridTemplateColumns: "repeat(4,minmax(0,1fr))" }}>
+                <div className="cards-4" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))" }}>
                   {views.slice(0, 4).map((v) => (
                     <button key={v.id} type="button" className="cmp-card" onClick={() => applyView(v)}
-                      style={{ textAlign: "left", cursor: "pointer" }}>
-                      <span className="insight-ico" style={{ background: "#DFF5F1", marginBottom: 8 }}>
-                        <Icon name="bookmark" size={20} />
+                      style={{ textAlign: "left", cursor: "pointer", padding: 12 }}>
+                      <span className="insight-ico" style={{ background: "#DFF5F1", marginBottom: 6 }}>
+                        <Icon name="bookmark" size={18} />
                       </span>
-                      <strong style={{ display: "block", fontSize: 13.5 }}>{v.name}</strong>
+                      <strong style={{ display: "block", fontSize: 13 }}>{v.name}</strong>
                       <span className="panel-sub">{Object.keys(v.state?.filters ?? {}).length} filter axes · Opens {(VIEW_ROUTES[v.state?.view ?? ""] ?? "/")}</span>
                     </button>
                   ))}
@@ -289,7 +282,13 @@ export function BenchmarksPage() {
             title="Benchmark Results"
             sub="Benchmarks computed from available campaign performance in the current scope."
             action={(
-              <div style={{ display: "flex", gap: 8 }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <label htmlFor="b-axis" className="panel-sub" style={{ margin: 0 }}>Group By</label>
+                <select id="b-axis" aria-label="Group By" value={axis}
+                  onChange={(e) => { setAxis(e.target.value as Axis); setSelected(new Set()); }}
+                  style={{ background: "var(--shell-card)", border: "1px solid var(--shell-line)", borderRadius: 8, padding: "7px 26px 7px 10px", fontSize: 12.5, color: "var(--shell-navy)", fontFamily: "inherit" }}>
+                  {AXES.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
+                </select>
                 <LoadingButton type="button" className="btn-outline" loading={exportBusy} loadingLabel="Exporting…" spinnerClass="spinner dark" disabled={exportBusy} onClick={() => void onExport()}>
                   <Icon name="download" size={15} /> Export
                 </LoadingButton>
@@ -362,7 +361,7 @@ export function BenchmarksPage() {
             ) : <EmptyState text="Tick at least two benchmark rows above to compare them here." />}
           </Panel>
         </div>
-        <div className="rail-stack">
+        <div className="rail-stack" style={{ gap: 12 }}>
           <Panel title="Benchmark Insights" sub="Understand the data behind these benchmarks.">
             <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 10 }}>
               <span className="insight-ico" style={{ background: "#DFF5F1" }}>
@@ -396,12 +395,21 @@ export function BenchmarksPage() {
             </p>
           </Panel>
           <Panel title="Tips for Better Benchmarks">
-            <ul className="rec-list">
+            <ul className="rec-list" style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 4, fontSize: 13 }}>
               <li>Use relevant filters to narrow the dataset</li>
               <li>Include multiple platforms for broader insights</li>
               <li>Compare against similar verticals and objectives</li>
               <li>Save custom benchmarks for future use</li>
             </ul>
+          </Panel>
+          <Panel title="Learn More">
+            <p className="panel-sub" style={{ margin: "0 0 8px" }}>
+              Drill into a result with the AI Analyst or export it into a shareable report.
+            </p>
+            <div style={{ display: "flex", gap: 8 }}>
+              <Link className="btn-soft" to="/analyst">Open Analyst →</Link>
+              <Link className="btn-soft" to="/reports">Open Reports →</Link>
+            </div>
           </Panel>
         </div>
       </div>

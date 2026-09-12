@@ -14,6 +14,10 @@ import {
   useScopedApi,
 } from "@/components/product";
 
+// Brand single-source: served by the backend from Web/assets
+// (GET /foap-logo.png); never duplicated into the frontend tree.
+const FOAP_LOGO = "/foap-logo.png";
+
 interface CreativeRow {
   creative_key: string;
   name?: string;
@@ -28,13 +32,13 @@ interface CreativeRow {
 }
 
 const MODULES = [
-  { id: "summary", title: "Campaign Summary", body: "Overview of performance across selected campaigns.", icon: "bars", tint: "#E7F1FB" },
-  { id: "breakdown", title: "Creative Breakdown", body: "Detailed performance by creative, with metrics and thumbnails.", icon: "play", tint: "#EFEAFB" },
+  { id: "summary", title: "Campaign Summary", body: "Performance overview across selected campaigns.", icon: "bars", tint: "#DFF3F0" },
+  { id: "breakdown", title: "Creative Breakdown", body: "Per-creative metrics with thumbnails.", icon: "play", tint: "#EFEAFB" },
   { id: "benchmarks", title: "Benchmarks", body: "Compare against industry or custom benchmarks.", icon: "bars", tint: "#E7F1FB" },
-  { id: "compare", title: "Compare", body: "Side-by-side comparison of campaigns or creatives.", icon: "compare", tint: "#FBF3E2" },
+  { id: "compare", title: "Compare", body: "Side-by-side campaigns or creatives.", icon: "compare", tint: "#FBF3E2" },
   { id: "insights", title: "Insights", body: "Key trends, patterns, and takeaways.", icon: "trend", tint: "#FCECEA" },
   { id: "recommendations", title: "Recommendations", body: "AI-powered suggestions to improve performance.", icon: "spark", tint: "#E5F5EC" },
-  { id: "export", title: "Data Export", body: "Include raw data tables and export options.", icon: "report", tint: "#EFEAFB" },
+  { id: "export", title: "Data Export", body: "Raw data tables and export options.", icon: "report", tint: "#F0E9FA" },
 ];
 
 const KPI_CHOICES = ["Impressions", "Clicks", "CTR", "CVR", "ROAS", "CPA", "Spend", "Conversions"];
@@ -66,7 +70,7 @@ export function WorkbookPage() {
 
   const top = useMemo(() => {
     const rows = creatives.data ?? [];
-    return rows.slice().sort((a, b) => num(b.metrics?.impressions) - num(a.metrics?.impressions)).slice(0, 3);
+    return rows.slice().sort((a, b) => num(b.metrics?.impressions) - num(a.metrics?.impressions)).slice(0, 4);
   }, [creatives.data]);
 
   const toggleModule = (id: string) =>
@@ -113,6 +117,16 @@ export function WorkbookPage() {
     }
   };
 
+  const today = new Date().toLocaleDateString("en-US", {
+    month: "short", day: "numeric", year: "numeric",
+  });
+  const previewKpis = compare ? [
+    { label: "Impressions", value: fmtCompact(num(compare.metrics.impressions?.current)) },
+    { label: "Clicks", value: fmtCompact(num(compare.metrics.clicks?.current)) },
+    { label: "Spend", value: fmtMoney(num(compare.metrics.spend?.current)) },
+    { label: "ROAS", value: fmtMult(num(compare.metrics.roas?.current)) },
+  ] : [];
+
   return (
     <>
       <PageHeader
@@ -125,7 +139,7 @@ export function WorkbookPage() {
         )}
       />
       <Panel title="1. Configure Your Workbook" sub="Select the modules and options you want to include in your workbook.">
-        <div className="cards-4">
+        <div className="cards-4" style={{ gap: 10 }}>
           {MODULES.map((m) => {
             const on = modules.includes(m.id);
             return (
@@ -135,16 +149,16 @@ export function WorkbookPage() {
                 className="cmp-card"
                 aria-pressed={on}
                 onClick={() => toggleModule(m.id)}
-                style={{ textAlign: "left", cursor: "pointer", borderColor: on ? "var(--shell-teal)" : undefined }}
+                style={{ textAlign: "left", cursor: "pointer", padding: 0, overflow: "hidden", borderColor: on ? "var(--shell-teal)" : undefined, opacity: on ? 1 : 0.72 }}
               >
-                <span style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-                  <input type="checkbox" checked={on} readOnly aria-hidden="true" tabIndex={-1} />
-                  <span className="insight-ico" style={{ background: m.tint }}>
-                    <Icon name={m.icon} size={20} />
-                  </span>
+                <span style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 64, background: m.tint }}>
+                  <Icon name={m.icon} size={30} />
+                </span>
+                <span style={{ display: "flex", gap: 8, alignItems: "flex-start", padding: "10px 12px 12px" }}>
+                  <input type="checkbox" checked={on} readOnly aria-hidden="true" tabIndex={-1} style={{ marginTop: 3 }} />
                   <span>
-                    <strong style={{ display: "block", fontSize: 14 }}>{m.title}</strong>
-                    <span className="panel-sub">{m.body}</span>
+                    <strong style={{ display: "block", fontSize: 13 }}>{m.title}</strong>
+                    <span className="panel-sub" style={{ fontSize: 12 }}>{m.body}</span>
                   </span>
                 </span>
               </button>
@@ -158,11 +172,11 @@ export function WorkbookPage() {
             <label htmlFor="wb-name">Workbook Name</label>
             <input id="wb-name" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
-          <div className="field" style={{ marginTop: 12 }}>
+          <div className="field" style={{ marginTop: 10 }}>
             <label htmlFor="wb-desc">Description (Optional)</label>
             <textarea
               id="wb-desc"
-              rows={4}
+              rows={3}
               maxLength={200}
               placeholder="Add a brief description for your workbook…"
               value={description}
@@ -171,7 +185,7 @@ export function WorkbookPage() {
             />
             <p className="panel-sub" style={{ textAlign: "right" }}>{description.length}/200</p>
           </div>
-          <p style={{ fontSize: 13, fontWeight: 700, margin: "8px 0" }}>Select KPIs to Include</p>
+          <p style={{ fontSize: 13, fontWeight: 700, margin: "6px 0" }}>Select KPIs to Include</p>
           <div className="chip-row">
             {kpis.map((k) => (
               <button key={k} type="button" className="chip" aria-pressed="true" onClick={() => toggleKpi(k)}>
@@ -186,61 +200,59 @@ export function WorkbookPage() {
         </Panel>
         <Panel title="3. Workbook Preview" action={<span className="link-teal">⛶ Full Screen</span>}>
           {compare && creatives.data ? (
-            <div>
-              <p style={{ fontSize: 13, fontWeight: 700 }}>1. Campaign Summary</p>
-              <div className="cards-4" style={{ gap: 8 }}>
-                <div className="cmp-card" style={{ padding: 10 }}>
-                  <strong>{fmtCompact(num(compare.metrics.impressions?.current))}</strong>
-                  <p className="panel-sub">Impressions</p>
-                </div>
-                <div className="cmp-card" style={{ padding: 10 }}>
-                  <strong>{fmtCompact(num(compare.metrics.clicks?.current))}</strong>
-                  <p className="panel-sub">Clicks</p>
-                </div>
-                <div className="cmp-card" style={{ padding: 10 }}>
-                  <strong>{fmtMoney(num(compare.metrics.spend?.current))}</strong>
-                  <p className="panel-sub">Spend</p>
-                </div>
-                <div className="cmp-card" style={{ padding: 10 }}>
-                  <strong>{fmtMult(num(compare.metrics.roas?.current))}</strong>
-                  <p className="panel-sub">ROAS</p>
+            <div style={{ border: "1px solid var(--shell-line)", borderRadius: 10, overflow: "hidden" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid var(--shell-line)", background: "var(--shell-bg)" }}>
+                <img src={FOAP_LOGO} alt="Foap" style={{ height: 22, width: "auto" }} />
+                <div style={{ minWidth: 0 }}>
+                  <strong style={{ display: "block", fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {name || "Untitled Workbook"}
+                  </strong>
+                  <span className="panel-sub" style={{ fontSize: 11.5 }}>{today} · Finished-report preview from live demo data</span>
                 </div>
               </div>
-              <p style={{ fontSize: 13, fontWeight: 700, marginTop: 12 }}>2. Creative Breakdown</p>
-              {top.length ? (
-                <div className="tbl-wrap">
-                  <table className="tbl">
-                    <thead>
-                      <tr><th>#</th><th>Creative</th><th>Campaign</th><th className="num">Impr.</th><th className="num">CTR</th><th className="num">ROAS</th></tr>
-                    </thead>
-                    <tbody>
-                      {top.map((c, i) => (
-                        <tr key={c.creative_key}>
-                          <td className="idx">{i + 1}</td>
-                          <td>
-                            <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                              <CreativeThumb seed={c.creative_key} duration={c.annotation?.duration_s ?? c.duration_s} label={c.name} />
-                              <span className="cell-main">{c.name || c.creative_key}</span>
-                            </span>
-                          </td>
-                          <td>{c.campaigns?.[0] ?? "—"}</td>
-                          <td className="num">{fmtCompact(num(c.metrics?.impressions))}</td>
-                          <td className="num">{c.metrics?.ctr == null ? "—" : `${(c.metrics.ctr * 100).toFixed(1)}%`}</td>
-                          <td className="num">{c.metrics?.roas == null ? "—" : `${c.metrics.roas.toFixed(1)}x`}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+              <div style={{ padding: "10px 14px" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: 8 }}>
+                  {previewKpis.map((k) => (
+                    <div key={k.label} style={{ background: "var(--shell-bg)", border: "1px solid var(--shell-line)", borderRadius: 8, padding: "8px 10px" }}>
+                      <strong style={{ display: "block", fontSize: 15, fontVariantNumeric: "tabular-nums" }}>{k.value}</strong>
+                      <span className="panel-sub" style={{ fontSize: 11 }}>{k.label}</span>
+                    </div>
+                  ))}
                 </div>
-              ) : <EmptyState text="No creatives in the current scope." />}
-              <p className="panel-sub" style={{ marginTop: 8 }}>
-                Modules: {modules.length ? modules.join(", ") : "none selected"} · KPIs: {kpis.join(", ") || "none"}
-              </p>
+                {top.length ? (
+                  <div className="tbl-wrap" style={{ marginTop: 8 }}>
+                    <table className="tbl" style={{ fontSize: 12.5 }}>
+                      <thead>
+                        <tr><th>#</th><th>Creative</th><th className="num">Impr.</th><th className="num">CTR</th><th className="num">ROAS</th></tr>
+                      </thead>
+                      <tbody>
+                        {top.map((c, i) => (
+                          <tr key={c.creative_key}>
+                            <td className="idx">{i + 1}</td>
+                            <td>
+                              <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                <CreativeThumb seed={c.creative_key} duration={c.annotation?.duration_s ?? c.duration_s} label={c.name} />
+                                <span className="cell-main" style={{ fontSize: 12.5 }}>{c.name || c.creative_key}</span>
+                              </span>
+                            </td>
+                            <td className="num">{fmtCompact(num(c.metrics?.impressions))}</td>
+                            <td className="num">{c.metrics?.ctr == null ? "—" : `${(c.metrics.ctr * 100).toFixed(1)}%`}</td>
+                            <td className="num">{c.metrics?.roas == null ? "—" : `${c.metrics.roas.toFixed(1)}x`}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : <EmptyState text="No creatives in the current scope." />}
+                <p className="panel-sub" style={{ marginTop: 8, fontSize: 11.5 }}>
+                  Modules: {modules.length ? modules.join(", ") : "none selected"} · KPIs: {kpis.join(", ") || "none"}
+                </p>
+              </div>
             </div>
           ) : <Skeleton height={280} />}
         </Panel>
         <Panel title="4. Quick-Start Templates" sub="Start with a pre-built template and customize it.">
-          <div className="rail-stack">
+          <div className="rail-stack" style={{ gap: 8 }}>
             {TEMPLATES.map((t) => (
               <button
                 key={t.id}
@@ -248,29 +260,26 @@ export function WorkbookPage() {
                 className="cmp-card"
                 aria-pressed={template === t.id}
                 onClick={() => applyTemplate(t.id)}
-                style={{ textAlign: "left", cursor: "pointer", borderColor: template === t.id ? "var(--shell-teal)" : undefined }}
+                style={{ textAlign: "left", cursor: "pointer", padding: "10px 12px", borderColor: template === t.id ? "var(--shell-teal)" : undefined }}
               >
-                <strong style={{ display: "block", fontSize: 14 }}>{t.title}</strong>
-                <span className="panel-sub">{t.body}</span>
+                <strong style={{ display: "block", fontSize: 13 }}>{t.title}</strong>
+                <span className="panel-sub" style={{ fontSize: 12 }}>{t.body}</span>
               </button>
             ))}
           </div>
         </Panel>
       </div>
-      {status ? <p className="panel-sub" role="status" style={{ marginTop: 12 }}>{status}</p> : null}
-      <Panel title="Finish Your Workbook">
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-          <button type="button" className="btn-outline" onClick={() => applyTemplate(template)}>
-            <Icon name="report" size={16} /> Duplicate from Template
-          </button>
-          <span style={{ display: "flex", gap: 10 }}>
-            <button type="button" className="btn-outline" onClick={resetAll}>Cancel</button>
-            <LoadingButton type="button" className="btn-primary" loading={busy} loadingLabel="Creating…" disabled={busy} onClick={() => void createWorkbook()}>
-              Create Workbook
-            </LoadingButton>
-          </span>
-        </div>
-      </Panel>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 12, padding: "10px 4px", borderTop: "1px solid var(--shell-line)" }}>
+        <strong style={{ fontSize: 13.5 }}>Finish Your Workbook</strong>
+        {status ? <span className="panel-sub" role="status" style={{ margin: 0, flex: "1 1 auto", minWidth: 200 }}>{status}</span> : <span style={{ flex: "1 1 auto" }} />}
+        <button type="button" className="btn-outline" onClick={() => applyTemplate(template)}>
+          <Icon name="report" size={16} /> Duplicate from Template
+        </button>
+        <button type="button" className="btn-outline" onClick={resetAll}>Cancel</button>
+        <LoadingButton type="button" className="btn-primary" loading={busy} loadingLabel="Creating…" disabled={busy} onClick={() => void createWorkbook()}>
+          Create Workbook
+        </LoadingButton>
+      </div>
     </>
   );
 }

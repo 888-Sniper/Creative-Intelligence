@@ -911,7 +911,14 @@ def analyst_creatives(request: Request,
     _ = (who, _limited)
     from creative_intel import benchmarks as benchmarks_mod
     query = query_multidict(request)
-    scope = benchmarks_mod.Scope.from_query(query).resolve(conn).normalized()
+    # "objective" here is the analysis-objective selector (validated
+    # against analyst.OBJECTIVES below; unknown values 409), never a
+    # campaign-objective scope filter: the caller passes
+    # ?objective=<analysis objective>, and parsing it as a scope axis
+    # narrowed every response to ads carrying that campaign objective
+    # (empty on any dataset without one, including the demo seed).
+    scope = benchmarks_mod.Scope.from_query(
+        query, ignore=("objective",)).resolve(conn).normalized()
     objective = (query.get("objective") or ["reach"])[0]
     if objective not in analyst.OBJECTIVES:
         raise _conflict(ValueError(

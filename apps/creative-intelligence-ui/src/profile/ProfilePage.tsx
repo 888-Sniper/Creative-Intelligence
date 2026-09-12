@@ -19,10 +19,28 @@ function displayName(em: PublicEmployee): string {
   return `${em.first_name || ""} ${em.last_name || ""}`.trim() || em.email || "—";
 }
 
+/** Friendly date for profile surfaces: never a raw ISO string. Empty
+ *  or unparseable input renders as "—", never invented. */
+export function friendlyDate(raw: string): string {
+  if (!raw) return "—";
+  const d = new Date(raw.length <= 10 ? `${raw}T00:00:00` : raw);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("en-US", {
+    month: "short", day: "numeric", year: "numeric",
+  });
+}
+
+function daypart(): string {
+  const h = new Date().getHours();
+  if (h < 12) return "Good Morning";
+  if (h < 18) return "Good Afternoon";
+  return "Good Evening";
+}
+
 /** Legacy avatar_html parity: provider avatar URL when set, else initials.
  *  Display logic only — a manual avatar is never overwritten on login
  *  (the server fills empty fields when linking, never clobbers). */
-function ProfileAvatar({ employee }: { employee: PublicEmployee }) {
+function ProfileAvatar({ employee, size = 64 }: { employee: PublicEmployee; size?: number }) {
   const url = employee.avatar_url || "";
   if (url) {
     return (
@@ -31,7 +49,7 @@ function ProfileAvatar({ employee }: { employee: PublicEmployee }) {
         src={url}
         alt=""
         referrerPolicy="no-referrer"
-        style={{ width: 64, height: 64 }}
+        style={{ width: size, height: size }}
       />
     );
   }
@@ -45,8 +63,9 @@ function ProfileAvatar({ employee }: { employee: PublicEmployee }) {
         alignItems: "center",
         justifyContent: "center",
         fontWeight: 700,
-        width: 64,
-        height: 64,
+        width: size,
+        height: size,
+        fontSize: Math.round(size * 0.32),
       }}
     >
       {`${first}${last}`.trim() || "?"}
@@ -69,6 +88,7 @@ export function ProfilePage() {
   const [sessionStatus, setSessionStatus] = useState("");
   const [op, setOp] = useState<null | "save" | "avatar" | "revoke">(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
+  const firstRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -172,10 +192,16 @@ export function ProfilePage() {
     }
   };
 
+  const heroStats = employee ? [
+    { icon: "user", label: "Account Status", value: employee.status ? employee.status.charAt(0).toUpperCase() + employee.status.slice(1) : "Unavailable" },
+    { icon: "check", label: "Sign-In Method", value: employee.provider ? `${employee.provider.charAt(0).toUpperCase() + employee.provider.slice(1)} SSO` : "Work Email" },
+    { icon: "clock", label: "Member Since", value: employee.created_at ? friendlyDate(employee.created_at) : "Unavailable" },
+  ] : [];
+
   const activity = employee ? [
-    { icon: "clock", label: "Last signed in", value: employee.last_login_at || "—" },
-    { icon: "check", label: "Access approved", value: employee.approved_at || "—" },
-    { icon: "user", label: "Account created", value: employee.created_at || "—" },
+    { icon: "clock", label: "Last signed in", value: employee.last_login_at ? friendlyDate(employee.last_login_at) : "—" },
+    { icon: "check", label: "Access approved", value: employee.approved_at ? friendlyDate(employee.approved_at) : "—" },
+    { icon: "user", label: "Account created", value: employee.created_at ? friendlyDate(employee.created_at) : "—" },
   ] : [];
 
   return (
@@ -190,33 +216,61 @@ export function ProfilePage() {
       {!loading && !loadError && employee && (
         <>
           <Panel title="Profile Card" sub="How you appear across the workspace.">
-            <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-              <ProfileAvatar employee={employee} />
-              <div>
-                <p style={{ margin: 0, fontSize: 19, fontWeight: 800, color: "var(--shell-navy)" }}>
+            <div style={{ display: "flex", gap: 20, alignItems: "flex-start", flexWrap: "wrap" }}>
+              <ProfileAvatar employee={employee} size={140} />
+              <div style={{ flex: "1 1 240px", minWidth: 0 }}>
+                <p style={{ margin: 0, fontSize: 15, color: "var(--shell-muted)" }}>
+                  {daypart()}, {employee.first_name || displayName(employee)}
+                </p>
+                <p style={{ margin: "2px 0 0", fontSize: 22, fontWeight: 800, color: "var(--shell-navy)" }}>
                   {displayName(employee)}
                 </p>
-                <p className="panel-sub" style={{ marginTop: 2 }}>{employee.email}</p>
                 <p className="panel-sub" style={{ marginTop: 4 }}>
                   {`${employee.role} · ${employee.status}`}
                 </p>
-                {employee.provider ? (
-                  <p className="panel-sub" style={{ marginTop: 2 }}>
-                    Signed in via {employee.provider}
-                  </p>
-                ) : null}
+                <p className="panel-sub" style={{ marginTop: 2 }}>{employee.email}</p>
+                <p className="panel-sub" style={{ marginTop: 2 }}>
+                  Team unavailable · Member since {employee.created_at ? friendlyDate(employee.created_at) : "unavailable"}
+                  {employee.provider ? ` · Signed in via ${employee.provider}` : ""}
+                </p>
+                <div className="chip-row" style={{ marginTop: 12 }}>
+                  <button type="button" className="btn-outline" onClick={() => firstRef.current?.focus()}>
+                    <Icon name="user" size={14} /> Edit Profile
+                  </button>
+                  <button type="button" className="btn-outline" onClick={() => fileRef.current?.click()}>
+                    <Icon name="download" size={14} /> Upload Photo
+                  </button>
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 10, flex: "1 1 100%", marginTop: 4 }}>
+                {heroStats.map((s) => (
+                  <div key={s.label} style={{ flex: "1 1 0", background: "var(--shell-bg)", border: "1px solid var(--shell-line)", borderRadius: 10, padding: "10px 12px", minWidth: 0 }}>
+                    <p className="panel-sub" style={{ margin: 0, fontSize: 11.5 }}>{s.label}</p>
+                    <p style={{ margin: "2px 0 0", fontSize: 14, fontWeight: 700, color: "var(--shell-navy)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {s.value}
+                    </p>
+                  </div>
+                ))}
               </div>
             </div>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".jpg,.jpeg,.png,.webp"
+              aria-label="Avatar Image File"
+              style={{ position: "absolute", width: 1, height: 1, opacity: 0, pointerEvents: "none" }}
+            />
           </Panel>
 
           <div className="section-gap" />
-          <div className="cols-2">
+          <div className="cols-3">
             <Panel title="Personal Information" sub="Name and avatar for your account.">
               <div className="filter-grid" style={{ gridTemplateColumns: "1fr 1fr", marginTop: 0 }}>
                 <div className="field">
                   <label htmlFor="p-first">First Name</label>
                   <input
                     id="p-first"
+                    ref={firstRef}
                     type="text"
                     value={first}
                     onChange={(e) => setFirst(e.target.value)}
@@ -243,15 +297,9 @@ export function ProfilePage() {
                 />
               </div>
               <p className="panel-sub" style={{ marginTop: 10 }}>
-                …Or upload an image (JPEG/PNG/WebP, up to 2 MB):
+                …Or upload an image (JPEG/PNG/WebP, up to 2 MB) with Upload Photo above.
               </p>
-              <input
-                ref={fileRef}
-                type="file"
-                accept=".jpg,.jpeg,.png,.webp"
-                aria-label="Avatar Image File"
-              />
-              <div className="chip-row" style={{ marginTop: 14 }}>
+              <div className="chip-row" style={{ marginTop: 12 }}>
                 <LoadingButton type="button" className="btn-primary" loading={op === "save"} loadingLabel="Saving…" disabled={op !== null} onClick={() => void save()}>
                   Save Profile
                 </LoadingButton>
@@ -283,18 +331,14 @@ export function ProfilePage() {
                 </div>
                 <div>
                   <dt>Member Since</dt>
-                  <dd>{employee.created_at || "—"}</dd>
+                  <dd>{employee.created_at ? friendlyDate(employee.created_at) : "—"}</dd>
                 </div>
                 <div>
                   <dt>Last Login</dt>
-                  <dd>{employee.last_login_at || "—"}</dd>
+                  <dd>{employee.last_login_at ? friendlyDate(employee.last_login_at) : "—"}</dd>
                 </div>
               </dl>
             </Panel>
-          </div>
-
-          <div className="section-gap" />
-          <div className="cols-2">
             <Panel title="Connected Accounts" sub="Ways you can sign in.">
               <div className="insight">
                 <span className="insight-ico" style={{ background: "var(--shell-blue-soft)" }}>
@@ -319,6 +363,10 @@ export function ProfilePage() {
                 </div>
               ) : null}
             </Panel>
+          </div>
+
+          <div className="section-gap" />
+          <div className="cols-3">
             <Panel title="Security" sub="Protect every session on every device.">
               <p className="panel-sub" style={{ marginTop: 0 }}>
                 Signing out everywhere revokes all sessions immediately — you will need to sign in again on each device.
@@ -332,10 +380,6 @@ export function ProfilePage() {
                 </span>
               </div>
             </Panel>
-          </div>
-
-          <div className="section-gap" />
-          <div className="cols-2">
             <Panel title="Notifications" sub="Choose what you want to be notified about.">
               <p className="panel-sub" style={{ marginTop: 0 }}>
                 Email and in-app notification preferences live in Settings and apply to this account.

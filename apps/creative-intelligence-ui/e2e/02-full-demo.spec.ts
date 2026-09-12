@@ -204,7 +204,7 @@ test.describe("full demo visuals", () => {
     await page.setViewportSize({ width: 390, height: 844 });
     const seeds = readSeeds();
     await loginAs(context, page, seeds.admin, "/campaigns");
-    await expect(page.getByLabel("Campaign Status")).toBeVisible({ timeout: 30000 });
+    await expect(page.getByLabel("Campaign Status", { exact: true })).toBeVisible({ timeout: 30000 });
     // Full ten-campaign table, lightest demo campaign included.
     await expect(page.getByText("Discover Something New").first()).toBeVisible();
     await expectCleanDemo(page);

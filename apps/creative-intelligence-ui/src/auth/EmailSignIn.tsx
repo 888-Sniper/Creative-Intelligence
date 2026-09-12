@@ -94,6 +94,7 @@ export function EmailSignIn() {
             autoComplete="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
+            style={{ minHeight: 44 }}
           />
         </div>
         {!codeSent ? (
@@ -117,6 +118,7 @@ export function EmailSignIn() {
               autoComplete="one-time-code"
               value={code}
               onChange={(e) => setCode(e.target.value)}
+              style={{ minHeight: 44 }}
             />
             <LoadingButton type="button" className="login-primary" loading={op === "verify"} loadingLabel="Verifying…" disabled={busy} onClick={() => void run("verify", () => emailCodeSignIn(email, code))}>
               <>Verify &amp; Sign In</>
@@ -145,6 +147,7 @@ export function EmailSignIn() {
           autoComplete="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
+          style={{ minHeight: 44 }}
         />
       </div>
       <label className="login-label" htmlFor="login-password">
@@ -159,6 +162,7 @@ export function EmailSignIn() {
           autoComplete="current-password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
+          style={{ minHeight: 44 }}
         />
         <button
           type="button"

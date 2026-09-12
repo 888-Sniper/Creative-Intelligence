@@ -444,6 +444,9 @@ export function DashboardPage() {
 
   return (
     <div className="dashboard">
+      {/* Scoped density (theme.css is read-only): tighter table rows so
+        more of Top Creatives reads without scrolling. */}
+      <style>{`.dashboard .dash-table td{padding-top:7px;padding-bottom:7px}`}</style>
       <PageHeader
         title={`Good ${daypart}, ${firstName}`}
         sub="Your creative performance at a glance."
@@ -459,7 +462,8 @@ export function DashboardPage() {
           </>
         )}
       />
-      <FilterPanel actions="none" />
+      {/* Team stays in the global scope but hides on Dashboard only. */}
+      <FilterPanel actions="none" showTeam={false} />
       {/* Approved composition: the Insights rail spans the full right
         side from the KPI row down (KPIs | Insights, Charts | Insights,
         Top Creatives + Retention | Insights). */}

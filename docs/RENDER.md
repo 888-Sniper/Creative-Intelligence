@@ -88,7 +88,13 @@ Render Free has an **ephemeral filesystem**: anything written under
    not exist before this boot, the ten synthetic demo campaigns, ten
    annotated demo creatives and their artwork are seeded once via
    `load_demo_dataset()` (120 days of rows ending yesterday, so KPI
-   comparisons, charts and trends compute for real).
+   comparisons, charts and trends compute for real), plus populated-
+   screen showcase content: seven demo saved views (four benchmark
+   cards, three compare views) and three demo-owner analyst
+   conversations with stored findings, every row demo-attributed and
+   skipped when already present. Report history needs no rows: the
+   Reports page regenerates its demo rows client-side from the
+   campaign catalog.
 4. An existing database is never touched: a second boot of the same
    instance skips seeding entirely, so rows cannot duplicate and demo
    edits made during the session survive until the instance stops.

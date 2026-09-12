@@ -880,6 +880,124 @@ def _demo_retention_points(secs):
             for i in range(steps)]
 
 
+#: Showcase owner for seeded analyst rows. Analyst conversations are
+#: strictly per-employee (a cross-owner read is a 404 by design, and
+#: that isolation must never weaken for the demo), so seeded chats
+#: carry this fixed showcase string instead of impersonating a real
+#: employee. No employees/auth rows are created for it — it is pure
+#: attribution, like source="demo" on the ads rows.
+DEMO_ANALYST_OWNER = "demo"
+
+#: Saved views seeded alongside the demo dataset: four benchmark
+#: cards (view="benchmark", the first GET /api/views rows the
+#: Benchmarks page renders) plus three compare views (view="compare",
+#: entries the Saved Insights grid opens on /compare). Filter values
+#: name real demo rows so applying a card analyses the seeded
+#: dataset, never an empty scope.
+_DEMO_SAVED_VIEWS = (
+    ("Demo \u2014 Benchmark: Platform",
+     {"filters": {}, "kpi": "roas", "view": "benchmark",
+      "benchmark": "platform", "benchmark_scope": "filters",
+      "rank_by": "roas"}),
+    ("Demo \u2014 Benchmark: Hook Type",
+     {"filters": {"platform": ["tiktok"]}, "kpi": "ctr",
+      "view": "benchmark", "benchmark": "hook_type",
+      "benchmark_scope": "filters", "rank_by": "ctr"}),
+    ("Demo \u2014 Benchmark: Creator Vs Branded",
+     {"filters": {"vertical": ["Beauty"]}, "kpi": "cpa",
+      "view": "benchmark", "benchmark": "creator_vs_branded",
+      "benchmark_scope": "global", "rank_by": "cpa"}),
+    ("Demo \u2014 Benchmark: Format",
+     {"filters": {"market": ["UK"]}, "kpi": "cpm", "view": "benchmark",
+      "benchmark": "format", "benchmark_scope": "filters",
+      "rank_by": "cpm"}),
+    ("Demo \u2014 Compare: Campaigns (ROAS)",
+     {"filters": {"campaign": ["Spring Skincare Launch",
+                               "Built For Real Life"]},
+      "kpi": "roas", "view": "compare", "benchmark": "campaign",
+      "benchmark_scope": "filters", "rank_by": "roas"}),
+    ("Demo \u2014 Compare: Creatives (CTR)",
+     {"filters": {"platform": ["tiktok"]}, "kpi": "ctr",
+      "view": "compare", "benchmark": "hook_type",
+      "benchmark_scope": "filters", "rank_by": "ctr"}),
+    ("Demo \u2014 Compare: Markets (CPA)",
+     {"filters": {"market": ["UK", "US"]}, "kpi": "cpa",
+      "view": "compare", "benchmark": "platform",
+      "benchmark_scope": "global", "rank_by": "cpa"}),
+)
+
+#: Analyst showcase turns (question, scope, objective, language): two
+#: full-analysis turns so stored findings persist, plus one
+#: recommendations turn for recent-chat variety. Every message and
+#: finding is computed from the seeded rows by answer_turn — never
+#: invented copy.
+_DEMO_ANALYST_TURNS = (
+    ("Which hook types drive the highest CTR?", {}, "reach", "en"),
+    ("Compare hook performance across creatives.", {}, "reach", "en"),
+    ("What are your recommendations for the next campaign?",
+     {}, "conversions", "en"),
+)
+
+
+def _seed_demo_views(conn):
+    """Insert missing demo saved views (per-name skip, never overwrite).
+
+    A re-seed is a no-op and demo edits made during the session
+    survive: only names absent from saved_views are written, through
+    the same save_view() validation the API uses. Returns how many
+    views were inserted.
+    """
+    inserted = 0
+    for name, state in _DEMO_SAVED_VIEWS:
+        present = conn.execute(
+            "SELECT 1 FROM saved_views WHERE name=?", (name,)).fetchone()
+        if present:
+            continue
+        save_view(conn, name, dict(state))
+        inserted += 1
+    return inserted
+
+
+def _seed_demo_analyst(conn):
+    """Run the demo analyst showcase turns (skip when already present).
+
+    Real deterministic turns under DEMO_ANALYST_OWNER: one user plus
+    one assistant message per conversation, findings persisted with
+    scope + dataset version exactly as a live turn stores them.
+    Returns how many conversations were created.
+    """
+    from creative_intel import analyst_chat
+
+    def _seed_owner(owner):
+        here = conn.execute(
+            "SELECT 1 FROM analyst_conversations WHERE owner_employee_id=?"
+            " LIMIT 1", (owner,)).fetchone()
+        if here:
+            return 0
+        made = 0
+        for question, scope, objective, language in _DEMO_ANALYST_TURNS:
+            analyst_chat.answer_turn(conn, owner, question, None,
+                                     scope=dict(scope), objective=objective,
+                                     language=language)
+            made += 1
+        return made
+
+    created = _seed_owner(DEMO_ANALYST_OWNER)
+    # Conversations are private per employee, so a demo-owner set alone
+    # never shows up in anyone's Recent Chats: mirror the same showcase
+    # turns to every employee present (per-owner skip, never overwrite).
+    # On a fresh boot there are no employees yet; the admin reseed path
+    # backfills them idempotently.
+    try:
+        owners = [r[0] for r in conn.execute("SELECT id FROM employees")]
+    except Exception:
+        owners = []
+    for owner in owners:
+        if owner != DEMO_ANALYST_OWNER:
+            created += _seed_owner(owner)
+    return created
+
+
 def load_demo_dataset(db_path, media_dir=None):
     """Seed the synthetic demo dataset (source="demo").
 
@@ -890,9 +1008,13 @@ def load_demo_dataset(db_path, media_dir=None):
     Each demo creative also gains a distinct seeded image asset (an
     uploaded-media row, skipped when one already exists), so the
     thumbnail endpoint serves real per-creative art instead of the
-    generated fallback. media_dir overrides the media store (tests
+    generated fallback. Showcase content for populated screens rides
+    along: seven demo saved views (four benchmark cards, three
+    compare views) plus three demo-owner analyst conversations with
+    stored findings, every row demo-attributed and skipped when
+    already present. media_dir overrides the media store (tests
     pass an isolated directory); the default is the app media store.
-    Returns the number of rows inserted on this call.
+    Returns the number of ads rows inserted on this call.
     """
     import csv as _csv
     import datetime as _dt
@@ -967,6 +1089,14 @@ def load_demo_dataset(db_path, media_dir=None):
         if not has_image:
             media.save_media_bytes(conn, store, key, key + ".png",
                                    demo_art.art_for_key(key))
+    # Showcase content for populated screens: saved benchmark cards +
+    # compare views (global, every viewer) and demo-owner analyst
+    # chats with stored findings (owner-scoped like all analyst
+    # history). Each step skips what is present, so reloads insert
+    # nothing new; the returned count stays ads-only, exactly as
+    # before, and no accounts/uploads/auth rows are touched.
+    _seed_demo_views(conn)
+    _seed_demo_analyst(conn)
     conn.commit()
     conn.close()
     return total

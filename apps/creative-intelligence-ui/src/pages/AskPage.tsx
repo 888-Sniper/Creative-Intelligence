@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, ApiError } from "@/api/client";
 import { useFilters } from "@/state/FilterContext";
@@ -65,9 +65,21 @@ const FOLLOW_UPS = [
   "Which campaign should we scale first?",
 ];
 
+/** Representative first question: the demo opens with this already
+ *  answered (user message, narrative, KPI cards, trend, context,
+ *  takeaways, follow-ups) instead of an empty composer. */
+const DEFAULT_QUESTION = "Which campaigns had the highest ROI last month and what drove the results?";
+
 function num(v: unknown): number {
   const n = Number(v ?? 0);
   return Number.isFinite(n) ? n : 0;
+}
+
+function friendlyDate(raw?: string | null): string {
+  if (!raw) return "";
+  const d = new Date(raw.length <= 10 ? `${raw}T00:00:00` : raw);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
 /** Bucket daily revenue into at most 12 EQUAL-TIME spans. Fixed-count
@@ -97,12 +109,16 @@ export function bucket(points: Array<{ date: string; revenue: number }>): { labe
 
 export function AskPage() {
   const { scope } = useFilters();
-  const [question, setQuestion] = useState("Which campaigns had the highest ROI last month and what drove the results?");
+  const [question, setQuestion] = useState(DEFAULT_QUESTION);
   const [asked, setAsked] = useState("");
   const [answer, setAnswer] = useState<AskAnswer | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [chats, setChats] = useState<Conversation[] | null>(null);
+  const scopeRef = useRef(scope);
+  scopeRef.current = scope;
+  // The opening answered example fires exactly once per mount.
+  const autoRan = useRef(false);
 
   const compare = useCompare();
   const daily = useDaily(90);
@@ -127,7 +143,7 @@ export function AskPage() {
     try {
       const res = await api<AskAnswer>("POST", "/api/ask", {
         question: text,
-        filters: scopeBody(scope),
+        filters: scopeBody(scopeRef.current),
       });
       setAnswer(res);
     } catch (e) {
@@ -136,6 +152,17 @@ export function AskPage() {
       setBusy(false);
     }
   };
+  const askRef = useRef(ask);
+  askRef.current = ask;
+
+  // Demo opens with a representative answered example already on
+  // screen; everything shown comes from the live backend scope.
+  useEffect(() => {
+    if (autoRan.current) return;
+    autoRan.current = true;
+    void askRef.current(DEFAULT_QUESTION);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const roi = useMemo(() => bucket(daily ?? []), [daily]);
 
@@ -183,34 +210,43 @@ export function AskPage() {
       />
       <div className="main-rail">
         <div className="rail-stack">
-          <Panel title="Ask a Question">
-            <div className="composer">
-              <input
-                value={question}
-                onChange={(e) => setQuestion(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") void ask(); }}
-                placeholder="Ask a question about your marketing data…"
-                aria-label="Ask a question about your marketing data"
-              />
-              <LoadingButton type="button" className="btn-primary" loading={busy} loadingLabel="Asking…" disabled={busy || !question.trim()} onClick={() => void ask()}>
-                <Icon name="chat" size={16} /> Ask
-              </LoadingButton>
-            </div>
-            <div className="prompt-chips">
+          <section className="panel" aria-label="Question composer">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                void ask();
+              }}
+            >
+              <div className="composer">
+                <input
+                  value={question}
+                  onChange={(e) => setQuestion(e.target.value)}
+                  placeholder="Ask a question about your marketing data…"
+                  aria-label="Ask a question about your marketing data"
+                />
+                <LoadingButton type="submit" className="btn-primary" loading={busy} loadingLabel="Asking…" disabled={busy || !question.trim()} aria-label="Ask">
+                  <Icon name="chat" size={16} /> Ask
+                </LoadingButton>
+              </div>
+            </form>
+            <div className="prompt-chips" style={{ marginTop: 10 }}>
               {PROMPTS.map((p) => (
                 <button key={p} type="button" className="chip" onClick={() => { setQuestion(p); void ask(p); }}>
                   {p}
                 </button>
               ))}
             </div>
-          </Panel>
+          </section>
           {asked ? (
             <Panel title={asked} sub="Today">
+              <p style={{ fontSize: 13, fontWeight: 700, margin: "0 0 6px", color: "var(--shell-navy)" }}>
+                {asked}
+              </p>
               {busy ? <Skeleton height={120} /> : error ? (
                 <EmptyState text={error} />
               ) : answer ? (
                 <>
-                  <p style={{ fontSize: 14, lineHeight: 1.6 }}>{answer.answer}</p>
+                  <p style={{ fontSize: 14, lineHeight: 1.6, marginTop: 0 }}>{answer.answer}</p>
                   <div className="kpi-grid">
                     {kpis.map((k) => (
                       <KpiCard
@@ -232,16 +268,7 @@ export function AskPage() {
                       />
                     ) : <Skeleton height={200} />}
                   </Panel>
-                  <Panel title="Suggested Follow-Ups">
-                    <div className="prompt-chips">
-                      {FOLLOW_UPS.map((f) => (
-                        <button key={f} type="button" className="chip" onClick={() => { setQuestion(f); void ask(f); }}>
-                          {f}
-                        </button>
-                      ))}
-                    </div>
-                  </Panel>
-                  <div className="cols-2">
+                  <div className="cols-2" style={{ marginTop: 12 }}>
                     <Panel title="Source & Data Context">
                       <p className="panel-sub">Sources: {(answer.sources ?? []).join(", ") || "—"}</p>
                       <p className="panel-sub">Scope: {answer.scope || "All data"}</p>
@@ -258,7 +285,7 @@ export function AskPage() {
                     </Panel>
                   </div>
                   {takeaways.length ? (
-                    <div className="takeaways" style={{ marginTop: 16 }}>
+                    <div className="takeaways" style={{ marginTop: 12 }}>
                       <h5>Key Takeaways</h5>
                       <ul>
                         {takeaways.map((t) => (
@@ -267,6 +294,15 @@ export function AskPage() {
                       </ul>
                     </div>
                   ) : null}
+                  <Panel title="Suggested Follow-Ups">
+                    <div className="prompt-chips" style={{ marginTop: 0 }}>
+                      {FOLLOW_UPS.map((f) => (
+                        <button key={f} type="button" className="chip" onClick={() => { setQuestion(f); void ask(f); }}>
+                          {f}
+                        </button>
+                      ))}
+                    </div>
+                  </Panel>
                 </>
               ) : null}
             </Panel>
@@ -278,9 +314,9 @@ export function AskPage() {
         </div>
         <div className="rail-stack">
           <Panel title="Suggested Questions">
-            <div className="rail-stack" style={{ gap: 8 }}>
+            <div className="rail-stack" style={{ gap: 6 }}>
               {SUGGESTED.map((s) => (
-                <button key={s} type="button" className="btn-outline" style={{ justifyContent: "space-between", textAlign: "left" }}
+                <button key={s} type="button" className="btn-outline" style={{ justifyContent: "space-between", textAlign: "left", minHeight: 30, padding: "6px 12px", fontSize: 12.5 }}
                   onClick={() => { setQuestion(s); void ask(s); }}>
                   <span style={{ minWidth: 0, whiteSpace: "normal" }}>{s}</span>
                   <span style={{ flex: "none" }} aria-hidden="true"><Icon name="chev" size={14} /></span>
@@ -289,17 +325,19 @@ export function AskPage() {
             </div>
           </Panel>
           <Panel title="Recent Chats" action={<Link className="link-teal" to="/analyst">View all</Link>}>
-            {chats === null ? <Skeleton height={140} /> : (
+            {chats === null ? <Skeleton height={120} /> : (
               chats.length ? (
                 <div>
                   {chats.slice(0, 5).map((c) => (
-                    <div className="insight" key={c.id}>
-                      <span className="insight-ico" style={{ background: "#E7F1FB" }}>
-                        <Icon name="chat" size={18} />
+                    <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 9, padding: "7px 0", borderBottom: "1px solid var(--shell-line)" }}>
+                      <span className="insight-ico" style={{ background: "#E7F1FB", width: 30, height: 30, borderRadius: 9 }}>
+                        <Icon name="chat" size={15} />
                       </span>
-                      <div>
-                        <h4>{c.title || "Untitled Conversation"}</h4>
-                        <p>{c.updated_at ? c.updated_at.slice(0, 10) : ""}</p>
+                      <div style={{ minWidth: 0 }}>
+                        <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: "var(--shell-navy)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {c.title || "Untitled Conversation"}
+                        </p>
+                        <p className="panel-sub" style={{ margin: 0, fontSize: 11.5 }}>{friendlyDate(c.updated_at)}</p>
                       </div>
                     </div>
                   ))}

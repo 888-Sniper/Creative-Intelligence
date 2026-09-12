@@ -348,7 +348,10 @@ export function CampaignsPage() {
   };
 
   return (
-    <>
+    <div className="campaigns">
+      {/* Scoped density (theme.css is read-only): shallower filter card,
+        tighter grid and table rows so the table reads higher. */}
+      <style>{`.campaigns .panel{padding:16px 18px}.campaigns .filter-grid{gap:8px 10px}.campaigns .tbl td{padding-top:7px;padding-bottom:7px}`}</style>
       <PageHeader
         title="Campaigns"
         sub="Plan, monitor, and optimize your creative campaigns with real-time insights."
@@ -374,9 +377,19 @@ export function CampaignsPage() {
             </select>
           </div>
           <div className="field">
-            {/* Visible qualifier (not tooltip-only) so touch and
-              keyboard users get the inferred-status explanation too. */}
-            <label htmlFor="c-status">Campaign Status <span className="panel-sub">(activity-based)</span></label>
+            {/* Status stays activity-derived (not the ad platform's own
+              status); the explainer lives on an info icon beside the
+              short label so the card stays shallow. The icon sits
+              outside the label element to keep its accessible name
+              exactly "Campaign Status". */}
+            <span style={{ display: "flex", alignItems: "center", gap: 6, margin: "0 0 6px" }}>
+              <label htmlFor="c-status" style={{ margin: 0 }}>Campaign Status</label>
+              <button type="button" className="trend-info" style={{ width: 18, height: 18, fontSize: 10 }}
+                title="Activity-derived status from recent ad activity — not the ad platform's own campaign status."
+                aria-label="How campaign status is determined">
+                <span aria-hidden="true">i</span>
+              </button>
+            </span>
             <select id="c-status" value={filters.status || "all"}
               title="Activity-derived status from recent ad activity — not the ad platform's own campaign status."
               onChange={(e) => setFilter("status", e.target.value === "all" ? "" : e.target.value)}>
@@ -415,8 +428,8 @@ export function CampaignsPage() {
             </select>
           </div>
           <div className="field">
-            <label htmlFor="c-from">Date Range</label>
-            <div className="date-pair">
+            <label id="c-date-label">Date Range</label>
+            <div className="date-pair" role="group" aria-labelledby="c-date-label" style={{ flexWrap: "nowrap" }}>
               <input type="date" aria-label="From date" value={filters.date_from}
                 onChange={(e) => setFilter("date_from", e.target.value)} />
               <input type="date" aria-label="To date" value={filters.date_to}
@@ -480,7 +493,7 @@ export function CampaignsPage() {
         </div>
       </Panel>
       {banner ? <p className="panel-sub" role="status" style={{ margin: "12px 0 0" }}>{banner}</p> : null}
-      <div className="main-rail" style={{ marginTop: 16 }}>
+      <div className="main-rail" style={{ marginTop: 12 }}>
         <div className="rail-stack">
           {compare ? (
             <div className="kpi-grid">
@@ -488,9 +501,9 @@ export function CampaignsPage() {
                 <span className="kpi-ico" style={{ background: "#E4F4ED", color: "#0E7C5B" }}>
                   <Icon name="users" size={22} />
                 </span>
-                <div>
-                  <p className="kpi-label">Total Campaigns</p>
-                  <p className="kpi-value">{rows.length}</p>
+                <div className="kpi-body">
+                  <p className="kpi-label" style={{ fontSize: 13, fontWeight: 600, color: "var(--shell-muted)", margin: 0 }}>Total Campaigns</p>
+                  <p className="kpi-value" style={{ fontSize: 27, fontWeight: 800, margin: 0 }}>{rows.length}</p>
                 </div>
               </div>
               <KpiCard label="Total Impressions" display={fmtCompact(num(compare.metrics.impressions?.current))}
@@ -509,13 +522,14 @@ export function CampaignsPage() {
             <Panel title="Campaign Performance Trends">
               {daily ? (
                 <TrendChart
+                  height={200}
                   series={[
                     { label: "Impressions", color: "#00B3A0", soft: "#DDF3F0", points: daily.map((p) => num(p.impressions)) },
                     { label: "Clicks", color: "#1D3A8F", soft: "#E4EAF7", points: daily.map((p) => num(p.clicks)), axis: "right" },
                   ]}
                   labels={daily.map((p) => p.date.slice(5))}
                 />
-              ) : <Skeleton height={230} />}
+              ) : <Skeleton height={200} />}
             </Panel>
             <Panel
               title="Campaign Performance by Platform"
@@ -529,11 +543,12 @@ export function CampaignsPage() {
               {benchPlatform.data ? (
                 platGroups.length ? (
                   <GroupBars
+                    height={200}
                     groups={platGroups}
                     format={(v) => platMetric === "spend" ? fmtMoney(v) : fmtCompact(v)}
                   />
                 ) : <EmptyState text="No platform data in the current scope." />
-              ) : <Skeleton height={230} />}
+              ) : <Skeleton height={200} />}
             </Panel>
           </div>
           <Panel
@@ -672,6 +687,6 @@ export function CampaignsPage() {
           ) : <Skeleton height={320} />}
         </Panel>
       </div>
-    </>
+    </div>
   );
 }

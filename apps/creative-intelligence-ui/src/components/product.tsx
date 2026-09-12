@@ -194,9 +194,12 @@ function titleAxis(v: string, all: string): string {
   return v.split("_").map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w)).join(" ");
 }
 
-export function FilterPanel({ onApply, kpi = true, creative = false, trailing, actions = "panel" }: {
+export function FilterPanel({ onApply, kpi = true, creative = false, trailing, actions = "panel", showTeam = true }: {
   onApply?: () => void; kpi?: boolean; creative?: boolean;
   trailing?: React.ReactNode; actions?: "panel" | "none";
+  /** Dashboard hides Team (opt-out); it stays visible everywhere else
+   *  and keeps filtering through the shared global scope when set. */
+  showTeam?: boolean;
 }) {
   const { filters, setFilter, clearFilters } = useFilters();
   const pick = (
@@ -235,7 +238,7 @@ export function FilterPanel({ onApply, kpi = true, creative = false, trailing, a
           {trailing}
           <div className="field">
             <label id="f-date-label">Date Range</label>
-            <div className="date-pair" role="group" aria-labelledby="f-date-label">
+            <div className="date-pair" role="group" aria-labelledby="f-date-label" style={{ flexWrap: "nowrap" }}>
               <input type="date" aria-label="From date" value={filters.date_from}
                 onChange={(e) => setFilter("date_from", e.target.value)} />
               <input type="date" aria-label="To date" value={filters.date_to}
@@ -271,11 +274,13 @@ export function FilterPanel({ onApply, kpi = true, creative = false, trailing, a
           <input id="f-project" placeholder="All Projects" value={filters.project}
             onChange={(e) => setFilter("project", e.target.value)} />
         </div>
-        <div className="field">
-          <label htmlFor="f-team">Team</label>
-          <input id="f-team" placeholder="All Teams" value={filters.team}
-            onChange={(e) => setFilter("team", e.target.value)} />
-        </div>
+        {showTeam ? (
+          <div className="field">
+            <label htmlFor="f-team">Team</label>
+            <input id="f-team" placeholder="All Teams" value={filters.team}
+              onChange={(e) => setFilter("team", e.target.value)} />
+          </div>
+        ) : null}
         <div className="field">
           <label htmlFor="f-campaign">Campaign</label>
           <input id="f-campaign" placeholder="All Campaigns" value={filters.campaign}
@@ -307,9 +312,11 @@ export function FilterPanel({ onApply, kpi = true, creative = false, trailing, a
               onChange={(e) => setFilter("kpi", e.target.value)} />
           </div>
         ) : <div />}
+        {/* ONE compact Date Range field: From/To share a single row
+          in one field (never two stacked date inputs). */}
         <div className="field">
-          <label id="f-date-label">Date</label>
-          <div className="date-pair" role="group" aria-labelledby="f-date-label">
+          <label id="f-date-label">Date Range</label>
+          <div className="date-pair" role="group" aria-labelledby="f-date-label" style={{ flexWrap: "nowrap" }}>
             <input type="date" aria-label="From date" value={filters.date_from}
               onChange={(e) => setFilter("date_from", e.target.value)} />
             <input type="date" aria-label="To date" value={filters.date_to}
@@ -344,14 +351,17 @@ export function KpiCard({ label, display, icon, tint, metricLabel, compare }: {
   const metrics = compare?.metrics ?? {};
   const m = metrics[metricLabel] ?? metrics[metricLabel.toLowerCase()]
     ?? metrics[metricLabel.toUpperCase()];
+  // KPI hierarchy: Title Case softer label above a stronger, larger
+  // number. theme.css is read-only, so the emphasis lives here inline
+  // and hand-rolled cards on Campaigns/Creatives mirror these values.
   return (
     <div className="kpi-card">
       <span className="kpi-ico" style={{ background: tint }}>
         <Icon name={icon} size={22} />
       </span>
       <div className="kpi-body">
-        <div className="kpi-label">{label}</div>
-        <div className="kpi-value">{display}</div>
+        <div className="kpi-label" style={{ fontSize: 13, fontWeight: 600, color: "var(--shell-muted)" }}>{label}</div>
+        <div className="kpi-value" style={{ fontSize: 27, fontWeight: 800 }}>{display}</div>
         {m && compare ? (
           <KpiTrend metricLabel={metricLabel}
             comparison={{

@@ -411,8 +411,8 @@ export function ReportsPage() {
         title="Generated Reports"
         sub="Create and download custom reports to share insights, track performance, and showcase results."
       />
-      <div className="main-rail">
-        <div className="rail-stack">
+      <div className="main-rail" style={{ marginTop: 12, gap: 12 }}>
+        <div className="rail-stack" style={{ gap: 12 }}>
           <Panel
             title="Generate a New Report"
             sub="Select your content, metrics, and format to create a custom report."
@@ -423,7 +423,7 @@ export function ReportsPage() {
             )}
           >
             {catalogError ? <EmptyState text={catalogError} /> : null}
-            <div className="filter-grid" style={{ gridTemplateColumns: "repeat(4,minmax(0,1fr))" }}>
+            <div className="filter-grid" style={{ gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: "10px 12px" }}>
               <MultiCheck
                 id="rep-camp"
                 label="Campaigns"
@@ -451,8 +451,8 @@ export function ReportsPage() {
                 <input id="rep-range" value={dateRange} onChange={(e) => setDateRange(e.target.value)} />
               </div>
             </div>
-            <p style={{ fontSize: 13, fontWeight: 700, margin: "12px 0 8px" }}>Output Format</p>
-            <div className="fmt-row">
+            <p style={{ fontSize: 13, fontWeight: 700, margin: "10px 0 6px" }}>Output Format</p>
+            <div className="fmt-row" style={{ gap: 10 }}>
               {FORMATS.map((f) => {
                 const on = format === f.id;
                 return (
@@ -462,6 +462,7 @@ export function ReportsPage() {
                     className={`fmt-card${on ? " on" : ""}`}
                     aria-pressed={on}
                     onClick={() => setFormat(f.id)}
+                    style={{ padding: "10px 12px" }}
                   >
                     <span className="fmt-ico"><Icon name="report" size={20} /></span>
                     <span>
@@ -510,7 +511,7 @@ export function ReportsPage() {
               <EmptyState text="Loading Reports…" />
             ) : rows.length ? (
               <div className="tbl-wrap">
-                <table className="tbl rep-tbl">
+                <table className="tbl rep-tbl" style={{ fontSize: 13 }}>
                   <thead>
                     <tr>
                       <th scope="col">Report</th>
@@ -525,20 +526,20 @@ export function ReportsPage() {
                   <tbody>
                     {rows.map((r) => (
                       <tr key={r.id}>
-                        <td>
+                        <td style={{ padding: "8px 10px" }}>
                           <strong className="cell-main" style={{ display: "block" }}>{r.title}</strong>
                           <span className="panel-sub">{r.kind}</span>
                         </td>
-                        <td><StatusPill status={r.status} /></td>
-                        <td><FormatBadge format={r.format} /></td>
-                        <td>{r.created}</td>
-                        <td>{r.by}</td>
-                        <td>
+                        <td style={{ padding: "8px 10px" }}><StatusPill status={r.status} /></td>
+                        <td style={{ padding: "8px 10px" }}><FormatBadge format={r.format} /></td>
+                        <td style={{ padding: "8px 10px" }}>{r.created}</td>
+                        <td style={{ padding: "8px 10px" }}>{r.by}</td>
+                        <td style={{ padding: "8px 10px" }}>
                           <span className="chip-row">
                             {r.chips.map((c) => <span key={c} className="chip-static">{c}</span>)}
                           </span>
                         </td>
-                        <td>
+                        <td style={{ padding: "8px 10px" }}>
                           <span className="row-actions">
                             {r.href ? (
                               <a className="icon-btn" download={r.filename ?? "report"} href={r.href} aria-label={`Download ${r.title}`}>
@@ -574,22 +575,22 @@ export function ReportsPage() {
             )}
           </Panel>
         </div>
-        <div className="rail-stack">
+        <div className="rail-stack" style={{ gap: 12 }}>
           <Panel title="Reporting Tips" action={<span className="link-teal">See All</span>}>
             <ul className="tips-list">
-              <li>
+              <li style={{ padding: "10px 0" }}>
                 <span className="insight-ico" style={{ background: "#E7F1FB" }}><Icon name="bars" size={18} /></span>
                 <div><h4>Focus on Key KPIs</h4><p>Include 3–5 core metrics to keep your report clear and impactful.</p></div>
               </li>
-              <li>
+              <li style={{ padding: "10px 0" }}>
                 <span className="insight-ico" style={{ background: "#E5F5EC" }}><Icon name="users" size={18} /></span>
                 <div><h4>Use Benchmarks for Context</h4><p>Compare against workspace benchmarks to highlight performance.</p></div>
               </li>
-              <li>
+              <li style={{ padding: "10px 0" }}>
                 <span className="insight-ico" style={{ background: "#E7F1FB" }}><Icon name="report" size={18} /></span>
                 <div><h4>Choose the Right Format</h4><p>Use a deck for presentations, XLSX for deep analysis, or a one-pager for quick sharing.</p></div>
               </li>
-              <li>
+              <li style={{ padding: "10px 0" }}>
                 <span className="insight-ico" style={{ background: "#E5F5EC" }}><Icon name="target" size={18} /></span>
                 <div><h4>Tailor to Your Audience</h4><p>Customize your report based on stakeholders – from creative teams to executive leadership.</p></div>
               </li>
@@ -599,7 +600,7 @@ export function ReportsPage() {
             {latest.length ? (
               <ul className="tips-list">
                 {latest.map((r) => (
-                  <li key={r.id}>
+                  <li key={r.id} style={{ padding: "10px 0" }}>
                     <span className="file-thumb" aria-hidden="true"><Icon name="report" size={18} /></span>
                     <div style={{ flex: 1 }}>
                       <h4>{r.title}</h4>

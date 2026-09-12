@@ -374,7 +374,10 @@ export function CreativesPage() {
   };
 
   return (
-    <>
+    <div className="creatives">
+      {/* Scoped density (theme.css is read-only): shallower cards,
+        tighter grid, cards and table rows so the table reads higher. */}
+      <style>{`.creatives .panel{padding:16px 18px}.creatives .filter-grid{gap:8px 10px}.creatives .creative-card{padding:8px}.creatives .tbl td{padding-top:7px;padding-bottom:7px}`}</style>
       <PageHeader
         title="Creatives"
         sub="Explore top performing creatives, analyze what works, and get AI-powered recommendations."
@@ -427,7 +430,7 @@ export function CreativesPage() {
         )}
       />
       {banner ? <p className="panel-sub" role="status" style={{ margin: "12px 0 0" }}>{banner}</p> : null}
-      <div className="main-rail" style={{ marginTop: 16 }}>
+      <div className="main-rail" style={{ marginTop: 12 }}>
         <div className="rail-stack">
           {creatives.data && (length === "all" ? compare : true) ? (
             <>
@@ -441,9 +444,9 @@ export function CreativesPage() {
                   <span className="kpi-ico" style={{ background: "#DFF5F1", color: "#009485" }}>
                     <Icon name="play" size={22} />
                   </span>
-                  <div>
-                    <p className="kpi-label">Total Creatives</p>
-                    <p className="kpi-value">{fmtCompact(rows.length)}</p>
+                  <div className="kpi-body">
+                    <p className="kpi-label" style={{ fontSize: 13, fontWeight: 600, color: "var(--shell-muted)", margin: 0 }}>Total Creatives</p>
+                    <p className="kpi-value" style={{ fontSize: 27, fontWeight: 800, margin: 0 }}>{fmtCompact(rows.length)}</p>
                   </div>
                 </div>
                 {length === "all" && compare ? (
@@ -645,23 +648,29 @@ export function CreativesPage() {
               ) : <EmptyState text="Not enough data for learnings yet." />
             ) : <Skeleton height={220} />}
           </Panel>
+          {/* With zero creatives in the scoped group there is no
+            evidence for test ideas: show an empty state, not ideas. */}
           <Panel title="Recommended Tests" action={<Link className="link-teal" to="/insights">See All</Link>}>
-            <div>
-              {tests.map((t) => (
-                <div className="insight" key={t.title}>
-                  <span className="insight-ico" style={{ background: "#E7F1FB" }}>
-                    <Icon name={t.icon} size={20} />
-                  </span>
-                  <div>
-                    <h4>{t.title}</h4>
-                    <p>{t.body}</p>
-                  </div>
+            {creatives.data ? (
+              lengthRows.length ? (
+                <div>
+                  {tests.map((t) => (
+                    <div className="insight" key={t.title}>
+                      <span className="insight-ico" style={{ background: "#E7F1FB" }}>
+                        <Icon name={t.icon} size={20} />
+                      </span>
+                      <div>
+                        <h4>{t.title}</h4>
+                        <p>{t.body}</p>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              ) : <EmptyState text="Not enough data for recommendations yet." />
+            ) : <Skeleton height={220} />}
           </Panel>
         </div>
       </div>
-    </>
+    </div>
   );
 }

@@ -590,7 +590,7 @@ export function ComparePage() {
         sub="Compare campaigns or creatives side by side to find what drives the best performance."
       />
       <Panel title="Comparison Setup">
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,2fr) minmax(0,1fr) auto", gap: 16, alignItems: "end" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,2fr) minmax(0,1fr) auto", gap: 12, alignItems: "end" }}>
           <div className="field">
             <label htmlFor="cmp-mode">Compare By</label>
             <select id="cmp-mode" value={mode} onChange={(e) => switchMode(e.target.value as typeof mode)}>
@@ -645,13 +645,13 @@ export function ComparePage() {
       ) : null}
       {items.length ? (
         <>
-          <div className="cmp-grid" style={{ marginTop: 16 }}>
+          <div className="cmp-grid" style={{ marginTop: 12 }}>
             {items.map((item, i) => (
-              <div className="cmp-card" key={item.key} style={{ borderTop: `4px solid ${COLORS[i % COLORS.length]}` }}>
-                <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 10 }}>
+              <div className="cmp-card" key={item.key} style={{ borderTop: `4px solid ${COLORS[i % COLORS.length]}`, padding: 14 }}>
+                <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 8 }}>
                   <CreativeThumb seed={item.thumbSeed} duration={item.duration} label={item.title} />
                   <div>
-                    <h4 style={{ margin: 0, fontSize: 15 }}>{item.title}</h4>
+                    <h4 style={{ margin: 0, fontSize: 14 }}>{item.title}</h4>
                     <p className="panel-sub" style={{ margin: "2px 0" }}>{item.sub}</p>
                     <p className="panel-sub" style={{ margin: 0 }}>{item.meta}</p>
                   </div>
@@ -660,8 +660,8 @@ export function ComparePage() {
                   <tbody>
                     {CARD_KPIS.map((k) => (
                       <tr key={k}>
-                        <th scope="row" style={{ border: 0, padding: "5px 0" }}>{kpiLabel(k)}</th>
-                        <td className="num" style={{ border: 0, padding: "5px 0", fontWeight: 700 }}>{fmtCard(k, item.values[k])}</td>
+                        <th scope="row" style={{ border: 0, padding: "3px 0" }}>{kpiLabel(k)}</th>
+                        <td className="num" style={{ border: 0, padding: "3px 0", fontWeight: 700 }}>{fmtCard(k, item.values[k])}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -669,7 +669,7 @@ export function ComparePage() {
               </div>
             ))}
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1.2fr) minmax(0,1fr) minmax(0,1fr)", gap: 16, marginTop: 16 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1.2fr) minmax(0,1fr) minmax(0,1fr)", gap: 12, marginTop: 12 }}>
             <Panel
               title={mode === "campaigns" ? "Performance Over Time" : "Retention Curves"}
               action={mode === "campaigns" ? (
@@ -747,7 +747,7 @@ export function ComparePage() {
               ) : <EmptyState text="Select a baseline to compare differences." />}
             </Panel>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1.2fr) minmax(0,1fr) minmax(0,1fr)", gap: 16, marginTop: 16 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1.2fr) minmax(0,1fr) minmax(0,1fr)", gap: 12, marginTop: 12 }}>
             <Panel title="Creative Attributes Comparison">
               <div className="tbl-wrap">
                 <table className="tbl">
@@ -808,8 +808,14 @@ export function ComparePage() {
           <EmptyState text="Select two to four campaigns or creatives, then Apply Comparison." />
         </Panel>
       ) : null}
-      <Panel title="Period Comparison" sub="Period A vs Period B over the identical scoped population.">
-        <div className="filter-grid" style={{ gridTemplateColumns: "repeat(4,minmax(0,1fr))" }}>
+      <details className="panel" style={{ marginTop: 12 }}>
+        <summary style={{ cursor: "pointer", fontSize: 16.5, fontWeight: 700, color: "var(--shell-navy)" }}>
+          Advanced: Period Comparison
+          <span className="panel-sub" style={{ display: "block", fontWeight: 400 }}>
+            Period A vs Period B over the identical scoped population.
+          </span>
+        </summary>
+        <div className="filter-grid" style={{ gridTemplateColumns: "repeat(4,minmax(0,1fr))", marginTop: 12 }}>
           <div className="field">
             <label htmlFor="cp-afrom">A From</label>
             <input id="cp-afrom" type="date" value={aFrom} onChange={(e) => setAFrom(e.target.value)} />
@@ -862,7 +868,7 @@ export function ComparePage() {
             <EmptyState text="Fill all four period dates, then Compare Periods." />
           ) : null}
         </div>
-      </Panel>
+      </details>
     </>
   );
 }

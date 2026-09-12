@@ -156,6 +156,7 @@ describe("ComparePage", () => {
     await waitFor(() => {
       expect(screen.getByText("Performance Over Time")).toBeDefined();
     });
+    fireEvent.click(screen.getByText("Advanced: Period Comparison"));
     fireEvent.change(screen.getByLabelText("A From"), { target: { value: "2026-08-01" } });
     fireEvent.change(screen.getByLabelText("A To"), { target: { value: "2026-08-07" } });
     fireEvent.change(screen.getByLabelText("B From"), { target: { value: "2026-08-08" } });

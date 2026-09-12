@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "@/api/client";
 import { Icon } from "@/components/icons";
 import { LoadingButton } from "@/components/LoadingButton";
-import { EmptyState, PageHeader, Panel, Skeleton } from "@/components/product";
+import { DemoDataBadge, EmptyState, PageHeader, Panel, Skeleton } from "@/components/product";
 
 /** Admin employee management (port of legacy Web/Index.html v-admin).
  *
@@ -11,6 +11,11 @@ import { EmptyState, PageHeader, Panel, Skeleton } from "@/components/product";
  * POST /api/admin/employees/{id}/{approve|suspend|reactivate|revoke|role},
  * POST /api/admin/employees/{id}/sessions/revoke,
  * GET /api/admin/audit?limit=20.
+ *
+ * Teams are read from GET /api/campaigns/meta (distinct campaign team
+ * names with campaign counts). The backend stores no per-employee team
+ * and exposes no team-mutation endpoint, so the Team column honestly
+ * shows "—" and browser-local custom teams are labelled "Local".
  */
 
 interface AdminEmployee {
@@ -35,6 +40,12 @@ interface AdminAuditEvent {
   created_at: string;
 }
 
+interface CampaignMeta {
+  name: string;
+  client: string;
+  team: string;
+}
+
 const REVOKE_CONFIRM =
   "Revoke This Employee's Access? Their Sessions Stop Working Immediately.";
 const SUSPEND_ADMIN_CONFIRM =
@@ -44,6 +55,8 @@ const DEMOTE_ADMIN_CONFIRM =
 const INVALIDATE_CONFIRM =
   "Invalidate All Sessions For This Employee? They Are Signed Out Everywhere Immediately.";
 
+const LOCAL_TEAMS_KEY = "ci-local-teams";
+
 function msg(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
@@ -51,6 +64,34 @@ function msg(e: unknown): string {
 function displayName(e: AdminEmployee): string {
   const nm = `${e.first_name || ""} ${e.last_name || ""}`.trim();
   return nm || e.email;
+}
+
+/** Friendly date for admin surfaces: never a raw ISO string. Empty or
+ *  unparseable input renders as "—", never invented. */
+export function friendlyDate(raw: string): string {
+  if (!raw) return "—";
+  const d = new Date(raw.length <= 10 ? `${raw}T00:00:00` : raw);
+  if (Number.isNaN(d.getTime())) return "—";
+  const date = d.toLocaleDateString("en-US", {
+    month: "short", day: "numeric", year: "numeric",
+  });
+  const diffDays = Math.floor((Date.now() - d.getTime()) / 86400000);
+  if (diffDays < 0) return date;
+  if (diffDays === 0) return `Today · ${date}`;
+  if (diffDays === 1) return `Yesterday · ${date}`;
+  if (diffDays < 30) return `${diffDays}d ago · ${date}`;
+  return date;
+}
+
+function loadLocalTeams(): string[] {
+  try {
+    const raw = window.localStorage.getItem(LOCAL_TEAMS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((t): t is string => typeof t === "string") : [];
+  } catch {
+    return [];
+  }
 }
 
 function applyLocalFilters(
@@ -88,18 +129,28 @@ async function queryAudit(): Promise<AdminAuditEvent[]> {
   return Array.isArray(r.events) ? r.events : [];
 }
 
+function toCsv(rows: Array<Record<string, string>>): string {
+  const esc = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+  return rows.map((r) => Object.values(r).map(esc).join(",")).join("\n");
+}
+
 export function AdminEmployeesPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [roleFilter, setRoleFilter] = useState("");
   const [employees, setEmployees] = useState<AdminEmployee[] | null>(null);
   const [events, setEvents] = useState<AdminAuditEvent[]>([]);
+  const [teams, setTeams] = useState<Array<{ name: string; campaigns: number }> | null>(null);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState("");
+  const [inviteOpen, setInviteOpen] = useState(false);
   const [addEmail, setAddEmail] = useState("");
   const [addFirst, setAddFirst] = useState("");
   const [addLast, setAddLast] = useState("");
   const [addRole, setAddRole] = useState("employee");
+  const [teamOpen, setTeamOpen] = useState(false);
+  const [teamName, setTeamName] = useState("");
+  const [localTeams, setLocalTeams] = useState<string[]>(loadLocalTeams);
   const [seedBusy, setSeedBusy] = useState(false);
   const [seedResult, setSeedResult] = useState("");
 
@@ -107,13 +158,19 @@ export function AdminEmployeesPage() {
     let live = true;
     (async () => {
       try {
-        const [rows, evs] = await Promise.all([
+        const [rows, evs, meta] = await Promise.all([
           queryEmployees(search, statusFilter || roleFilter || ""),
           queryAudit(),
+          api<{ campaigns?: CampaignMeta[] }>("GET", "/api/campaigns/meta").catch(() => ({ campaigns: [] as CampaignMeta[] })),
         ]);
         if (!live) return;
         setEmployees(applyLocalFilters(rows, statusFilter, roleFilter));
         setEvents(evs);
+        const counts = new Map<string, number>();
+        for (const c of meta.campaigns ?? []) {
+          if (c.team) counts.set(c.team, (counts.get(c.team) ?? 0) + 1);
+        }
+        setTeams([...counts.entries()].map(([name, campaigns]) => ({ name, campaigns })).sort((a, b) => a.name.localeCompare(b.name)));
         setNotice("");
       } catch (e) {
         if (!live) return;
@@ -225,6 +282,7 @@ export function AdminEmployeesPage() {
       setAddEmail("");
       setAddFirst("");
       setAddLast("");
+      setInviteOpen(false);
       await reloadLists();
       setNotice("Employee Added As Active.");
     } catch (e) {
@@ -232,24 +290,100 @@ export function AdminEmployeesPage() {
     }
   }
 
+  function exportAccessReport(): void {
+    const rows = employees ?? [];
+    const stamp = new Date().toISOString().slice(0, 10);
+    const empCsv = toCsv([
+      { Employee: "Employee", Email: "Email", Role: "Role", Status: "Status", LastActive: "Last Active" },
+      ...rows.map((e) => ({
+        Employee: displayName(e),
+        Email: e.email,
+        Role: e.role,
+        Status: e.status,
+        LastActive: e.last_login_at || "",
+      })),
+    ]);
+    const auditCsv = toCsv([
+      { When: "When", Action: "Action", Target: "Target", Admin: "Admin", Change: "Change" },
+      ...events.map((v) => ({
+        When: v.created_at,
+        Action: v.action,
+        Target: v.target_id,
+        Admin: v.admin_id,
+        Change: `${v.prev_value} → ${v.new_value}`,
+      })),
+    ]);
+    const blob = new Blob(
+      [`Employees (${stamp})\n${empCsv}\n\nAudit Trail (${stamp})\n${auditCsv}\n`],
+      { type: "text/csv" },
+    );
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `access-report-${stamp}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setNotice("Access Report Exported.");
+  }
+
+  function createTeam(): void {
+    const name = teamName.trim();
+    if (!name) return;
+    const next = [...localTeams.filter((t) => t.toLowerCase() !== name.toLowerCase()), name];
+    setLocalTeams(next);
+    try {
+      window.localStorage.setItem(LOCAL_TEAMS_KEY, JSON.stringify(next));
+    } catch {
+      /* private mode: browser-local teams are best-effort only */
+    }
+    setTeamName("");
+    setTeamOpen(false);
+    setNotice(`Team “${name}” Saved In This Browser.`);
+  }
+
   const stats = useMemo(() => {
     const rows = employees ?? [];
+    const total = rows.length;
+    const pct = (n: number) => (total ? `${Math.round((n / total) * 100)}% of employees` : "No employees yet");
+    const active = rows.filter((e) => e.status === "active").length;
+    const pending = rows.filter((e) => e.status === "pending").length;
+    const admins = rows.filter((e) => e.role === "admin").length;
     return [
-      { label: "Total Employees", value: String(rows.length), icon: "users", tint: "#E7F1FB" },
-      { label: "Active", value: String(rows.filter((e) => e.status === "active").length), icon: "check", tint: "#E5F5EC" },
-      { label: "Pending Approval", value: String(rows.filter((e) => e.status === "pending").length), icon: "clock", tint: "#FBF3E2" },
-      { label: "Admins", value: String(rows.filter((e) => e.role === "admin").length), icon: "lock", tint: "#EFEAFB" },
+      { label: "Total Employees", value: String(total), icon: "users", tint: "#E7F1FB", trend: total ? `${rows.filter((e) => e.role !== "admin").length} employees · ${admins} admins` : "No employees yet" },
+      { label: "Active Users", value: String(active), icon: "check", tint: "#E5F5EC", trend: pct(active) },
+      { label: "Pending Invites", value: String(pending), icon: "clock", tint: "#FBF3E2", trend: pending ? "Awaiting approval" : "Inbox zero" },
+      { label: "Admins", value: String(admins), icon: "lock", tint: "#EFEAFB", trend: pct(admins) },
     ];
   }, [employees]);
 
   const adminCount = stats[3].value;
   const employeeCount = String((employees ?? []).filter((e) => e.role !== "admin").length);
+  const allTeams = useMemo(() => {
+    const real = (teams ?? []).map((t) => ({ ...t, local: false }));
+    const have = new Set(real.map((t) => t.name.toLowerCase()));
+    const local = localTeams.filter((t) => !have.has(t.toLowerCase()))
+      .map((name) => ({ name, campaigns: 0, local: true }));
+    return [...real, ...local];
+  }, [teams, localTeams]);
 
   return (
     <>
       <PageHeader
         title="Admin"
         sub="Access is decided here, on the server. Changes take effect immediately, including on live sessions."
+        actions={(
+          <>
+            <button type="button" className="btn-outline" onClick={exportAccessReport}>
+              <Icon name="download" size={14} /> Export Access Report
+            </button>
+            <button type="button" className="btn-outline" onClick={() => setTeamOpen(true)}>
+              <Icon name="plus" size={14} /> Create Team
+            </button>
+            <button type="button" className="btn-primary" onClick={() => setInviteOpen(true)}>
+              <Icon name="plus" size={14} /> Invite
+            </button>
+          </>
+        )}
       />
       <div className="kpi-grid" style={{ marginTop: 0 }}>
         {stats.map((s) => (
@@ -260,6 +394,9 @@ export function AdminEmployeesPage() {
             <div className="kpi-body">
               <div className="kpi-label">{s.label}</div>
               <div className="kpi-value">{employees === null ? "—" : s.value}</div>
+              <div className="kpi-label" style={{ textTransform: "none", letterSpacing: 0 }}>
+                {employees === null ? "Loading…" : s.trend}
+              </div>
             </div>
           </div>
         ))}
@@ -319,12 +456,12 @@ export function AdminEmployeesPage() {
             <table className="tbl">
               <thead>
                 <tr>
-                  <th scope="col">Employee</th>
+                  <th scope="col">Name</th>
                   <th scope="col">Email</th>
                   <th scope="col">Role</th>
+                  <th scope="col">Team</th>
                   <th scope="col">Status</th>
-                  <th scope="col">Last Login</th>
-                  <th scope="col">Approval</th>
+                  <th scope="col">Last Active</th>
                   <th scope="col">Actions</th>
                 </tr>
               </thead>
@@ -353,6 +490,7 @@ export function AdminEmployeesPage() {
                             {e.role}
                           </span>
                         </td>
+                        <td title="The backend stores no per-employee team">—</td>
                         <td>
                           <span className={
                             e.status === "active" ? "pill pill-ok"
@@ -362,13 +500,7 @@ export function AdminEmployeesPage() {
                             {e.status}
                           </span>
                         </td>
-                        <td>{e.last_login_at || "—"}</td>
-                        <td>
-                          {e.approved_at || "—"}
-                          {e.approved_by
-                            ? ` by ${e.approved_by.slice(0, 8)}`
-                            : ""}
-                        </td>
+                        <td>{e.last_login_at ? friendlyDate(e.last_login_at) : "Never signed in"}</td>
                         <td>
                           <span className="row-actions" style={{ flexWrap: "wrap", gap: 4, rowGap: 8, columnGap: 12 }}>
                             {e.status === "pending" && (
@@ -449,45 +581,6 @@ export function AdminEmployeesPage() {
       </Panel>
 
       <div className="section-gap" />
-      <Panel title="Add Employee" sub="New employees join as Active immediately.">
-        <div className="rep-filters">
-          <input
-            type="text"
-            placeholder="email"
-            aria-label="New Employee Email"
-            value={addEmail}
-            onChange={(e) => setAddEmail(e.target.value)}
-            style={{ minWidth: 200 }}
-          />
-          <input
-            type="text"
-            placeholder="first name (optional)"
-            aria-label="New Employee First Name"
-            value={addFirst}
-            onChange={(e) => setAddFirst(e.target.value)}
-          />
-          <input
-            type="text"
-            placeholder="last name (optional)"
-            aria-label="New Employee Last Name"
-            value={addLast}
-            onChange={(e) => setAddLast(e.target.value)}
-          />
-          <select
-            aria-label="New Employee Role"
-            value={addRole}
-            onChange={(e) => setAddRole(e.target.value)}
-          >
-            <option value="employee">Employee</option>
-            <option value="admin">Admin</option>
-          </select>
-          <button type="button" className="btn-primary" onClick={() => void addEmployee()}>
-            <Icon name="plus" size={14} /> Add (Active)
-          </button>
-        </div>
-      </Panel>
-
-      <div className="section-gap" />
       <div className="cols-2">
         <Panel title="Teams & Permissions" sub="Who can do what in this workspace.">
           <div>
@@ -509,6 +602,22 @@ export function AdminEmployeesPage() {
                 <p>Full product access — dashboards, campaigns, creatives, reports, Ask The Data, and AI Analyst — without admin controls.</p>
               </div>
             </div>
+            {allTeams.map((t) => (
+              <div className="insight" key={t.name}>
+                <span className="insight-ico" style={{ background: "var(--shell-green-soft)" }}>
+                  <Icon name="users" size={18} />
+                </span>
+                <div style={{ flex: 1 }}>
+                  <h4>{t.name}</h4>
+                  <p>{t.campaigns === 1 ? "1 campaign" : `${t.campaigns} campaigns`} in the current dataset{t.local ? " · saved in this browser only" : ""}.</p>
+                </div>
+                {t.local ? <span className="badge-demo">Local</span> : null}
+              </div>
+            ))}
+            {teams === null ? <Skeleton height={60} /> : null}
+            {teams !== null && allTeams.length === 0 ? (
+              <EmptyState text="No Teams Yet — Teams Appear When Campaigns Carry A Team Name." />
+            ) : null}
           </div>
         </Panel>
         <Panel title="Access Rules & Permission Groups" sub="Rules the server enforces on every change.">
@@ -548,6 +657,7 @@ export function AdminEmployeesPage() {
       <Panel
         title="Demo Dataset"
         sub="Populate the ten synthetic campaigns and creatives. Upserts only: existing rows are never duplicated or deleted."
+        action={<DemoDataBadge />}
       >
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
           <LoadingButton type="button" className="btn-outline" loading={seedBusy}
@@ -557,6 +667,9 @@ export function AdminEmployeesPage() {
           </LoadingButton>
           {seedResult ? <span className="panel-sub" role="status" style={{ margin: 0 }}>{seedResult}</span> : null}
         </div>
+        <p className="panel-sub" style={{ marginTop: 8 }}>
+          Demo-only: synthetic campaigns and creatives are namespaced separately and never mix with real employee access data above.
+        </p>
       </Panel>
 
       <div className="section-gap" />
@@ -582,7 +695,7 @@ export function AdminEmployeesPage() {
               <tbody>
                 {events.map((v) => (
                   <tr key={v.id}>
-                    <td>{v.created_at}</td>
+                    <td>{friendlyDate(v.created_at)}</td>
                     <td className="cell-main">{v.action}</td>
                     <td>{(v.target_id || "").slice(0, 8)}</td>
                     <td>{(v.admin_id || "").slice(0, 8)}</td>
@@ -596,6 +709,111 @@ export function AdminEmployeesPage() {
           </div>
         )}
       </Panel>
+
+      {inviteOpen ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Invite Employee"
+          onClick={() => setInviteOpen(false)}
+          style={{ position: "fixed", inset: 0, zIndex: 80, background: "rgba(15,23,42,.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+        >
+          <div
+            className="panel"
+            onClick={(e) => e.stopPropagation()}
+            style={{ width: "100%", maxWidth: 460, margin: 0 }}
+          >
+            <div className="panel-head">
+              <div>
+                <h2 className="panel-title">Invite Employee</h2>
+                <p className="panel-sub">New employees join as Active immediately.</p>
+              </div>
+              <button type="button" className="link-teal" onClick={() => setInviteOpen(false)}>
+                Close
+              </button>
+            </div>
+            <div className="rep-filters" style={{ flexDirection: "column", alignItems: "stretch" }}>
+              <input
+                type="text"
+                placeholder="email"
+                aria-label="New Employee Email"
+                value={addEmail}
+                onChange={(e) => setAddEmail(e.target.value)}
+              />
+              <input
+                type="text"
+                placeholder="first name (optional)"
+                aria-label="New Employee First Name"
+                value={addFirst}
+                onChange={(e) => setAddFirst(e.target.value)}
+              />
+              <input
+                type="text"
+                placeholder="last name (optional)"
+                aria-label="New Employee Last Name"
+                value={addLast}
+                onChange={(e) => setAddLast(e.target.value)}
+              />
+              <select
+                aria-label="New Employee Role"
+                value={addRole}
+                onChange={(e) => setAddRole(e.target.value)}
+              >
+                <option value="employee">Employee</option>
+                <option value="admin">Admin</option>
+              </select>
+              <button type="button" className="btn-primary" onClick={() => void addEmployee()}>
+                <Icon name="plus" size={14} /> Add (Active)
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {teamOpen ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Create Team"
+          onClick={() => setTeamOpen(false)}
+          style={{ position: "fixed", inset: 0, zIndex: 80, background: "rgba(15,23,42,.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+        >
+          <div
+            className="panel"
+            onClick={(e) => e.stopPropagation()}
+            style={{ width: "100%", maxWidth: 420, margin: 0 }}
+          >
+            <div className="panel-head">
+              <div>
+                <h2 className="panel-title">Create Team</h2>
+                <p className="panel-sub">Saved in this browser only — workspace teams come from campaign data.</p>
+              </div>
+              <button type="button" className="link-teal" onClick={() => setTeamOpen(false)}>
+                Close
+              </button>
+            </div>
+            <div className="field">
+              <label htmlFor="new-team-name">Team Name</label>
+              <input
+                id="new-team-name"
+                type="text"
+                placeholder="e.g. Growth"
+                value={teamName}
+                onChange={(e) => setTeamName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") createTeam(); }}
+              />
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
+              <button type="button" className="btn-outline" onClick={() => setTeamOpen(false)}>
+                Cancel
+              </button>
+              <button type="button" className="btn-primary" disabled={!teamName.trim()} onClick={createTeam}>
+                Create Team
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </>
   );
 }

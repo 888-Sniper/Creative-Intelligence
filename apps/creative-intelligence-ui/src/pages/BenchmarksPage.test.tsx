@@ -117,6 +117,18 @@ describe("BenchmarksPage", () => {
     });
   });
 
+  it("keeps Group By with the results and links out to learn more", async () => {
+    mockFetch();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("Benchmark Results")).toBeDefined();
+    });
+    expect(screen.getByRole("combobox", { name: "Group By" })).toBeDefined();
+    expect(screen.getByText("Learn More")).toBeDefined();
+    expect(screen.getByRole("link", { name: "Open Analyst →" })).toBeDefined();
+    expect(screen.getByRole("link", { name: "Open Reports →" })).toBeDefined();
+  });
+
   it("shows skeletons while loading", () => {
     window.fetch = vi.fn(
       () => new Promise<Response>(() => {}),

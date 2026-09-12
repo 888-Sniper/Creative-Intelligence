@@ -163,6 +163,24 @@ describe("CreativesPage", () => {
     expect(screen.getByText("Showing over-30s creatives only.")).toBeDefined();
   });
 
+  it("shows an empty state instead of test ideas when zero creatives", async () => {
+    window.fetch = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      if (url.startsWith("/api/kpis/compare")) return Response.json(comparePayload);
+      if (url.startsWith("/api/creatives")) return Response.json([]);
+      if (url.startsWith("/api/benchmarks")) return Response.json({});
+      return Response.json({});
+    }) as unknown as typeof fetch;
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("Not enough data for recommendations yet.")).toBeDefined();
+    });
+    expect(screen.queryByText("Test Creator vs. Branded Intros")).toBeNull();
+    expect(screen.queryByText("Try Shorter Video Lengths")).toBeNull();
+    expect(screen.queryByText("Experiment With New Hook Types")).toBeNull();
+    expect(screen.getByText("Not enough data for learnings yet.")).toBeDefined();
+  });
+
   it("reset restores the full scope and local view state", async () => {
     mockLibrary();
     renderPage();

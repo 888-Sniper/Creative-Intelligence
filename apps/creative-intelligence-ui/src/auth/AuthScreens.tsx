@@ -36,7 +36,7 @@ export function AccessRevoked() {
 
 /** Shared centred shell: Foap logo above the card on every auth screen,
  *  over pale aqua decorative blobs (approved login treatment). */
-function AuthShell({ children }: { children: React.ReactNode }) {
+function AuthShell({ children, dense = false }: { children: React.ReactNode; dense?: boolean }) {
   return (
     <div id="auth-screen">
       <div className="auth-blobs" aria-hidden="true">
@@ -44,8 +44,13 @@ function AuthShell({ children }: { children: React.ReactNode }) {
         <span className="auth-blob b2" />
         <span className="auth-blob b3" />
       </div>
-      <div className="login-shell">
-        <img src={FOAP_LOGO} alt="Foap" className="login-logo" />
+      <div className="login-shell" style={dense ? { maxWidth: 400 } : undefined}>
+        <img
+          src={FOAP_LOGO}
+          alt="Foap"
+          className="login-logo"
+          style={dense ? { height: 38, marginBottom: 20 } : undefined}
+        />
         {children}
       </div>
     </div>
@@ -82,8 +87,8 @@ export function LoginPage() {
   const authError = params.get("auth_error") ?? "";
   if (authError) window.history.replaceState(null, "", window.location.pathname);
   return (
-    <AuthShell>
-      <div className="auth-card login-card">
+    <AuthShell dense>
+      <div className="auth-card login-card" style={{ maxWidth: 400, padding: "28px 28px 22px" }}>
         <h1>Welcome Back</h1>
         <p className="muted login-sub">Sign In To Your Employee Workspace.</p>
         {authError ? <p className="muted">Sign-In Failed: {authError}</p> : null}

@@ -113,6 +113,30 @@ describe("CampaignsPage", () => {
     });
   });
 
+  it("keeps a short Campaign Status label with an info explainer", async () => {
+    window.fetch = fetchFor({ campaigns, comparePayload, detail }).fetch;
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("All Campaigns (2)")).toBeDefined();
+    });
+    expect(screen.getByLabelText("Campaign Status")).toBeDefined();
+    expect(screen.queryByText(/activity-based/)).toBeNull();
+    const info = screen.getByRole("button", { name: "How campaign status is determined" });
+    expect(info.getAttribute("title")).toMatch(/Activity-derived/);
+  });
+
+  it("presents a single Date Range group for From/To", async () => {
+    window.fetch = fetchFor({ campaigns, comparePayload, detail }).fetch;
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("All Campaigns (2)")).toBeDefined();
+    });
+    expect(screen.getAllByText("Date Range")).toHaveLength(1);
+    const from = screen.getByLabelText("From date");
+    const to = screen.getByLabelText("To date");
+    expect(from.closest(".field")).toBe(to.closest(".field"));
+  });
+
   it("opens campaign details with totals and recommendations", async () => {
     window.fetch = fetchFor({ campaigns, comparePayload, detail }).fetch;
     renderPage();

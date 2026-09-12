@@ -107,10 +107,10 @@ function Toggle({ label, body, checked, onChange }: {
   label: string; body: string; checked: boolean; onChange: (v: boolean) => void;
 }) {
   return (
-    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", padding: "10px 0", borderBottom: "1px solid var(--shell-line)" }}>
-      <div>
-        <strong style={{ display: "block", fontSize: 13.5 }}>{label}</strong>
-        <span className="panel-sub">{body}</span>
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", padding: "7px 0", borderBottom: "1px solid var(--shell-line)" }}>
+      <div style={{ minWidth: 0 }}>
+        <strong style={{ display: "block", fontSize: 13 }}>{label}</strong>
+        <span className="panel-sub" style={{ fontSize: 12 }}>{body}</span>
       </div>
       <button
         type="button"
@@ -119,15 +119,64 @@ function Toggle({ label, body, checked, onChange }: {
         aria-label={label}
         onClick={() => onChange(!checked)}
         style={{
-          width: 44, height: 24, borderRadius: 999, border: 0, cursor: "pointer", flex: "none",
+          width: 40, height: 22, borderRadius: 999, border: 0, cursor: "pointer", flex: "none",
           background: checked ? "var(--shell-teal)" : "#CBD5E1", position: "relative",
         }}
       >
         <span style={{
-          position: "absolute", top: 2, left: checked ? 22 : 2, width: 20, height: 20,
+          position: "absolute", top: 2, left: checked ? 20 : 2, width: 18, height: 18,
           borderRadius: "50%", background: "#fff", transition: "left .15s",
         }} />
       </button>
+    </div>
+  );
+}
+
+/** Recognizable brand mark for integrations with no backend connection
+ *  endpoint. The mark is iconography only — connection state stays
+ *  honest ("Not Connected") and is never implied by the icon. */
+function IntegrationMark({ name }: { name: string }) {
+  const mark: Record<string, { bg: string; fg: string; glyph: string }> = {
+    "Meta": { bg: "#E7F1FB", fg: "#2F6FBE", glyph: "M" },
+    "TikTok": { bg: "#F0E9FA", fg: "#1F2A37", glyph: "♪" },
+    "Google Analytics 4": { bg: "#FBF3E2", fg: "#C2521F", glyph: "GA" },
+  };
+  const m = mark[name] ?? { bg: "#EDF1F6", fg: "#5C6B7A", glyph: "◦" };
+  return (
+    <span className="insight-ico" aria-hidden="true"
+      style={{ background: m.bg, color: m.fg, fontWeight: 800, fontSize: m.glyph.length > 1 ? 12 : 16 }}>
+      {m.glyph}
+    </span>
+  );
+}
+
+/** Static appearance mockup: previews the current theme, accent, and
+ *  density choices with plain boxes (no live app preview). */
+function AppearancePreview({ accent, density, mode }: { accent: string; density: string; mode: string }) {
+  const accents: Record<string, string> = {
+    "Teal (Default)": "#0E7C8C",
+    "Blue": "#2F6FBE",
+    "Violet": "#6D5BD0",
+  };
+  const color = accents[accent] ?? accents["Teal (Default)"];
+  const dark = mode === "dark";
+  const pad = density === "Compact" ? 4 : 8;
+  return (
+    <div aria-hidden="true" style={{
+      display: "flex", gap: 6, marginTop: 12, border: "1px solid var(--shell-line)",
+      borderRadius: 10, overflow: "hidden", background: dark ? "#1F2A37" : "#F4F7FA",
+    }}>
+      <div style={{ width: 44, background: dark ? "#2B3448" : "#fff", padding: pad, display: "grid", gap: 4, alignContent: "start" }}>
+        {[0, 1, 2].map((i) => (
+          <div key={i} style={{ height: 8, borderRadius: 4, background: i === 0 ? color : dark ? "#3A465E" : "#E3E9F0" }} />
+        ))}
+      </div>
+      <div style={{ flex: 1, padding: pad, display: "grid", gap: 4, alignContent: "start" }}>
+        <div style={{ height: 10, borderRadius: 4, background: color, width: "55%" }} />
+        {[0, 1].map((i) => (
+          <div key={i} style={{ height: 8, borderRadius: 4, background: dark ? "#3A465E" : "#fff", border: `1px solid ${dark ? "#3A465E" : "#E3E9F0"}` }} />
+        ))}
+      </div>
     </div>
   );
 }
@@ -227,8 +276,7 @@ export function SettingsPage() {
         title="Settings"
         sub="Control your workspace, data, integrations, and application preferences."
       />
-      <div className="main-rail">
-        <div className="rail-stack">
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(340px,1fr))", gap: 12, marginTop: 12 }}>
           <Panel title="General Settings" sub="Manage your workspace details and default preferences.">
             <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 12 }}>
               <Avatar url={employee.avatar_url} label={name} />
@@ -278,6 +326,16 @@ export function SettingsPage() {
               </div>
             </div>
           </Panel>
+          <Panel title="Notifications" sub="Choose what you want to be notified about. Stored in this browser only — workspace policies are set by your administrator.">
+            <Toggle label="Email Reports" body="Receive scheduled reports and key insights via email."
+              checked={prefs.emailReports} onChange={(v) => setPref("emailReports", v)} />
+            <Toggle label="Campaign Updates" body="Get notified when campaigns are completed or updated."
+              checked={prefs.campaignUpdates} onChange={(v) => setPref("campaignUpdates", v)} />
+            <Toggle label="AI Insights" body="Receive alerts for new AI analysis and recommendations."
+              checked={prefs.aiInsights} onChange={(v) => setPref("aiInsights", v)} />
+            <Toggle label="Product Updates" body="Be the first to know about new features and improvements."
+              checked={prefs.productUpdates} onChange={(v) => setPref("productUpdates", v)} />
+          </Panel>
           <Panel title="Data & Privacy" sub="Manage how your data is used and your privacy preferences. These preferences live in this browser; workspace policy is set by your administrator.">
             <Toggle label="Data Usage" body="Help improve Foap by allowing anonymized usage data."
               checked={prefs.dataUsage} onChange={(v) => setPref("dataUsage", v)} />
@@ -302,6 +360,22 @@ export function SettingsPage() {
               </button>
             </div>
           </Panel>
+          <Panel title="Integrations" sub="Connect your data sources to unlock deeper insights."
+            action={<a className="link-teal" href="#integration-google">Manage Integrations</a>}>
+            <GoogleDriveCard />
+            {[["Meta", "Import campaign performance data from Meta Ads."],
+              ["TikTok", "Connect your TikTok Ads account for deeper analysis."],
+              ["Google Analytics 4", "Link your GA4 property to analyze web performance."]].map(([n, d]) => (
+              <div key={n} className="insight">
+                <IntegrationMark name={n} />
+                <div style={{ flex: 1 }}>
+                  <h4>{n}</h4>
+                  <p>{d}</p>
+                </div>
+                <span className="badge-demo">Not Connected</span>
+              </div>
+            ))}
+          </Panel>
           <Panel title="Appearance" sub="Customize how Foap looks and feels.">
             <div className="filter-grid" style={{ gridTemplateColumns: "repeat(2,minmax(0,1fr))" }}>
               <div className="field">
@@ -323,42 +397,8 @@ export function SettingsPage() {
                 </select>
               </div>
             </div>
-          </Panel>
-          <Panel title="Data Tools" sub="Advanced analysis tooling for power users.">
-            <RetentionPatterns />
-            <div style={{ marginTop: 16 }}>
-              <CohortBuilder />
-            </div>
-          </Panel>
-        </div>
-        <div className="rail-stack">
-          <Panel title="Notifications" sub="Choose what you want to be notified about. Stored in this browser only — workspace policies are set by your administrator.">
-            <Toggle label="Email Reports" body="Receive scheduled reports and key insights via email."
-              checked={prefs.emailReports} onChange={(v) => setPref("emailReports", v)} />
-            <Toggle label="Campaign Updates" body="Get notified when campaigns are completed or updated."
-              checked={prefs.campaignUpdates} onChange={(v) => setPref("campaignUpdates", v)} />
-            <Toggle label="AI Insights" body="Receive alerts for new AI analysis and recommendations."
-              checked={prefs.aiInsights} onChange={(v) => setPref("aiInsights", v)} />
-            <Toggle label="Product Updates" body="Be the first to know about new features and improvements."
-              checked={prefs.productUpdates} onChange={(v) => setPref("productUpdates", v)} />
-          </Panel>
-          <Panel title="Integrations" sub="Connect your data sources to unlock deeper insights."
-            action={<a className="link-teal" href="#integration-google">Manage Integrations</a>}>
-            <GoogleDriveCard />
-            {[["Meta", "Import campaign performance data from Meta Ads."],
-              ["TikTok", "Connect your TikTok Ads account for deeper analysis."],
-              ["Google Analytics 4", "Link your GA4 property to analyze web performance."]].map(([n, d]) => (
-              <div key={n} className="insight">
-                <span className="insight-ico" style={{ background: "#EDF1F6" }}>
-                  <Icon name="info" size={18} />
-                </span>
-                <div style={{ flex: 1 }}>
-                  <h4>{n}</h4>
-                  <p>{d}</p>
-                </div>
-                <span className="badge-demo">Not Connected</span>
-              </div>
-            ))}
+            <p className="panel-sub" style={{ marginTop: 10 }}>Preview</p>
+            <AppearancePreview accent={prefs.accent} density={prefs.density} mode={mode} />
           </Panel>
           <Panel title="Security" sub="Keep your account and workspace secure.">
             <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", padding: "10px 0", borderBottom: "1px solid var(--shell-line)" }}>
@@ -395,7 +435,14 @@ export function SettingsPage() {
               </span>
             </div>
           </Panel>
-        </div>
+      </div>
+      <div style={{ marginTop: 12 }}>
+        <Panel title="Data Tools" sub="Advanced analysis tooling for power users.">
+          <RetentionPatterns />
+          <div style={{ marginTop: 16 }}>
+            <CohortBuilder />
+          </div>
+        </Panel>
       </div>
       {status ? <p className="panel-sub" role="status" style={{ marginTop: 12 }}>{status}</p> : null}
       <Panel title="Save Preferences">

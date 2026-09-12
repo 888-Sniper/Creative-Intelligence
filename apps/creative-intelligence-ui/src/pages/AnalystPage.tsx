@@ -922,7 +922,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
 
       <div className="section-gap" />
       <Panel
-        title="Analysis Filters"
+        title="Analyst Controls"
         sub="Every answer and chart respects this scope."
         action={(
           <button type="button" className="link-teal" onClick={() => { clearFilters(); setRange("all"); }}>
@@ -930,17 +930,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
           </button>
         )}
       >
-        <div className="filter-grid">
-          <div className="field">
-            <label htmlFor="a-client">Client</label>
-            <input id="a-client" placeholder="All Clients" value={filters.client}
-              onChange={(e) => setFilter("client", e.target.value)} />
-          </div>
-          <div className="field">
-            <label htmlFor="a-project">Project</label>
-            <input id="a-project" placeholder="All Projects" value={filters.project}
-              onChange={(e) => setFilter("project", e.target.value)} />
-          </div>
+        <div className="filter-grid" style={{ gridTemplateColumns: "repeat(5,minmax(0,1fr))" }}>
           <div className="field">
             <label htmlFor="a-campaign">Campaign</label>
             <select id="a-campaign" value={filters.campaign}
@@ -975,15 +965,9 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
               {DATE_RANGES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
             </select>
           </div>
-        </div>
-      </Panel>
-
-      <div className="section-gap" />
-      <Panel title="Analyst Controls" sub="Objective, language, conversations, and exports.">
-        <div className="chip-row">
-          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 600 }}>
-            Objective{" "}
-            <select value={objective} onChange={(e) => setObjective(e.target.value)}
+          <div className="field">
+            <label htmlFor="a-objective">Objective</label>
+            <select id="a-objective" value={objective} onChange={(e) => setObjective(e.target.value)}
               aria-label="Objective">
               {OBJECTIVES.map((o) => (
                 <option key={o} value={o}>
@@ -991,62 +975,81 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
                 </option>
               ))}
             </select>
-          </label>
-          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 600 }}>
-            Language{" "}
-            <select value={locale} onChange={(e) => setLocale(e.target.value)} aria-label="Language">
+          </div>
+          <div className="field">
+            <label htmlFor="a-locale">Language</label>
+            <select id="a-locale" value={locale} onChange={(e) => setLocale(e.target.value)} aria-label="Language">
               <option value="auto">Auto</option>
               <option value="pl">Polski</option>
               <option value="en">English</option>
             </select>
-          </label>
-          <LoadingButton type="button" className="btn-outline" onClick={() => void startConversation()}
-            loading={starting} loadingLabel="Starting…" spinnerClass="spinner dark"
-            disabled={busy} title="Start a new analyst conversation">
-            <Icon name="plus" size={14} /> New Conversation
-          </LoadingButton>
-          <LoadingButton type="button" className="btn-outline" onClick={() => void downloadReport("one-pager")}
-            loading={exporting === "one-pager"} loadingLabel="Preparing…" spinnerClass="spinner dark"
-            disabled={busy || exporting !== null} title="Sectioned Findings Report (Markdown)">
-            Report
-          </LoadingButton>
-          <LoadingButton type="button" className="btn-outline" onClick={() => void downloadReport("xlsx")}
-            loading={exporting === "xlsx"} loadingLabel="Preparing…" spinnerClass="spinner dark"
-            disabled={busy || exporting !== null} title="Sectioned Findings Report (Excel)">
-            Report XLSX
-          </LoadingButton>
-          <LoadingButton type="button" className="btn-outline" onClick={() => void downloadWorkbook()}
-            loading={exporting === "workbook"} loadingLabel="Preparing…" spinnerClass="spinner dark"
-            disabled={busy || exporting !== null} title="Blank analyst workbook (Excel)">
-            Blank Workbook
-          </LoadingButton>
-        </div>
-        {conversations.length > 0 && (
-          <div className="chip-row" style={{ marginTop: 12 }} aria-label="Previous analyses">
-            {conversations.map((c) => (
-              <button
-                key={c.id}
-                type="button"
-                className="chip"
-                aria-pressed={c.id === activeId}
-                onClick={() => {
-                  setActiveId(c.id);
-                  setMessages([]);
-                }}
-                title={c.objective ? `Objective: ${c.objective}` : undefined}
-              >
-                {c.title || "Untitled Conversation"}
-                {typeof c.message_count === "number" ? ` (${c.message_count})` : ""}
-              </button>
-            ))}
           </div>
-        )}
-        {(lastScope || datasetVersion) && (
-          <p className="panel-sub" style={{ marginTop: 10 }}>
-            {lastScope}
-            {datasetVersion ? ` · Data v${datasetVersion}` : ""}
-          </p>
-        )}
+        </div>
+        <details style={{ marginTop: 10 }}>
+          <summary className="link-teal" style={{ cursor: "pointer", display: "inline-block" }}>
+            More filters, conversations &amp; exports
+          </summary>
+          <div className="filter-grid" style={{ gridTemplateColumns: "repeat(2,minmax(0,1fr))", marginTop: 10 }}>
+            <div className="field">
+              <label htmlFor="a-client">Client</label>
+              <input id="a-client" placeholder="All Clients" value={filters.client}
+                onChange={(e) => setFilter("client", e.target.value)} />
+            </div>
+            <div className="field">
+              <label htmlFor="a-project">Project</label>
+              <input id="a-project" placeholder="All Projects" value={filters.project}
+                onChange={(e) => setFilter("project", e.target.value)} />
+            </div>
+          </div>
+          <div className="chip-row" style={{ marginTop: 10 }}>
+            <LoadingButton type="button" className="btn-outline" onClick={() => void startConversation()}
+              loading={starting} loadingLabel="Starting…" spinnerClass="spinner dark"
+              disabled={busy} title="Start a new analyst conversation">
+              <Icon name="plus" size={14} /> New Conversation
+            </LoadingButton>
+            <LoadingButton type="button" className="btn-outline" onClick={() => void downloadReport("one-pager")}
+              loading={exporting === "one-pager"} loadingLabel="Preparing…" spinnerClass="spinner dark"
+              disabled={busy || exporting !== null} title="Sectioned Findings Report (Markdown)">
+              Report
+            </LoadingButton>
+            <LoadingButton type="button" className="btn-outline" onClick={() => void downloadReport("xlsx")}
+              loading={exporting === "xlsx"} loadingLabel="Preparing…" spinnerClass="spinner dark"
+              disabled={busy || exporting !== null} title="Sectioned Findings Report (Excel)">
+              Report XLSX
+            </LoadingButton>
+            <LoadingButton type="button" className="btn-outline" onClick={() => void downloadWorkbook()}
+              loading={exporting === "workbook"} loadingLabel="Preparing…" spinnerClass="spinner dark"
+              disabled={busy || exporting !== null} title="Blank analyst workbook (Excel)">
+              Blank Workbook
+            </LoadingButton>
+          </div>
+          {conversations.length > 0 && (
+            <div className="chip-row" style={{ marginTop: 10 }} aria-label="Previous analyses">
+              {conversations.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  className="chip"
+                  aria-pressed={c.id === activeId}
+                  onClick={() => {
+                    setActiveId(c.id);
+                    setMessages([]);
+                  }}
+                  title={c.objective ? `Objective: ${c.objective}` : undefined}
+                >
+                  {c.title || "Untitled Conversation"}
+                  {typeof c.message_count === "number" ? ` (${c.message_count})` : ""}
+                </button>
+              ))}
+            </div>
+          )}
+          {(lastScope || datasetVersion) && (
+            <p className="panel-sub" style={{ marginTop: 10 }}>
+              {lastScope}
+              {datasetVersion ? ` · Data v${datasetVersion}` : ""}
+            </p>
+          )}
+        </details>
       </Panel>
 
       {error ? (
@@ -1163,10 +1166,10 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
       </div>
 
       <div className="section-gap" />
-      <div className="cols-2">
+      <div className="cols-3">
         <Panel title="What To Test Next" sub="Numbered next-flight plan from the latest findings.">
           {testNext.length ? (
-            <ol style={{ margin: 0, paddingLeft: 20, display: "grid", gap: 10, fontSize: 13.5, color: "var(--shell-navy)" }}>
+            <ol style={{ margin: 0, paddingLeft: 20, display: "grid", gap: 8, fontSize: 13, color: "var(--shell-navy)" }}>
               {testNext.map((t) => <li key={t}>{t}</li>)}
             </ol>
           ) : <EmptyState text="Ask a question to generate test ideas." />}
@@ -1188,14 +1191,12 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
             </div>
           ) : <EmptyState text="No related insights in scope." />}
         </Panel>
+        <Panel title="Stored Findings" sub="Saved findings with accept / dismiss decisions.">
+          {storedFindings.length ? (
+            <div>{storedFindings.map((f) => findingCard(f))}</div>
+          ) : <EmptyState text="No stored findings yet — ask a question to generate findings." />}
+        </Panel>
       </div>
-
-      <div className="section-gap" />
-      <Panel title="Stored Findings" sub="Saved analyst findings with accept / dismiss decisions.">
-        {storedFindings.length ? (
-          <div>{storedFindings.map((f) => findingCard(f))}</div>
-        ) : <EmptyState text="No stored findings yet — ask a question to generate findings." />}
-      </Panel>
 
       <div className="section-gap" />
       <Panel title="Top Performing Creatives" sub="From this analysis — ranked by ROAS, then CTR.">

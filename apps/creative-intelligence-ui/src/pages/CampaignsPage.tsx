@@ -373,6 +373,7 @@ export function CampaignsPage() {
           <div className="field">
             <label htmlFor="c-status">Campaign Status</label>
             <select id="c-status" value={filters.status || "all"}
+              title="Activity-derived status from recent ad activity — not the ad platform's own campaign status."
               onChange={(e) => setFilter("status", e.target.value === "all" ? "" : e.target.value)}>
               <option value="all">All Statuses</option>
               <option value="Active">Active</option>

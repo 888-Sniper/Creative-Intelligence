@@ -171,6 +171,7 @@ export function DashboardPage() {
   const [tab, setTab] = useState("retention");
   const [curve, setCurve] = useState<Array<[number, number]> | null>(null);
   const [curveError, setCurveError] = useState("");
+  const [curveLoading, setCurveLoading] = useState(true);
 
   const { data: compare, error: compareError } = useCompareState(applied);
   const daily = useDaily(30, applied);
@@ -232,18 +233,28 @@ export function DashboardPage() {
   useEffect(() => {
     const key = topCreatives[0]?.creative_key;
     if (!key) {
+      // No top creative (still loading, or an honestly empty scope):
+      // never leave the retention chart on its shimmer.
       setCurve(null);
+      setCurveLoading(false);
       return;
     }
     let live = true;
     setCurve(null);
     setCurveError("");
+    setCurveLoading(true);
     api<CurveResponse>("GET", `/api/retention/curve?creative_key=${encodeURIComponent(key)}`)
       .then((r) => {
-        if (live) setCurve(r.points.map((p) => [num(p.t), num(p.p)]));
+        if (!live) return;
+        const pts = r.points.map((p) => [num(p.t), num(p.p)] as [number, number]);
+        setCurve(pts.length ? pts : null);
+        if (!pts.length) setCurveError("No retention curve for the top creative yet.");
+        setCurveLoading(false);
       })
       .catch((e) => {
-        if (live) setCurveError(e instanceof Error ? e.message : String(e));
+        if (!live) return;
+        setCurveError(e instanceof Error ? e.message : String(e));
+        setCurveLoading(false);
       });
     return () => { live = false; };
   }, [topCreatives]);
@@ -649,7 +660,11 @@ export function DashboardPage() {
                     />
                   ) : curveError ? (
                     <EmptyState text={curveError} />
-                  ) : <Skeleton height={170} />}
+                  ) : curveLoading || creatives.loading ? (
+                    <Skeleton height={170} />
+                  ) : (
+                    <EmptyState compact icon="play" title="No retention data" text="Retention curves appear once creative data is in scope." />
+                  )}
                 </div>
                 <div className="takeaways">
                   <h5><Icon name="check" size={15} /> Key Takeaways</h5>
@@ -663,22 +678,31 @@ export function DashboardPage() {
                     {durationRows.find((r) => r.key === "15–30s")?.ctr != null ? (
                       <li><Icon name="check" size={13} /><span>15–30 second creatives average {(durationRows.find((r) => r.key === "15–30s")?.ctr ?? 0).toFixed(1)}% CTR in the current scope.</span></li>
                     ) : null}
+                    {!nearThree && hookRows[0]?.ctr == null && durationRows.find((r) => r.key === "15–30s")?.ctr == null ? (
+                      <li className="muted">No takeaways in the current scope yet.</li>
+                    ) : null}
                   </ul>
                 </div>
               </div>
             ) : null}
             {tab === "hooks" ? (
-              hookCompare.length ? (
+              hooks.loading ? (
+                <Skeleton height={190} />
+              ) : hookCompare.length ? (
                 <GroupBars height={190} groups={hookCompare} format={(v) => `${v.toFixed(1)}%`} />
               ) : <EmptyState compact icon="spark" title="No hook data" text="Hook analysis appears once annotated creatives are in scope." />
             ) : null}
             {tab === "length" ? (
-              lengthCompare.length ? (
+              creatives.loading ? (
+                <Skeleton height={190} />
+              ) : lengthCompare.length ? (
                 <GroupBars height={190} groups={lengthCompare} format={(v) => `${v.toFixed(1)}%`} />
               ) : <EmptyState compact icon="play" title="No duration data" text="Length analysis appears once annotated creatives are in scope." />
             ) : null}
             {tab === "format" ? (
-              formatCompare.length ? (
+              creatives.loading ? (
+                <Skeleton height={190} />
+              ) : formatCompare.length ? (
                 <GroupBars height={190} groups={formatCompare} format={(v) => `${v.toFixed(1)}%`} />
               ) : <EmptyState compact icon="grid" title="No format data" text="Format comparison appears once annotated creatives are in scope." />
             ) : null}

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, ApiError } from "@/api/client";
 import { useAuth } from "@/auth/AuthProvider";
@@ -42,6 +42,7 @@ export function AccountMenu() {
   // bottom-left. Collapsed it is a single compact row that cannot
   // cover interactive controls.
   const [expanded, setExpanded] = useState(false);
+  const boxRef = useRef<HTMLDivElement>(null);
   const employee = me?.employee;
 
   useEffect(() => {
@@ -57,6 +58,23 @@ export function AccountMenu() {
       live = false;
     };
   }, []);
+
+  /* Close on outside click or Escape. */
+  useEffect(() => {
+    if (!expanded) return;
+    const onDown = (e: MouseEvent) => {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setExpanded(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setExpanded(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [expanded]);
 
   if (!employee) return null;
   const name = `${employee.first_name} ${employee.last_name}`.trim() || employee.email;
@@ -74,7 +92,7 @@ export function AccountMenu() {
   };
 
   return (
-    <div id="account-menu">
+    <div id="account-menu" ref={boxRef}>
       <button
         type="button"
         className="menu-toggle"

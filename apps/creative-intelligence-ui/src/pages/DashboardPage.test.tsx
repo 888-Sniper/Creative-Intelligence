@@ -111,4 +111,15 @@ describe("DashboardPage precision pass", () => {
     // Approved copy preserved.
     expect(screen.getByText("Your creative performance at a glance.")).toBeDefined();
   });
+
+  it("shows an honest empty state instead of an endless shimmer with no creative data", async () => {
+    mockFetch();
+    renderPage();
+    // Creatives resolve empty: the retention chart must settle on an
+    // empty state, never a perpetual skeleton.
+    await waitFor(() => {
+      expect(screen.getByText("No Retention Data")).toBeDefined();
+    });
+    expect(screen.getByText("No takeaways in the current scope yet.")).toBeDefined();
+  });
 });

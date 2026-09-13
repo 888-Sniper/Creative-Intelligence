@@ -232,6 +232,43 @@ describe("AuthGate screens", () => {
     });
     expect(screen.getByText("Ada L")).toBeDefined();
   });
+
+  it("closes the account menu on outside click or Escape", async () => {
+    window.fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === "/api/auth/accounts") return Response.json({ accounts: [] });
+      return Response.json({
+        ...base,
+        authenticated: true,
+        gate: "app",
+        employee: { id: "e1", email: "ada@foap.test", first_name: "Ada", last_name: "L", avatar_url: "", provider: "google", role: "employee", status: "active", created_at: "", approved_at: "", approved_by: "", last_login_at: "", updated_at: "" },
+      });
+    }) as unknown as typeof fetch;
+    const view = renderGate();
+    await waitFor(() => {
+      expect(screen.getByText("Ada L")).toBeDefined();
+    });
+    const toggle = () => screen.getByRole("button", { name: "Toggle Account Menu" });
+    expect(toggle().getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(toggle());
+    expect(toggle().getAttribute("aria-expanded")).toBe("true");
+    expect(view.container.querySelector("#account-menu-body")).not.toBeNull();
+    // Outside click closes.
+    fireEvent.mouseDown(document.body);
+    expect(toggle().getAttribute("aria-expanded")).toBe("false");
+    expect(view.container.querySelector("#account-menu-body")).toBeNull();
+    // Escape closes too.
+    fireEvent.click(toggle());
+    expect(view.container.querySelector("#account-menu-body")).not.toBeNull();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(toggle().getAttribute("aria-expanded")).toBe("false");
+    expect(view.container.querySelector("#account-menu-body")).toBeNull();
+    // Clicks inside the menu do not close it.
+    fireEvent.click(toggle());
+    fireEvent.mouseDown(toggle());
+    expect(toggle().getAttribute("aria-expanded")).toBe("true");
+    view.unmount();
+  });
 });
 
 describe("login loading states", () => {

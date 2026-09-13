@@ -163,7 +163,7 @@ video{max-width:100%;width:100%;border:1px solid var(--line);border-radius:var(-
 .login-show{position:absolute;right:8px;top:50%;transform:translateY(-50%)}
 .login-icon-btn{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;color:var(--muted)}
 .login-icon-btn:hover{color:var(--foap-primary)}
-.login-remember-row{display:flex;align-items:center;justify-content:space-between;margin:0 0 19px;font-size:14px}
+.login-remember-row{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px 12px;margin:0 0 19px;font-size:14px}
 .login-remember{display:inline-flex;align-items:center;gap:8px;cursor:pointer}
 .login-remember input{width:auto;margin:0}
 .login-link{background:none;border:none;color:var(--foap-primary);font-size:14px;font-weight:600;cursor:pointer;padding:2px 0;font-family:inherit;text-decoration:none}

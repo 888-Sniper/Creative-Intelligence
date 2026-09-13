@@ -44,7 +44,7 @@ function AuthShell({ children, dense = false }: { children: React.ReactNode; den
         <span className="auth-blob b2" />
         <span className="auth-blob b3" />
       </div>
-      <div className="login-shell" style={dense ? { maxWidth: 400 } : undefined}>
+      <div className="login-shell" style={dense ? { maxWidth: 520 } : undefined}>
         <img
           src={FOAP_LOGO}
           alt="Foap"
@@ -88,7 +88,7 @@ export function LoginPage() {
   if (authError) window.history.replaceState(null, "", window.location.pathname);
   return (
     <AuthShell dense>
-      <div className="auth-card login-card" style={{ maxWidth: 400, padding: "28px 28px 22px" }}>
+      <div className="auth-card login-card" style={{ maxWidth: 520, padding: "36px 40px 28px" }}>
         <h1>Welcome Back</h1>
         <p className="muted login-sub">Sign In To Your Employee Workspace.</p>
         {authError ? <p className="muted">Sign-In Failed: {authError}</p> : null}

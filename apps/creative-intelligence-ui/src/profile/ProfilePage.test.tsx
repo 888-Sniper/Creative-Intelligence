@@ -54,7 +54,7 @@ describe("ProfilePage", () => {
     // Employee ID: monospace with a copy affordance, never wrapped raw.
     expect(screen.getByRole("button", { name: "Copy Employee ID" })).toBeDefined();
     // Avatar URL lives under Advanced avatar options; Upload is primary.
-    expect(screen.getByText("Advanced avatar options")).toBeDefined();
+    expect(screen.getByText("Advanced Avatar Options")).toBeDefined();
     expect(screen.getByRole("button", { name: /Upload Photo/ }).className).toContain("btn-primary");
     expect((screen.getByLabelText("First Name") as HTMLInputElement).value).toBe("Ada");
     expect((screen.getByLabelText("Last Name") as HTMLInputElement).value).toBe("Lovelace");

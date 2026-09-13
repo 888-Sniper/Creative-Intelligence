@@ -384,7 +384,7 @@ export function AdminEmployeesPage() {
       { label: "Active Users", value: String(active), icon: "check", tint: "#E5F5EC", trend: pct(active) },
       /* "Pending Approvals", not "Pending Invites": no invitation
        *  email exists — pending rows await an approval decision. */
-      { label: "Pending Approvals", value: String(pending), icon: "clock", tint: "#FBF3E2", trend: pending ? "Awaiting approval" : "Inbox zero" },
+      { label: "Pending Approvals", value: String(pending), icon: "clock", tint: "#FBF3E2", trend: pending ? "Awaiting Approval" : "Inbox Zero" },
       { label: "Admins", value: String(admins), icon: "lock", tint: "#EFEAFB", trend: pct(admins) },
     ];
   }, [employees]);
@@ -533,7 +533,7 @@ export function AdminEmployeesPage() {
                             {e.status}
                           </span>
                         </td>
-                        <td>{e.last_login_at ? friendlyDate(e.last_login_at) : "Never signed in"}</td>
+                        <td>{e.last_login_at ? friendlyDate(e.last_login_at) : "Never Signed In"}</td>
                         <td>
                           <span className="row-actions">
                             {e.status === "pending" && (
@@ -580,7 +580,7 @@ export function AdminEmployeesPage() {
                             <details className="row-menu">
                               {/* role=button: some AT/summary mappings omit the
                                   disclosure role, and tests drive this control. */}
-                              <summary role="button" aria-label={`More actions for ${e.email}`} title="More actions">
+                              <summary role="button" aria-label={`More Actions For ${e.email}`} title="More Actions">
                                 <Icon name="dots" size={16} />
                               </summary>
                               <div className="row-menu-pop" role="menu">
@@ -677,7 +677,7 @@ export function AdminEmployeesPage() {
                 <Icon name="check" size={18} />
               </span>
               <div>
-                <h4>Admin gate</h4>
+                <h4>Admin Gate</h4>
                 <p>Only admins can open this page, and every admin API call is re-authorized on the server.</p>
               </div>
             </li>
@@ -686,7 +686,7 @@ export function AdminEmployeesPage() {
                 <Icon name="lock" size={18} />
               </span>
               <div>
-                <h4>Last-admin protection</h4>
+                <h4>Last-Admin Protection</h4>
                 <p>Suspending the last active admin is refused by the server, so the workspace can never lock itself out.</p>
               </div>
             </li>
@@ -695,7 +695,7 @@ export function AdminEmployeesPage() {
                 <Icon name="clock" size={18} />
               </span>
               <div>
-                <h4>Immediate effect</h4>
+                <h4>Immediate Effect</h4>
                 <p>Approve, suspend, revoke, and session invalidation apply instantly — including on live sessions.</p>
               </div>
             </li>
@@ -800,7 +800,7 @@ export function AdminEmployeesPage() {
               />
               <input
                 type="text"
-                placeholder="first name (optional)"
+                placeholder="First Name (Optional)"
                 aria-label="New Employee First Name"
                 value={addFirst}
                 onChange={(e) => setAddFirst(e.target.value)}

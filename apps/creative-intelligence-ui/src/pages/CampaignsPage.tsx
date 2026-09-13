@@ -382,7 +382,7 @@ export function CampaignsPage() {
       />
       {/* Approved composition goes straight into the controls:
         no extra "Campaign Filters" heading. */}
-      <section className="panel" aria-label="Campaign filters">
+      <section className="panel" aria-label="Campaign Filters">
         <div className="filter-grid">
           <div className="field">
             <label htmlFor="c-client">Client</label>
@@ -399,7 +399,7 @@ export function CampaignsPage() {
               exactly "Campaign Status". */}
             <span style={{ display: "flex", alignItems: "center", gap: 6, margin: "0 0 6px" }}>
               <label htmlFor="c-status" style={{ margin: 0 }}>Campaign Status</label>
-              <InfoTip label="How campaign status is determined"
+              <InfoTip label="How Campaign Status Is Determined"
                 text="Activity-derived status from recent ad activity — not the ad platform's own campaign status." />
             </span>
             <select id="c-status" value={filters.status || "all"}
@@ -543,7 +543,7 @@ export function CampaignsPage() {
             <Panel
               title="Campaign Performance by Platform"
               action={(
-                <select aria-label="Platform metric" value={platMetric}
+                <select aria-label="Platform Metric" value={platMetric}
                   onChange={(e) => setPlatMetric(e.target.value as typeof platMetric)}>
                   {PLATFORM_METRICS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
                 </select>
@@ -565,8 +565,8 @@ export function CampaignsPage() {
             action={(
               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                 <input
-                  aria-label="Search campaigns"
-                  placeholder="Search campaigns…"
+                  aria-label="Search Campaigns"
+                  placeholder="Search Campaigns…"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   style={{ width: 200 }}
@@ -586,7 +586,7 @@ export function CampaignsPage() {
                   <table className="tbl">
                     <thead>
                       <tr>
-                        <th scope="col"><input type="checkbox" aria-label="Select all campaigns" checked={allChecked} onChange={toggleAll} /></th>
+                        <th scope="col"><input type="checkbox" aria-label="Select All Campaigns" checked={allChecked} onChange={toggleAll} /></th>
                         <th scope="col">Campaign</th>
                         <th scope="col">Client</th>
                         <th scope="col">Platform</th>

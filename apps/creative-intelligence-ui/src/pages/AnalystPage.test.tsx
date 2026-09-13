@@ -71,7 +71,7 @@ function mockFetch() {
 describe("AnalystPage", () => {
   // Advanced controls live in the disclosure; tests follow the UX.
   function openMore() {
-    fireEvent.click(screen.getByText("More filters, conversations & exports"));
+    fireEvent.click(screen.getByText("More Filters, Conversations & Exports"));
   }
 
   it("renders controls and composer", () => {

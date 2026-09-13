@@ -207,9 +207,9 @@ export function ProfilePage() {
   ] : [];
 
   const activity = employee ? [
-    { icon: "clock", label: "Last signed in", value: employee.last_login_at ? friendlyDate(employee.last_login_at) : "—" },
-    { icon: "check", label: "Access approved", value: employee.approved_at ? friendlyDate(employee.approved_at) : "—" },
-    { icon: "user", label: "Account created", value: employee.created_at ? friendlyDate(employee.created_at) : "—" },
+    { icon: "clock", label: "Last Signed In", value: employee.last_login_at ? friendlyDate(employee.last_login_at) : "—" },
+    { icon: "check", label: "Access Approved", value: employee.approved_at ? friendlyDate(employee.approved_at) : "—" },
+    { icon: "user", label: "Account Created", value: employee.created_at ? friendlyDate(employee.created_at) : "—" },
   ] : [];
 
   return (
@@ -300,7 +300,7 @@ export function ProfilePage() {
               </div>
               <details style={{ marginTop: 12 }}>
                 <summary className="panel-sub" style={{ cursor: "pointer", fontWeight: 600 }}>
-                  Advanced avatar options
+                  Advanced Avatar Options
                 </summary>
                 <div className="field" style={{ marginTop: 8 }}>
                   <label htmlFor="p-avatar">Avatar URL (Optional)</label>

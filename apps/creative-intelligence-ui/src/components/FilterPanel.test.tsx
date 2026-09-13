@@ -32,26 +32,26 @@ describe("FilterPanel", () => {
     renderPanel({ showTeam: false });
     expect(screen.getAllByText("Date Range")).toHaveLength(1);
     // Collapsed: no date inputs in the grid until the field opens.
-    expect(screen.queryByLabelText("From date")).toBeNull();
+    expect(screen.queryByLabelText("From Date")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /All Time|–/ }));
-    const from = screen.getByLabelText("From date");
-    const to = screen.getByLabelText("To date");
+    const from = screen.getByLabelText("From Date");
+    const to = screen.getByLabelText("To Date");
     expect(from.closest(".daterange-pop")).not.toBeNull();
     expect(from.closest(".daterange-pop")).toBe(to.closest(".daterange-pop"));
     fireEvent.change(from, { target: { value: "2026-08-01" } });
     fireEvent.change(to, { target: { value: "2026-08-07" } });
     expect(screen.getByText("Aug 1 – Aug 7, 2026")).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
-    expect(screen.queryByLabelText("From date")).toBeNull();
+    expect(screen.queryByLabelText("From Date")).toBeNull();
   });
 
   it("keeps the single Date Range field in the creative variant", () => {
     renderPanel({ creative: true });
     expect(screen.getAllByText("Date Range")).toHaveLength(1);
-    expect(screen.queryByLabelText("From date")).toBeNull();
+    expect(screen.queryByLabelText("From Date")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /All Time|–/ }));
-    const from = screen.getByLabelText("From date");
-    const to = screen.getByLabelText("To date");
+    const from = screen.getByLabelText("From Date");
+    const to = screen.getByLabelText("To Date");
     expect(from.closest(".daterange-pop")).toBe(to.closest(".daterange-pop"));
   });
 

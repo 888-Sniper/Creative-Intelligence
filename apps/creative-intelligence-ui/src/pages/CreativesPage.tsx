@@ -141,14 +141,14 @@ function RetentionSpark({ creativeKey }: { creativeKey: string }) {
       .catch(() => live && setPoints([]));
     return () => { live = false; };
   }, [creativeKey]);
-  if (!points) return <span className="spark" aria-label="Loading retention curve" />;
+  if (!points) return <span className="spark" aria-label="Loading Retention Curve" />;
   if (!points.length) return <span className="muted">No Curve</span>;
   const W = 110, H = 34;
   const d = points.map(([t, p], i) =>
     `${i ? "L" : "M"}${((t / Math.max(30, points[points.length - 1][0])) * W).toFixed(1)},${(H - (p / 100) * H).toFixed(1)}`,
   ).join(" ");
   return (
-    <svg className="spark" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Retention curve">
+    <svg className="spark" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Retention Curve">
       <path d={d} fill="none" stroke="#0A9183" strokeWidth={1.8} strokeLinejoin="round" />
     </svg>
   );
@@ -534,13 +534,13 @@ export function CreativesPage() {
                 <select id="cr-sort" value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
                   {SORTS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
                 </select>
-                <div role="group" aria-label="Table layout" style={{ display: "flex", gap: 4 }}>
-                  <button type="button" className="icon-btn" aria-pressed={view === "list"} aria-label="List view"
+                <div role="group" aria-label="Table Layout" style={{ display: "flex", gap: 4 }}>
+                  <button type="button" className="icon-btn" aria-pressed={view === "list"} aria-label="List View"
                     style={{ width: 32, height: 32, background: view === "list" ? "#E7F1FB" : undefined }}
                     onClick={() => setView("list")}>
                     <Icon name="list" size={16} />
                   </button>
-                  <button type="button" className="icon-btn" aria-pressed={view === "grid"} aria-label="Grid view"
+                  <button type="button" className="icon-btn" aria-pressed={view === "grid"} aria-label="Grid View"
                     style={{ width: 32, height: 32, background: view === "grid" ? "#E7F1FB" : undefined }}
                     onClick={() => setView("grid")}>
                     <Icon name="grid" size={16} />
@@ -560,7 +560,7 @@ export function CreativesPage() {
                       <thead>
                         <tr>
                           <th scope="col">
-                            <input type="checkbox" aria-label="Select all creatives" checked={allChecked}
+                            <input type="checkbox" aria-label="Select All Creatives" checked={allChecked}
                               onChange={() => setSelected(allChecked ? new Set() : new Set(rows.map((r) => r.creative_key)))} />
                           </th>
                           <th scope="col">Creative</th>

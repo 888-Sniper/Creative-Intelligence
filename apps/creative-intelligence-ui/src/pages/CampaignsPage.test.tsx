@@ -68,7 +68,7 @@ describe("CampaignsPage", () => {
     expect(screen.getAllByText("Beta").length).toBeGreaterThan(0);
     expect(screen.getByText("$121")).toBeDefined();
     expect(screen.getByRole("button", { name: "Apply Filters" })).toBeDefined();
-    expect(screen.getByLabelText("Search campaigns")).toBeDefined();
+    expect(screen.getByLabelText("Search Campaigns")).toBeDefined();
     expect(screen.getByText("Total Campaigns")).toBeDefined();
   });
 
@@ -123,7 +123,7 @@ describe("CampaignsPage", () => {
     });
     expect(screen.getByLabelText("Campaign Status")).toBeDefined();
     expect(screen.queryByText(/activity-based/)).toBeNull();
-    const info = screen.getByRole("button", { name: "How campaign status is determined" });
+    const info = screen.getByRole("button", { name: "How Campaign Status Is Determined" });
     // Explainer opens on click (touch/keyboard path) and closes on Escape.
     expect(screen.queryByText(/Activity-derived status/)).toBeNull();
     fireEvent.click(info);
@@ -139,10 +139,10 @@ describe("CampaignsPage", () => {
       expect(screen.getByText("All Campaigns (2)")).toBeDefined();
     });
     expect(screen.getAllByText("Date Range")).toHaveLength(1);
-    expect(screen.queryByLabelText("From date")).toBeNull();
+    expect(screen.queryByLabelText("From Date")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /All Time|–/ }));
-    const from = screen.getByLabelText("From date");
-    const to = screen.getByLabelText("To date");
+    const from = screen.getByLabelText("From Date");
+    const to = screen.getByLabelText("To Date");
     expect(from.closest(".daterange-pop")).toBe(to.closest(".daterange-pop"));
   });
 

@@ -211,7 +211,7 @@ describe("ReportsPage", () => {
     await waitFor(() => {
       expect(screen.getAllByText("Camp A Performance").length).toBeGreaterThan(0);
     });
-    fireEvent.change(screen.getByLabelText("Search reports"), { target: { value: "zzz-no-match" } });
+    fireEvent.change(screen.getByLabelText("Search Reports"), { target: { value: "zzz-no-match" } });
     await waitFor(() => {
       expect(screen.getByText("No Matching Reports")).toBeDefined();
     });
@@ -243,8 +243,8 @@ describe("ReportsPage", () => {
       expect(screen.getByText("2 Campaigns Selected")).toBeDefined();
     });
     fireEvent.click(screen.getByRole("button", { name: /^Date Range/ }));
-    fireEvent.change(screen.getByLabelText("Report from date"), { target: { value: "2024-01-01" } });
-    fireEvent.change(screen.getByLabelText("Report to date"), { target: { value: "2024-01-31" } });
+    fireEvent.change(screen.getByLabelText("Report From Date"), { target: { value: "2024-01-01" } });
+    fireEvent.change(screen.getByLabelText("Report To Date"), { target: { value: "2024-01-31" } });
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
     fireEvent.click(screen.getByRole("button", { name: /Generate Report/ }));
     await waitFor(() => {
@@ -261,11 +261,11 @@ describe("ReportsPage", () => {
       expect(screen.getAllByText("Camp A Performance").length).toBeGreaterThan(0);
     });
     // Demo rows are stamped Mar 2024: a 7-day window hides them all.
-    fireEvent.change(screen.getByLabelText("Filter by time"), { target: { value: "Last 7 Days" } });
+    fireEvent.change(screen.getByLabelText("Filter By Time"), { target: { value: "Last 7 Days" } });
     await waitFor(() => {
       expect(screen.getByText("No Matching Reports")).toBeDefined();
     });
-    fireEvent.change(screen.getByLabelText("Filter by time"), { target: { value: "All Time" } });
+    fireEvent.change(screen.getByLabelText("Filter By Time"), { target: { value: "All Time" } });
     await waitFor(() => {
       expect(screen.getAllByText("Camp A Performance").length).toBeGreaterThan(0);
     });

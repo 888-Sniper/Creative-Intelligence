@@ -513,11 +513,11 @@ export function DashboardPage() {
           title="Campaign Performance Trends"
           action={(
             <div className="mini-selects">
-              <select aria-label="Left trend metric" value={leftMetric} onChange={(e) => setLeftMetric(e.target.value as TrendMetric)}>
+              <select aria-label="Left Trend Metric" value={leftMetric} onChange={(e) => setLeftMetric(e.target.value as TrendMetric)}>
                 {TREND_METRICS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
               </select>
               <span className="mini-vs">vs.</span>
-              <select aria-label="Right trend metric" value={rightMetric} onChange={(e) => setRightMetric(e.target.value as TrendMetric)}>
+              <select aria-label="Right Trend Metric" value={rightMetric} onChange={(e) => setRightMetric(e.target.value as TrendMetric)}>
                 {TREND_METRICS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
               </select>
             </div>
@@ -540,11 +540,11 @@ export function DashboardPage() {
           title="Benchmark Comparison"
           action={(
             <div className="mini-selects">
-              <select aria-label="Benchmark metric" value={benchMetric} onChange={(e) => setBenchMetric(e.target.value as BenchMetric)}>
+              <select aria-label="Benchmark Metric" value={benchMetric} onChange={(e) => setBenchMetric(e.target.value as BenchMetric)}>
                 {BENCH_METRICS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
               </select>
               <span className="mini-vs">vs.</span>
-              <select aria-label="Benchmark baseline" value={baseline} onChange={(e) => setBaseline(e.target.value)}>
+              <select aria-label="Benchmark Baseline" value={baseline} onChange={(e) => setBaseline(e.target.value)}>
                 <option value="Scope Average">Scope Average</option>
                 <option value="Top Performer">Top Performer</option>
               </select>
@@ -637,7 +637,7 @@ export function DashboardPage() {
             ) : <Skeleton height={220} />}
           </Panel>
           <Panel title="Retention & Hook Insights">
-            <div className="tabs retention-tabs" role="tablist" aria-label="Retention and hook insights">
+            <div className="tabs retention-tabs" role="tablist" aria-label="Retention And Hook Insights">
               {[
                 { value: "retention", label: "Audience Retention" },
                 { value: "hooks", label: "Hook Analysis" },

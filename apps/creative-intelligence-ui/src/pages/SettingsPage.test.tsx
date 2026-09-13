@@ -213,7 +213,7 @@ describe("SettingsPage", () => {
   it("shows Google Drive as not connected by default", async () => {
     mockFetch({ googleConnected: false });
     renderSettings();
-    const integrations = await screen.findByText("Connect your data sources to unlock deeper insights.");
+    const integrations = await screen.findByRole("heading", { name: "Integrations" });
     const panel = integrations.closest("section") ?? document.body;
     await waitFor(() => {
       expect(within(panel as HTMLElement).getByRole("button", { name: "Connect" })).toBeDefined();

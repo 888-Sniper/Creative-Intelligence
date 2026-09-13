@@ -10,14 +10,6 @@ import { Icon } from "@/components/icons";
 import { PageHeader, Panel } from "@/components/product";
 import { LoadingButton } from "@/components/LoadingButton";
 
-const PROVIDER_LABELS: Record<string, string> = {
-  google: "Google",
-  microsoft: "Microsoft",
-  apple: "Apple",
-  github: "GitHub",
-  email: "Email",
-};
-
 /* Settings matches the approved reference. Workspace preferences persist
  * locally per browser; identity/security/drive actions stay backend-backed
  * (logout, session revoke, password-reset email, Drive OAuth status). */
@@ -323,12 +315,12 @@ export function SettingsPage() {
         sub="Control your workspace, data, integrations, and application preferences."
       />
       <div className="cols-2-even" style={{ marginTop: 12 }}>
-          <Panel title="General Settings" icon="gear" sub="Manage your workspace details and default preferences.">
+          <Panel title="General Settings" icon="gear">
             <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 12 }}>
               <Avatar url={employee.avatar_url} label={name} />
               <div>
                 <strong style={{ fontSize: 14 }}>{name}</strong>
-                <p className="panel-sub" style={{ margin: 0 }}>{employee.email} · {employee.role} · {employee.status} · {PROVIDER_LABELS[employee.provider] ?? "—"}</p>
+                <p className="panel-sub" style={{ margin: 0 }}>{employee.email}</p>
               </div>
             </div>
             <div className="filter-grid" style={{ gridTemplateColumns: "repeat(2,minmax(0,1fr))" }}>
@@ -369,7 +361,7 @@ export function SettingsPage() {
               </div>
             </div>
           </Panel>
-          <Panel title="Notifications" icon="bell" sub="Choose what you want to be notified about. Stored in this browser only — workspace policies are set by your administrator.">
+          <Panel title="Notifications" icon="bell">
             <Toggle label="Email Reports" body="Save your email-reports preference here. Delivery starts when workspace notifications are enabled by your administrator."
               checked={prefs.emailReports} onChange={(v) => setPref("emailReports", v)} />
             <Toggle label="Campaign Updates" body="Get notified when campaigns are completed or updated."
@@ -379,7 +371,7 @@ export function SettingsPage() {
             <Toggle label="Product Updates" body="Be the first to know about new features and improvements."
               checked={prefs.productUpdates} onChange={(v) => setPref("productUpdates", v)} />
           </Panel>
-          <Panel title="Data & Privacy" icon="eye" sub="Manage how your data is used and your privacy preferences. These preferences live in this browser; workspace policy is set by your administrator.">
+          <Panel title="Data & Privacy" icon="eye">
             <Toggle label="Data Usage" body="Help improve Foap by allowing anonymized usage data."
               checked={prefs.dataUsage} onChange={(v) => setPref("dataUsage", v)} />
             <Toggle label="Share Analytics Data" body="Allow aggregated, anonymized data to contribute to workspace benchmark averages."
@@ -403,7 +395,7 @@ export function SettingsPage() {
               </button>
             </div>
           </Panel>
-          <Panel title="Integrations" icon="grid" sub="Connect your data sources to unlock deeper insights."
+          <Panel title="Integrations" icon="grid"
             action={<a className="link-teal" href="#integration-google">Manage Integrations</a>}>
             <GoogleDriveCard />
             {[["Meta", "Import campaign performance data from Meta Ads."],

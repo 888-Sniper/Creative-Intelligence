@@ -41,7 +41,7 @@ export function AskBar() {
         <input
           type="text"
           placeholder="Ask Foap Creative Intelligence about your campaign data…"
-          aria-label="Ask about your campaign data"
+          aria-label="Ask About Your Campaign Data"
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
           onKeyDown={(e) => {

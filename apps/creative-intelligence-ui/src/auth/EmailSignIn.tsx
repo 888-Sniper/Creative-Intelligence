@@ -158,7 +158,7 @@ export function EmailSignIn() {
         <input
           id="login-password"
           type={showPassword ? "text" : "password"}
-          placeholder="Enter your password"
+          placeholder="Enter Your Password"
           autoComplete="current-password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}

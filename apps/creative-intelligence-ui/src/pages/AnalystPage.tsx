@@ -690,7 +690,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
     {
       value: engagement.mult != null && engagement.ready ? `${engagement.mult.toFixed(1)}x` : "—",
       label: "More Engagement",
-      sub: "Top creative vs average",
+      sub: "Top Creative Vs Average",
       icon: "users",
       tint: "#EFEAFB",
     },
@@ -923,7 +923,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
             </LoadingButton>
           </div>
         </form>
-        <div className="prompt-chips" aria-label="Try asking">
+        <div className="prompt-chips" aria-label="Try Asking">
           <span style={{ fontSize: 13, fontWeight: 600, color: "var(--shell-muted)", alignSelf: "center" }}>
             Try asking:
           </span>
@@ -1004,7 +1004,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
         </div>
         <details style={{ marginTop: 10 }}>
           <summary className="link-teal" style={{ cursor: "pointer", display: "inline-block" }}>
-            More filters, conversations &amp; exports
+            More Filters, Conversations &amp; Exports
           </summary>
           <div className="cols-2-even" style={{ marginTop: 10 }}>
             <MetaSelect id="a-client" label="Client" allLabel="All Clients"
@@ -1017,7 +1017,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
           <div className="chip-row" style={{ marginTop: 10 }}>
             <LoadingButton type="button" className="btn-outline" onClick={() => void startConversation()}
               loading={starting} loadingLabel="Starting…" spinnerClass="spinner dark"
-              disabled={busy} title="Start a new analyst conversation">
+              disabled={busy} title="Start A New Analyst Conversation">
               <Icon name="plus" size={14} /> New Conversation
             </LoadingButton>
             <LoadingButton type="button" className="btn-outline" onClick={() => void downloadReport("one-pager")}
@@ -1037,7 +1037,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
             </LoadingButton>
           </div>
           {conversations.length > 0 && (
-            <div className="chip-row" style={{ marginTop: 10 }} aria-label="Previous analyses">
+            <div className="chip-row" style={{ marginTop: 10 }} aria-label="Previous Analyses">
               {conversations.map((c) => (
                 <button
                   key={c.id}

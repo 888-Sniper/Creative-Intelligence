@@ -74,10 +74,10 @@ describe("DashboardPage precision pass", () => {
     });
     expect(screen.queryByLabelText("Team")).toBeNull();
     expect(screen.getAllByText("Date Range")).toHaveLength(1);
-    expect(screen.queryByLabelText("From date")).toBeNull();
+    expect(screen.queryByLabelText("From Date")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /All Time|–/ }));
-    const from = screen.getByLabelText("From date");
-    const to = screen.getByLabelText("To date");
+    const from = screen.getByLabelText("From Date");
+    const to = screen.getByLabelText("To Date");
     expect(from.closest(".daterange-pop")).toBe(to.closest(".daterange-pop"));
   });
 

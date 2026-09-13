@@ -5,8 +5,8 @@ import { loginAs, readSeeds } from "./helpers";
 //  confirm with Done, then Apply Filters. */
 async function setDateRange(page, from: string, to: string) {
   await page.getByRole("button", { name: /^Date Range/ }).click();
-  await page.getByLabel("From date").fill(from);
-  await page.getByLabel("To date").fill(to);
+  await page.getByLabel("From Date").fill(from);
+  await page.getByLabel("To Date").fill(to);
   await page.getByRole("button", { name: "Done" }).click();
 }
 

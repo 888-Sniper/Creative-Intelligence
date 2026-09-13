@@ -164,7 +164,7 @@ export function GlobalSearch() {
       </form>
       {showDrop ? (
         <div className="gs-drop" role="listbox" id="global-search-results"
-          aria-label="Search suggestions">
+          aria-label="Search Suggestions">
           {!loaded ? (
             <p className="gs-empty">Searching…</p>
           ) : hits.length === 0 ? (

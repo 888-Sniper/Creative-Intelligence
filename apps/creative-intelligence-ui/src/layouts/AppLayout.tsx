@@ -46,7 +46,7 @@ export function AppLayout() {
             ) : null}
           </nav>
           <span className="header-spacer"></span>
-          <button type="button" className="theme-btn" aria-label="Toggle light and dark mode" onClick={toggle}>
+          <button type="button" className="theme-btn" aria-label="Toggle Light And Dark Mode" onClick={toggle}>
             Light/Dark
           </button>
         </div>

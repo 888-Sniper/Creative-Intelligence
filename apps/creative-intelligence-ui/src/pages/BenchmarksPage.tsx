@@ -78,7 +78,7 @@ function BenchmarkViewSub({ view }: { view: SavedView }) {
   const dest = view.state?.view ? (VIEW_ROUTES[view.state.view] ?? view.state.view) : "";
   return (
     <span className="panel-sub">
-      {axes ? `${axes} filter ${axes === 1 ? "axis" : "axes"}` : "Saved setup"}
+      {axes ? `${axes} filter ${axes === 1 ? "axis" : "axes"}` : "Saved Setup"}
       {dest ? ` · Opens ${dest}` : ""}
     </span>
   );
@@ -234,7 +234,7 @@ export function BenchmarksPage() {
           </LoadingButton>
         )}
       />
-      <section className="panel" aria-label="Benchmark filters">
+      <section className="panel" aria-label="Benchmark Filters">
         <div className="filter-grid fg-6">
           <MetaSelect id="b-client" label="Client" allLabel="All Clients"
             values={metaClients} value={filters.client}
@@ -323,7 +323,7 @@ export function BenchmarksPage() {
                   <table className="tbl">
                     <thead>
                       <tr>
-                        <th scope="col"><input type="checkbox" aria-label="Select all benchmarks"
+                        <th scope="col"><input type="checkbox" aria-label="Select All Benchmarks"
                           checked={rows.length > 0 && rows.every((r) => selected.has(r.key))}
                           onChange={() => setSelected(rows.every((r) => selected.has(r.key)) ? new Set() : new Set(rows.map((r) => r.key)))} /></th>
                         <th scope="col">Benchmark Name</th>

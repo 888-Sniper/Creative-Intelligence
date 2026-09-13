@@ -169,7 +169,7 @@ describe("AdminEmployeesPage", () => {
     // Friendly dates, never raw ISO.
     expect(screen.getByText(/Sep 1, 2026/)).toBeDefined();
     expect(screen.queryByText("2026-09-01")).toBeNull();
-    expect(screen.getByText("Never signed in")).toBeDefined();
+    expect(screen.getByText("Never Signed In")).toBeDefined();
     expect(screen.getByText("Audit Trail")).toBeDefined();
     expect(screen.getByText("Employee Approved")).toBeDefined();
     expect(screen.getByText("pending → active")).toBeDefined();

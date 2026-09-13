@@ -247,7 +247,7 @@ export function InsightsPage() {
         )}
       />
       {saveStatus ? <p className="panel-sub" role="status" style={{ margin: "0 0 12px" }}>{saveStatus}</p> : null}
-      <section className="panel" aria-label="Find insights">
+      <section className="panel" aria-label="Find Insights">
         <div className="filter-grid fg-6">
           <div className="field">
             <label htmlFor="in-search">Search</label>

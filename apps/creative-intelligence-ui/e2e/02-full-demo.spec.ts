@@ -79,7 +79,7 @@ test.describe("full demo visuals", () => {
     await expect(page.getByText("Meta Leads On ROAS")).toBeVisible();
     await expect(page.getByText("Tie on ROAS")).toHaveCount(0);
     // Charts populated, thumbnails decoded: the capture is settled.
-    await expect(page.getByRole("img", { name: "Trend chart" })).toBeVisible({ timeout: 30000 });
+    await expect(page.getByRole("img", { name: "Trend Chart" })).toBeVisible({ timeout: 30000 });
     await expect(page.getByRole("img", { name: "Comparison bar chart" })).toBeVisible({ timeout: 30000 });
     await expectImagesDecoded(page, 'img[src*="/thumbnail"]');
     await expectCleanDemo(page);
@@ -117,7 +117,7 @@ test.describe("full demo visuals", () => {
     await expectNoBusyButton(page);
     await expect(page.getByText("Select two to four campaigns or creatives, then Apply Comparison.")).toHaveCount(0);
     await expect(page.getByText("No Daily Data For The Selected Campaigns.")).toHaveCount(0);
-    await expect(page.getByRole("img", { name: /comparison chart/ }).first()).toBeVisible({ timeout: 60000 });
+    await expect(page.getByRole("img", { name: /Comparison Chart/ }).first()).toBeVisible({ timeout: 60000 });
     for (const heading of ["Performance Over Time", "KPI Comparison", "Difference Summary",
       "Creative Attributes Comparison", "Key Takeaways", "Recommended Next Tests"]) {
       await expect(page.getByRole("heading", { name: heading })).toBeVisible();
@@ -141,7 +141,7 @@ test.describe("full demo visuals", () => {
     // Displayed selections match the requested three-way comparison.
     await expect(page.getByRole("button", { name: /^Remove / })).toHaveCount(3);
     await expect(page.getByRole("button", { name: "Remove Adventure Awaits" })).toHaveCount(0);
-    await expect(page.getByRole("img", { name: /comparison chart/ }).first()).toBeVisible({ timeout: 60000 });
+    await expect(page.getByRole("img", { name: /Comparison Chart/ }).first()).toBeVisible({ timeout: 60000 });
     await expectReady(page);
   });
 

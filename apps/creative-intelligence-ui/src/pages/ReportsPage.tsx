@@ -235,12 +235,12 @@ function ReportRangeField({ from, to, onFrom, onTo }: {
           <div className="daterange-pop" role="group" aria-labelledby="rep-range-label">
             <div className="field">
               <label htmlFor="rep-range-from">From</label>
-              <input id="rep-range-from" type="date" aria-label="Report from date" value={from}
+              <input id="rep-range-from" type="date" aria-label="Report From Date" value={from}
                 onChange={(e) => onFrom(e.target.value)} />
             </div>
             <div className="field">
               <label htmlFor="rep-range-to">To</label>
-              <input id="rep-range-to" type="date" aria-label="Report to date" value={to}
+              <input id="rep-range-to" type="date" aria-label="Report To Date" value={to}
                 onChange={(e) => onTo(e.target.value)} />
             </div>
             <div className="daterange-actions">
@@ -577,15 +577,15 @@ export function ReportsPage() {
               <span className="rep-filters">
                 <span className="rep-search">
                   <Icon name="search" size={14} />
-                  <input aria-label="Search reports" placeholder="Search reports…" value={query} onChange={(e) => setQuery(e.target.value)} />
+                  <input aria-label="Search Reports" placeholder="Search Reports…" value={query} onChange={(e) => setQuery(e.target.value)} />
                 </span>
-                <select aria-label="Filter by status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+                <select aria-label="Filter By Status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
                   {["All Statuses", "Completed", "Generating", "Failed"].map((o) => <option key={o}>{o}</option>)}
                 </select>
-                <select aria-label="Filter by format" value={formatFilter} onChange={(e) => setFormatFilter(e.target.value)}>
+                <select aria-label="Filter By Format" value={formatFilter} onChange={(e) => setFormatFilter(e.target.value)}>
                   {["All Formats", "pptx", "xlsx", "one-pager"].map((o) => <option key={o}>{o}</option>)}
                 </select>
-                <select aria-label="Filter by time" value={timeFilter} onChange={(e) => setTimeFilter(e.target.value)}>
+                <select aria-label="Filter By Time" value={timeFilter} onChange={(e) => setTimeFilter(e.target.value)}>
                   <option>All Time</option>
                   <option>Last 7 Days</option>
                   <option>Last 30 Days</option>

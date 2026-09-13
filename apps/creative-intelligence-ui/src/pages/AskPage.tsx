@@ -47,8 +47,8 @@ interface Conversation {
 const PROMPTS = [
   "What drove our CTR increase?",
   "Which creatives perform best?",
-  "Compare performance by platform",
-  "Summarise last month",
+  "Compare Performance By Platform",
+  "Summarise Last Month",
 ];
 
 const SUGGESTED = [
@@ -56,7 +56,7 @@ const SUGGESTED = [
   "Compare ROI by platform",
   "Which audience segments performed best?",
   "Why did our CTR increase?",
-  "Show me underperforming creatives",
+  "Show Me Underperforming Creatives",
   "Summarise last month's performance",
 ];
 
@@ -217,7 +217,7 @@ export function AskPage() {
       />
       <div className="main-rail">
         <div className="rail-stack">
-          <section className="panel" aria-label="Question composer">
+          <section className="panel" aria-label="Question Composer">
             <form
               onSubmit={(e) => {
                 e.preventDefault();
@@ -319,7 +319,7 @@ export function AskPage() {
             <Panel title="Ask a Question to Begin">
               <EmptyState
                 icon="chat"
-                title="Ask your first question"
+                title="Ask Your First Question"
                 text="Answers cite your uploaded data first and always show their scope. Try a suggestion on the right."
               />
             </Panel>
@@ -337,7 +337,7 @@ export function AskPage() {
               ))}
             </div>
           </Panel>
-          <Panel title="Recent Chats" action={<Link className="link-teal" to="/analyst">View all</Link>}>
+          <Panel title="Recent Chats" action={<Link className="link-teal" to="/analyst">View All</Link>}>
             {chats === null ? <Skeleton height={120} /> : (
               chats.length ? (
                 <div>

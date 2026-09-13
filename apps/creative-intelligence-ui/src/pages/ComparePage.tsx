@@ -184,7 +184,7 @@ export function GroupedBars({ series, metric }: {
     return label.length > room ? `${label.slice(0, room - 1)}…` : label;
   };
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }} role="img" aria-label={`${kpiLabel(kpi)} comparison chart`}>
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }} role="img" aria-label={`${kpiLabel(kpi)} Comparison Chart`}>
       {[0, 0.25, 0.5, 0.75, 1].map((f) => (
         <g key={f}>
           <line x1={PL} x2={W - 8} y1={y(max * f)} y2={y(max * f)} stroke="#E3EAF3" strokeWidth={1} />
@@ -607,7 +607,7 @@ export function ComparePage() {
         title="Compare"
         sub="Compare campaigns or creatives side by side to find what drives the best performance."
       />
-      <div className="cmp-setup-bar" role="group" aria-label="Comparison setup">
+      <div className="cmp-setup-bar" role="group" aria-label="Comparison Setup">
         <div className="cmp-setup">
           <div className="field">
             <label htmlFor="cmp-mode">Compare By</label>
@@ -690,7 +690,7 @@ export function ComparePage() {
             <Panel
               title={mode === "campaigns" ? "Performance Over Time" : "Retention Curves"}
               action={mode === "campaigns" ? (
-                <select aria-label="Trend metric" value={perfMetric} onChange={(e) => setPerfMetric(e.target.value)}>
+                <select aria-label="Trend Metric" value={perfMetric} onChange={(e) => setPerfMetric(e.target.value)}>
                   {["roas", "ctr", "cpa", "cpm", "spend"].map((m) => <option key={m} value={m}>{kpiLabel(m)}</option>)}
                 </select>
               ) : undefined}
@@ -721,7 +721,7 @@ export function ComparePage() {
             <Panel
               title="KPI Comparison"
               action={(
-                <select aria-label="Comparison metric" value={barMetric} onChange={(e) => setBarMetric(e.target.value)}>
+                <select aria-label="Comparison Metric" value={barMetric} onChange={(e) => setBarMetric(e.target.value)}>
                   {DIFF_KPIS.map((m) => <option key={m} value={m}>{kpiLabel(m)}</option>)}
                 </select>
               )}
@@ -736,7 +736,7 @@ export function ComparePage() {
             <Panel
               title="Difference Summary"
               action={(
-                <select aria-label="Comparison baseline" value={baseName} onChange={(e) => setBaseName(e.target.value)}>
+                <select aria-label="Comparison Baseline" value={baseName} onChange={(e) => setBaseName(e.target.value)}>
                   {items.map((i) => <option key={i.key} value={i.key}>vs. {i.title}</option>)}
                 </select>
               )}

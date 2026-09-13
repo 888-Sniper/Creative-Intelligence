@@ -43,7 +43,7 @@ export function TrendChart({ series, labels, height = 240, ticks = 5 }: {
   const labelEvery = Math.max(1, Math.ceil(n / 7));
   return (
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height, display: "block" }}
-      role="img" aria-label="Trend chart">
+      role="img" aria-label="Trend Chart">
       {grid.map((g) => (
         <g key={g}>
           <line x1={PL} x2={W - PR} y1={y(g)} y2={y(g)} stroke="#E5EAF1" strokeWidth={1} />
@@ -102,7 +102,7 @@ export function GroupBars({ groups, height = 230, format }: {
   const fmt = format ?? fmtAxis;
   return (
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height, display: "block" }}
-      role="img" aria-label="Comparison bar chart">
+      role="img" aria-label="Comparison Bar Chart">
       {grid.map((g) => (
         <g key={g}>
           <line x1={PL} x2={W - PR} y1={y(g)} y2={y(g)} stroke="#E5EAF1" strokeWidth={1} />
@@ -151,7 +151,7 @@ export function RetentionCurve({ points, callout, height = 190 }: {
   const grid = [0, 25, 50, 75, 100];
   return (
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height, display: "block" }}
-      role="img" aria-label="Retention curve">
+      role="img" aria-label="Retention Curve">
       {grid.map((g) => (
         <g key={g}>
           <line x1={PL} x2={W - PR} y1={y(g)} y2={y(g)} stroke="#E5EAF1" strokeWidth={1} />

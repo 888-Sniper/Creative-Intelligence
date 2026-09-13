@@ -150,7 +150,7 @@ export function CreativeThumb({ seed, duration, label }: {
   // when no image is available (unknown creative, backend error).
   const src = `/api/creatives/${encodeURIComponent(seed)}/thumbnail`;
   return (
-    <span className="thumb-wrap" role="img" aria-label={label ? `${label} thumbnail` : "Creative thumbnail"}>
+    <span className="thumb-wrap" role="img" aria-label={label ? `${label} Thumbnail` : "Creative Thumbnail"}>
       <span
         className="thumb thumb-art"
         aria-hidden="true"
@@ -399,12 +399,12 @@ export function DateRangeField({ id }: { id: string }) {
           <div className="daterange-pop" role="group" aria-labelledby={`${id}-label`}>
             <div className="field">
               <label htmlFor={`${id}-from`}>From</label>
-              <input id={`${id}-from`} type="date" aria-label="From date" value={filters.date_from}
+              <input id={`${id}-from`} type="date" aria-label="From Date" value={filters.date_from}
                 onChange={(e) => setFilter("date_from", e.target.value)} />
             </div>
             <div className="field">
               <label htmlFor={`${id}-to`}>To</label>
-              <input id={`${id}-to`} type="date" aria-label="To date" value={filters.date_to}
+              <input id={`${id}-to`} type="date" aria-label="To Date" value={filters.date_to}
                 onChange={(e) => setFilter("date_to", e.target.value)} />
             </div>
             <div className="daterange-actions">

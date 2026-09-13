@@ -66,7 +66,7 @@ export function GoogleDriveCard() {
       </span>
       <div style={{ flex: 1 }}>
         <h4>Google Drive</h4>
-        <p>Access and analyze your creative assets. Read-only access; tokens stay on the server.</p>
+        <p>Read-only access to analyze your creative assets.</p>
         <p>
           Status: <strong>{connected === null ? "…" : connected ? "Connected" : "Not Connected"}</strong>
         </p>

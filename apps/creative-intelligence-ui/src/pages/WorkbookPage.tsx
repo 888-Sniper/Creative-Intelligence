@@ -388,7 +388,7 @@ export function WorkbookPage() {
       </div>
       {fullScreen ? (
         <div className="modal-overlay" onClick={() => setFullScreen(false)}>
-          <div className="modal-card" role="dialog" aria-modal="true" aria-label="Workbook preview"
+          <div className="modal-card" role="dialog" aria-modal="true" aria-label="Workbook Preview"
             onClick={(e) => e.stopPropagation()}>
             <div className="modal-head">
               <strong style={{ fontSize: 14 }}>{name || "Untitled Workbook"}</strong>

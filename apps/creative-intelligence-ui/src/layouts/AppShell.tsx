@@ -31,7 +31,7 @@ export function AppShell() {
   return (
     <div className="shell">
       {open ? (
-        <button type="button" className="side-overlay" aria-label="Close menu"
+        <button type="button" className="side-overlay" aria-label="Close Menu"
           onClick={close} />
       ) : null}
       <aside className={`sidebar${open ? " open" : ""}`} aria-label="Primary">
@@ -62,11 +62,11 @@ export function AppShell() {
         <header className="topbar">
           <div className="topbar-inner">
             <button type="button" className="icon-btn hamburger"
-              aria-label="Open menu" onClick={() => setOpen(true)}>
+              aria-label="Open Menu" onClick={() => setOpen(true)}>
               <Icon name="menu" size={20} />
             </button>
             <GlobalSearch />
-            <Link to="/insights" className="icon-btn" aria-label="Recent activity">
+            <Link to="/insights" className="icon-btn" aria-label="Recent Activity">
               <Icon name="bell" size={20} />
               <span className="dot" aria-hidden="true" />
             </Link>

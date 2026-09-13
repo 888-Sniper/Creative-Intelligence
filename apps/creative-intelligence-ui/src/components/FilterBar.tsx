@@ -74,11 +74,11 @@ export function FilterBar() {
         <TextField name="date" label="Date" placeholder="date" />
         <label>
           From
-          <input type="date" aria-label="From date" value={filters.date_from} onChange={(e) => setFilter("date_from", e.target.value)} className={filters.date_from ? "active" : undefined} />
+          <input type="date" aria-label="From Date" value={filters.date_from} onChange={(e) => setFilter("date_from", e.target.value)} className={filters.date_from ? "active" : undefined} />
         </label>
         <label>
           To
-          <input type="date" aria-label="To date" value={filters.date_to} onChange={(e) => setFilter("date_to", e.target.value)} className={filters.date_to ? "active" : undefined} />
+          <input type="date" aria-label="To Date" value={filters.date_to} onChange={(e) => setFilter("date_to", e.target.value)} className={filters.date_to ? "active" : undefined} />
         </label>
       </div>
       <div style={{ marginTop: 8 }}>

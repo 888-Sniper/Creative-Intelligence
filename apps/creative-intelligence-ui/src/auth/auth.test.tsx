@@ -95,7 +95,7 @@ describe("AuthGate screens", () => {
     const email = screen.getByLabelText("Work Email") as HTMLInputElement;
     expect(email.getAttribute("placeholder")).toBe("name@company.com");
     const password = screen.getByLabelText("Password") as HTMLInputElement;
-    expect(password.getAttribute("placeholder")).toBe("Enter your password");
+    expect(password.getAttribute("placeholder")).toBe("Enter Your Password");
     expect(password.getAttribute("type")).toBe("password");
     expect(screen.getByRole("checkbox", { name: "Remember Me" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Forgot Password?" })).toBeDefined();

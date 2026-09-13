@@ -213,7 +213,7 @@ describe("ReportsPage", () => {
     });
     fireEvent.change(screen.getByLabelText("Search reports"), { target: { value: "zzz-no-match" } });
     await waitFor(() => {
-      expect(screen.getByText("No matching reports")).toBeDefined();
+      expect(screen.getByText("No Matching Reports")).toBeDefined();
     });
   });
 
@@ -222,7 +222,7 @@ describe("ReportsPage", () => {
     renderPage();
     await waitFor(() => {
       // Real workspace: no fabricated rows even though campaigns exist.
-      expect(screen.getByText(/No reports yet/)).toBeDefined();
+      expect(screen.getByText(/No Reports Yet/)).toBeDefined();
     });
     expect(screen.queryByText("Camp A Performance")).toBeNull();
   });
@@ -263,7 +263,7 @@ describe("ReportsPage", () => {
     // Demo rows are stamped Mar 2024: a 7-day window hides them all.
     fireEvent.change(screen.getByLabelText("Filter by time"), { target: { value: "Last 7 Days" } });
     await waitFor(() => {
-      expect(screen.getByText("No matching reports")).toBeDefined();
+      expect(screen.getByText("No Matching Reports")).toBeDefined();
     });
     fireEvent.change(screen.getByLabelText("Filter by time"), { target: { value: "All Time" } });
     await waitFor(() => {

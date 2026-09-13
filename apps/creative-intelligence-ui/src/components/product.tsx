@@ -667,10 +667,17 @@ export function Skeleton({ height = 120 }: { height?: number }) {
 /** Structured empty state: small icon, bold title, one-line explanation,
  *  optional CTA, and significantly less vertical height than a bare panel.
  *  The legacy `text` form keeps rendering for inline error slots. */
+export function titleCase(value: string): string {
+  return value.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 export function EmptyState({ text, title, icon, action, compact }: {
   text?: string; title?: string; icon?: string; action?: React.ReactNode; compact?: boolean;
 }) {
-  if (!title && !icon && !action) return <div className="empty">{text}</div>;
+  if (!title && !icon && !action) {
+    const body = text && /^\s*No\b/.test(text) ? titleCase(text) : text;
+    return <div className="empty">{body}</div>;
+  }
   return (
     <div className={`empty-structured${compact ? " empty-compact" : ""}`}>
       {icon ? (
@@ -678,7 +685,7 @@ export function EmptyState({ text, title, icon, action, compact }: {
           <Icon name={icon} size={20} />
         </span>
       ) : null}
-      <p className="empty-title">{title ?? text}</p>
+      <p className="empty-title">{title ? titleCase(title) : text}</p>
       {text && title ? <p className="empty-body">{text}</p> : null}
       {action ? <div className="empty-action">{action}</div> : null}
     </div>

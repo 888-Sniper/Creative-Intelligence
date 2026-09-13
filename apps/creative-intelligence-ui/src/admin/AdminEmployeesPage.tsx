@@ -375,12 +375,12 @@ export function AdminEmployeesPage() {
   const stats = useMemo(() => {
     const rows = employees ?? [];
     const total = rows.length;
-    const pct = (n: number) => (total ? `${Math.round((n / total) * 100)}% of employees` : "No employees yet");
+    const pct = (n: number) => (total ? `${Math.round((n / total) * 100)}% of employees` : "No Employees Yet");
     const active = rows.filter((e) => e.status === "active").length;
     const pending = rows.filter((e) => e.status === "pending").length;
     const admins = rows.filter((e) => e.role === "admin").length;
     return [
-      { label: "Total Employees", value: String(total), icon: "users", tint: "#E7F1FB", trend: total ? `${rows.filter((e) => e.role !== "admin").length} employees · ${admins} admins` : "No employees yet" },
+      { label: "Total Employees", value: String(total), icon: "users", tint: "#E7F1FB", trend: total ? `${rows.filter((e) => e.role !== "admin").length} employees · ${admins} admins` : "No Employees Yet" },
       { label: "Active Users", value: String(active), icon: "check", tint: "#E5F5EC", trend: pct(active) },
       /* "Pending Approvals", not "Pending Invites": no invitation
        *  email exists — pending rows await an approval decision. */

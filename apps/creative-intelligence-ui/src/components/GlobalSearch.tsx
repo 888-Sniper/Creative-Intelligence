@@ -168,7 +168,7 @@ export function GlobalSearch() {
           {!loaded ? (
             <p className="gs-empty">Searching…</p>
           ) : hits.length === 0 ? (
-            <p className="gs-empty">No matches for “{query.trim()}”.</p>
+            <p className="gs-empty">No Matches for “{query.trim()}”.</p>
           ) : (
             <>
               {(Object.keys(KIND_LABEL) as Array<Hit["kind"]>).map((kind) => {

@@ -57,7 +57,7 @@ describe("GlobalSearch", () => {
     renderSearch();
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "zzz-no-match" } });
     await waitFor(() => {
-      expect(screen.getByText(/No matches for/)).toBeDefined();
+      expect(screen.getByText(/No Matches for/)).toBeDefined();
     });
   });
 

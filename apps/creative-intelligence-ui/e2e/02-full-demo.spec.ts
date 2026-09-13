@@ -116,7 +116,7 @@ test.describe("full demo visuals", () => {
     await expect(page.locator(".cmp-card h4", { hasText: "Spring Skincare Launch" })).toBeVisible();
     await expectNoBusyButton(page);
     await expect(page.getByText("Select two to four campaigns or creatives, then Apply Comparison.")).toHaveCount(0);
-    await expect(page.getByText("No daily data for the selected campaigns.")).toHaveCount(0);
+    await expect(page.getByText("No Daily Data For The Selected Campaigns.")).toHaveCount(0);
     await expect(page.getByRole("img", { name: /comparison chart/ }).first()).toBeVisible({ timeout: 60000 });
     for (const heading of ["Performance Over Time", "KPI Comparison", "Difference Summary",
       "Creative Attributes Comparison", "Key Takeaways", "Recommended Next Tests"]) {
@@ -137,7 +137,7 @@ test.describe("full demo visuals", () => {
     await page.getByRole("button", { name: "Apply Comparison" }).click();
     await compared;
     await expectNoBusyButton(page);
-    await expect(page.getByText("No daily data for the selected campaigns.")).toHaveCount(0);
+    await expect(page.getByText("No Daily Data For The Selected Campaigns.")).toHaveCount(0);
     // Displayed selections match the requested three-way comparison.
     await expect(page.getByRole("button", { name: /^Remove / })).toHaveCount(3);
     await expect(page.getByRole("button", { name: "Remove Adventure Awaits" })).toHaveCount(0);

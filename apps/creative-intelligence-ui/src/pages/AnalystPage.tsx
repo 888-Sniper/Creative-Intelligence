@@ -676,14 +676,14 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
     {
       value: hookLift != null && hookLift > 0 ? `+${hookLift.toFixed(0)}%` : "—",
       label: "Higher CTR",
-      sub: bestHook ? `${titleCase(bestHook.key)} hooks` : "No hook data",
+      sub: bestHook ? `${titleCase(bestHook.key)} hooks` : "No Hook Data",
       icon: "click",
       tint: "#E7F1FB",
     },
     {
       value: roasLift != null && roasLift > 0 ? `+${roasLift.toFixed(0)}%` : "—",
       label: "Higher ROAS",
-      sub: bestPlat ? `${platformLabel(bestPlat.key)} leading` : "No platform data",
+      sub: bestPlat ? `${platformLabel(bestPlat.key)} leading` : "No Platform Data",
       icon: "coin",
       tint: "#E5F5EC",
     },
@@ -697,7 +697,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
     {
       value: bestLength ? bestLength.label.replace("–", "-") : "—",
       label: "Optimal Video Length",
-      sub: bestLength?.ctr != null ? `${bestLength.ctr.toFixed(1)}% CTR in band` : "No duration data",
+      sub: bestLength?.ctr != null ? `${bestLength.ctr.toFixed(1)}% CTR in band` : "No Duration Data",
       icon: "bars",
       tint: "#FBF3E2",
     },

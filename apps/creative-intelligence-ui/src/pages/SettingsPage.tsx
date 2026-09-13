@@ -48,9 +48,30 @@ const TIMEZONES = [
   "(GMT+10:00) Sydney",
 ];
 
+/** First-run timezone guess from the browser: mapped onto the fixed
+ *  option list so a new account never starts on a mock default. */
+function guessTimezone(): string {
+  let tz = "";
+  try {
+    tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+  } catch {
+    tz = "";
+  }
+  if (/Australia/i.test(tz)) return "(GMT+10:00) Sydney";
+  if (/Pacific\/Auckland|Pacific\/Fiji/i.test(tz)) return "(GMT+10:00) Sydney";
+  if (/Europe\/London|Europe\/Dublin|Europe\/Lisbon/i.test(tz)) return "(GMT+00:00) London";
+  if (/Europe\//i.test(tz)) return "(GMT+00:00) London";
+  if (/America\/Los_Angeles|America\/Vancouver|America\/Tijuana|US\/Pacific/i.test(tz))
+    return "(GMT-08:00) Pacific Time (US & Canada)";
+  if (/America\/Chicago|America\/Denver|America\/Phoenix|US\/(Central|Mountain|Arizona)/i.test(tz))
+    return "(GMT-05:00) Eastern Time (US & Canada)";
+  if (/America\//i.test(tz)) return "(GMT-05:00) Eastern Time (US & Canada)";
+  return "(GMT+00:00) London";
+}
+
 const DEFAULTS: Prefs = {
-  workspace: "Alex's Workspace",
-  timezone: "(GMT-05:00) Eastern Time (US & Canada)",
+  workspace: "Foap Creative Intelligence",
+  timezone: guessTimezone(),
   theme: "light",
   defaultView: "Dashboard",
   currency: "USD – US Dollar",
@@ -68,7 +89,7 @@ const DEFAULTS: Prefs = {
 };
 
 const ACCENTS: Record<string, { teal: string; dark: string }> = {
-  "Teal (Default)": { teal: "#0E7C8C", dark: "#0A5A66" },
+  "Teal (Default)": { teal: "#0A9183", dark: "#08786E" },
   "Blue": { teal: "#2F6FBE", dark: "#1F4E86" },
   "Violet": { teal: "#6D5BD0", dark: "#4A3F96" },
 };
@@ -104,7 +125,11 @@ function loadPrefs(): Prefs {
   const raw = storageGet();
   if (raw) {
     try {
-      return { ...DEFAULTS, ...(JSON.parse(raw) as Partial<Prefs>) };
+      const prefs = { ...DEFAULTS, ...(JSON.parse(raw) as Partial<Prefs>) };
+      // Retire the old mock default: anyone still carrying it gets the
+      // neutral product name (a deliberately renamed workspace is kept).
+      if (prefs.workspace === "Alex's Workspace") prefs.workspace = DEFAULTS.workspace;
+      return prefs;
     } catch {
       /* corrupt value: fall through to defaults */
     }
@@ -163,7 +188,7 @@ function IntegrationMark({ name }: { name: string }) {
  *  density choices with plain boxes (no live app preview). */
 function AppearancePreview({ accent, density, mode }: { accent: string; density: string; mode: string }) {
   const accents: Record<string, string> = {
-    "Teal (Default)": "#0E7C8C",
+    "Teal (Default)": "#0A9183",
     "Blue": "#2F6FBE",
     "Violet": "#6D5BD0",
   };
@@ -345,7 +370,7 @@ export function SettingsPage() {
             </div>
           </Panel>
           <Panel title="Notifications" icon="bell" sub="Choose what you want to be notified about. Stored in this browser only — workspace policies are set by your administrator.">
-            <Toggle label="Email Reports" body="Receive scheduled reports and key insights via email."
+            <Toggle label="Email Reports" body="Save your email-reports preference here. Delivery starts when workspace notifications are enabled by your administrator."
               checked={prefs.emailReports} onChange={(v) => setPref("emailReports", v)} />
             <Toggle label="Campaign Updates" body="Get notified when campaigns are completed or updated."
               checked={prefs.campaignUpdates} onChange={(v) => setPref("campaignUpdates", v)} />

@@ -48,7 +48,14 @@ describe("ProfilePage", () => {
       expect(screen.getByText("Ada Lovelace")).toBeDefined();
     });
     expect(screen.getByText("ada@foap.test")).toBeDefined();
-    expect(screen.getByText("employee · active")).toBeDefined();
+    expect(screen.getByText("Employee · Active")).toBeDefined();
+    expect(screen.getByText(/Team — · Member since/)).toBeDefined();
+    expect(screen.getByText(/Signed in via Google/)).toBeDefined();
+    // Employee ID: monospace with a copy affordance, never wrapped raw.
+    expect(screen.getByRole("button", { name: "Copy Employee ID" })).toBeDefined();
+    // Avatar URL lives under Advanced avatar options; Upload is primary.
+    expect(screen.getByText("Advanced avatar options")).toBeDefined();
+    expect(screen.getByRole("button", { name: /Upload Photo/ }).className).toContain("btn-primary");
     expect((screen.getByLabelText("First Name") as HTMLInputElement).value).toBe("Ada");
     expect((screen.getByLabelText("Last Name") as HTMLInputElement).value).toBe("Lovelace");
     expect(

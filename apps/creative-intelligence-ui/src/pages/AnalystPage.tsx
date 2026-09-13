@@ -193,7 +193,7 @@ function stampNow(): string {
 
 /** Accessible horizontal bars (value labels, no chart lib needed for
  *  single-series breakdowns). */
-function LabeledBars({ rows, format, color = "#00B3A0" }: {
+function LabeledBars({ rows, format, color = "#0A9183" }: {
   rows: Array<{ label: string; value: number }>;
   format: (v: number) => string;
   color?: string;
@@ -267,7 +267,7 @@ function LengthCombo({ rows }: {
           const y = padT + ih - bh;
           return (
             <g key={r.label}>
-              <rect x={x} y={y} width={bw} height={bh} rx="5" fill="#00B3A0" />
+              <rect x={x} y={y} width={bw} height={bh} rx="5" fill="#0A9183" />
               <text x={x + bw / 2} y={y - 6} textAnchor="middle" fontSize="12"
                 fontWeight="700" fill="var(--shell-navy)">
                 {r.ctr.toFixed(1)}%
@@ -294,7 +294,7 @@ function LengthCombo({ rows }: {
         ) : null}
       </svg>
       <div className="legend" aria-hidden="true">
-        <span><i style={{ background: "#00B3A0" }} />CTR</span>
+        <span><i style={{ background: "#0A9183" }} />CTR</span>
         <span><i style={{ background: "#E8833A" }} />ROAS</span>
       </div>
     </div>
@@ -835,11 +835,16 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
   function findingCard(f: AnalystFinding) {
     return (
       <div key={f.finding_id} className="takeaways" style={{ marginTop: 10 }}>
-        <h5>{f.primary_signal || f.finding_id}</h5>
+        <h5>
+          {f.primary_signal || f.finding_id}
+          <span className={`pill finding-pill${f.status === "accepted" ? " pill-ok" : f.status === "rejected" ? " pill-bad" : " pill-info"}`}
+            style={{ marginLeft: 8, verticalAlign: "middle" }}>
+            {f.status === "accepted" ? "Accepted" : f.status === "rejected" ? "Rejected" : "Proposed"}
+          </span>
+        </h5>
         <p style={{ margin: "0 0 6px", fontSize: 12.5, color: "var(--shell-muted)" }}>
           {[f.priority ? `Priority: ${f.priority}` : "",
-            f.confidence_level ? `Confidence: ${f.confidence_level}` : "",
-            f.status && f.status !== "proposed" ? f.status : ""].filter(Boolean).join(" · ")}
+            f.confidence_level ? `Confidence: ${f.confidence_level}` : ""].filter(Boolean).join(" · ")}
         </p>
         {f.diagnosis ? <p style={{ margin: "0 0 4px", fontSize: 13 }}>Diagnosis: {f.diagnosis}</p> : null}
         {f.creative_hypothesis ? <p style={{ margin: "0 0 4px", fontSize: 13 }}>Hypothesis: {f.creative_hypothesis}</p> : null}
@@ -907,14 +912,14 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
             </LoadingButton>
             <LoadingButton
               type="button"
-              className="btn-outline"
+              className="btn-outline btn-compact"
               disabled={busy || !input.trim()}
               loading={op === "three-points"}
               loadingLabel="Condensing…"
               onClick={() => void send("three-points", 3)}
               title="Condense The Answer To 3 Points"
             >
-              3 Points
+              <Icon name="list" size={14} /> 3 Points
             </LoadingButton>
           </div>
         </form>
@@ -1074,7 +1079,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
       >
         {loadingScope && !scopeReady ? <Skeleton height={150} /> : (
           <>
-            <p style={{ fontSize: 14, lineHeight: 1.65, margin: "0 0 4px" }}>{summary}</p>
+            <p className="answer-tint" style={{ fontSize: 14, lineHeight: 1.65, margin: "0 0 4px" }}>{summary}</p>
             <div className="kpi-grid">
               {statCards.map((s) => (
                 <div className="kpi-card" key={s.label}>
@@ -1202,7 +1207,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
         <Panel title="Stored Findings" sub="Saved findings with accept / dismiss decisions.">
           {storedFindings.length ? (
             <div>{storedFindings.map((f) => findingCard(f))}</div>
-          ) : <EmptyState text="No stored findings yet — ask a question to generate findings." />}
+          ) : <EmptyState compact icon="bookmark" title="No stored findings" text="Ask a question to generate findings, then accept the ones to keep." />}
         </Panel>
       </div>
 
@@ -1232,7 +1237,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
               </div>
             ))}
           </div>
-        ) : <EmptyState text="No creatives in scope." />}
+        ) : <EmptyState compact icon="creatives" title="No creatives in scope" text="The creative strip populates once creatives are in scope." />}
       </Panel>
     </>
   );

@@ -201,7 +201,7 @@ export function CampaignsPage() {
       const avg = plats.reduce((t, p) => t + (p.roas ?? 0), 0) / plats.length;
       const d = rate(plats[0].roas ?? 0, avg);
       items.push({
-        icon: "trend", tint: "#DFF5F1",
+        icon: "trend", tint: "#E5F5F2",
         title: "Scale High-Performing Campaigns",
         body: `${platformLabel(plats[0].key)} campaigns average ${(plats[0].roas ?? 0).toFixed(1)}x ROAS${d != null ? `, ${d >= 0 ? "+" : ""}${d.toFixed(0)}% above the platform average` : ""}. Consider increasing budget allocation.`,
         action: "View Campaigns", href: "/campaigns",
@@ -209,7 +209,7 @@ export function CampaignsPage() {
     }
     if (underperformers.length) {
       items.push({
-        icon: "users", tint: "#DFF5F1",
+        icon: "users", tint: "#E5F5F2",
         title: "Improve Underperforming Creatives",
         body: `${underperformers.length} campaign${underperformers.length === 1 ? " is" : "s are"} underperforming on CTR versus the ${avgCtr == null ? "" : `${avgCtr.toFixed(1)}% `}scope average. Refresh creative assets to improve engagement.`,
         action: "View Recommendations", href: "/creatives",
@@ -232,7 +232,7 @@ export function CampaignsPage() {
       .sort((a, b) => (b.roas ?? 0) - (a.roas ?? 0))[0];
     if (topRoas?.roas != null) {
       items.push({
-        icon: "target", tint: "#DFF5F1",
+        icon: "target", tint: "#E5F5F2",
         title: "Refine Audience Targeting",
         body: `${topRoas.name} leads the current scope at ${topRoas.roas.toFixed(1)}x ROAS. Mirror its audience and hook formula in the next flight.`,
         action: "View Details", href: "/compare",
@@ -464,9 +464,10 @@ export function CampaignsPage() {
           </div>
           <div className="field">
             <span className="field-label" aria-hidden="true">&nbsp;</span>
-            <button type="button" className="link-teal" onClick={() => setMoreFilters((v) => !v)}
+            <button type="button" className="filter-toggle" onClick={() => setMoreFilters((v) => !v)}
               aria-expanded={moreFilters}>
               {moreFilters ? "Fewer Filters" : "More Filters"}
+              <Icon name="chev" size={13} />
             </button>
           </div>
           {moreFilters ? (
@@ -513,7 +514,7 @@ export function CampaignsPage() {
                 </div>
               </div>
               <KpiCard label="Total Impressions" display={fmtCompact(num(compare.metrics.impressions?.current))}
-                icon="megaphone" tint="#DFF5F1" metricLabel="Impressions" compare={compare} />
+                icon="megaphone" tint="#E5F5F2" metricLabel="Impressions" compare={compare} />
               <KpiCard label="Total Clicks" display={fmtCompact(num(compare.metrics.clicks?.current))}
                 icon="click" tint="#E7F1FB" metricLabel="Clicks" compare={compare} />
               <KpiCard label="Average ROAS" display={fmtMult(num(compare.metrics.roas?.current))}
@@ -532,7 +533,7 @@ export function CampaignsPage() {
                 <TrendChart
                   height={200}
                   series={[
-                    { label: "Impressions", color: "#00B3A0", soft: "#DDF3F0", points: daily.map((p) => num(p.impressions)) },
+                    { label: "Impressions", color: "#0A9183", soft: "#E5F5F2", points: daily.map((p) => num(p.impressions)) },
                     { label: "Clicks", color: "#1D3A8F", soft: "#E4EAF7", points: daily.map((p) => num(p.clicks)), axis: "right" },
                   ]}
                   labels={daily.map((p) => p.date.slice(5))}
@@ -555,7 +556,7 @@ export function CampaignsPage() {
                     groups={platGroups}
                     format={(v) => platMetric === "spend" ? fmtMoney(v) : fmtCompact(v)}
                   />
-                ) : <EmptyState text="No platform data in the current scope." />
+                ) : <EmptyState compact icon="bars" title="No platform data" text="Platform breakdown appears once campaign data is in scope." />
               ) : <Skeleton height={200} />}
             </Panel>
           </div>
@@ -632,7 +633,7 @@ export function CampaignsPage() {
                     </tbody>
                   </table>
                 </div>
-              ) : <EmptyState text="No campaigns match the current filters." />
+              ) : <EmptyState compact icon="campaign" title="No campaigns match" text="Try loosening the current filters." />
             ) : campaigns.error ? (
               <EmptyState text={campaigns.error} />
             ) : <Skeleton height={220} />}
@@ -691,7 +692,7 @@ export function CampaignsPage() {
           {campaigns.data && benchPlatform.data ? (
             rail.length ? (
               <InsightList items={rail.map((r) => ({ icon: r.icon, tint: r.tint, title: r.title, body: r.body, action: r.action, href: r.href }))} />
-            ) : <EmptyState text="Not enough scoped data for recommendations yet." />
+            ) : <EmptyState compact icon="spark" title="No recommendations yet" text="Recommendations appear once campaign data is in scope." />
           ) : <Skeleton height={320} />}
         </Panel>
       </div>

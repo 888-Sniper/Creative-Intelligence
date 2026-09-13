@@ -664,8 +664,25 @@ export function Skeleton({ height = 120 }: { height?: number }) {
   return <div className="skel" style={{ height }} aria-label="Loading" />;
 }
 
-export function EmptyState({ text }: { text: string }) {
-  return <div className="empty">{text}</div>;
+/** Structured empty state: small icon, bold title, one-line explanation,
+ *  optional CTA, and significantly less vertical height than a bare panel.
+ *  The legacy `text` form keeps rendering for inline error slots. */
+export function EmptyState({ text, title, icon, action, compact }: {
+  text?: string; title?: string; icon?: string; action?: React.ReactNode; compact?: boolean;
+}) {
+  if (!title && !icon && !action) return <div className="empty">{text}</div>;
+  return (
+    <div className={`empty-structured${compact ? " empty-compact" : ""}`}>
+      {icon ? (
+        <span className="empty-ico" aria-hidden="true">
+          <Icon name={icon} size={20} />
+        </span>
+      ) : null}
+      <p className="empty-title">{title ?? text}</p>
+      {text && title ? <p className="empty-body">{text}</p> : null}
+      {action ? <div className="empty-action">{action}</div> : null}
+    </div>
+  );
 }
 
 export function DemoDataBadge() {

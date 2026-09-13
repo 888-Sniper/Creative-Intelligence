@@ -285,7 +285,7 @@ export function InsightsPage() {
           <Panel title="Pinned Learnings" sub="Your most important insights, always within reach.">
             {cards.data ? (
               findings.pinned.filter(matchAxes).length ? (
-                <div style={{ background: "#DFF5F1", borderRadius: 10, padding: 10 }}>
+                <div style={{ background: "#E5F5F2", borderRadius: 10, padding: 10 }}>
                   <div className="cards-3" style={{ gap: 10 }}>
                     {findings.pinned.filter(matchAxes).map((c) => (
                       <div className="cmp-card" key={c.creative_key} style={{ padding: 12 }}>
@@ -296,7 +296,14 @@ export function InsightsPage() {
                     ))}
                   </div>
                 </div>
-              ) : <EmptyState text="No pinned learnings yet. Run the AI Analyst to generate findings." />
+              ) : (
+                <EmptyState
+                  icon="spark"
+                  title="No saved insights yet"
+                  text="Run AI Analyst or save a finding to start building your insight library."
+                  action={<Link className="btn-soft" to="/analyst">Open AI Analyst</Link>}
+                />
+              )
             ) : <Skeleton height={120} />}
           </Panel>
           <Panel title={`Your Saved Insights (${savedCards.length})`}>
@@ -319,7 +326,15 @@ export function InsightsPage() {
                     </div>
                   ))}
                 </div>
-              ) : <EmptyState text="No saved insights match the current search and filters." />
+              ) : (
+                <EmptyState
+                  compact
+                  icon="bookmark"
+                  title="No saved insights yet"
+                  text="Run AI Analyst or save a finding to start building your insight library."
+                  action={<Link className="btn-soft" to="/analyst">Open AI Analyst</Link>}
+                />
+              )
             )}
           </Panel>
           {(itype === "All Types" || itype === "Creative Findings") && findings.rest.filter(matchAxes).length ? (
@@ -354,7 +369,7 @@ export function InsightsPage() {
                     </div>
                   ))}
                 </div>
-              ) : <EmptyState text="No recent analyst activity yet." />
+              ) : <EmptyState compact icon="clock" title="No recent activity" text="Analyst conversations will appear here." />
             )}
           </Panel>
           <Panel title="Recommended Related Insights">
@@ -363,7 +378,7 @@ export function InsightsPage() {
               <div>
                 {findings.rest.filter(matchAxes).slice(0, 4).map((c) => (
                   <div className="insight" key={c.creative_key}>
-                    <span className="insight-ico" style={{ background: "#DFF5F1" }}>
+                    <span className="insight-ico" style={{ background: "#E5F5F2" }}>
                       <Icon name="spark" size={20} />
                     </span>
                     <div>

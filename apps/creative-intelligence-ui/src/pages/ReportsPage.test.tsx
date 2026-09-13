@@ -213,7 +213,7 @@ describe("ReportsPage", () => {
     });
     fireEvent.change(screen.getByLabelText("Search reports"), { target: { value: "zzz-no-match" } });
     await waitFor(() => {
-      expect(screen.getByText("No reports match these filters.")).toBeDefined();
+      expect(screen.getByText("No matching reports")).toBeDefined();
     });
   });
 
@@ -242,8 +242,10 @@ describe("ReportsPage", () => {
     await waitFor(() => {
       expect(screen.getByText("2 Campaigns Selected")).toBeDefined();
     });
+    fireEvent.click(screen.getByRole("button", { name: /^Date Range/ }));
     fireEvent.change(screen.getByLabelText("Report from date"), { target: { value: "2024-01-01" } });
     fireEvent.change(screen.getByLabelText("Report to date"), { target: { value: "2024-01-31" } });
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
     fireEvent.click(screen.getByRole("button", { name: /Generate Report/ }));
     await waitFor(() => {
       const filters = reportBody["filters"] as Record<string, string[]>;
@@ -261,7 +263,7 @@ describe("ReportsPage", () => {
     // Demo rows are stamped Mar 2024: a 7-day window hides them all.
     fireEvent.change(screen.getByLabelText("Filter by time"), { target: { value: "Last 7 Days" } });
     await waitFor(() => {
-      expect(screen.getByText("No reports match these filters.")).toBeDefined();
+      expect(screen.getByText("No matching reports")).toBeDefined();
     });
     fireEvent.change(screen.getByLabelText("Filter by time"), { target: { value: "All Time" } });
     await waitFor(() => {

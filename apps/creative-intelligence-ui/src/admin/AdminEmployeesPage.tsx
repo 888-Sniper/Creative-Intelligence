@@ -437,7 +437,7 @@ export function AdminEmployeesPage() {
 
       <Panel title="Employee Access" sub="Search, approve, suspend, revoke, and change roles.">
         <div className="rep-filters" style={{ marginBottom: 12 }}>
-          <span className="rep-search">
+          <span className="rep-search admin-search">
             <Icon name="search" size={15} />
             <input
               type="text"
@@ -535,7 +535,7 @@ export function AdminEmployeesPage() {
                         </td>
                         <td>{e.last_login_at ? friendlyDate(e.last_login_at) : "Never signed in"}</td>
                         <td>
-                          <span className="row-actions" style={{ flexWrap: "wrap", gap: 4, rowGap: 8, columnGap: 12 }}>
+                          <span className="row-actions">
                             {e.status === "pending" && (
                               <button
                                 type="button"
@@ -577,36 +577,47 @@ export function AdminEmployeesPage() {
                                 Reactivate
                               </button>
                             )}
-                            {e.status !== "revoked" && (
-                              <button
-                                type="button"
-                                className="link-teal"
-                                disabled={busyKey !== null}
-                                onClick={() =>
-                                  void runAction("revoke", e.id, e.role, "")
-                                }
-                              >
-                                Revoke
-                              </button>
-                            )}
-                            <button
-                              type="button"
-                              className="link-teal"
-                                disabled={busyKey !== null}
-                              onClick={() =>
-                                void runAction("role", e.id, e.role, nextRole)
-                              }
-                            >
-                              Make {nextRole === "admin" ? "Admin" : "Employee"}
-                            </button>
-                            <button
-                              type="button"
-                              className="link-teal"
-                              disabled={busyKey !== null}
-                              onClick={() => void invalidateSessions(e.id)}
-                            >
-                              Invalidate Sessions
-                            </button>
+                            <details className="row-menu">
+                              {/* role=button: some AT/summary mappings omit the
+                                  disclosure role, and tests drive this control. */}
+                              <summary role="button" aria-label={`More actions for ${e.email}`} title="More actions">
+                                <Icon name="dots" size={16} />
+                              </summary>
+                              <div className="row-menu-pop" role="menu">
+                                {e.status !== "revoked" && (
+                                  <button
+                                    type="button"
+                                    disabled={busyKey !== null}
+                                    onClick={(ev) => {
+                                      ev.currentTarget.closest("details")?.removeAttribute("open");
+                                      void runAction("revoke", e.id, e.role, "");
+                                    }}
+                                  >
+                                    Revoke
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  disabled={busyKey !== null}
+                                  onClick={(ev) => {
+                                    ev.currentTarget.closest("details")?.removeAttribute("open");
+                                    void runAction("role", e.id, e.role, nextRole);
+                                  }}
+                                >
+                                  Make {nextRole === "admin" ? "Admin" : "Employee"}
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={busyKey !== null}
+                                  onClick={(ev) => {
+                                    ev.currentTarget.closest("details")?.removeAttribute("open");
+                                    void invalidateSessions(e.id);
+                                  }}
+                                >
+                                  Invalidate Sessions
+                                </button>
+                              </div>
+                            </details>
                           </span>
                         </td>
                       </tr>
@@ -693,23 +704,31 @@ export function AdminEmployeesPage() {
       </div>
 
       <div className="section-gap" />
-      <Panel
-        title="Demo Dataset"
-        sub="Populate the ten synthetic campaigns and creatives. Upserts only: existing rows are never duplicated or deleted."
-        action={<DemoDataBadge />}
-      >
-        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-          <LoadingButton type="button" className="btn-outline" loading={seedBusy}
-            loadingLabel="Seeding…" spinnerClass="spinner dark" disabled={seedBusy}
-            onClick={() => void seedDemo()}>
-            <Icon name="download" size={15} /> Seed Demo Data
-          </LoadingButton>
-          {seedResult ? <span className="panel-sub" role="status" style={{ margin: 0 }}>{seedResult}</span> : null}
+      <details className="adv-disclosure">
+        <summary>
+          <span className="adv-title">Advanced · Demo Tools</span>
+          <span className="panel-sub">Synthetic dataset controls for demo environments — not production access management.</span>
+        </summary>
+        <div style={{ marginTop: 10 }}>
+          <Panel
+            title="Demo Dataset"
+            sub="Populate the ten synthetic campaigns and creatives. Upserts only: existing rows are never duplicated or deleted."
+            action={<DemoDataBadge />}
+          >
+            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <LoadingButton type="button" className="btn-outline" loading={seedBusy}
+                loadingLabel="Seeding…" spinnerClass="spinner dark" disabled={seedBusy}
+                onClick={() => void seedDemo()}>
+                <Icon name="download" size={15} /> Seed Demo Data
+              </LoadingButton>
+              {seedResult ? <span className="panel-sub" role="status" style={{ margin: 0 }}>{seedResult}</span> : null}
+            </div>
+            <p className="panel-sub" style={{ marginTop: 8 }}>
+              Demo-only: synthetic campaigns and creatives are namespaced separately and never mix with real employee access data above.
+            </p>
+          </Panel>
         </div>
-        <p className="panel-sub" style={{ marginTop: 8 }}>
-          Demo-only: synthetic campaigns and creatives are namespaced separately and never mix with real employee access data above.
-        </p>
-      </Panel>
+      </details>
 
       <div className="section-gap" />
       <Panel

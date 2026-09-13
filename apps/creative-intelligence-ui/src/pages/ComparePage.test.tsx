@@ -146,7 +146,7 @@ describe("ComparePage", () => {
     renderPage();
     fireEvent.click(screen.getByRole("button", { name: "Apply Comparison" }));
     await waitFor(() => {
-      expect(screen.getByText(/Select At Least Two/)).toBeDefined();
+      expect(screen.getByRole("alert").textContent).toBe("Select at least two campaigns to compare.");
     });
   });
 

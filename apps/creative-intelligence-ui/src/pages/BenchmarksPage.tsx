@@ -289,7 +289,7 @@ export function BenchmarksPage() {
                   {views.slice(0, 4).map((v) => (
                     <button key={v.id} type="button" className="cmp-card" onClick={() => applyView(v)}
                       style={{ textAlign: "left", cursor: "pointer", padding: 12 }}>
-                      <span className="insight-ico" style={{ background: "#DFF5F1", marginBottom: 6 }}>
+                      <span className="insight-ico" style={{ background: "#E5F5F2", marginBottom: 6 }}>
                         <Icon name="bookmark" size={18} />
                       </span>
                       <strong style={{ display: "block", fontSize: 13 }}>{v.name}</strong>
@@ -297,7 +297,7 @@ export function BenchmarksPage() {
                     </button>
                   ))}
                 </div>
-              ) : <EmptyState text="No saved benchmarks yet. Use Create Benchmark to save the current setup." />
+              ) : <EmptyState compact icon="bookmark" title="No saved benchmarks" text="Use Create Benchmark to save the current setup." />
             )}
           </Panel>
           <Panel
@@ -356,7 +356,7 @@ export function BenchmarksPage() {
                     </tbody>
                   </table>
                 </div>
-              ) : <EmptyState text="No benchmarks in the current scope." />
+              ) : <EmptyState compact icon="bars" title="No benchmarks in scope" text="Upload campaign data or loosen the filters." />
             ) : benchmarks.error ? (
               <EmptyState text={benchmarks.error} />
             ) : <Skeleton height={200} />}
@@ -380,13 +380,13 @@ export function BenchmarksPage() {
                   </div>
                 ))}
               </div>
-            ) : <EmptyState text="Tick at least two benchmark rows above to compare them here." />}
+            ) : <EmptyState compact icon="compare" title="Nothing selected" text="Tick at least two benchmark rows above to compare them here." />}
           </Panel>
         </div>
         <div className="rail-stack">
           <Panel title="Benchmark Insights" sub="Understand the data behind these benchmarks.">
             <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 10 }}>
-              <span className="insight-ico" style={{ background: "#DFF5F1" }}>
+              <span className="insight-ico" style={{ background: "#E5F5F2" }}>
                 <Icon name="bars" size={22} />
               </span>
               <div>

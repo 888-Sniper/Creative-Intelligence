@@ -149,7 +149,7 @@ function RetentionSpark({ creativeKey }: { creativeKey: string }) {
   ).join(" ");
   return (
     <svg className="spark" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Retention curve">
-      <path d={d} fill="none" stroke="#0E7C8C" strokeWidth={1.8} strokeLinejoin="round" />
+      <path d={d} fill="none" stroke="#0A9183" strokeWidth={1.8} strokeLinejoin="round" />
     </svg>
   );
 }
@@ -457,7 +457,7 @@ export function CreativesPage() {
               ) : null}
               <div className="kpi-grid">
                 <div className="kpi-card">
-                  <span className="kpi-ico" style={{ background: "#DFF5F1", color: "#009485" }}>
+                  <span className="kpi-ico" style={{ background: "#E5F5F2", color: "#0A9183" }}>
                     <Icon name="play" size={20} />
                   </span>
                   <div className="kpi-body">
@@ -472,7 +472,7 @@ export function CreativesPage() {
                     <KpiCard label="Total Clicks" display={fmtCompact(num(compare.metrics.clicks?.current))}
                       icon="click" tint="#E7F1FB" metricLabel="Clicks" compare={compare} />
                     <KpiCard label="Average ROAS" display={`${num(compare.metrics.roas?.current).toFixed(1)}x`}
-                      icon="users" tint="#DFF5F1" metricLabel="ROAS" compare={compare} />
+                      icon="users" tint="#E5F5F2" metricLabel="ROAS" compare={compare} />
                   </>
                 ) : (
                   <>
@@ -481,7 +481,7 @@ export function CreativesPage() {
                     <KpiCard label="Total Clicks" display={fmtCompact(pooled.clicks)}
                       icon="click" tint="#E7F1FB" metricLabel="Clicks" compare={null} />
                     <KpiCard label="Average ROAS" display={pooled.roas == null ? "—" : `${pooled.roas.toFixed(1)}x`}
-                      icon="users" tint="#DFF5F1" metricLabel="ROAS" compare={null} />
+                      icon="users" tint="#E5F5F2" metricLabel="ROAS" compare={null} />
                   </>
                 )}
               </div>
@@ -523,7 +523,7 @@ export function CreativesPage() {
                     );
                   })}
                 </div>
-              ) : <EmptyState text="No creatives in the current scope." />
+              ) : <EmptyState icon="creatives" title="No creatives yet" text="Upload creative data or loosen the filters to see top performers." />
             ) : <Skeleton height={190} />}
           </Panel>
           <Panel
@@ -637,7 +637,7 @@ export function CreativesPage() {
                     })}
                   </div>
                 )
-              ) : <EmptyState text="No creatives match the current filters." />
+              ) : <EmptyState compact icon="creatives" title="No matches" text="Try loosening the current filters." />
             ) : creatives.error ? (
               <EmptyState text={creatives.error} />
             ) : <Skeleton height={220} />}
@@ -657,7 +657,7 @@ export function CreativesPage() {
                 <div>
                   {learnings.map((l) => (
                     <div className="insight" key={l.title}>
-                      <span className="insight-ico" style={{ background: "#DFF5F1" }}>
+                      <span className="insight-ico" style={{ background: "#E5F5F2" }}>
                         <Icon name={l.icon} size={20} />
                       </span>
                       <div>
@@ -667,7 +667,7 @@ export function CreativesPage() {
                     </div>
                   ))}
                 </div>
-              ) : <EmptyState text="Not enough data for learnings yet." />
+              ) : <EmptyState compact icon="spark" title="No learnings yet" text="Learnings appear once creatives are in scope." />
             ) : <Skeleton height={220} />}
           </Panel>
           {/* With zero creatives in the scoped group there is no
@@ -688,7 +688,7 @@ export function CreativesPage() {
                     </div>
                   ))}
                 </div>
-              ) : <EmptyState text="Not enough data for recommendations yet." />
+              ) : <EmptyState compact icon="target" title="No recommendations yet" text="Test ideas appear once creatives are in scope." />
             ) : <Skeleton height={220} />}
           </Panel>
         </div>

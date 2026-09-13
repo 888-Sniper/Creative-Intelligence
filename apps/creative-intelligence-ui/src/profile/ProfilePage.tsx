@@ -19,6 +19,13 @@ function displayName(em: PublicEmployee): string {
   return `${em.first_name || ""} ${em.last_name || ""}`.trim() || em.email || "—";
 }
 
+/** Backend stores lowercase codes ("admin", "google"): present them
+ *  Title Cased. Unknown/empty values render as-is, never invented. */
+function cap(raw: string): string {
+  if (!raw) return "—";
+  return raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
+}
+
 /** Friendly date for profile surfaces: never a raw ISO string. Empty
  *  or unparseable input renders as "—", never invented. */
 export function friendlyDate(raw: string): string {
@@ -87,6 +94,7 @@ export function ProfilePage() {
   const [status, setStatus] = useState("");
   const [sessionStatus, setSessionStatus] = useState("");
   const [op, setOp] = useState<null | "save" | "avatar" | "revoke">(null);
+  const [copied, setCopied] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const firstRef = useRef<HTMLInputElement | null>(null);
 
@@ -226,18 +234,18 @@ export function ProfilePage() {
                     {displayName(employee)}
                   </p>
                   <p className="panel-sub" style={{ marginTop: 4 }}>
-                    {`${employee.role} · ${employee.status}`}
+                    {`${cap(employee.role)} · ${cap(employee.status)}`}
                   </p>
                   <p className="panel-sub" style={{ marginTop: 2 }}>{employee.email}</p>
                   <p className="panel-sub" style={{ marginTop: 2 }}>
-                    Team unavailable · Member since {employee.created_at ? friendlyDate(employee.created_at) : "unavailable"}
-                    {employee.provider ? ` · Signed in via ${employee.provider}` : ""}
+                    Team — · Member since {employee.created_at ? friendlyDate(employee.created_at) : "unavailable"}
+                    {employee.provider ? ` · Signed in via ${cap(employee.provider)}` : ""}
                   </p>
                   <div className="chip-row" style={{ marginTop: 12 }}>
                     <button type="button" className="btn-outline" onClick={() => firstRef.current?.focus()}>
                       <Icon name="user" size={14} /> Edit Profile
                     </button>
-                    <button type="button" className="btn-outline" onClick={() => fileRef.current?.click()}>
+                    <button type="button" className="btn-primary" onClick={() => fileRef.current?.click()}>
                       <Icon name="download" size={14} /> Upload Photo
                     </button>
                   </div>
@@ -290,16 +298,21 @@ export function ProfilePage() {
                   />
                 </div>
               </div>
-              <div className="field" style={{ marginTop: 12 }}>
-                <label htmlFor="p-avatar">Avatar URL (Optional)</label>
-                <input
-                  id="p-avatar"
-                  type="text"
-                  value={avatarUrl}
-                  onChange={(e) => setAvatarUrl(e.target.value)}
-                  placeholder="avatar image link or blank"
-                />
-              </div>
+              <details style={{ marginTop: 12 }}>
+                <summary className="panel-sub" style={{ cursor: "pointer", fontWeight: 600 }}>
+                  Advanced avatar options
+                </summary>
+                <div className="field" style={{ marginTop: 8 }}>
+                  <label htmlFor="p-avatar">Avatar URL (Optional)</label>
+                  <input
+                    id="p-avatar"
+                    type="text"
+                    value={avatarUrl}
+                    onChange={(e) => setAvatarUrl(e.target.value)}
+                    placeholder="avatar image link or blank"
+                  />
+                </div>
+              </details>
               <p className="panel-sub" style={{ marginTop: 10 }}>
                 …Or upload an image (JPEG/PNG/WebP, up to 2 MB) with Upload Photo above.
               </p>
@@ -319,7 +332,30 @@ export function ProfilePage() {
               <dl className="detail-list">
                 <div>
                   <dt>Employee ID</dt>
-                  <dd>{employee.id || "—"}</dd>
+                  <dd>
+                    <span className="id-copy">
+                      <code title={employee.id || undefined}>{employee.id || "—"}</code>
+                      {employee.id ? (
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          aria-label={copied ? "Employee ID copied" : "Copy Employee ID"}
+                          title={copied ? "Copied" : "Copy Employee ID"}
+                          onClick={() => {
+                            try {
+                              void navigator.clipboard?.writeText(employee.id);
+                            } catch {
+                              /* clipboard unavailable: selection still visible via title */
+                            }
+                            setCopied(true);
+                            window.setTimeout(() => setCopied(false), 1500);
+                          }}
+                        >
+                          <Icon name={copied ? "check" : "copy"} size={14} />
+                        </button>
+                      ) : null}
+                    </span>
+                  </dd>
                 </div>
                 <div>
                   <dt>Work Email</dt>

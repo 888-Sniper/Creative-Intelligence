@@ -189,6 +189,76 @@ function StatusPill({ status }: { status: HistoryRow["status"] }) {
   );
 }
 
+/** Single-cell Date Range popover for the generator row: one button shows
+ *  the active range (or All Time) and opens From/To inputs. Same repFrom /
+ *  repTo state as the old joined control — only the presentation fits its
+ *  grid cell so all four config fields share one row. */
+function ReportRangeField({ from, to, onFrom, onTo }: {
+  from: string; to: string; onFrom: (v: string) => void; onTo: (v: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const boxRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open ]);
+  const short = (iso: string) => {
+    if (!iso) return "";
+    const d = new Date(`${iso}T00:00:00`);
+    if (Number.isNaN(d.getTime())) return iso;
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  };
+  const f = short(from);
+  const t = short(to);
+  const label = f || t ? `${f || "…"} – ${t || "…"}` : "All Time";
+  return (
+    <div className="field">
+      <label id="rep-range-label">Date Range</label>
+      <div className="daterange" ref={boxRef}>
+        <button type="button" className="daterange-btn" aria-labelledby="rep-range-label rep-range-val"
+          aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+          <Icon name="calendar" size={15} />
+          <span id="rep-range-val">{label}</span>
+        </button>
+        {open ? (
+          <div className="daterange-pop" role="group" aria-labelledby="rep-range-label">
+            <div className="field">
+              <label htmlFor="rep-range-from">From</label>
+              <input id="rep-range-from" type="date" aria-label="Report from date" value={from}
+                onChange={(e) => onFrom(e.target.value)} />
+            </div>
+            <div className="field">
+              <label htmlFor="rep-range-to">To</label>
+              <input id="rep-range-to" type="date" aria-label="Report to date" value={to}
+                onChange={(e) => onTo(e.target.value)} />
+            </div>
+            <div className="daterange-actions">
+              <button type="button" className="link-teal"
+                onClick={() => { onFrom(""); onTo(""); }}>
+                Clear
+              </button>
+              <button type="button" className="btn-primary" onClick={() => setOpen(false)}>
+                Done
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function MultiCheck({
   id,
   label,
@@ -466,15 +536,7 @@ export function ReportsPage() {
                   {BENCH_OPTIONS.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
                 </select>
               </div>
-              <div className="field field-span-2">
-                <label id="rep-range-label">Date Range</label>
-                <div className="date-pair" role="group" aria-labelledby="rep-range-label">
-                  <input type="date" aria-label="Report from date" value={repFrom}
-                    onChange={(e) => setRepFrom(e.target.value)} />
-                  <input type="date" aria-label="Report to date" value={repTo}
-                    onChange={(e) => setRepTo(e.target.value)} />
-                </div>
-              </div>
+              <ReportRangeField from={repFrom} to={repTo} onFrom={setRepFrom} onTo={setRepTo} />
             </div>
             <p style={{ fontSize: 13, fontWeight: 700, margin: "10px 0 6px" }}>Output Format</p>
             <div className="fmt-row">
@@ -599,7 +661,7 @@ export function ReportsPage() {
                 </table>
               </div>
             ) : (
-              <EmptyState text={query || statusFilter !== "All Statuses" || formatFilter !== "All Formats" || timeFilter !== "All Time" ? "No reports match these filters." : "No reports yet. Configure the generator above to create your first report."} />
+              <EmptyState compact icon="report" title={query || statusFilter !== "All Statuses" || formatFilter !== "All Formats" || timeFilter !== "All Time" ? "No matching reports" : "No reports yet"} text={query || statusFilter !== "All Statuses" || formatFilter !== "All Formats" || timeFilter !== "All Time" ? "Try loosening the search or filters." : "Configure the generator above to create your first report."} />
             )}
           </Panel>
         </div>
@@ -639,7 +701,7 @@ export function ReportsPage() {
                 ))}
               </ul>
             ) : (
-              <EmptyState text="No generated files yet." />
+              <EmptyState compact icon="report" title="No files yet" text="Generated files will appear here." />
             )}
             <button type="button" className="btn-outline" style={{ width: "100%", marginTop: 8 }}
               onClick={() => { setQuery(""); setStatusFilter("All Statuses"); setFormatFilter("All Formats"); setTimeFilter("All Time"); }}>

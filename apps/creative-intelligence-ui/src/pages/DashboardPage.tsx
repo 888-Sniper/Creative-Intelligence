@@ -207,7 +207,7 @@ export function DashboardPage() {
   const leftLabel = TREND_METRICS.find((m) => m.value === leftMetric)?.label ?? "Impressions";
   const rightLabel = TREND_METRICS.find((m) => m.value === rightMetric)?.label ?? "Clicks";
   const trendSeries = [
-    { label: leftLabel, color: "#00B3A0", soft: "#DDF3F0", points: trend.map((p) => num(p[leftMetric])) },
+    { label: leftLabel, color: "#0A9183", soft: "#E5F5F2", points: trend.map((p) => num(p[leftMetric])) },
     { label: rightLabel, color: "#1D3A8F", soft: "#E4EAF7", points: trend.map((p) => num(p[rightMetric])), axis: "right" as const },
   ];
 
@@ -330,7 +330,7 @@ export function DashboardPage() {
         const tied = verdict === "tie";
         items.push({
           icon: "trend",
-          tint: "#DFF5F1",
+          tint: "#E5F5F2",
           title: tied
             ? `${titleCase(a.key)} and ${titleCase(b.key)} Tie on CTR`
             : `${titleCase(a.key)} Hooks Drive Higher CTR`,
@@ -356,7 +356,7 @@ export function DashboardPage() {
         const diff = percentDiff(topCtr, bottomCtr);
         items.push({
           icon: "users",
-          tint: "#DFF5F1",
+          tint: "#E5F5F2",
           title: verdict === "tie"
             ? "Creator and Branded Content Tie on CTR"
             : `${topName} Content Outperforms ${topName === "Creator" ? "Branded" : "Creator"} Content`,
@@ -435,7 +435,7 @@ export function DashboardPage() {
   }, [curve]);
 
   const kpiConfigs = [
-    { label: "Total Impressions", metric: "impressions", display: compare ? fmtCompact(num(compare.metrics.impressions?.current)) : "", icon: "users", tint: "#DFF5F1", color: "#009485" },
+    { label: "Total Impressions", metric: "impressions", display: compare ? fmtCompact(num(compare.metrics.impressions?.current)) : "", icon: "users", tint: "#E5F5F2", color: "#0A9183" },
     { label: "Total Clicks", metric: "clicks", display: compare ? fmtCompact(num(compare.metrics.clicks?.current)) : "", icon: "click", tint: "#E7F1FB", color: "#2F6FBE" },
     { label: "Total Spend", metric: "spend", display: compare ? fmtMoney(num(compare.metrics.spend?.current)) : "", icon: "coin", tint: "#E4F4ED", color: "#0E7C5B" },
     { label: "Average ROAS", metric: "roas", display: compare ? fmtMult(num(compare.metrics.roas?.current)) : "", icon: "bars", tint: "#E7F1FB", color: "#2F6FBE" },
@@ -513,14 +513,16 @@ export function DashboardPage() {
           )}
         >
           {daily ? (
-            <>
-              <TrendChart series={trendSeries} labels={trend.map((p) => shortDay(p.date))} height={205} />
-              <div className="legend">
-                {trendSeries.map((s) => (
-                  <span key={s.label}><i style={{ background: s.color }} />{s.label}</span>
-                ))}
-              </div>
-            </>
+            trend.length ? (
+              <>
+                <TrendChart series={trendSeries} labels={trend.map((p) => shortDay(p.date))} height={205} />
+                <div className="legend">
+                  {trendSeries.map((s) => (
+                    <span key={s.label}><i style={{ background: s.color }} />{s.label}</span>
+                  ))}
+                </div>
+              </>
+            ) : <EmptyState compact icon="trend" title="No trend data" text="Performance trends appear once campaign data is in scope." />
           ) : <Skeleton height={205} />}
         </Panel>
         <Panel
@@ -553,11 +555,11 @@ export function DashboardPage() {
                   format={(v) => formatBench(benchMetric, v)}
                 />
                 <div className="legend">
-                  <span><i style={{ background: "#0E7C8C", borderRadius: 2 }} />Your Campaigns</span>
+                  <span><i style={{ background: "#0A9183", borderRadius: 2 }} />Your Campaigns</span>
                   <span><i style={{ background: "#CBD8E6", borderRadius: 2 }} />{baseline === "Top Performer" ? "Top Performer" : "Scope Average"}</span>
                 </div>
               </>
-            ) : <EmptyState text="No platform benchmarks in the current scope." />
+            ) : <EmptyState compact icon="bars" title="No benchmarks in scope" text="Upload campaign data or loosen the filters." />
           ) : <Skeleton height={205} />}
         </Panel>
       </div>
@@ -620,7 +622,7 @@ export function DashboardPage() {
                     </tbody>
                   </table>
                 </div>
-              ) : <EmptyState text="No creatives in the current scope." />
+              ) : <EmptyState compact icon="creatives" title="No creatives yet" text="Upload creative data or loosen the filters." />
             ) : <Skeleton height={220} />}
           </Panel>
           <Panel title="Retention & Hook Insights">
@@ -668,17 +670,17 @@ export function DashboardPage() {
             {tab === "hooks" ? (
               hookCompare.length ? (
                 <GroupBars height={190} groups={hookCompare} format={(v) => `${v.toFixed(1)}%`} />
-              ) : <EmptyState text="No hook benchmarks in the current scope." />
+              ) : <EmptyState compact icon="spark" title="No hook data" text="Hook analysis appears once annotated creatives are in scope." />
             ) : null}
             {tab === "length" ? (
               lengthCompare.length ? (
                 <GroupBars height={190} groups={lengthCompare} format={(v) => `${v.toFixed(1)}%`} />
-              ) : <EmptyState text="No duration data in the current scope." />
+              ) : <EmptyState compact icon="play" title="No duration data" text="Length analysis appears once annotated creatives are in scope." />
             ) : null}
             {tab === "format" ? (
               formatCompare.length ? (
                 <GroupBars height={190} groups={formatCompare} format={(v) => `${v.toFixed(1)}%`} />
-              ) : <EmptyState text="No format data in the current scope." />
+              ) : <EmptyState compact icon="grid" title="No format data" text="Format comparison appears once annotated creatives are in scope." />
             ) : null}
           </Panel>
       </div>

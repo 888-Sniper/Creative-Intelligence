@@ -274,7 +274,7 @@ export function ComparePage() {
     const names = [...new Set(list.filter(Boolean))].slice(0, 4);
     if (names.length < 2) {
       setCampaignData(null);
-      setError("Select At Least Two Campaigns To Compare.");
+      setError("Select at least two campaigns to compare.");
       return;
     }
     setLoading(true);
@@ -302,7 +302,7 @@ export function ComparePage() {
     if (seen.length < 2) {
       setCreativeData(null);
       setCreativeKeys([]);
-      setError("Select At Least Two Creatives To Compare.");
+      setError("Select at least two creatives to compare.");
       return;
     }
     setLoading(true);
@@ -618,7 +618,7 @@ export function ComparePage() {
           </div>
           <div className="field">
             <label htmlFor="cmp-add">{mode === "campaigns" ? "Select Campaigns" : "Select Creatives"}</label>
-            <div className="chip-row" style={{ marginBottom: 8 }}>
+            <div className="chip-row" style={{ marginBottom: picked.length ? 8 : 0 }}>
               {picked.map((p, i) => (
                 <span key={p} className="chip" style={{ cursor: "default" }}>
                   <i style={{ width: 8, height: 8, borderRadius: "50%", background: COLORS[i % COLORS.length] }} />
@@ -629,7 +629,6 @@ export function ComparePage() {
                   </button>
                 </span>
               ))}
-              {picked.length === 0 ? <span className="panel-sub">Nothing selected yet.</span> : null}
             </div>
             <select id="cmp-add" value="" onChange={(e) => { addOption(e.target.value); e.target.value = ""; }}>
               <option value="">{mode === "campaigns" ? "Add a campaign…" : "Add a creative…"}</option>
@@ -793,7 +792,7 @@ export function ComparePage() {
                 <div>
                   {takeaways.map((t) => (
                     <div className="insight" key={t}>
-                      <span className="insight-ico" style={{ background: "#DFF5F1" }}>
+                      <span className="insight-ico" style={{ background: "#E5F5F2" }}>
                         <Icon name="check" size={18} />
                       </span>
                       <div><p style={{ color: "var(--shell-navy)" }}>{t}</p></div>
@@ -823,7 +822,12 @@ export function ComparePage() {
         </>
       ) : !loading ? (
         <Panel title="No Comparison Yet">
-          <EmptyState text="Select two to four campaigns or creatives, then Apply Comparison." />
+          <EmptyState
+            compact
+            icon="compare"
+            title="Select at least two campaigns to compare"
+            text="Pick two to four campaigns or creatives above, then Apply Comparison."
+          />
         </Panel>
       ) : null}
       <details className="panel" style={{ marginTop: 12 }}>

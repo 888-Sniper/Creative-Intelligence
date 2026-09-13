@@ -272,7 +272,7 @@ export function AskPage() {
                   <Panel title="Revenue Trend">
                     {daily ? (
                       <TrendChart
-                        series={[{ label: "Revenue", color: "#00B3A0", soft: "#DDF3F0", points: roi.values }]}
+                        series={[{ label: "Revenue", color: "#0A9183", soft: "#E5F5F2", points: roi.values }]}
                         labels={roi.labels}
                       />
                     ) : <Skeleton height={200} />}
@@ -317,7 +317,11 @@ export function AskPage() {
             </Panel>
           ) : (
             <Panel title="Ask a Question to Begin">
-              <p className="panel-sub">Answers cite your uploaded data first and always show their scope.</p>
+              <EmptyState
+                icon="chat"
+                title="Ask your first question"
+                text="Answers cite your uploaded data first and always show their scope. Try a suggestion on the right."
+              />
             </Panel>
           )}
         </div>
@@ -351,7 +355,7 @@ export function AskPage() {
                     </div>
                   ))}
                 </div>
-              ) : <EmptyState text="No analyst chats yet." />
+              ) : <EmptyState compact icon="chat" title="No recent chats" text="Your conversations will appear here." />
             )}
           </Panel>
         </div>

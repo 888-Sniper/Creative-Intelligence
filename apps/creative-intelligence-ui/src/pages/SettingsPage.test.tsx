@@ -106,7 +106,7 @@ describe("SettingsPage", () => {
     await waitFor(() => {
       expect(screen.getByText("General Settings")).toBeDefined();
     });
-    expect((screen.getByLabelText("Workspace Name") as HTMLInputElement).value).toBe("Alex's Workspace");
+    expect((screen.getByLabelText("Workspace Name") as HTMLInputElement).value).toBe("Foap Creative Intelligence");
     expect((screen.getByLabelText("Theme") as HTMLSelectElement).value).toBe("light");
     expect((screen.getByLabelText("Accent Color") as HTMLSelectElement).value).toBe("Teal (Default)");
     expect((screen.getByLabelText("Interface Density") as HTMLSelectElement).value).toBe("Comfortable");
@@ -116,6 +116,16 @@ describe("SettingsPage", () => {
     expect(screen.getByText("Advanced")).toBeDefined();
     expect(screen.getByRole("button", { name: "Save Changes" })).toBeDefined();
     expect(screen.getByText("No unsaved changes.")).toBeDefined();
+  });
+
+  it("retires the legacy mock workspace name on load", async () => {
+    window.localStorage.setItem("ci-settings-prefs", JSON.stringify({ workspace: "Alex's Workspace" }));
+    mockFetch();
+    renderSettings();
+    await waitFor(() => {
+      expect((screen.getByLabelText("Workspace Name") as HTMLInputElement).value)
+        .toBe("Foap Creative Intelligence");
+    });
   });
 
   it("saves and resets workspace preferences", async () => {
@@ -136,7 +146,7 @@ describe("SettingsPage", () => {
     await waitFor(() => {
       expect(screen.getByText("Defaults Restored.")).toBeDefined();
     });
-    expect((screen.getByLabelText("Workspace Name") as HTMLInputElement).value).toBe("Alex's Workspace");
+    expect((screen.getByLabelText("Workspace Name") as HTMLInputElement).value).toBe("Foap Creative Intelligence");
   });
 
   it("stages appearance choices and applies them only on Save", async () => {

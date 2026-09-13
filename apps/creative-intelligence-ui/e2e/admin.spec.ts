@@ -27,9 +27,13 @@ test.describe("admin journey", () => {
     await row.getByRole("button", { name: "Reactivate" }).click();
     await expect(row.getByRole("button", { name: "Suspend" })).toBeVisible();
     // Role change employee -> admin -> employee (accept confirms).
+    // Role actions live in the row overflow menu; it closes after each pick.
+    await row.getByRole("button", { name: /More actions/ }).click();
     await row.getByRole("button", { name: "Make admin" }).click();
+    await row.getByRole("button", { name: /More actions/ }).click();
     await expect(row.getByRole("button", { name: "Make employee" })).toBeVisible();
     await row.getByRole("button", { name: "Make employee" }).click();
+    await row.getByRole("button", { name: /More actions/ }).click();
     await expect(row.getByRole("button", { name: "Make admin" })).toBeVisible();
     // Audit trail records the lifecycle (codes render Title Cased).
     await expect(page.getByText("Employee Created").first()).toBeVisible();

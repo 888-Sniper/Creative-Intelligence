@@ -116,7 +116,7 @@ export function GroupBars({ groups, height = 230, format }: {
         return (
           <g key={g.label}>
             <rect x={cx - bw - 3} y={y(g.yours)} width={bw}
-              height={Math.max(1, y(0) - y(g.yours))} rx={3} fill="#0E7C8C" />
+              height={Math.max(1, y(0) - y(g.yours))} rx={3} fill="#0A9183" />
             <rect x={cx + 3} y={y(g.bench)} width={bw}
               height={Math.max(1, y(0) - y(g.bench))} rx={3} fill="#CBD8E6" />
             <text x={cx} y={H - 7} textAnchor="middle" fontSize={10.5} fill="#64748F">
@@ -132,7 +132,7 @@ export function GroupBars({ groups, height = 230, format }: {
 export function BarLegend({ yours, bench }: { yours: string; bench: string }) {
   return (
     <div className="legend">
-      <span><i style={{ background: "#0E7C8C", borderRadius: 2 }} />{yours}</span>
+      <span><i style={{ background: "#0A9183", borderRadius: 2 }} />{yours}</span>
       <span><i style={{ background: "#CBD8E6", borderRadius: 2 }} />{bench}</span>
     </div>
   );
@@ -160,13 +160,13 @@ export function RetentionCurve({ points, callout, height = 190 }: {
           </text>
         </g>
       ))}
-      <path d={area} fill="#DDF3F0" opacity={0.8} />
-      <path d={line} fill="none" stroke="#00B3A0" strokeWidth={2.2}
+      <path d={area} fill="#E5F5F2" opacity={0.8} />
+      <path d={line} fill="none" stroke="#0A9183" strokeWidth={2.2}
         strokeLinejoin="round" strokeLinecap="round" />
       {points.length > 1 ? (
         <g>
           <circle cx={x(points[1][0])} cy={y(points[1][1])} r={4.5}
-            fill="#fff" stroke="#00B3A0" strokeWidth={2.5} />
+            fill="#fff" stroke="#0A9183" strokeWidth={2.5} />
           {callout ? (
             <text x={x(points[1][0]) + 8} y={y(points[1][1]) - 12}
               fontSize={11} fontWeight={700} fill="#16213A">{callout}</text>

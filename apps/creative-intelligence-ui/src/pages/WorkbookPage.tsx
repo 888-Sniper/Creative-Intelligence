@@ -32,23 +32,23 @@ interface CreativeRow {
 }
 
 const MODULES = [
-  { id: "summary", title: "Campaign Summary", body: "Performance overview across selected campaigns.", icon: "bars", tint: "#DFF3F0" },
-  { id: "breakdown", title: "Creative Breakdown", body: "Per-creative metrics with thumbnails.", icon: "play", tint: "#EFEAFB" },
-  { id: "benchmarks", title: "Benchmarks", body: "Compare against industry or custom benchmarks.", icon: "bars", tint: "#E7F1FB" },
-  { id: "compare", title: "Compare", body: "Side-by-side campaigns or creatives.", icon: "compare", tint: "#FBF3E2" },
-  { id: "insights", title: "Insights", body: "Key trends, patterns, and takeaways.", icon: "trend", tint: "#FCECEA" },
-  { id: "recommendations", title: "Recommendations", body: "AI-powered suggestions to improve performance.", icon: "spark", tint: "#E5F5EC" },
-  { id: "export", title: "Data Export", body: "Raw data tables and export options.", icon: "report", tint: "#F0E9FA" },
+  { id: "summary", title: "Campaign Summary", body: "Performance overview across selected campaigns.", icon: "bars", tint: "#E3F2EF" },
+  { id: "breakdown", title: "Creative Breakdown", body: "Per-creative metrics with thumbnails.", icon: "play", tint: "#ECEAF6" },
+  { id: "benchmarks", title: "Benchmarks", body: "Compare against industry or custom benchmarks.", icon: "bars", tint: "#E6EFF7" },
+  { id: "compare", title: "Compare", body: "Side-by-side campaigns or creatives.", icon: "compare", tint: "#F6F1E4" },
+  { id: "insights", title: "Insights", body: "Key trends, patterns, and takeaways.", icon: "trend", tint: "#F7ECEA" },
+  { id: "recommendations", title: "Recommendations", body: "AI-powered suggestions to improve performance.", icon: "spark", tint: "#E6F2EA" },
+  { id: "export", title: "Data Export", body: "Raw data tables and export options.", icon: "report", tint: "#ECE8F4" },
 ];
 
 const KPI_CHOICES = ["Impressions", "Clicks", "CTR", "CVR", "ROAS", "CPA", "Spend", "Conversions"];
 
 const TEMPLATES = [
-  { id: "executive", title: "Executive Summary", body: "High-level overview with key insights and recommendations.", icon: "bars", tint: "#DFF3F0", modules: ["summary", "insights", "recommendations"], kpis: ["Impressions", "Clicks", "ROAS"] },
-  { id: "deepdive", title: "Creative Performance Deep Dive", body: "Detailed creative analysis with benchmarks and comparisons.", icon: "play", tint: "#EFEAFB", modules: ["breakdown", "benchmarks", "compare", "insights"], kpis: ["Impressions", "CTR", "CVR", "ROAS"] },
-  { id: "platform", title: "Platform Comparison", body: "Compare performance across platforms and channels.", icon: "compare", tint: "#E7F1FB", modules: ["summary", "benchmarks", "compare"], kpis: ["Impressions", "Clicks", "Spend", "ROAS"] },
-  { id: "monthly", title: "Monthly Performance Report", body: "Track trends and performance over time.", icon: "trend", tint: "#E5F5EC", modules: ["summary", "breakdown", "insights", "export"], kpis: ["Impressions", "Clicks", "CTR", "Conversions", "Spend"] },
-  { id: "custom", title: "Custom Template", body: "Start with a clean workbook and build your own.", icon: "report", tint: "#F0E9FA", modules: [], kpis: ["Impressions"] },
+  { id: "executive", title: "Executive Summary", body: "High-level overview with key insights and recommendations.", icon: "bars", tint: "#E3F2EF", modules: ["summary", "insights", "recommendations"], kpis: ["Impressions", "Clicks", "ROAS"] },
+  { id: "deepdive", title: "Creative Performance Deep Dive", body: "Detailed creative analysis with benchmarks and comparisons.", icon: "play", tint: "#ECEAF6", modules: ["breakdown", "benchmarks", "compare", "insights"], kpis: ["Impressions", "CTR", "CVR", "ROAS"] },
+  { id: "platform", title: "Platform Comparison", body: "Compare performance across platforms and channels.", icon: "compare", tint: "#E6EFF7", modules: ["summary", "benchmarks", "compare"], kpis: ["Impressions", "Clicks", "Spend", "ROAS"] },
+  { id: "monthly", title: "Monthly Performance Report", body: "Track trends and performance over time.", icon: "trend", tint: "#E6F2EA", modules: ["summary", "breakdown", "insights", "export"], kpis: ["Impressions", "Clicks", "CTR", "Conversions", "Spend"] },
+  { id: "custom", title: "Custom Template", body: "Start with a clean workbook and build your own.", icon: "report", tint: "#ECE8F4", modules: [], kpis: ["Impressions"] },
 ];
 
 function num(v: unknown): number {
@@ -83,12 +83,17 @@ function PreviewDoc({ name, today, modules, kpis, previewKpis, top }: {
         {showSummary ? (
           previewKpis.length ? (
             <div className="wb-kpis-auto">
-              {previewKpis.map((k) => (
+              {previewKpis.slice(0, 4).map((k) => (
                 <div key={k.label} style={{ background: "var(--shell-bg)", border: "1px solid var(--shell-line)", borderRadius: 8, padding: "8px 10px" }}>
                   <strong style={{ display: "block", fontSize: 15, fontVariantNumeric: "tabular-nums" }}>{k.value}</strong>
                   <span className="panel-sub" style={{ fontSize: 11 }}>{k.label}</span>
                 </div>
               ))}
+              {previewKpis.length > 4 ? (
+                <div style={{ background: "transparent", border: "1px dashed var(--shell-line)", borderRadius: 8, padding: "8px 10px", display: "flex", alignItems: "center" }}>
+                  <span className="panel-sub" style={{ fontSize: 11 }}>+{previewKpis.length - 4} more in the finished report</span>
+                </div>
+              ) : null}
             </div>
           ) : <EmptyState text="Select KPIs to preview the summary block." />
         ) : null}
@@ -310,7 +315,7 @@ export function WorkbookPage() {
             <label htmlFor="wb-desc">Description (Optional)</label>
             <textarea
               id="wb-desc"
-              rows={3}
+              rows={2}
               maxLength={200}
               placeholder="Add a brief description for your workbook…"
               value={description}
@@ -370,7 +375,7 @@ export function WorkbookPage() {
           </div>
         </Panel>
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 8, padding: "8px 4px", borderTop: "1px solid var(--shell-line)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 14, padding: "8px 4px", borderTop: "1px solid var(--shell-line)" }}>
         <strong style={{ fontSize: 13.5 }}>Finish Your Workbook</strong>
         {status ? <span className="panel-sub" role="status" style={{ margin: 0, flex: "1 1 auto", minWidth: 200 }}>{status}</span> : <span style={{ flex: "1 1 auto" }} />}
         <button type="button" className="btn-outline" onClick={() => applyTemplate(template)}>

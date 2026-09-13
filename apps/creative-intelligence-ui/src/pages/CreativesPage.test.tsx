@@ -176,12 +176,12 @@ describe("CreativesPage", () => {
     }) as unknown as typeof fetch;
     renderPage();
     await waitFor(() => {
-      expect(screen.getByText("Not enough data for recommendations yet.")).toBeDefined();
+      expect(screen.getByText("No recommendations yet")).toBeDefined();
     });
     expect(screen.queryByText("Test Creator vs. Branded Intros")).toBeNull();
     expect(screen.queryByText("Try Shorter Video Lengths")).toBeNull();
     expect(screen.queryByText("Experiment With New Hook Types")).toBeNull();
-    expect(screen.getByText("Not enough data for learnings yet.")).toBeDefined();
+    expect(screen.getByText("No learnings yet")).toBeDefined();
   });
 
   it("reset restores the full scope and local view state", async () => {

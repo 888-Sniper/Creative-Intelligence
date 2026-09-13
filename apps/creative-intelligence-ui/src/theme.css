@@ -104,7 +104,7 @@ input[type="text"]{min-width:130px}
 .creative-card .media video{width:100%;height:170px;object-fit:cover;display:block;background:#000;cursor:pointer}
 .creative-card .body{padding:14px 16px;display:flex;flex-direction:column;gap:6px}
 .creative-card .title{font-weight:700;font-size:15px}
-.detail-layout{display:grid;grid-template-columns:minmax(0,1.6fr)minmax(280px,1fr);gap:12px;align-items:start}
+.detail-layout{display:grid;grid-template-columns:minmax(0,1.6fr)minmax(280px,1fr);gap:12px}
 .detail-side{display:flex;flex-direction:column;gap:12px}
 .retention-bar{height:10px;border-radius:5px;background:var(--foap-surface-2);overflow:hidden;margin:4px 0}
 .retention-bar i{display:block;height:100%;background:var(--foap-primary);border-radius:5px}
@@ -328,6 +328,16 @@ body[data-density="compact"] .kpi-grid{grid-gap:8px;gap:8px}
 .daterange-actions{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .kpi-value{font-size:27px;font-weight:750;letter-spacing:-.015em;color:var(--shell-navy);margin-top:2px;font-variant-numeric:tabular-nums}
 .cols-2{display:grid;grid-template-columns:7fr 5fr;gap:12px;margin-top:4px}
+/* Row-unit rule: every horizontal group is one visual unit. Grid
+ * stretch equalises outer heights; direct panel/card children fill
+ * their track as flex columns so headings align and bodies absorb
+ * differing content. Empty states centre-fill instead of collapsing.
+ * Single-column (mobile) tracks size naturally — no forced heights. */
+.cols-2,.cols-2-even,.cols-3,.cmp-grid,.cmp-grid-4,.cmp-trio,.cards-3,.cards-4,.creative-cards,.creative-cards-4,.detail-layout,.detail-cols-2,.main-rail,.wb-rail,.kpi-grid,.fmt-row{align-items:stretch}
+.cols-2>.panel,.cols-2-even>.panel,.cols-3>.panel,.cmp-grid>.panel,.cmp-grid-4>.panel,.cmp-trio>.panel,.cards-3>.panel,.cards-4>.panel,.detail-layout>.panel,.detail-cols-2>.panel,.main-rail>.panel,.wb-rail>.panel,.fmt-row>.panel,.kpi-grid>.kpi-card,.creative-cards>.panel,.creative-cards-4>.panel{height:100%;display:flex;flex-direction:column}
+.cols-2>.panel>.panel-body,.cols-2-even>.panel>.panel-body,.cols-3>.panel>.panel-body,.main-rail>.panel>.panel-body,.detail-layout>.panel>.panel-body{flex:1}
+.panel>.empty:last-child,.panel>.empty-structured:last-child{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center}
+
 .cols-2-even{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:4px}
 .cols-3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:4px}
 /* Named filter-grid widths for pages that need 4 or 6 columns.
@@ -336,7 +346,7 @@ body[data-density="compact"] .kpi-grid{grid-gap:8px;gap:8px}
 .filter-grid.fg-4{grid-template-columns:repeat(4,minmax(0,1fr))}
 .filter-grid.fg-6{grid-template-columns:repeat(6,minmax(0,1fr))}
 .creative-cards-4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
-.main-rail{display:grid;grid-template-columns:minmax(0,1fr) var(--shell-rail-w);gap:12px;margin-top:12px;align-items:start}
+.main-rail{display:grid;grid-template-columns:minmax(0,1fr) var(--shell-rail-w);gap:12px;margin-top:12px}
 .rail-stack{display:flex;flex-direction:column;gap:12px;min-width:0}
 /* Dashboard approved-density pass: equal KPI heights, aligned chart
  * starts, uncrowded controls, and a compact lower rail. Scoped so no
@@ -350,12 +360,12 @@ body[data-density="compact"] .kpi-grid{grid-gap:8px;gap:8px}
 .dashboard .kpi-grid{margin:12px 0;gap:12px;align-items:stretch}
 .dashboard .kpi-grid>div{display:flex;min-width:0}
 .dashboard .kpi-grid .kpi-card{flex:1 1 auto;min-height:118px;padding:14px;gap:10px}
-.dashboard .dash-charts{grid-template-columns:minmax(0,1.08fr) minmax(0,.92fr);align-items:start;margin-top:0}
+.dashboard .dash-charts{grid-template-columns:minmax(0,1.08fr) minmax(0,.92fr);margin-top:0}
 .dashboard .dash-charts .panel-head{flex-direction:column;align-items:stretch}
 .dashboard .dash-charts .mini-selects{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center}
 .dashboard .dash-charts .mini-selects select{width:100%;min-width:0}
 .dashboard .legend{margin-top:8px}
-.dashboard .dash-lower{grid-template-columns:minmax(0,2fr) minmax(0,1fr);align-items:start;margin-top:12px}
+.dashboard .dash-lower{grid-template-columns:minmax(0,2fr) minmax(0,1fr);margin-top:12px}
 .dashboard .dash-table{table-layout:fixed}
 .dashboard .dash-table th{font-size:11px;padding:8px 5px;letter-spacing:.02em}
 .dashboard .dash-table td{padding:8px 6px}
@@ -444,7 +454,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13.5px}
 @media (max-width:640px){.cards-3{grid-template-columns:minmax(0,1fr)}}
 /* Workbook 3-column rail: mirrors .main-rail but keeps its desktop
  * proportions in CSS (not inline) so it collapses with the rest. */
-.wb-rail{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr) minmax(0,1fr);gap:12px;margin-top:12px;align-items:start}
+.wb-rail{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr) minmax(0,1fr);gap:12px;margin-top:12px}
 .wb-rail>*{min-width:0}
 /* Profile hero: left = avatar + identity + actions, right = greeting
  * + account stats. Stacks on narrow screens. */

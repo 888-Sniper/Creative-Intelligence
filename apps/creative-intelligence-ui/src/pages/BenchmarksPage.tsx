@@ -16,7 +16,7 @@ import {
   useScopedApi,
 } from "@/components/product";
 
-/* Benchmarks Library keeps every existing backend behavior (axis-grouped
+/* Benchmarks keeps every existing backend behavior (axis-grouped
  * benchmark rows, three-way compare, CSV export) and only changes the
  * presentation layer to the approved reference. "Saved Benchmarks" are
  * the backend-backed saved views, applied on click. */
@@ -226,7 +226,7 @@ export function BenchmarksPage() {
   return (
     <>
       <PageHeader
-        title="Benchmarks Library"
+        title="Benchmarks"
         sub="Discover, save, and manage benchmarks to guide stronger creative decisions."
         actions={(
           <LoadingButton type="button" className="btn-primary" loading={saving} loadingLabel="Saving…" disabled={saving} onClick={() => void createBenchmark()}>
@@ -302,9 +302,9 @@ export function BenchmarksPage() {
           </Panel>
           <Panel
             title="Benchmark Results"
-            sub="Benchmarks computed from available campaign performance in the current scope."
+            sub="Benchmarks From Current Campaign Data"
             action={(
-              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <div className="panel-controls">
                 <label htmlFor="b-axis" className="panel-sub" style={{ margin: 0 }}>Group By</label>
                 <select id="b-axis" aria-label="Group By" value={axis}
                   onChange={(e) => { setAxis(e.target.value as Axis); setSelected(new Set()); }}
@@ -410,13 +410,13 @@ export function BenchmarksPage() {
               </div>
             </div>
           </Panel>
-          <Panel title="Performance Context">
+          <Panel title="Context">
             <p className="panel-sub">
               These benchmarks are computed from the campaigns in your current scope — use them as a
               starting point and consider your unique goals, audience, and creative strategy.
             </p>
           </Panel>
-          <Panel title="Tips for Better Benchmarks">
+          <Panel title="Benchmark Tips">
             <ul className="rec-list" style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 4, fontSize: 13 }}>
               <li>Use relevant filters to narrow the dataset</li>
               <li>Include multiple platforms for broader insights</li>

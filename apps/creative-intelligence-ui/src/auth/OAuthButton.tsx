@@ -52,26 +52,37 @@ const CONNECTING_NAMES: Record<string, string> = {
 export function OAuthButton({ provider, label }: { provider: string; label?: string }) {
   const { authenticating, oauthStart } = useAuth();
   const [starting, setStarting] = useState(false);
+  const [error, setError] = useState("");
   const busy = starting || authenticating;
   const idleLabel = label ?? `Continue With ${provider}`;
   const busyLabel = `Connecting To ${CONNECTING_NAMES[provider] ?? provider}…`;
   return (
-    <LoadingButton
-      type="button"
-      className="auth-btn oauth-btn"
-      loading={starting}
-      loadingLabel={busyLabel}
-      spinnerClass="spinner dark"
-      disabled={busy}
-      onClick={() => {
-        if (busy) return;
-        setStarting(true);
-        void oauthStart(provider).finally(() => setStarting(false));
-      }}
-    >
-      <ProviderMark provider={provider} />
-      <span>{idleLabel}</span>
-    </LoadingButton>
+    <>
+      <LoadingButton
+        type="button"
+        className="auth-btn oauth-btn"
+        loading={starting}
+        loadingLabel={busyLabel}
+        spinnerClass="spinner dark"
+        disabled={busy}
+        onClick={() => {
+          if (busy) return;
+          setError("");
+          setStarting(true);
+          // Success navigates away: KEEP starting so the spinner runs
+          // until the provider page appears. Only a genuine failure
+          // restores the idle state and shows a retryable error.
+          void oauthStart(provider).catch(() => {
+            setStarting(false);
+            setError(`Could Not Reach ${CONNECTING_NAMES[provider] ?? provider} — Try Again.`);
+          });
+        }}
+      >
+        <ProviderMark provider={provider} />
+        <span>{idleLabel}</span>
+      </LoadingButton>
+      {error ? <p className="muted login-status" role="alert">{error}</p> : null}
+    </>
   );
 }
 

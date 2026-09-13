@@ -278,12 +278,12 @@ export function AskPage() {
                     ) : <Skeleton height={200} />}
                   </Panel>
                   <div className="cols-2">
-                    <Panel title="Source & Data Context">
+                    <Panel title="Data Context">
                       <p className="panel-sub">Sources: {(answer.sources ?? []).join(", ") || "—"}</p>
                       <p className="panel-sub">Scope: {answer.scope || "All data"}</p>
                       {answer.review_id ? <p className="panel-sub">Saved for review (#{answer.review_id}).</p> : null}
                     </Panel>
-                    <Panel title="Benchmark Context">
+                    <Panel title="Context">
                       {platforms.data ? (
                         <p className="panel-sub">
                           {Object.entries(platforms.data).map(([k, g]) =>

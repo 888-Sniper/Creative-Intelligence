@@ -652,7 +652,7 @@ export function AdminEmployeesPage() {
             ) : null}
           </div>
         </Panel>
-        <Panel title="Access Rules & Permission Groups" sub="Rules the server enforces on every change.">
+        <Panel title="Access Rules" sub="Rules the server enforces on every change.">
           <ul className="tips-list">
             <li>
               <span className="insight-ico" style={{ background: "var(--shell-green-soft)" }}>

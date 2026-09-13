@@ -1152,7 +1152,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
 
       <div className="section-gap" />
       <div className="cols-3">
-        <Panel title="Top Performing Hook Types" sub="CTR by opening hook across the scope.">
+        <Panel title="Hook Types" sub="CTR by opening hook across the scope.">
           {hooks.data === null ? <Skeleton height={200} /> : hookRows.rows.length ? (
             <LabeledBars
               rows={hookRows.rows.slice(0, 5).map((r) => ({ label: titleCase(r.key), value: r.ctr ?? 0 }))}
@@ -1160,14 +1160,14 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
             />
           ) : <EmptyState text="No hook benchmarks in scope." />}
         </Panel>
-        <Panel title="Video Length Performance" sub="CTR bars with ROAS trend by duration band.">
+        <Panel title="Video Length" sub="CTR bars with ROAS trend by duration band.">
           {creatives.data === null ? <Skeleton height={200} /> : lengthRows.some((r) => r.ctr != null) ? (
             <LengthCombo rows={lengthRows.map((r) => ({
               label: r.label, ctr: r.ctr ?? 0, roas: r.roas,
             }))} />
           ) : <EmptyState text="No duration data in scope." />}
         </Panel>
-        <Panel title="Performance by Brand Timing" sub="CTR by first brand appearance.">
+        <Panel title="Brand Timing" sub="CTR by first brand appearance.">
           {creatives.data === null ? <Skeleton height={200} /> : brandRows.some((r) => r.ctr != null) ? (
             <LabeledBars
               rows={brandRows.filter((r) => r.ctr != null).map((r) => ({ label: r.label, value: r.ctr ?? 0 }))}
@@ -1212,7 +1212,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
       </div>
 
       <div className="section-gap" />
-      <Panel title="Top Performing Creatives" sub="From this analysis — ranked by ROAS, then CTR.">
+      <Panel title="Top Creatives" sub="From this analysis — ranked by ROAS, then CTR.">
         {creatives.data === null ? <Skeleton height={180} /> : topCreatives.length ? (
           <div className="creative-cards-4">
             {topCreatives.map((c) => (

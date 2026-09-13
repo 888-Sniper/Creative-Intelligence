@@ -504,7 +504,7 @@ export function ReportsPage() {
       <div className="main-rail">
         <div className="rail-stack">
           <Panel
-            title="Generate a New Report"
+            title="New Report"
             sub="Select your content, metrics, and format to create a custom report."
             action={(
               <button type="button" className="btn-outline" onClick={saveTemplate}>
@@ -666,7 +666,7 @@ export function ReportsPage() {
           </Panel>
         </div>
         <div className="rail-stack">
-          <Panel title="Reporting Tips">
+          <Panel title="Report Tips">
             <ul className="tips-list">
               <li>
                 <span className="insight-ico" style={{ background: "#E7F1FB" }}><Icon name="bars" size={18} /></span>

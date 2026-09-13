@@ -560,14 +560,16 @@ export function KpiCard({ label, display, icon, tint, metricLabel, compare }: {
       <div className="kpi-body">
         <div className="kpi-label">{label}</div>
         <div className="kpi-value">{display}</div>
-        {m && compare ? (
-          <KpiTrend metricLabel={metricLabel}
-            comparison={{
-              state: m.state, direction: m.direction, sentiment: m.sentiment,
-              percent_change: m.percent_change,
-            }}
-            previous={compare.previous_period} />
-        ) : null}
+        <div className="kpi-trend-slot">
+          {m && compare ? (
+            <KpiTrend metricLabel={metricLabel}
+              comparison={{
+                state: m.state, direction: m.direction, sentiment: m.sentiment,
+                percent_change: m.percent_change,
+              }}
+              previous={compare.previous_period} />
+          ) : null}
+        </div>
       </div>
     </div>
   );

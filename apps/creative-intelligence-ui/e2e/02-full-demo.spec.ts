@@ -119,7 +119,7 @@ test.describe("full demo visuals", () => {
     await expect(page.getByText("No Daily Data For The Selected Campaigns.")).toHaveCount(0);
     await expect(page.getByRole("img", { name: /Comparison Chart/ }).first()).toBeVisible({ timeout: 60000 });
     for (const heading of ["Performance Over Time", "KPI Comparison", "Difference Summary",
-      "Creative Attributes Comparison", "Key Takeaways", "Recommended Next Tests"]) {
+      "Creative Attributes", "Key Takeaways", "Next Tests"]) {
       await expect(page.getByRole("heading", { name: heading })).toBeVisible();
     }
     await expectImagesDecoded(page, 'img[src*="/thumbnail"]');
@@ -194,7 +194,7 @@ test.describe("full demo visuals", () => {
     const seeds = readSeeds();
     const routes: Array<[shot: string, path: string, heading: string]> = [
       ["d-campaigns", "/campaigns", "Campaigns"],
-      ["d-benchmarks", "/benchmarks", "Benchmarks Library"],
+      ["d-benchmarks", "/benchmarks", "Benchmarks"],
       ["d-analyst", "/analyst", "Your Creative Partner"],
       ["d-admin", "/admin", "Admin"],
       ["d-profile", "/profile", "Profile"],

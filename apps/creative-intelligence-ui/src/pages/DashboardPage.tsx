@@ -510,7 +510,7 @@ export function DashboardPage() {
       )}
       <div className="cols-2 dash-charts">
         <Panel
-          title="Campaign Performance Trends"
+          title="Performance Trends"
           action={(
             <div className="mini-selects">
               <select aria-label="Left Trend Metric" value={leftMetric} onChange={(e) => setLeftMetric(e.target.value as TrendMetric)}>
@@ -537,7 +537,7 @@ export function DashboardPage() {
           ) : <Skeleton height={205} />}
         </Panel>
         <Panel
-          title="Benchmark Comparison"
+          title="Benchmarks"
           action={(
             <div className="mini-selects">
               <select aria-label="Benchmark Metric" value={benchMetric} onChange={(e) => setBenchMetric(e.target.value as BenchMetric)}>
@@ -578,7 +578,7 @@ export function DashboardPage() {
         side beneath the charts (collapses to stacked under 1180px). */}
       <div className="cols-2 dash-lower">
           <Panel
-            title="Top Performing Creatives"
+            title="Top Creatives"
             action={<Link className="link-teal" to="/creatives">See All</Link>}
           >
             {creatives.data ? (
@@ -636,8 +636,8 @@ export function DashboardPage() {
               ) : <EmptyState compact icon="creatives" title="No creatives yet" text="Upload creative data or loosen the filters." />
             ) : <Skeleton height={220} />}
           </Panel>
-          <Panel title="Retention & Hook Insights">
-            <div className="tabs retention-tabs" role="tablist" aria-label="Retention And Hook Insights">
+          <Panel title="Retention Insights">
+            <div className="tabs retention-tabs" role="tablist" aria-label="Retention Insights">
               {[
                 { value: "retention", label: "Audience Retention" },
                 { value: "hooks", label: "Hook Analysis" },
@@ -710,7 +710,7 @@ export function DashboardPage() {
       </div>
         </div>
         <Panel
-          title="Insights & Recommendations"
+          title="Recommendations"
           action={<Link className="link-teal" to="/insights">See All</Link>}
         >
           {campaigns.data && creatives.data && platforms.data ? (

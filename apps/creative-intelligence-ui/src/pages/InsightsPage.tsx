@@ -353,7 +353,7 @@ export function InsightsPage() {
           ) : null}
         </div>
         <div className="rail-stack">
-          <Panel title="Recent Activity">
+          <Panel title="Activity">
             {conversations === null ? <Skeleton height={160} /> : (
               recent.length ? (
                 <div>
@@ -372,7 +372,7 @@ export function InsightsPage() {
               ) : <EmptyState compact icon="clock" title="No recent activity" text="Analyst conversations will appear here." />
             )}
           </Panel>
-          <Panel title="Recommended Related Insights">
+          <Panel title="Related Insights">
             {cards.data ? (
               findings.rest.filter(matchAxes).length ? (
               <div>

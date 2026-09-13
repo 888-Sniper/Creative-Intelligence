@@ -87,9 +87,9 @@ describe("ComparePage", () => {
     expect(screen.getAllByText("Camp A").length).toBeGreaterThan(0);
     expect(screen.getByText("KPI Comparison")).toBeDefined();
     expect(screen.getByText("Difference Summary")).toBeDefined();
-    expect(screen.getByText("Creative Attributes Comparison")).toBeDefined();
+    expect(screen.getByText("Creative Attributes")).toBeDefined();
     expect(screen.getByText("Key Takeaways")).toBeDefined();
-    expect(screen.getByText("Recommended Next Tests")).toBeDefined();
+    expect(screen.getByText("Next Tests")).toBeDefined();
     expect(screen.getByText("Camp A leads Camp B on ROAS (2 vs 1)")).toBeDefined();
   });
 

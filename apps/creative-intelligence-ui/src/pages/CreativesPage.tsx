@@ -494,7 +494,7 @@ export function CreativesPage() {
             </div>
           )}
           <Panel
-            title="Top Performing Creatives"
+            title="Top Creatives"
             action={<Link className="link-teal" to="/creatives">See All</Link>}
           >
             {creatives.data ? (
@@ -672,7 +672,7 @@ export function CreativesPage() {
           </Panel>
           {/* With zero creatives in the scoped group there is no
             evidence for test ideas: show an empty state, not ideas. */}
-          <Panel title="Recommended Tests" action={<Link className="link-teal" to="/insights">See All</Link>}>
+          <Panel title="Next Tests" action={<Link className="link-teal" to="/insights">See All</Link>}>
             {creatives.data ? (
               lengthRows.length ? (
                 <div>

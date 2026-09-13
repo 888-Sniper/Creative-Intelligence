@@ -70,7 +70,7 @@ describe("ReportsPage", () => {
     mockCatalog();
     renderPage();
     await waitFor(() => {
-      expect(screen.getByText("Generate a New Report")).toBeDefined();
+      expect(screen.getByText("New Report")).toBeDefined();
     });
     expect(screen.getByText("2 Campaigns Selected")).toBeDefined();
     expect(screen.getByText("5 KPIs Selected")).toBeDefined();
@@ -78,7 +78,7 @@ describe("ReportsPage", () => {
     expect(screen.getByRole("button", { name: /XLSX Data Workbook/ })).toBeDefined();
     expect(screen.getByRole("button", { name: /One-Pager Executive Summary/ })).toBeDefined();
     expect(screen.getByRole("button", { name: /Generate Report/ })).toBeDefined();
-    expect(screen.getByText("Reporting Tips")).toBeDefined();
+    expect(screen.getByText("Report Tips")).toBeDefined();
     expect(screen.getByText("Latest Generated Files")).toBeDefined();
   });
 

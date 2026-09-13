@@ -337,6 +337,19 @@ body[data-density="compact"] .kpi-grid{grid-gap:8px;gap:8px}
 .cols-2>.panel,.cols-2-even>.panel,.cols-3>.panel,.cmp-grid>.panel,.cmp-grid-4>.panel,.cmp-trio>.panel,.cards-3>.panel,.cards-4>.panel,.detail-layout>.panel,.detail-cols-2>.panel,.main-rail>.panel,.wb-rail>.panel,.fmt-row>.panel,.kpi-grid>.kpi-card,.creative-cards>.panel,.creative-cards-4>.panel{height:100%;display:flex;flex-direction:column}
 .cols-2>.panel>.panel-body,.cols-2-even>.panel>.panel-body,.cols-3>.panel>.panel-body,.main-rail>.panel>.panel-body,.detail-layout>.panel>.panel-body{flex:1}
 .panel>.empty:last-child,.panel>.empty-structured:last-child{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center}
+/* Gap ownership: rail-stack and row grids own inter-row spacing through
+ * `gap`, so grid children must not add their own vertical margins
+ * (staggered tops, doubled rhythm). Standalone grids keep theirs. */
+.rail-stack>.kpi-grid,.rail-stack>.cols-2,.rail-stack>.cols-2-even,.rail-stack>.cols-3{margin-top:0;margin-bottom:0}
+.rail-stack>:first-child{margin-top:0}
+/* Header actions never wrap or shrink: See All / Export stay on one
+ * line, vertically centred beside the title. */
+.panel-head>a,.panel-head>button{white-space:nowrap;flex:0 0 auto}
+.panel-controls{display:flex;align-items:center;gap:8px;flex:0 1 auto;min-width:0}
+@media (max-width:560px){.panel-controls{flex-wrap:wrap}.panel-head>a,.panel-head>button{white-space:normal}}
+/* KPI trend slot: a card with no comparison keeps the same body height
+ * as one with a trend row, so value baselines align across the row. */
+.kpi-trend-slot{display:block;min-height:22px}
 
 .cols-2-even{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:4px}
 .cols-3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:4px}
@@ -365,7 +378,8 @@ body[data-density="compact"] .kpi-grid{grid-gap:8px;gap:8px}
 .dashboard .dash-charts .mini-selects{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center}
 .dashboard .dash-charts .mini-selects select{width:100%;min-width:0}
 .dashboard .legend{margin-top:8px}
-.dashboard .dash-lower{grid-template-columns:minmax(0,2fr) minmax(0,1fr);margin-top:12px}
+.dashboard .dash-lower{grid-template-columns:minmax(0,2fr) minmax(0,1fr);margin-top:0}
+.dashboard .rail-stack>.kpi-grid{margin-top:0;margin-bottom:0}
 .dashboard .dash-table{table-layout:fixed}
 .dashboard .dash-table th{font-size:11px;padding:8px 5px;letter-spacing:.02em}
 .dashboard .dash-table td{padding:8px 6px}

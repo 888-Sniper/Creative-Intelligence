@@ -10,7 +10,7 @@ const NAV = [
   { to: "/campaigns", label: "Campaigns", icon: "campaign" },
   { to: "/creatives", label: "Creatives", icon: "creatives" },
   { to: "/compare", label: "Compare", icon: "compare" },
-  { to: "/benchmarks", label: "Benchmarks Library", icon: "book" },
+  { to: "/benchmarks", label: "Benchmarks", icon: "book" },
   { to: "/insights", label: "Saved Insights", icon: "bookmark" },
   { to: "/reports", label: "Generated Reports", icon: "report" },
   { to: "/workbook", label: "Blank Workbook", icon: "workbook" },

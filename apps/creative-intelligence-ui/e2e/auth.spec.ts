@@ -84,8 +84,8 @@ test.describe("employee journey", () => {
     await page.getByRole("link", { name: "Profile" }).click();
     await expect(page.getByRole("heading", { name: "Profile" }).first()).toBeVisible();
     // Verified email is shown read-only: visible text, never an editable field.
-    // Exact match: the address also appears in Personal Information and
-    // Connected Accounts rows by design.
+    // Exact match: the address also appears in Personal Info and
+    // Connections rows by design.
     await expect(page.getByText("ada@foap.test", { exact: true })).toBeVisible();
     await expect(page.getByRole("textbox", { name: /email/i })).toHaveCount(0);
 

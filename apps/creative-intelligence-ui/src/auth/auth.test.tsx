@@ -400,9 +400,34 @@ describe("login loading states", () => {
     expect(screen.getByRole("button", { name: "Continue With Microsoft" })).toBeDefined();
     expect(screen.queryByRole("button", { name: "Connecting To Microsoft…" })).toBeNull();
     d.release(Response.json({ url: "https://workos.test/authorize" }));
+    // The auth URL resolved so navigation is underway: the spinner KEEPS
+    // running (production unmounts the page on navigation; jsdom stays).
+    // There must be no idle flash between URL resolution and redirect.
     await waitFor(() => {
-      expect(screen.queryByRole("button", { name: "Connecting To Google…" })).toBeNull();
+      expect(screen.getByRole("button", { name: "Connecting To Google…" })).toBeDefined();
     });
+  });
+
+  it("restores the idle state with a retryable error when OAuth start fails", async () => {
+    const d = defer();
+    deferredFetch({ "/api/auth/oauth/start": () => d.gate });
+    renderGate();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Continue With Google" })).toBeDefined();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Continue With Google" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Connecting To Google…" })).toBeDefined();
+    });
+    d.release(new Response(JSON.stringify({ detail: "OAuth Unavailable." }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Continue With Google" })).toBeDefined();
+    });
+    expect(screen.getByRole("alert")).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Connecting To Google…" })).toBeNull();
   });
 });
 

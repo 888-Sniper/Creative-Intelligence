@@ -362,24 +362,24 @@ export function SettingsPage() {
             </div>
           </Panel>
           <Panel title="Notifications" icon="bell">
-            <Toggle label="Email Reports" body="Save your email-reports preference here. Delivery starts when workspace notifications are enabled by your administrator."
+            <Toggle label="Email Reports" body="Receive Reports And Insights By Email."
               checked={prefs.emailReports} onChange={(v) => setPref("emailReports", v)} />
-            <Toggle label="Campaign Updates" body="Get notified when campaigns are completed or updated."
+            <Toggle label="Campaign Updates" body="Get Notified When Campaigns Are Updated."
               checked={prefs.campaignUpdates} onChange={(v) => setPref("campaignUpdates", v)} />
-            <Toggle label="AI Insights" body="Receive alerts for new AI analysis and recommendations."
+            <Toggle label="AI Insights" body="Receive Alerts For New AI Analysis."
               checked={prefs.aiInsights} onChange={(v) => setPref("aiInsights", v)} />
-            <Toggle label="Product Updates" body="Be the first to know about new features and improvements."
+            <Toggle label="Product Updates" body="Get Updates On New Features."
               checked={prefs.productUpdates} onChange={(v) => setPref("productUpdates", v)} />
           </Panel>
           <Panel title="Data & Privacy" icon="eye">
-            <Toggle label="Data Usage" body="Help improve Foap by allowing anonymized usage data."
+            <Toggle label="Data Usage" body="Help Improve Foap With Anonymous Usage Data."
               checked={prefs.dataUsage} onChange={(v) => setPref("dataUsage", v)} />
-            <Toggle label="Share Analytics Data" body="Allow aggregated, anonymized data to contribute to workspace benchmark averages."
+            <Toggle label="Share Analytics Data" body="Contribute Anonymous Data To Benchmarks."
               checked={prefs.shareAnalytics} onChange={(v) => setPref("shareAnalytics", v)} />
             <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", padding: "10px 0" }}>
               <div>
                 <strong style={{ display: "block", fontSize: 13.5 }}>Data Retention Period</strong>
-                <span className="panel-sub">Browser preference only — actual workspace retention is managed by your administrator.</span>
+                <span className="panel-sub" title="Browser preference only — actual workspace retention is managed by your administrator.">Choose Your Preferred Data Retention Period.</span>
               </div>
               <select aria-label="Data Retention Period" value={prefs.retention} onChange={(e) => setPref("retention", e.target.value)}>
                 {["12 Months", "24 Months", "36 Months"].map((o) => <option key={o}>{o}</option>)}
@@ -388,7 +388,7 @@ export function SettingsPage() {
             <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", padding: "10px 0" }}>
               <div>
                 <strong style={{ display: "block", fontSize: 13.5 }}>Export Your Data</strong>
-                <span className="panel-sub">Download a copy of your data and account information.</span>
+                <span className="panel-sub">Download Your Account And Workspace Data.</span>
               </div>
               <button type="button" className="btn-outline" onClick={exportData}>
                 <Icon name="download" size={15} /> Export Data
@@ -411,7 +411,7 @@ export function SettingsPage() {
               </div>
             ))}
           </Panel>
-          <Panel title="Appearance" icon="spark" sub="Customize how Foap looks and feels.">
+          <Panel title="Appearance" icon="spark">
             <div className="filter-grid" style={{ gridTemplateColumns: "repeat(2,minmax(0,1fr))" }}>
               <div className="field">
                 <label htmlFor="s-theme">Theme</label>
@@ -440,7 +440,7 @@ export function SettingsPage() {
             />
             {dirty ? <p className="panel-sub">Unsaved changes — click Save Changes to apply.</p> : null}
           </Panel>
-          <Panel title="Security" icon="lock" sub="Keep your account and workspace secure.">
+          <Panel title="Security" icon="lock">
             <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", padding: "10px 0", borderBottom: "1px solid var(--shell-line)" }}>
               <div>
                 <strong style={{ display: "block", fontSize: 13.5 }}>Password</strong>

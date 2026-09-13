@@ -41,15 +41,20 @@ export function EmailSignIn() {
   const [op, setOp] = useState<null | "password" | "send" | "verify" | "reset">(null);
   const busy = authenticating || op !== null;
 
-  const run = async (name: NonNullable<typeof op>, fn: () => Promise<string | void>) => {
+  // `stayOnSuccess` keeps the spinner running after a successful call
+  // for flows that leave the login screen (password / code verify): the
+  // gate replaces the page once the session resolves, so clearing the op
+  // here would flash an idle button mid-transition. Send/reset flows
+  // stay on the page and always clear.
+  const run = async (name: NonNullable<typeof op>, fn: () => Promise<string | void>, stayOnSuccess = false) => {
     if (busy) return;
     setOp(name);
     try {
       const msg = await fn();
       setMessage(typeof msg === "string" ? msg : "");
+      if (!stayOnSuccess) setOp(null);
     } catch (err) {
       setMessage(err instanceof ApiError ? err.message : "Sign-In Failed.");
-    } finally {
       setOp(null);
     }
   };
@@ -70,7 +75,7 @@ export function EmailSignIn() {
     run("password", async () => {
       await emailSignIn(email, password);
       persistRememberedEmail(email, remember);
-    });
+    }, true);
 
   const switchMode = (next: "password" | "code") => {
     setMode(next);
@@ -120,7 +125,7 @@ export function EmailSignIn() {
               onChange={(e) => setCode(e.target.value)}
               style={{ minHeight: 44 }}
             />
-            <LoadingButton type="button" className="login-primary" loading={op === "verify"} loadingLabel="Verifying…" disabled={busy} onClick={() => void run("verify", () => emailCodeSignIn(email, code))}>
+            <LoadingButton type="button" className="login-primary" loading={op === "verify"} loadingLabel="Verifying…" disabled={busy} onClick={() => void run("verify", () => emailCodeSignIn(email, code), true)}>
               <>Verify &amp; Sign In</>
             </LoadingButton>
           </>

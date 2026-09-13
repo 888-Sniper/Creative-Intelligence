@@ -133,9 +133,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAuthenticating(true);
     try {
       const res = await api<{ url: string }>("POST", "/api/auth/oauth/start", { provider });
-      window.location.href = res.url;
-    } finally {
+      window.location.assign(res.url);
+      // KEEP authenticating = true: navigation unmounts this page, so the
+      // initiating button spins continuously until the provider page
+      // appears. Only a genuine failure below restores the idle state.
+    } catch (err) {
       setAuthenticating(false);
+      throw err;
     }
   }, []);
 
@@ -163,6 +167,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }),
         );
       } finally {
+        // Runs after afterLogin resolved (setMe + refresh): React batches
+        // this clear with the gate flip, so the spinner bridges the whole
+        // transition and the login button never re-renders idle.
         setAuthenticating(false);
       }
     },
@@ -186,6 +193,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }),
         );
       } finally {
+        // Same batching as password sign-in: spinner bridges the gate flip.
         setAuthenticating(false);
       }
     },

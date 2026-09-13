@@ -95,13 +95,13 @@ describe("CreativesPage", () => {
     mockLibrary();
     renderPage();
     await waitFor(() => {
-      expect(screen.getByText("Top Performing Creatives")).toBeDefined();
+      expect(screen.getByText("Top Creatives")).toBeDefined();
     });
     expect(screen.getAllByText("Alpha").length).toBeGreaterThan(0);
     expect(screen.getByLabelText("Sort By")).toBeDefined();
     expect(screen.getByRole("button", { name: "Apply Filters" })).toBeDefined();
     expect(screen.getByText("Top Learnings")).toBeDefined();
-    expect(screen.getByText("Recommended Tests")).toBeDefined();
+    expect(screen.getByText("Next Tests")).toBeDefined();
   });
 
   it("shows skeletons while loading", () => {
@@ -129,7 +129,7 @@ describe("CreativesPage", () => {
     mockLibrary();
     renderPage();
     await waitFor(() => {
-      expect(screen.getByText("Top Performing Creatives")).toBeDefined();
+      expect(screen.getByText("Top Creatives")).toBeDefined();
     });
     const names = screen.getAllByRole("button", { name: "Alpha" });
     fireEvent.click(names[0]);
@@ -143,7 +143,7 @@ describe("CreativesPage", () => {
     mockLibrary();
     renderPage();
     await waitFor(() => {
-      expect(screen.getByText("Top Performing Creatives")).toBeDefined();
+      expect(screen.getByText("Top Creatives")).toBeDefined();
     });
     // Branded pool (3.2%) beats creator pool (2.8%): the heading must
     // say so instead of a fixed creator phrase.
@@ -188,7 +188,7 @@ describe("CreativesPage", () => {
     mockLibrary();
     renderPage();
     await waitFor(() => {
-      expect(screen.getByText("Top Performing Creatives")).toBeDefined();
+      expect(screen.getByText("Top Creatives")).toBeDefined();
     });
     fireEvent.change(screen.getByLabelText("Video Length"), { target: { value: "long" } });
     await waitFor(() => {

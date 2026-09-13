@@ -528,7 +528,7 @@ export function CampaignsPage() {
             </div>
           )}
           <div className="cols-2">
-            <Panel title="Campaign Performance Trends">
+            <Panel title="Performance Trends">
               {daily ? (
                 <TrendChart
                   height={200}
@@ -541,7 +541,7 @@ export function CampaignsPage() {
               ) : <Skeleton height={200} />}
             </Panel>
             <Panel
-              title="Campaign Performance by Platform"
+              title="Platform Performance"
               action={(
                 <select aria-label="Platform Metric" value={platMetric}
                   onChange={(e) => setPlatMetric(e.target.value as typeof platMetric)}>
@@ -686,7 +686,7 @@ export function CampaignsPage() {
           ) : null}
         </div>
         <Panel
-          title="Campaign Insights & Recommendations"
+          title="Recommendations"
           action={<Link className="link-teal" to="/insights">See All</Link>}
         >
           {campaigns.data && benchPlatform.data ? (

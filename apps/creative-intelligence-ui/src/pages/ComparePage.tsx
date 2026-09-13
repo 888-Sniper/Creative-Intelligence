@@ -765,7 +765,7 @@ export function ComparePage() {
             </Panel>
           </div>
           <div className="cmp-trio">
-            <Panel title="Creative Attributes Comparison">
+            <Panel title="Creative Attributes">
               <div className="tbl-wrap">
                 <table className="tbl">
                   <thead>
@@ -801,7 +801,7 @@ export function ComparePage() {
                 </div>
               ) : <EmptyState text="Run a comparison to generate takeaways." />}
             </Panel>
-            <Panel title="Recommended Next Tests">
+            <Panel title="Next Tests">
               {tests.length ? (
                 <div>
                   {tests.map((t) => (
@@ -821,11 +821,10 @@ export function ComparePage() {
           </div>
         </>
       ) : !loading ? (
-        <Panel title="No Comparison Yet">
+        <Panel title={mode === "creatives" ? "Creative Comparison" : "Campaign Comparison"}>
           <EmptyState
             compact
             icon="compare"
-            title="Select at least two campaigns to compare"
             text="Pick two to four campaigns or creatives above, then Apply Comparison."
           />
         </Panel>

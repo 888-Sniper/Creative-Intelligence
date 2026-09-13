@@ -276,7 +276,7 @@ export function ProfilePage() {
 
           <div className="section-gap" />
           <div className="cols-3">
-            <Panel title="Personal Information" sub="Name and avatar for your account.">
+            <Panel title="Personal Info" sub="Name and avatar for your account.">
               <div className="cols-2-even" style={{ marginTop: 0 }}>
                 <div className="field">
                   <label htmlFor="p-first">First Name</label>
@@ -328,7 +328,7 @@ export function ProfilePage() {
                 </span>
               </div>
             </Panel>
-            <Panel title="Workspace Information" sub="Identity details managed by your admin.">
+            <Panel title="Workspace" sub="Identity details managed by your admin.">
               <dl className="detail-list">
                 <div>
                   <dt>Employee ID</dt>
@@ -379,7 +379,7 @@ export function ProfilePage() {
                 </div>
               </dl>
             </Panel>
-            <Panel title="Connected Accounts" sub="Ways you can sign in.">
+            <Panel title="Connections" sub="Ways you can sign in.">
               <div className="insight">
                 <span className="insight-ico" style={{ background: "var(--shell-blue-soft)" }}>
                   <Icon name="user" size={18} />

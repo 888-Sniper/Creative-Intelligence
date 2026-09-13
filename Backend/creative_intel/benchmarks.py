@@ -369,7 +369,7 @@ Project identity is row["project"] when present, else row["campaign"].
 
 FILTER_KEYS = ("vertical", "platform", "funnel", "objective", "market",
                "client", "team", "date", "campaign", "hook_type",
-               "creator_vs_branded", "format")
+               "creator_vs_branded", "format", "sample_batch")
 
 KPI_KEYS = ("cpm", "vtr", "view_rate", "ctr", "cpc", "cpa", "roas")
 
@@ -547,7 +547,7 @@ def _iso_day(value, key):
     return text
 
 
-FILTER_FIELD = {"funnel": "funnel_stage"}
+FILTER_FIELD = {"funnel": "funnel_stage", "sample_batch": "import_id"}
 
 
 def match_filters(row, filters):
@@ -593,7 +593,7 @@ SCOPE_COLUMNS = {"client": "client", "team": "team",
                  "campaign": "campaign", "platform": "platform",
                  "vertical": "vertical", "market": "market",
                  "funnel": "funnel_stage", "objective": "objective",
-                 "date": "date"}
+                 "date": "date", "sample_batch": "import_id"}
 
 
 class Scope:
@@ -611,7 +611,8 @@ class Scope:
     AXES = ("client", "project", "team", "campaign", "platform", "vertical",
             "market", "funnel", "objective", "hook_type",
             "creator_vs_branded", "format", "date", "date_from",
-            "date_to", "status", "spend_min", "spend_max")
+            "date_to", "status", "spend_min", "spend_max",
+            "sample_batch")
 
     def __init__(self, raw=None):
         self.axes = {}
@@ -769,7 +770,7 @@ class Scope:
         """Short human label ("Beauty, Spain, TikTok") or "All Data"."""
         bits = []
         for key in self.AXES:
-            if key in ("date_from", "date_to"):
+            if key in ("date_from", "date_to", "sample_batch"):
                 continue
             if key == "campaign" and key in self.axes and not self.axes[key]:
                 bits.append("No Campaigns")

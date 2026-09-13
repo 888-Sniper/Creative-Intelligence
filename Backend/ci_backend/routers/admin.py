@@ -331,7 +331,8 @@ async def pack_remove(request: Request, conn=Depends(get_product_conn),
         raise HTTPException(status_code=409, detail={
             "error": "Batch mismatch: removal is scoped to the"
                      " imported pack only."})
-    out = demo_pack.remove_pack(conn, receipt["batch_id"])
+    out = demo_pack.remove_pack(conn, receipt["batch_id"],
+                              pack_key=demo_pack.PACK_KEY_V2)
     security_log.event("demo_pack_remove", actor=admin.id,
                        target=demo_pack.PACK_KEY_V2,
                        detail="batch=%s" % receipt["batch_id"])

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { api } from "@/api/client";
+import { applySavedView, VIEW_ROUTES, type SavedView } from "@/components/savedViews";
 import { useFilters } from "@/state/FilterContext";
 import { Icon } from "@/components/icons";
 import { LoadingButton } from "@/components/LoadingButton";
@@ -22,17 +23,6 @@ interface Conversation {
   updated_at?: string | null;
 }
 
-interface SavedView {
-  id: number;
-  name: string;
-  state: {
-    filters?: Record<string, string[]>;
-    kpi?: string;
-    view?: string;
-    compare_mode?: string;
-  };
-}
-
 interface AnalystCard {
   creative_key: string;
   name?: string;
@@ -47,16 +37,7 @@ interface AnalystCard {
   } | null;
 }
 
-const VIEW_ROUTES: Record<string, string> = {
-  main: "/",
-  campaign: "/campaigns",
-  creative: "/creatives",
-  compare: "/compare",
-  benchmark: "/benchmarks",
-  report: "/reports",
-  profile: "/profile",
-  admin: "/admin",
-};
+
 
 function dayLabel(iso: string | null | undefined): string {
   if (!iso) return "";
@@ -198,36 +179,10 @@ export function InsightsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversations, views, itype, needle, dateSaved, client, platform, market]);
 
-  /* Saved views restore the FULL saved scope: every stored axis plus
-   * the saved KPI. The global scope model is single-value per axis,
-   * so the first stored value wins when several were saved (documented
-   * here, not silently dropped elsewhere). */
-  const SCOPE_KEYS = ["client", "project", "team", "campaign", "platform",
-    "vertical", "market", "funnel", "objective", "status", "spend_min",
-    "spend_max", "hook_type", "creator_vs_branded", "format", "date",
-    "date_from", "date_to"] as const;
-  const applyView = (v: SavedView) => {
-    const f = v.state?.filters ?? {};
-    // Saved comparisons restore EVERY selection: route to Compare with
-    // the full campaign/creative list instead of a single scope value.
-    if (v.state?.view === "compare") {
-      const mode = v.state?.compare_mode === "creatives" ? "creatives" : "campaigns";
-      const key = mode === "campaigns" ? "campaign" : "creative";
-      const list = [...new Set(
-        (Array.isArray(f[key]) ? f[key] : (f[key] ? [f[key]] : []))
-          .map((s) => String(s)).filter(Boolean))].slice(0, 4);
-      if (list.length >= 2) {
-        navigate(`/compare?mode=${mode}&${mode === "campaigns" ? "campaigns" : "creatives"}=${
-          list.map(encodeURIComponent).join(",")}`);
-        return;
-      }
-    }
-    for (const k of SCOPE_KEYS) {
-      setFilter(k, (f[k] ?? [])[0] ?? "");
-    }
-    if (v.state?.kpi) setFilter("kpi", v.state.kpi);
-    navigate(v.state?.view ? (VIEW_ROUTES[v.state.view] ?? "/") : "/");
-  };
+  /* Shared restore: comparison deep link (full selection) when one
+   * applies, otherwise the saved route — every stored scope axis and
+   * the saved KPI travel along either way. */
+  const applyView = (v: SavedView) => applySavedView(v, setFilter, navigate);
 
   const saveInsight = async () => {
     setSaving(true);

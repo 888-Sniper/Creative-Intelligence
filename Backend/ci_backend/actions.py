@@ -288,7 +288,11 @@ def save_view(conn, name, state):
     if "filters" in state:
         if not isinstance(state["filters"], dict):
             raise ValueError("view filters must be an object")
-        unknown_axes = sorted(set(state["filters"]) - set(_bench.Scope.AXES))
+        # "creative" is a client-restored explicit creative-key list
+        # (compare deep-link), not a Scope axis: accepted and stored
+        # verbatim, never fed into server-side scoping.
+        unknown_axes = sorted(
+            set(state["filters"]) - set(_bench.Scope.AXES) - {"creative"})
         if unknown_axes:
             raise ValueError("unknown view filter axes: %s" % unknown_axes)
         _bench.Scope({k: v for k, v in state["filters"].items()

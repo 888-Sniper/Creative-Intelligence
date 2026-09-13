@@ -453,12 +453,12 @@ export function SettingsPage() {
             {/* Two-factor enrolment lives with the sign-in provider, not
               in a browser preference: this control is explicitly
               unavailable rather than a toggle that proves nothing. */}
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", padding: "10px 0", borderBottom: "1px solid var(--shell-line)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", padding: "10px 0", borderBottom: "1px solid var(--shell-line)" }}>
               <div>
                 <strong style={{ display: "block", fontSize: 13.5 }}>Two-Factor Authentication</strong>
-                <span className="panel-sub">Managed by your sign-in provider or administrator — not available as an in-app toggle.</span>
+                <span className="panel-sub">Managed by your sign-in provider or administrator.</span>
               </div>
-              <span className="badge-demo" title="Two-factor status comes from your sign-in provider">Unavailable</span>
+              <span className="badge-demo" style={{ marginTop: 2, flexShrink: 0 }} title="Two-factor status comes from your sign-in provider">Unavailable</span>
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", padding: "10px 0", flexWrap: "wrap" }}>
               <div>

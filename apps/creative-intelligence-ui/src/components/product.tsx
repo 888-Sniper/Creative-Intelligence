@@ -322,10 +322,22 @@ function fetchMeta(): Promise<CampaignMeta> {
   return metaPromise;
 }
 
-/** Drop the cached metadata so selectors refetch (call after import,
- *  rename, deletion or removal). */
+/** Drop the cached metadata and tell every mounted hook to refetch
+ *  (call after import, rename, deletion or removal). Nulling the
+ *  promise alone leaves components already showing old data stale,
+ *  so the version broadcast drives them to reload. */
+let metaVersion = 0;
+const metaListeners = new Set<() => void>();
 export function refreshCampaignMeta(): void {
   metaPromise = null;
+  metaVersion += 1;
+  metaListeners.forEach((fn) => {
+    try { fn(); } catch { /* a dead listener must not break others */ }
+  });
+}
+/** Test hook: current metadata generation (broadcasts bump it). */
+export function __campaignMetaVersion(): number {
+  return metaVersion;
 }
 
 /** Shared campaign-attribute metadata (clients, projects, teams,
@@ -339,9 +351,15 @@ export function useCampaignMeta(): {
   const [nonce, setNonce] = useState(0);
   const refresh = useCallback(() => {
     refreshCampaignMeta();
-    setData(null);
-    setError("");
-    setNonce((n) => n + 1);
+  }, []);
+  useEffect(() => {
+    const onBroadcast = () => {
+      setData(null);
+      setError("");
+      setNonce((n) => n + 1);
+    };
+    metaListeners.add(onBroadcast);
+    return () => { metaListeners.delete(onBroadcast); };
   }, []);
   useEffect(() => {
     let live = true;

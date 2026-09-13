@@ -22,28 +22,47 @@ function readScope(): SampleScope | null {
 }
 
 /** Sample Data banner: shown while a sample scope is active. Applies
- *  the pack date range once (saving prior filters), and restores them
- *  on return — user preferences are never silently wiped. */
+ *  a clean presentation scope once (all five surviving sample
+ *  campaigns visible: every narrowing filter cleared, pack date
+ *  range set), re-asserts the pack dates after a full page load
+ *  (which resets filter state but keeps the stored scope), and
+ *  restores the pre-demo filters saved by the admin panel on
+ *  return — user preferences are never silently wiped. */
 export function SampleScopeBanner() {
-  const { filters, setFilter } = useFilters();
+  const { filters, setFilter, clearFilters } = useFilters();
   const [scope, setScope] = useState<SampleScope | null>(null);
 
   useEffect(() => {
     const s = readScope();
     if (!s) return;
+    // A full page load resets FilterContext while the stored scope
+    // survives: a pristine (all-empty) filter state with an already
+    // applied scope means the demo dates were lost and must be
+    // re-asserted — without touching the saved return path.
+    const pristine = (Object.keys(EMPTY_FILTERS) as (keyof FilterValues)[])
+      .every((k) => filters[k] === EMPTY_FILTERS[k]);
     if (!s.applied) {
-      const prev: Partial<FilterValues> = {};
-      (Object.keys(EMPTY_FILTERS) as (keyof FilterValues)[]).forEach((k) => {
-        if (filters[k] !== EMPTY_FILTERS[k]) prev[k] = filters[k];
-      });
+      // The panel snapshots live pre-demo filters before navigating;
+      // fall back to current non-empty filters only when it stored none.
+      const prev: Partial<FilterValues> = { ...(s.prev ?? {}) };
+      if (s.prev === undefined) {
+        (Object.keys(EMPTY_FILTERS) as (keyof FilterValues)[]).forEach((k) => {
+          if (filters[k] !== EMPTY_FILTERS[k]) prev[k] = filters[k];
+        });
+      }
       const next = { ...s, prev, applied: true };
       try {
         localStorage.setItem(SAMPLE_SCOPE_KEY, JSON.stringify(next));
       } catch { /* ignore */ }
+      clearFilters();
       setFilter("date_from", s.from);
       setFilter("date_to", s.to);
       setScope(next);
     } else {
+      if (pristine) {
+        setFilter("date_from", s.from);
+        setFilter("date_to", s.to);
+      }
       setScope(s);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

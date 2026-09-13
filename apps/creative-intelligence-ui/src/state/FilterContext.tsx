@@ -45,7 +45,10 @@ export const EMPTY_FILTERS: FilterValues = {
   date_to: "",
 };
 
-/** Active scope only: non-empty, non-"all" values (legacy parity). */
+/** Active scope only: non-empty, non-"all" values (legacy parity).
+ *  While a Sample Data scope is stored, its batch id rides along as
+ *  `sample_batch` so the server restricts every scoped surface to
+ *  the pack — a badge and date range alone cannot do that. */
 export function scopeParams(filters: FilterValues): URLSearchParams {
   const params = new URLSearchParams();
   (Object.keys(filters) as (keyof FilterValues)[]).forEach((k) => {
@@ -53,6 +56,13 @@ export function scopeParams(filters: FilterValues): URLSearchParams {
     const v = filters[k];
     if (v && v !== "all") params.append(k, v);
   });
+  try {
+    const raw = window.localStorage.getItem("ci-sample-scope");
+    const batch = raw ? (JSON.parse(raw) as { batch?: unknown }).batch : null;
+    if (typeof batch === "string" && batch) params.append("sample_batch", batch);
+  } catch {
+    /* storage unavailable: scope stays unbatched */
+  }
   return params;
 }
 
@@ -112,4 +122,10 @@ export function useFilters(): FilterContextValue {
   const ctx = useContext(FilterContext);
   if (!ctx) throw new Error("useFilters must be used inside FilterProvider");
   return ctx;
+}
+
+/** Nullable variant for components (e.g. admin panels) that also
+ *  render in tests without a provider. */
+export function useFiltersOptional(): FilterContextValue | null {
+  return useContext(FilterContext);
 }

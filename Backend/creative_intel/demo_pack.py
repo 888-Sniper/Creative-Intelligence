@@ -760,7 +760,8 @@ def finalize_pack(conn, batch_id, imported_by="", media_dir=None,
         if present:
             continue
         rep = _bench.build_report(conn, camps, kpis, "platform", fmt,
-                                  filters={}, benchmark_scope="filters",
+                                  filters={"sample_batch": [batch_id]},
+                                  benchmark_scope="filters",
                                   rank_by=kpis[0])
         if fmt == "one-pager":
             blob = ("> Sample Data \u2014 synthetic demonstration figures,"
@@ -848,8 +849,13 @@ def campaign_impact(conn, batch_id, campaign_id):
             "creative_keys": keys, "batch_views": views}
 
 
-def delete_campaign(conn, batch_id, campaign_id):
-    """Normal campaign delete, scoped to the pack by stable id."""
+def delete_campaign(conn, batch_id, campaign_id, delete_views=True):
+    """Normal campaign delete, scoped to the pack by stable id.
+
+    delete_views=False preserves tracked views (migration keeps v1
+    views review-only even when their campaign filter goes stale).
+    Deleted media rows are always untracked so later verification
+    never counts dead member keys."""
     impact = campaign_impact(conn, batch_id, campaign_id)
     if not impact["campaign"]:
         raise ValueError("no sample campaign %r" % (campaign_id,))
@@ -868,9 +874,13 @@ def delete_campaign(conn, batch_id, campaign_id):
                 "SELECT id, stored_name FROM media"
                 " WHERE creative_key IN (%s)" % q, keys):
             _delete_media_file(conn, mid, stored)
-        for view in impact["batch_views"]:
-            conn.execute("DELETE FROM saved_views WHERE id=?",
-                         (view["id"],))
+            conn.execute("DELETE FROM demo_batch_members WHERE batch_id=?"
+                         " AND table_name='media' AND record_key=?",
+                         (batch_id, str(mid)))
+        if delete_views:
+            for view in impact["batch_views"]:
+                conn.execute("DELETE FROM saved_views WHERE id=?",
+                             (view["id"],))
     conn.commit()
     return impact
 
@@ -1121,7 +1131,10 @@ SAMPLE_VIEWS_V2 = (
       "benchmark_scope": "global", "rank_by": "cpa",
       "compare_mode": "campaigns"}),
     ("Sample \u2014 Compare: Focus Creatives (CTR)",
-     {"filters": {"campaign": ["Find Your Focus"]},
+     {"filters": {"campaign": ["Find Your Focus"],
+                  "creative": ["smp-focus-desk-noise",
+                               "smp-focus-focus-session",
+                               "smp-focus-one-button"]},
       "kpi": "ctr", "view": "compare", "benchmark": "hook_type",
       "benchmark_scope": "filters", "rank_by": "ctr",
       "compare_mode": "creatives"}),
@@ -1144,10 +1157,14 @@ V2_REPORT_JOBS = (
      ["roas", "ctr"]),
 )
 
+# (title, v1 campaign indexes covered; None = every kept campaign).
+# Workbooks ship prefilled with the pack's own summed raw inputs so
+# every formula sheet computes live — they are worked examples over
+# synthetic demonstration data, not blank templates.
 V2_WORKBOOKS = (
-    "Sample Workbook \u2014 Pack Overview",
-    "Sample Workbook \u2014 Avenlo Skin",
-    "Sample Workbook \u2014 Folden Home",
+    ("Sample Workbook \u2014 Pack Overview", None),
+    ("Sample Workbook \u2014 Avenlo Skin", (0,)),
+    ("Sample Workbook \u2014 Folden Home", (4,)),
 )
 
 
@@ -1435,11 +1452,22 @@ def _v2_own_view_id(conn, batch_id, name):
 
 
 def _v2_claim_view(conn, batch_id, name, state):
-    """Create-or-reuse ONLY our own view; disambiguate on collision."""
+    """Create-or-reuse ONLY our own view; disambiguate on collision.
+
+    Retry safety: an earlier attempt may already own "name (Sample N)"
+    (when a same-named user row forced disambiguation). That tracked
+    row is reused — a retry must never mint "(Sample 3)". A same-named
+    untracked row is user-owned and must never be adopted."""
     from ci_backend.actions import save_view
     own = _v2_own_view_id(conn, batch_id, name)
     if own is not None:
         return own, False
+    prefix = "%s (Sample " % name
+    for vid in _member_keys(conn, batch_id, "saved_views"):
+        row = conn.execute("SELECT id, name FROM saved_views WHERE id=?",
+                           (vid,)).fetchone()
+        if row and str(row[1]).startswith(prefix):
+            return row[0], False
     target = name
     if conn.execute("SELECT 1 FROM saved_views WHERE name=?",
                     (target,)).fetchone():
@@ -1457,53 +1485,20 @@ def _v2_claim_view(conn, batch_id, name, state):
 def _v2_claim_conversation(conn, batch_id, imported_by, question, scope,
                            objective, language):
     """Create-or-reuse ONLY our own conversation. Identity is the
-    tracked batch id — never a title match. Crash recovery: a row
-    with our exact fingerprint created after the import started may
-    be adopted; anything else is left alone."""
+    tracked batch id — never a title, owner or timestamp match. A
+    crash between answer_turn and tracking can leave one untracked
+    orphan row; a retry deliberately creates a fresh conversation
+    rather than adopting any untracked row, because a genuine
+    user-created conversation can share owner/title/scope/timing
+    and must never be absorbed into (or deleted with) the pack."""
     from creative_intel import analyst_chat as _chat
     title = question[:60]
-    scope_json = _json.dumps(dict(scope))
     for cid in _member_keys(conn, batch_id, "analyst_conversations"):
         row = conn.execute(
             "SELECT id, title FROM analyst_conversations WHERE id=?",
             (cid,)).fetchone()
         if row and row[1] == title:
             return row[0], False
-    # Crash-orphan recovery (NOT name adoption): adopt only a row
-    # with our exact fingerprint (owner/title/scope created after
-    # this import started) when no tracked row carries that title.
-    # Anything else is user-owned and left alone.
-    receipt = _receipt_row(conn, PACK_KEY_V2)
-    started = receipt["imported_at"] if receipt else ""
-    cand = conn.execute(
-        "SELECT id FROM analyst_conversations WHERE owner_employee_id=?"
-        " AND title=? AND scope_json=? AND created_at>=?"
-        " ORDER BY created_at LIMIT 1",
-        (imported_by, title, scope_json, started)).fetchone()
-    if cand:
-        titled = [c for c in _member_keys(conn, batch_id,
-                                          "analyst_conversations")
-                  if (conn.execute(
-                      "SELECT title FROM analyst_conversations WHERE id=?",
-                      (c,)).fetchone() or [""])[0] == title]
-        if not titled:
-            _track(conn, batch_id, "analyst_conversations", cand[0])
-            for (mid,) in conn.execute(
-                    "SELECT id FROM analyst_messages WHERE conversation_id=?",
-                    (cand[0],)):
-                _track(conn, batch_id, "analyst_messages", mid)
-            for (fid,) in conn.execute(
-                    "SELECT id FROM analyst_findings WHERE conversation_id=?",
-                    (cand[0],)):
-                _track(conn, batch_id, "analyst_findings", fid)
-            conn.commit()
-            if conn.execute("SELECT COUNT(*) FROM analyst_messages"
-                            " WHERE conversation_id=?",
-                            (cand[0],)).fetchone()[0]:
-                return cand[0], False
-            conn.execute("DELETE FROM analyst_conversations WHERE id=?",
-                         (cand[0],))
-            conn.commit()
     turn = _chat.answer_turn(
         conn, imported_by, question, None, scope=dict(scope),
         objective=objective, language=language)
@@ -1523,7 +1518,11 @@ def _v2_claim_conversation(conn, batch_id, imported_by, question, scope,
 
 def verify_pack_v2(conn, batch_id, media_dir=None):
     """Check required records AND file references. Returns (ok, detail).
-    DB and filesystem failures are reported separately."""
+    DB and filesystem failures are reported separately. Acceptance is
+    strict: 5 campaigns, 15 creatives, 15 tracked media rows, every
+    expected report/workbook file, 10 tracked views and 6 tracked
+    conversations — a pack with no media or files never passes, and
+    a missing tracked row fails instead of being skipped."""
     import os as _os
     from ci_backend.actions import _media_dir
     detail = {"db": {}, "files": {}}
@@ -1538,34 +1537,86 @@ def verify_pack_v2(conn, batch_id, media_dir=None):
         keys).fetchone()[0] if keys else 0
     detail["db"]["creatives"] = alive
     media_ids = _member_keys(conn, batch_id, "media")
-    detail["db"]["media_rows"] = len(media_ids)
+    alive_media = conn.execute(
+        "SELECT COUNT(*) FROM media WHERE id IN (%s)" % (
+            ",".join("?" * len(media_ids)) or "SELECT '' WHERE 0"),
+        media_ids).fetchone()[0] if media_ids else 0
+    detail["db"]["media_rows"] = alive_media
+    detail["db"]["media_missing_rows"] = sorted(
+        set(media_ids) - {
+            str(r[0]) for r in conn.execute(
+                "SELECT id FROM media WHERE id IN (%s)" % (
+                    ",".join("?" * len(media_ids)) or "SELECT '' WHERE 0"),
+                media_ids)} if media_ids else [])
     fkeys = _member_keys(conn, batch_id, "sample_files")
-    detail["db"]["sample_files"] = conn.execute(
+    alive_files = conn.execute(
         "SELECT COUNT(*) FROM sample_files WHERE file_key IN (%s)" % (
             ",".join("?" * len(fkeys)) or "SELECT '' WHERE 0"),
         fkeys).fetchone()[0] if fkeys else 0
-    ok = camps == 5 and alive == 15
-    missing_media, missing_files = [], []
-    if ok:
-        store = _media_dir(media_dir)
-        for mid in media_ids:
-            row = conn.execute("SELECT stored_name FROM media WHERE id=?",
-                               (mid,)).fetchone()
-            if not row:
-                continue
-            path = _os.path.join(store, row[0])
-            if not _os.path.isfile(path):
-                missing_media.append(mid)
-        for fk in fkeys:
-            row = conn.execute("SELECT name FROM sample_files WHERE file_key=?",
-                               (fk,)).fetchone()
-            if not row:
-                continue
-            path = _os.path.join(store, "sample", batch_id, row[0])
-            if not _os.path.isfile(path):
-                missing_files.append(fk)
+    detail["db"]["sample_files"] = alive_files
+    detail["db"]["sample_files_expected"] = (
+        len(V2_REPORT_JOBS) + len(V2_WORKBOOKS))
+    view_ids = _member_keys(conn, batch_id, "saved_views")
+    alive_views = conn.execute(
+        "SELECT COUNT(*) FROM saved_views WHERE id IN (%s)" % (
+            ",".join("?" * len(view_ids)) or "SELECT '' WHERE 0"),
+        view_ids).fetchone()[0] if view_ids else 0
+    detail["db"]["saved_views"] = alive_views
+    detail["db"]["saved_views_expected"] = len(SAMPLE_VIEWS_V2)
+    conv_ids = _member_keys(conn, batch_id, "analyst_conversations")
+    alive_convs = conn.execute(
+        "SELECT COUNT(*) FROM analyst_conversations WHERE id IN (%s)" % (
+            ",".join("?" * len(conv_ids)) or "SELECT '' WHERE 0"),
+        conv_ids).fetchone()[0] if conv_ids else 0
+    detail["db"]["conversations"] = alive_convs
+    detail["db"]["conversations_expected"] = len(SAMPLE_QUESTIONS_V2)
+    ok = (camps == 5 and alive == 15 and alive_media == 15
+          and alive_files == detail["db"]["sample_files_expected"]
+          and alive_views == detail["db"]["saved_views_expected"]
+          and alive_convs == detail["db"]["conversations_expected"])
+    missing_media, missing_files = list(
+        detail["db"]["media_missing_rows"]), []
+    detail["db"]["sample_files_missing_rows"] = sorted(
+        set(fkeys) - {
+            r[0] for r in conn.execute(
+                "SELECT file_key FROM sample_files WHERE file_key IN (%s)"
+                % (",".join("?" * len(fkeys)) or "SELECT '' WHERE 0"),
+                fkeys)} if fkeys else [])
+    missing_files.extend(detail["db"]["sample_files_missing_rows"])
+    detail["db"]["saved_views_missing_rows"] = sorted(
+        set(view_ids) - {
+            str(r[0]) for r in conn.execute(
+                "SELECT id FROM saved_views WHERE id IN (%s)" % (
+                    ",".join("?" * len(view_ids)) or "SELECT '' WHERE 0"),
+                view_ids)} if view_ids else [])
+    detail["db"]["conversations_missing_rows"] = sorted(
+        set(conv_ids) - {
+            str(r[0]) for r in conn.execute(
+                "SELECT id FROM analyst_conversations WHERE id IN (%s)"
+                % (",".join("?" * len(conv_ids)) or "SELECT '' WHERE 0"),
+                conv_ids)} if conv_ids else [])
+    if (detail["db"]["saved_views_missing_rows"]
+            or detail["db"]["conversations_missing_rows"]):
+        ok = False
+    store = _media_dir(media_dir)
+    for mid in media_ids:
+        row = conn.execute("SELECT stored_name FROM media WHERE id=?",
+                           (mid,)).fetchone()
+        if not row:
+            continue  # already counted in media_missing_rows above
+        path = _os.path.join(store, row[0])
+        if not _os.path.isfile(path):
+            missing_media.append(mid)
+    for fk in fkeys:
+        row = conn.execute("SELECT name FROM sample_files WHERE file_key=?",
+                           (fk,)).fetchone()
+        if not row:
+            continue  # already counted in sample_files_missing_rows
+        path = _os.path.join(store, "sample", batch_id, row[0])
+        if not _os.path.isfile(path):
+            missing_files.append(fk)
     detail["files"]["missing_media"] = missing_media
-    detail["files"]["missing_sample_files"] = missing_files
+    detail["files"]["missing_sample_files"] = sorted(set(missing_files))
     if missing_media or missing_files:
         ok = False
     return ok, detail
@@ -1584,6 +1635,65 @@ def finalize_pack_v2(conn, batch_id, imported_by="", media_dir=None,
     _ = save_view
     counts = dict(core_counts or {})
     store = _media_dir(media_dir)
+    # Any showcase failure (conversations, reports, workbooks) is
+    # recorded as a recoverable failed receipt — never a silent
+    # partial pack. Per-item checkpoints already committed stay, so
+    # a retry resumes without duplicating tracked rows.
+    try:
+        _finalize_showcase_v2(conn, batch_id, imported_by, store, counts)
+    except Exception as exc:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        _v2_set_status(conn, "failed", dict(counts),
+                       error="finalize: %s; safe to retry" % exc)
+        raise
+    return _finish_pack_v2(conn, batch_id, media_dir, counts)
+
+
+def _v2_workbook_prefill(conn, batch_id, campaign_indexes):
+    """Prefill rows [(creative_key, {input_field: value})] summed over
+    this batch's own ads rows. Facts the pack never synthesises
+    (reach, watch time, creator, concept) stay blank, which the
+    sheet legend defines as missing — never a measured zero."""
+    out = []
+    for ci in campaign_indexes:
+        for ki in range(3):
+            key = creative_key(ci, ki)
+            agg = conn.execute(
+                "SELECT COALESCE(SUM(impressions),0),"
+                " COALESCE(SUM(video_starts),0),"
+                " COALESCE(SUM(views_2s),0),"
+                " COALESCE(SUM(views_3s),0),"
+                " COALESCE(SUM(views_25),0),"
+                " COALESCE(SUM(views_50),0),"
+                " COALESCE(SUM(views_75),0),"
+                " COALESCE(SUM(views_100),0),"
+                " COALESCE(SUM(spend),0) FROM ads"
+                " WHERE import_id=? AND creative_key=?",
+                (batch_id, key)).fetchone()
+            if not agg or not agg[0]:
+                continue
+            dur = conn.execute(
+                "SELECT duration_s FROM creatives WHERE creative_key=?",
+                (key,)).fetchone()
+            vals = {"impressions": agg[0], "video_starts": agg[1],
+                    "views_2s": agg[2], "views_3s": agg[3],
+                    "views_25": agg[4], "views_50": agg[5],
+                    "views_75": agg[6], "views_100": agg[7],
+                    "spend": round(agg[8], 2)}
+            if dur and dur[0]:
+                vals["duration_s"] = dur[0]
+            out.append((key, vals))
+    return out
+
+
+def _finalize_showcase_v2(conn, batch_id, imported_by, store, counts):
+    """Views, conversations, reports, workbooks with checkpoints."""
+    import base64 as _b64
+    from creative_intel import benchmarks as _bench
+    from creative_intel import analyst_workbook as _wb
     n_views = 0
     for name, state in SAMPLE_VIEWS_V2:
         _, created = _v2_claim_view(conn, batch_id, name, state)
@@ -1592,8 +1702,10 @@ def finalize_pack_v2(conn, batch_id, imported_by="", media_dir=None,
     _v2_checkpoint(conn, batch_id, "views", counts)
     n_convs = 0
     for question, scope, objective, language in SAMPLE_QUESTIONS_V2:
+        scoped = dict(scope or {})
+        scoped["sample_batch"] = [batch_id]
         _, created = _v2_claim_conversation(
-            conn, batch_id, imported_by, question, scope,
+            conn, batch_id, imported_by, question, scoped,
             objective, language)
         n_convs += int(created)
     counts["conversations"] = n_convs
@@ -1615,8 +1727,11 @@ def finalize_pack_v2(conn, batch_id, imported_by="", media_dir=None,
             ("%s/%s" % (batch_id, fname),)).fetchone()
         if present:
             continue
+        # Sample-only by construction: the batch axis keeps real
+        # uploads out even on a mixed database.
         rep = _bench.build_report(conn, camps, kpis, "platform", fmt,
-                                  filters={}, benchmark_scope="filters",
+                                  filters={"sample_batch": [batch_id]},
+                                  benchmark_scope="filters",
                                   rank_by=kpis[0])
         if fmt == "one-pager":
             blob = ("> Sample Data \u2014 synthetic demonstration figures,"
@@ -1633,7 +1748,7 @@ def finalize_pack_v2(conn, batch_id, imported_by="", media_dir=None,
         n_reports += 1
     counts["reports"] = n_reports
     n_books = 0
-    for title in V2_WORKBOOKS:
+    for title, scope_idx in V2_WORKBOOKS:
         fname = "%s.xlsx" % title.replace(" \u2014 ", " - ")
         present = conn.execute(
             "SELECT 1 FROM sample_files WHERE file_key=?",
@@ -1641,9 +1756,14 @@ def finalize_pack_v2(conn, batch_id, imported_by="", media_dir=None,
         if present:
             continue
         blob = _wb.build_blank_workbook(
+            prefill=_v2_workbook_prefill(
+                conn, batch_id, scope_idx if scope_idx is not None
+                else V2_KEPT),
             cover={"name": title,
-                   "description": "Sample configuration over the"
-                   " one-time presentation pack (%s). Synthetic"
+                   "description": "Worked sample over the one-time"
+                   " presentation pack (%s): Input rows are prefilled"
+                   " with the pack's summed synthetic figures, so the"
+                   " formula sheets compute live. Synthetic"
                    " demonstration data." % PACK_KEY_V2,
                    "modules": ["Metrics", "Benchmarks"],
                    "kpis": ["ROAS", "CTR", "CPA"]})
@@ -1654,6 +1774,11 @@ def finalize_pack_v2(conn, batch_id, imported_by="", media_dir=None,
         n_books += 1
     counts["workbooks"] = n_books
     _v2_checkpoint(conn, batch_id, "files", counts)
+
+
+def _finish_pack_v2(conn, batch_id, media_dir, counts):
+    """Strict acceptance gate: added only after verify_pack_v2
+    passes on records AND files."""
     if not counts.get("ads_rows"):
         counts["ads_rows"] = conn.execute(
             "SELECT COUNT(*) FROM ads WHERE import_id=?",
@@ -1685,11 +1810,13 @@ def finalize_pack_v2(conn, batch_id, imported_by="", media_dir=None,
             "receipt": _receipt_row(conn, PACK_KEY_V2)}
 
 
-def migrate_to_v2(conn, imported_by="", authorize=False):
+def migrate_to_v2(conn, imported_by="", authorize=False, media_dir=None):
     """Authorised v1 -> v2 migration. Deletes ONLY live surplus
-    sample-owned campaigns (never restores user-deleted ones, never
-    touches review-only views/conversations), then writes the v2
-    receipt over the same batch with the frozen v1 data window."""
+    sample-owned campaigns (never restores user-deleted ones; tracked
+    v1 views stay review-only and are never deleted by the nested
+    campaign path), then runs the full v2 artwork/showcase
+    verification: the v2 receipt is marked added only when it
+    passes, failed with detail otherwise."""
     prev = migration_preview(conn)
     if not prev.get("eligible"):
         raise ValueError(prev.get("reason", "migration not eligible"))
@@ -1701,7 +1828,8 @@ def migrate_to_v2(conn, imported_by="", authorize=False):
         if item["already_deleted"]:
             kept_deleted.append(item["campaign_id"])
             continue
-        delete_campaign(conn, batch, item["campaign_id"])
+        delete_campaign(conn, batch, item["campaign_id"],
+                        delete_views=False)
         deleted.append(item["campaign_id"])
     v1 = _receipt_row(conn, PACK_KEY)
     counts = {
@@ -1709,25 +1837,43 @@ def migrate_to_v2(conn, imported_by="", authorize=False):
         "ads_rows": conn.execute(
             "SELECT COUNT(*) FROM ads WHERE import_id=?",
             (batch,)).fetchone()[0],
-        "migrated_from": PACK_KEY, "phase": "added",
+        "migrated_from": PACK_KEY, "phase": "migrated",
     }
     try:
         conn.execute(
             "INSERT INTO demo_packs (pack_key, batch_id, workspace,"
             " imported_by, imported_at, data_start, data_end,"
             " status, counts_json) VALUES (?, ?, ?, ?, ?, ?, ?,"
-            " 'added', ?)",
+            " 'migrated', ?)",
             (PACK_KEY_V2, batch, v1["workspace"], imported_by,
              _utcnow(), v1["data_start"], v1["data_end"],
              _json.dumps(counts)))
     except Exception:
-        conn.execute("UPDATE demo_packs SET status='added', counts_json=?"
+        conn.execute("UPDATE demo_packs SET status='migrated', counts_json=?"
                      " WHERE pack_key=?",
                      (_json.dumps(counts), PACK_KEY_V2))
+    conn.commit()
+    ok, detail = verify_pack_v2(conn, batch, media_dir)
+    if not ok:
+        counts = dict(counts, verify=detail,
+                      error="migration verify failed; safe to retry import")
+        conn.execute("UPDATE demo_packs SET status='failed', counts_json=?"
+                     " WHERE pack_key=?",
+                     (_json.dumps(counts), PACK_KEY_V2))
+        conn.commit()
+        return {"authorized": True, "deleted": deleted,
+                "kept_deleted": kept_deleted, "verified": False,
+                "verify": detail,
+                "receipt": _receipt_row(conn, PACK_KEY_V2)}
+    counts = dict(counts, verify=detail, phase="added")
+    conn.execute("UPDATE demo_packs SET status='added', counts_json=?"
+                 " WHERE pack_key=?",
+                 (_json.dumps(counts), PACK_KEY_V2))
     conn.execute("UPDATE demo_packs SET status='migrated' WHERE pack_key=?",
                  (PACK_KEY,))
     conn.commit()
     return {"authorized": True, "deleted": deleted,
-            "kept_deleted": kept_deleted,
+            "kept_deleted": kept_deleted, "verified": True,
+            "verify": detail,
             "receipt": _receipt_row(conn, PACK_KEY_V2)}
 

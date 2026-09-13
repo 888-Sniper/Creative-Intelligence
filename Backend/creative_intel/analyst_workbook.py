@@ -368,31 +368,34 @@ def _definitions_sheet():
     return {"name": "Definitions", "header": [], "rows": rows}
 
 
-def _cover_sheet(name, description, modules, kpis):
+def _cover_sheet(name, description, modules, kpis, prefilled=False):
     """First-sheet cover recording the workbook configuration.
 
-    The seven analysis sheets stay blank and reusable; this sheet
-    makes the export reflect the name, description, modules and KPIs
-    the user selected in the app (Workbook page, option A).
+    Blank by default (seven empty analysis sheets follow); prefilled
+    covers state the Input rows already carry figures so the formula
+    sheets compute live.
     """
     rows = _title_block(name or "Foap Analyst Workbook", [
         (description or "Custom analyst workbook.").strip(),
-        "Seven blank analysis sheets follow this cover.",
+        ("Input rows are prefilled with sample figures; formula sheets"
+         " compute live." if prefilled else
+         "Seven blank analysis sheets follow this cover."),
     ])
     rows.append(["Selected modules", ", ".join(modules) if modules else "none"])
     rows.append(["Selected KPIs", ", ".join(kpis) if kpis else "none"])
-    rows.append(["Generated in", "Foap Creative Intelligence (Blank Workbook)"])
+    rows.append(["Generated in", "Foap Creative Intelligence (%s Workbook)"
+                 % ("Prefilled Sample" if prefilled else "Blank")])
     return {"name": "Workbook", "header": [], "rows": rows}
 
 
 def build_blank_workbook(prefill=None, cover=None):
     """Blank reusable workbook as .xlsx bytes.
 
-    prefill: optional list of (creative_key, {input_field: value}) used
-    by tests to fill Input rows; production callers omit it.
-    cover: optional {"name", "description", "modules", "kpis"} mapping
-    prepended as a "Workbook" cover sheet; omitted callers get the
-    exact historical seven-sheet file.
+    prefill: optional list of (creative_key, {input_field: value});
+    when non-empty the cover is labelled prefilled so the file never
+    claims to be blank. cover: optional {"name", "description",
+    "modules", "kpis"} mapping prepended as a "Workbook" cover sheet;
+    omitted callers get the exact historical seven-sheet file.
     """
     sheets = [_input_sheet(prefill), _metrics_sheet(),
               _benchmarks_sheet(), _hypotheses_sheet(),
@@ -401,5 +404,7 @@ def build_blank_workbook(prefill=None, cover=None):
     if cover:
         sheets.insert(0, _cover_sheet(
             cover.get("name") or "", cover.get("description") or "",
-            list(cover.get("modules") or []), list(cover.get("kpis") or [])))
+            list(cover.get("modules") or []),
+            list(cover.get("kpis") or []),
+            prefilled=bool(prefill)))
     return ooxml.build_xlsx(sheets)

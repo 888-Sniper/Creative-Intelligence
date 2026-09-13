@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { api, scopedPath } from "@/api/client";
+import { applySavedView, VIEW_ROUTES, type SavedView } from "@/components/savedViews";
 import { useFilters } from "@/state/FilterContext";
 import { Icon } from "@/components/icons";
 import { LoadingButton } from "@/components/LoadingButton";
@@ -36,16 +37,8 @@ interface BenchRow {
   roas: number | null; n_ads: number;
 }
 
-interface SavedView {
-  id: number;
-  name: string;
-  state: { filters?: Record<string, string[]>; kpi?: string; view?: string; compare_mode?: string };
-}
-
-const VIEW_ROUTES: Record<string, string> = {
-  main: "/", campaign: "/campaigns", creative: "/creatives", compare: "/compare",
-  benchmark: "/benchmarks", report: "/reports", profile: "/profile", admin: "/admin",
-};
+const BENCHMARK_AXES: ReadonlyArray<Axis> =
+  ["platform", "hook_type", "format", "creator_vs_branded"];
 
 function num(v: unknown): number {
   const n = Number(v ?? 0);
@@ -152,19 +145,18 @@ export function BenchmarksPage() {
       return next;
     });
 
-  /* Saved views restore the FULL saved scope (every stored axis plus
-   *  the saved KPI). The global scope model is single-value per axis,
-   *  so the first stored value wins when several were saved. */
+  /* Shared restore over SPA navigation (a hard reload would reset
+   *  filter state and silently drop the restore). Saved benchmark
+   *  group-by axes apply to this page when they name one of its axes;
+   *  rank_by/benchmark_scope are report-build settings with no page
+   *  control and stay stored on the view. */
+  const navigate = useNavigate();
   const applyView = (v: SavedView) => {
-    const f = v.state?.filters ?? {};
-    for (const k of ["client", "project", "team", "campaign", "platform",
-      "vertical", "market", "funnel", "objective", "status", "spend_min",
-      "spend_max", "hook_type", "creator_vs_branded", "format", "date",
-      "date_from", "date_to"] as const) {
-      setFilter(k, (f[k] ?? [])[0] ?? "");
+    const axis = v.state?.benchmark;
+    if (axis && (BENCHMARK_AXES as ReadonlyArray<string>).includes(axis)) {
+      setAxis(axis as Axis);
     }
-    if (v.state?.kpi) setFilter("kpi", v.state.kpi);
-    window.location.assign(v.state?.view ? (VIEW_ROUTES[v.state.view] ?? "/") : "/");
+    applySavedView(v, setFilter, navigate);
   };
 
   const createBenchmark = async () => {

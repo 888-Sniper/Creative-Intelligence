@@ -3,8 +3,9 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "@/api/client";
 import { Icon } from "@/components/icons";
 import { LoadingButton } from "@/components/LoadingButton";
-import { DemoDataBadge, EmptyState, Panel } from "@/components/product";
+import { DemoDataBadge, EmptyState, Panel, refreshCampaignMeta } from "@/components/product";
 import { SAMPLE_SCOPE_KEY } from "@/components/SampleScopeBanner";
+import { EMPTY_FILTERS, useFiltersOptional } from "@/state/FilterContext";
 
 interface PackCampaign { campaign_id: string; campaign: string; }
 interface PackStatus {
@@ -115,27 +116,62 @@ export function DemoPackPanel() {
       setNotice("An Earlier Sample Pack Is Active — Review The Migration Preview Below Before Adding.");
     } else {
       setNotice(r.created ? "Sample Data Added." : "Pack Already Imported — Nothing Duplicated.");
+      // Campaign lists, charts and selectors everywhere reload: normal
+      // navigation afterwards shows the new campaigns with no hard reload.
+      refreshCampaignMeta();
     }
     setConfirmRemove(false);
   });
 
   const migrate = () => run("migrate", async () => {
-    const r = await api<{ authorized: boolean; deleted?: string[]; kept_deleted?: string[] }>(
+    const r = await api<{ authorized: boolean; deleted?: string[]; kept_deleted?: string[]; verified?: boolean }>(
       "POST", "/api/admin/demo/pack/migration/apply", { authorize: true });
     if (r.authorized) {
-      setNotice(`Migration Complete. Removed ${(r.deleted ?? []).length} Surplus Campaign(s); ` +
-        `Kept ${(r.kept_deleted ?? []).length} Earlier Deletion(s).`);
+      const base = `Migration Complete. Removed ${(r.deleted ?? []).length} Surplus Campaign(s); ` +
+        `Kept ${(r.kept_deleted ?? []).length} Earlier Deletion(s).`;
+      setNotice(r.verified === false
+        ? `${base} Verification Did Not Pass — The Pack Is Marked Failed With Detail; Safe To Retry.`
+        : `${base} Verification Passed.`);
+      refreshCampaignMeta();
     }
     setConfirmMigrate(false);
   });
 
+  const filtersCtx = useFiltersOptional();
   const openDemoDashboard = () => {
     if (!status?.receipt) return;
     try {
+      // Snapshot the live pre-demo filters before navigating away: a full
+      // page load resets FilterContext, so the banner can only restore
+      // what we store here. Preserve an existing in-progress scope's
+      // saved filters when one is active (re-open must not clobber it).
+      let prev: unknown;
+      let applied: unknown;
+      let scopeActive = false;
+      try {
+        const cur = JSON.parse(
+          localStorage.getItem(SAMPLE_SCOPE_KEY) ?? "null") as {
+            prev?: unknown; applied?: unknown } | null;
+        scopeActive = cur?.applied === true;
+        if (scopeActive) prev = cur?.prev;
+        applied = cur?.applied;
+      } catch { /* corrupt scope: start fresh */ }
+      const live = filtersCtx?.filters;
+      // Live snapshot only when no demo session is active: mid-demo
+      // drill-down filters must never overwrite the original return path.
+      if (live && !scopeActive) {
+        const snap: Record<string, string> = {};
+        (Object.keys(EMPTY_FILTERS) as (keyof typeof EMPTY_FILTERS)[]).forEach((k) => {
+          if (live[k] !== EMPTY_FILTERS[k]) snap[k] = live[k];
+        });
+        if (Object.keys(snap).length > 0) prev = snap;
+      }
       localStorage.setItem(SAMPLE_SCOPE_KEY, JSON.stringify({
         from: status.receipt.data_start,
         to: status.receipt.data_end,
         batch: status.receipt.batch_id,
+        ...(prev !== undefined ? { prev } : {}),
+        ...(applied !== undefined ? { applied } : {}),
       }));
     } catch { /* storage unavailable: still navigate */ }
     window.location.assign("/");
@@ -146,6 +182,7 @@ export function DemoPackPanel() {
     await api("POST", "/api/admin/demo/pack/remove",
       { confirm: true, batch_id: status.receipt.batch_id });
     setNotice("Sample Data Removed. The Import Receipt Is Kept.");
+    refreshCampaignMeta();
     setConfirmRemove(false);
     setImpact(null);
   });
@@ -168,6 +205,7 @@ export function DemoPackPanel() {
     await api("POST", "/api/admin/demo/pack/rename",
       { kind: "campaign", id: renameId, name: renameName.trim() });
     setNotice("Sample Campaign Renamed. Cleanup Provenance Kept.");
+    refreshCampaignMeta();
     setRenameId("");
     setRenameName("");
   });

@@ -82,7 +82,6 @@ function GateScreen({ gate }: { gate: "pending" | "suspended" | "revoked" }) {
 }
 
 export function LoginPage() {
-  const { me } = useAuth();
   const params = new URLSearchParams(window.location.search);
   const authError = params.get("auth_error") ?? "";
   if (authError) window.history.replaceState(null, "", window.location.pathname);
@@ -102,9 +101,6 @@ export function LoginPage() {
         <p className="muted login-footer">
           <Icon name="lock" size={14} /> For Foap Employees Only.
         </p>
-        {me?.workos_configured === false ? (
-          <p className="muted">WorkOS Is Not Configured On This Server Yet — Ask Your Administrator To Set It Up.</p>
-        ) : null}
       </div>
     </AuthShell>
   );

@@ -13,11 +13,10 @@ import { loginAs, readSeeds } from "./helpers";
  *  full-page screenshot under test-results/screens/ for human
  *  side-by-side comparison against the approved references. Pixel
  *  assertions are deliberately absent: font rendering differs between
- *  developer machines and CI runners, so a pixel gate would be flaky.
- *  The review gate is the uploaded `approved-screens` CI artifact
- *  (see .github/workflows/ci.yml and docs/Visual Review.md): the
- *  screenshots are the reviewable artifact, the assertions below
- *  are the deterministic gate.
+ *  machines, so a pixel gate would be flaky. The review gate is human
+ *  side-by-side comparison (see docs/Visual Review.md): the screenshots
+ *  under test-results/screens/ are the reviewable artifact, the
+ *  assertions below are the deterministic gate.
  *
  *  Approved viewports: 1440x1000 desktop; 1280x800, 1024x768 and
  *  768x1024 responsive passes over all 14 routes; 390x844 mobile

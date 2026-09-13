@@ -87,8 +87,7 @@ def test_direct_dependencies_pinned():
 
 def test_installers_enforce_hashes():
     for name in ("deploy/oracle/install.sh",
-                 "deploy/oracle/update.sh",
-                 ".github/workflows/ci.yml"):
+                 "deploy/oracle/update.sh"):
         text = _read(name)
         assert re.search(
             r"pip.*install --require-hashes -r .*requirements\.lock", text), \

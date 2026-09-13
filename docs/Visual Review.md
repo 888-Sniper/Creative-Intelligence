@@ -11,11 +11,10 @@ is the acceptance gate.
 - Suite: `apps/creative-intelligence-ui/e2e/00-screens.spec.ts`
   (runs inside `pnpm test:e2e` against the seeded backend +
   production build).
-- Every CI run uploads them as the `approved-screens` workflow
-  artifact (`.github/workflows/ci.yml`), even when E2E fails.
+- Captures land in `apps/creative-intelligence-ui/test-results/screens/`
+  on every local run (there is no hosted CI uploading artifacts).
 - Populated suite: `apps/creative-intelligence-ui/e2e/02-full-demo.spec.ts`
-  (runs ONLY under `FULL_DEMO=1`; the `full-demo` CI job runs it and
-  uploads `d-*.png` as the `populated-screens` artifact). These show
+  (runs ONLY under `FULL_DEMO=1`). These show
   the ten-example dataset with real content; the `00`/`01` captures
   keep the small deterministic fixture.
 - Local runs: `pnpm --dir apps/creative-intelligence-ui test:e2e`,

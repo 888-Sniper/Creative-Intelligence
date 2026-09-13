@@ -99,19 +99,6 @@ def test_backup_service_runs_unprivileged_with_offhost():
     assert "/var/backups/creative-intelligence" in backup
 
 
-def test_ci_runs_security_and_deploy_gates():
-    ci = _read(".github/workflows/ci.yml")
-    assert "pip_audit" in ci
-    assert "shellcheck" in ci
-    assert "gitleaks" in ci
-    assert "semgrep" in ci
-    assert "fetch-depth: 0" in ci
-    assert "audit --audit-level high" in ci
-    assert "requirements.lock" in ci
-    codeql = _read(".github/workflows/codeql.yml")
-    assert "python" in codeql and "typescript" in codeql
-
-
 def test_worker_service_bounded_and_enabled():
     service = _read("deploy/oracle/creative-intelligence-worker.service")
     assert re.search(r"^User=creative-intel\s*$", service, re.M)

@@ -279,7 +279,7 @@ body[data-density="compact"] .kpi-grid{grid-gap:8px;gap:8px}
 .panel + .panel{margin-top:16px}
 /* Gap containers own their spacing: never stack sibling margin on top
  * of grid/flex gap (double vertical rhythm, staggered card tops). */
-.rail-stack>.panel+.panel,.cols-2>.panel+.panel,.cols-3>.panel+.panel,.cols-2-even>.panel+.panel,.main-rail>.panel+.panel,.wb-rail>.panel+.panel,.cmp-grid>.panel+.panel,.kpi-grid>.panel+.panel,.cards-4>.panel+.panel,.creative-cards-4>.panel+.panel,.creative-cards>.panel+.panel,.filter-grid>.panel+.panel,.dashboard .dash-charts>.panel+.panel,.dashboard .dash-lower>.panel+.panel{margin-top:0}
+.rail-stack>.panel+.panel,.cols-2>.panel+.panel,.cols-3>.panel+.panel,.cols-2-even>.panel+.panel,.main-rail>.panel+.panel,.wb-rail>.panel+.panel,.cmp-grid>.panel+.panel,.cmp-grid-4>.panel+.panel,.cmp-trio>.panel+.panel,.kpi-grid>.panel+.panel,.cards-3>.panel+.panel,.cards-4>.panel+.panel,.creative-cards-4>.panel+.panel,.creative-cards>.panel+.panel,.filter-grid>.panel+.panel,.detail-layout>.panel+.panel,.detail-cols-2>.panel+.panel,.fmt-row>.panel+.panel,.dashboard .dash-charts>.panel+.panel,.dashboard .dash-lower>.panel+.panel{margin-top:0}
 .panel-title{margin:0;font-size:15.5px;font-weight:700;color:var(--shell-navy)}
 .panel-sub{margin:4px 0 0;font-size:13px;font-weight:400;color:var(--shell-muted)}
 .panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
@@ -334,8 +334,12 @@ body[data-density="compact"] .kpi-grid{grid-gap:8px;gap:8px}
  * differing content. Empty states centre-fill instead of collapsing.
  * Single-column (mobile) tracks size naturally — no forced heights. */
 .cols-2,.cols-2-even,.cols-3,.cmp-grid,.cmp-grid-4,.cmp-trio,.cards-3,.cards-4,.creative-cards,.creative-cards-4,.detail-layout,.detail-cols-2,.main-rail,.wb-rail,.kpi-grid,.fmt-row{align-items:stretch}
-.cols-2>.panel,.cols-2-even>.panel,.cols-3>.panel,.cmp-grid>.panel,.cmp-grid-4>.panel,.cmp-trio>.panel,.cards-3>.panel,.cards-4>.panel,.detail-layout>.panel,.detail-cols-2>.panel,.main-rail>.panel,.wb-rail>.panel,.fmt-row>.panel,.kpi-grid>.kpi-card,.creative-cards>.panel,.creative-cards-4>.panel{height:100%;display:flex;flex-direction:column}
-.cols-2>.panel>.panel-body,.cols-2-even>.panel>.panel-body,.cols-3>.panel>.panel-body,.main-rail>.panel>.panel-body,.detail-layout>.panel>.panel-body{flex:1}
+.cols-2>.panel,.cols-2-even>.panel,.cols-3>.panel,.cmp-grid>.panel,.cmp-grid-4>.panel,.cmp-trio>.panel,.cards-3>.panel,.cards-4>.panel,.detail-layout>.panel,.detail-cols-2>.panel,.main-rail>.panel,.wb-rail>.panel,.fmt-row>.panel,.creative-cards>.panel,.creative-cards-4>.panel{height:100%;display:flex;flex-direction:column}
+/* KPI cards stretch to the row height but keep the intended
+ * horizontal icon + body arrangement (never column). */
+.kpi-grid>.kpi-card{height:100%}
+/* NOTE: Panel renders no .panel-body wrapper; rules above match the
+ * actual markup (section.panel > .panel-head + content). */
 .panel>.empty:last-child,.panel>.empty-structured:last-child{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center}
 /* Gap ownership: rail-stack and row grids own inter-row spacing through
  * `gap`, so grid children must not add their own vertical margins

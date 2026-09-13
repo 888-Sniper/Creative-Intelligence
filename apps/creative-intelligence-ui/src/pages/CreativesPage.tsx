@@ -471,7 +471,7 @@ export function CreativesPage() {
                       icon="bars" tint="#E7F1FB" metricLabel="Impressions" compare={compare} />
                     <KpiCard label="Total Clicks" display={fmtCompact(num(compare.metrics.clicks?.current))}
                       icon="click" tint="#E7F1FB" metricLabel="Clicks" compare={compare} />
-                    <KpiCard label="Average ROAS" display={`${num(compare.metrics.roas?.current).toFixed(1)}x`}
+                    <KpiCard label="Average ROAS" display={compare.metrics.roas?.current == null ? "—" : `${compare.metrics.roas.current.toFixed(1)}x`}
                       icon="users" tint="#E5F5F2" metricLabel="ROAS" compare={compare} />
                   </>
                 ) : (

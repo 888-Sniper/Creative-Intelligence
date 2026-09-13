@@ -29,6 +29,7 @@ interface SavedView {
     filters?: Record<string, string[]>;
     kpi?: string;
     view?: string;
+    compare_mode?: string;
   };
 }
 
@@ -207,6 +208,20 @@ export function InsightsPage() {
     "date_from", "date_to"] as const;
   const applyView = (v: SavedView) => {
     const f = v.state?.filters ?? {};
+    // Saved comparisons restore EVERY selection: route to Compare with
+    // the full campaign/creative list instead of a single scope value.
+    if (v.state?.view === "compare") {
+      const mode = v.state?.compare_mode === "creatives" ? "creatives" : "campaigns";
+      const key = mode === "campaigns" ? "campaign" : "creative";
+      const list = [...new Set(
+        (Array.isArray(f[key]) ? f[key] : (f[key] ? [f[key]] : []))
+          .map((s) => String(s)).filter(Boolean))].slice(0, 4);
+      if (list.length >= 2) {
+        navigate(`/compare?mode=${mode}&${mode === "campaigns" ? "campaigns" : "creatives"}=${
+          list.map(encodeURIComponent).join(",")}`);
+        return;
+      }
+    }
     for (const k of SCOPE_KEYS) {
       setFilter(k, (f[k] ?? [])[0] ?? "");
     }

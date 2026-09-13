@@ -231,3 +231,230 @@ def art_for_subject(subject, variant=0):
     bottom = tuple(max(0, c - shift) for c in bottom)
     return _scene((top, bottom), paint)
 
+
+# --- v2 presentation pack: fifteen genuinely distinct compositions ---
+#
+# Unlike art_for_subject (one painter per subject plus a palette
+# shift), every v2 creative has its OWN painter, canvas size and
+# palette, so no two thumbnails share a scene. Sizes follow the
+# creative's format label: 1:1 -> 1080x1080, 4:5 -> 960x1200,
+# 9:16 -> 720x1280, 16:9 -> 1280x720.
+
+def _scene_wh(w, h, palette, paint):
+    top, bottom = palette
+    c = Canvas(w, h)
+    c.gradient(top, bottom)
+    paint(c)
+    return c.png()
+
+
+def _v_mirror(c):
+    w, h = c.w, c.h
+    c.circle(w // 2, h // 4, w // 5, (255, 236, 220))
+    c.circle(w // 2, h // 4, w // 7, (255, 214, 190))
+    c.rect(w // 2 - 14, h // 2, w // 2 + 14, h * 3 // 4, (250, 244, 236))
+    c.rect(w // 2 - 14, h // 2, w // 2 + 14, h // 2 + 16, (196, 120, 132))
+    c.band(h * 3 // 4, h, (122, 62, 72))
+    for i in range(3):
+        c.circle(w // 4 + i * w // 4, h * 7 // 8, 10, (255, 214, 190))
+
+
+def _v_steps(c):
+    w, h = c.w, c.h
+    for i, x in enumerate((w // 5, w * 2 // 5, w * 3 // 5)):
+        top_y = h // 3 + i * h // 12
+        c.rect(x, top_y, x + w // 8, h * 2 // 3, (244, 238, 228))
+        c.rect(x, top_y, x + w // 8, top_y + 18, (139, 168, 136))
+    c.band(h * 2 // 3, h, (84, 106, 100))
+    c.circle(w // 2, h // 6, w // 9, (255, 240, 220))
+
+
+def _v_texture(c):
+    w, h = c.w, c.h
+    for i in range(6):
+        y = h // 8 + i * h // 8
+        c.band(y, y + h // 24, (255 - i * 8, 228 - i * 6, 210 - i * 4))
+    c.circle(w * 3 // 4, h // 3, w // 8, (196, 120, 132))
+    c.circle(w // 4, h * 2 // 3, w // 10, (122, 62, 72))
+
+
+def _v_meeting(c):
+    w, h = c.w, c.h
+    c.rect(w // 6, h // 3, w * 5 // 6, h * 2 // 3, (60, 44, 34))
+    c.rect(w // 6, h // 3, w * 5 // 6, h // 3 + 14, (120, 70, 40))
+    c.circle(w // 2, h // 2, w // 10, (176, 116, 72))
+    for x in (w // 3, w // 2, w * 2 // 3):
+        c.circle(x, h // 4, 11, (235, 225, 210))
+    c.band(h * 3 // 4, h, (96, 62, 40))
+
+
+def _v_desk(c):
+    w, h = c.w, c.h
+    c.rect(w // 8, h // 4, w * 7 // 8, h * 3 // 4, (150, 96, 58))
+    c.rect(w // 4, h // 2, w * 3 // 4, h * 3 // 4 - 20, (240, 220, 190))
+    c.circle(w // 3, h // 3, w // 12, (235, 225, 210))
+    c.band(h * 3 // 4, h, (70, 44, 28))
+    c.rect(w // 5, h * 5 // 6, w * 4 // 5, h * 5 // 6 + 12, (120, 70, 40))
+
+
+def _v_thirty(c):
+    w, h = c.w, c.h
+    c.circle(w // 2, h // 2, w // 4, (255, 244, 214))
+    c.circle(w // 2, h // 2, w // 6, (122, 84, 52))
+    for i in range(12):
+        c.rect(w // 2 - 6, 20 + i * (h - 40) // 12,
+               w // 2 + 6, 34 + i * (h - 40) // 12, (150, 96, 58))
+    c.band(0, h // 10, (96, 62, 40))
+    c.band(h * 9 // 10, h, (96, 62, 40))
+
+
+def _v_drawer(c):
+    w, h = c.w, c.h
+    c.rect(w // 6, h // 4, w * 5 // 6, h * 3 // 4, (214, 188, 150))
+    for i in range(3):
+        y = h // 4 + 12 + i * h // 6
+        c.rect(w // 6 + 14, y, w * 5 // 6 - 14, y + h // 8, (240, 228, 200))
+        c.circle(w // 2, y + h // 16, 7, (150, 60, 70))
+    c.band(h * 3 // 4, h, (94, 64, 44))
+
+
+def _v_shelf(c):
+    w, h = c.w, c.h
+    for i, y in enumerate((h // 4, h // 2, h * 3 // 4 - 20)):
+        c.rect(w // 8, y, w * 7 // 8, y + 12, (150, 108, 72))
+        c.rect(w // 5 + i * 12, y - h // 8, w // 5 + i * 12 + w // 10,
+               y, (255 - i * 10, 236 - i * 8, 180))
+        c.circle(w * 3 // 5, y - h // 12, 14, (150, 60, 70))
+    c.band(h * 3 // 4 + 20, h, (60, 40, 52))
+
+
+def _v_start(c):
+    w, h = c.w, c.h
+    c.triangle(w // 8, h * 3 // 4, w * 7 // 8, h // 5, (255, 236, 180))
+    c.circle(w // 2, h // 2, w // 9, (60, 40, 52))
+    for x in (w // 5, w * 2 // 5, w * 3 // 5, w * 4 // 5):
+        c.circle(x, h * 5 // 6, 9, (255, 214, 130))
+    c.band(h * 3 // 4, h, (22, 26, 48))
+
+
+def _v_alarm(c):
+    w, h = c.w, c.h
+    c.circle(w // 2, h // 3, w // 5, (255, 240, 235))
+    c.circle(w // 2, h // 3, w // 8, (255, 92, 92))
+    c.rect(w // 2 - 5, h // 3 - w // 5, w // 2 + 5, h // 3, (24, 24, 28))
+    for y in (h // 2, h * 3 // 5, h * 7 // 10):
+        c.band(y, y + 10, (255, 92, 92))
+    c.band(h * 4 // 5, h, (24, 24, 28))
+
+
+def _v_ten(c):
+    w, h = c.w, c.h
+    for i in range(10):
+        x = w // 10 + i * w * 4 // 45
+        bar_h = h // 6 + (i % 4) * h // 16
+        c.rect(x, h * 2 // 3 - bar_h, x + w // 18, h * 2 // 3,
+               (44, 100, 78) if i % 2 else (64, 128, 96))
+    c.band(h * 2 // 3, h, (30, 70, 58))
+    c.circle(w // 2, h // 5, w // 10, (255, 244, 200))
+
+
+def _v_pace(c):
+    w, h = c.w, c.h
+    c.triangle(0, h, w // 2, h // 4, (52, 74, 104))
+    c.triangle(w // 3, h, w, h // 3, (36, 54, 82))
+    c.circle(w * 3 // 4, h // 5, w // 12, (240, 244, 250))
+    for x in (w // 4, w // 2, w * 3 // 4):
+        c.triangle(x - 20, h, x + 20, h * 2 // 3, (24, 60, 52))
+
+
+def _v_silence(c):
+    w, h = c.w, c.h
+    c.rect(w // 4, h // 4, w * 3 // 4, h * 3 // 4, (40, 48, 70))
+    c.rect(w // 4, h // 4, w * 3 // 4, h // 4 + 16, (90, 100, 140))
+    c.circle(w // 3, h // 2, h // 12, (245, 245, 248))
+    c.circle(w * 2 // 3, h // 2, h // 12, (245, 245, 248))
+    c.rect(w // 3, h // 2 - h // 40, w * 2 // 3, h // 2 + h // 40,
+           (40, 48, 70))
+    for i in range(4):
+        c.band(h // 6 + i * 12, h // 6 + i * 12 + 5,
+               (120 + i * 20, 140 + i * 15, 180))
+
+
+def _v_session(c):
+    w, h = c.w, c.h
+    c.rect(w // 6, h // 5, w * 5 // 6, h * 4 // 5, (250, 250, 252))
+    for i in range(5):
+        y = h // 5 + 24 + i * h // 8
+        c.rect(w // 6 + 20, y, w // 6 + 20 + (w // 2 - i * w // 14), y + 14,
+               (36 + i * 8, 120 + i * 10, 150 + i * 8))
+    c.circle(w * 4 // 5, h // 4, 20, (250, 214, 222))
+    c.band(h * 4 // 5, h, (24, 80, 110))
+
+
+def _v_button(c):
+    w, h = c.w, c.h
+    c.circle(w // 2, h // 2, w // 6, (120, 200, 220))
+    c.circle(w // 2, h // 2, w // 9, (24, 80, 110))
+    c.circle(w // 2, h // 2, w // 18, (245, 245, 248))
+    for gy in range(h // 8, h * 7 // 8, h // 8):
+        for gx in range(w // 8, w * 7 // 8, w // 8):
+            if (gx - w // 2) ** 2 + (gy - h // 2) ** 2 > (w // 5) ** 2:
+                c.circle(gx, gy, 4, (255, 255, 255))
+
+
+# v2 creative slug -> (painter, width, height, aspect label, blurb).
+# Sizes follow the creative's format label exactly.
+V2_ART = {
+    "mirror-test": (_v_mirror, 720, 1280, "9:16", "skincare mirror portrait"),
+    "three-steps": (_v_steps, 720, 1280, "9:16", "skincare routine steps"),
+    "texture": (_v_texture, 1080, 1080, "1:1", "skincare texture bands"),
+    "first-meeting": (_v_meeting, 720, 1280, "9:16", "coffee meeting table"),
+    "desk-brew": (_v_desk, 720, 1280, "9:16", "coffee desk brewer"),
+    "thirty-seconds": (_v_thirty, 1080, 1080, "1:1", "coffee timer rings"),
+    "drawer-reset": (_v_drawer, 720, 1280, "9:16", "home drawer reset"),
+    "one-shelf": (_v_shelf, 1080, 1080, "1:1", "home shelf styling"),
+    "cleaner-start": (_v_start, 960, 1200, "4:5", "home fresh start"),
+    "alarm": (_v_alarm, 720, 1280, "9:16", "fitness alarm clock"),
+    "ten-minutes": (_v_ten, 720, 1280, "9:16", "fitness effort bars"),
+    "your-pace": (_v_pace, 960, 1200, "4:5", "fitness trail peaks"),
+    "desk-noise": (_v_silence, 1280, 720, "16:9", "headphones silence"),
+    "focus-session": (_v_session, 1080, 1080, "1:1", "focus session board"),
+    "one-button": (_v_button, 720, 1280, "9:16", "headphone button"),
+}
+
+V2_PALETTES = {
+    "mirror-test": ((252, 222, 210), (196, 130, 140)),
+    "three-steps": ((228, 238, 230), (120, 150, 140)),
+    "texture": ((250, 214, 222), (170, 90, 110)),
+    "first-meeting": ((245, 230, 205), (140, 96, 62)),
+    "desk-brew": ((246, 232, 204), (150, 108, 72)),
+    "thirty-seconds": ((255, 238, 200), (120, 180, 150)),
+    "drawer-reset": ((240, 228, 200), (94, 64, 44)),
+    "one-shelf": ((246, 232, 204), (150, 108, 72)),
+    "cleaner-start": ((60, 70, 110), (22, 26, 48)),
+    "alarm": ((255, 200, 190), (70, 60, 70)),
+    "ten-minutes": ((255, 238, 200), (120, 180, 150)),
+    "your-pace": ((150, 190, 225), (40, 60, 92)),
+    "desk-noise": ((60, 70, 110), (22, 26, 48)),
+    "focus-session": ((120, 200, 220), (24, 80, 110)),
+    "one-button": ((120, 200, 220), (24, 80, 110)),
+}
+
+
+def v2_art_for_creative(slug):
+    """(png bytes, width, height, aspect) for a v2 creative slug."""
+    try:
+        paint, w, h, aspect, _blurb = V2_ART[slug]
+        top, bottom = V2_PALETTES[slug]
+    except KeyError:
+        raise ValueError("no v2 artwork for %r" % (slug,))
+    return _scene_wh(w, h, (top, bottom), paint), w, h, aspect
+
+
+def v2_art_manifest():
+    """Provenance manifest for handover: slug, size, aspect, painter."""
+    return [{"slug": slug, "width": spec[1], "height": spec[2],
+             "aspect": spec[3], "scene": spec[4],
+             "painter": spec[0].__name__, "provenance": "generated-stdlib"}
+            for slug, spec in V2_ART.items()]
+

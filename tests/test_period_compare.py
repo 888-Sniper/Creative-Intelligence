@@ -299,6 +299,27 @@ class CompareKpisTest(unittest.TestCase):
         # Non-money metrics still compare.
         self.assertEqual(got["metrics"]["impressions"]["state"], "compared")
 
+    def test_empty_previous_keeps_single_currency_money_current(self):
+        # Fresh import: the previous window is empty, so no
+        # cross-currency comparison exists. Single-currency money
+        # facts stay visible with no percentage (not coerced to
+        # zero downstream); a mixed current side stays unmeasurable.
+        csv = HDR + _row("S", "c1", 150, 12500, 300, 12, 300, "meta", "2024-01-02")
+        conn = _db(csv)
+        try:
+            got = period_compare.compare_kpis(conn, {})
+        finally:
+            conn.close()
+        spend = got["metrics"]["spend"]
+        self.assertEqual(spend["current"], 150)
+        self.assertIsNone(spend["previous"])
+        self.assertIsNone(spend["percent_change"])
+        self.assertEqual(spend["state"], "none")
+        roas = got["metrics"]["roas"]
+        self.assertEqual(roas["current"], 2.0)
+        self.assertIsNone(roas["previous"])
+        self.assertEqual(roas["state"], "none")
+
     def test_no_infinity_or_nan_anywhere(self):
         import math
 

@@ -63,7 +63,7 @@ VIEW_KPIS = ("all", "spend", "ctr", "cpc", "cpa", "cpm", "vtr",
 VIEW_RANKS = ("cpa", "cpm", "ctr", "vtr", "roas")
 
 VIEW_KEYS = ("filters", "kpi", "view", "benchmark", "benchmark_scope",
-             "rank_by")
+             "rank_by", "compare_mode")
 
 
 def connect(db_path):
@@ -313,6 +313,10 @@ def save_view(conn, name, state):
         if state["rank_by"] not in VIEW_RANKS:
             raise ValueError("view rank_by must be one of %s" % (VIEW_RANKS,))
         clean["rank_by"] = state["rank_by"]
+    if "compare_mode" in state:
+        if state["compare_mode"] not in ("campaigns", "creatives"):
+            raise ValueError("view compare_mode must be campaigns|creatives")
+        clean["compare_mode"] = state["compare_mode"]
     import datetime
     now = datetime.datetime.now(datetime.timezone.utc).isoformat()
     conn.execute(

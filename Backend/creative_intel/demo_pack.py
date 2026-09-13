@@ -199,11 +199,12 @@ def _utcnow():
     return _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _receipt_row(conn):
+def _receipt_row(conn, pack_key=None):
     row = conn.execute(
         "SELECT pack_key, batch_id, workspace, imported_by, imported_at,"
         " data_start, data_end, status, counts_json, removed_at"
-        " FROM demo_packs WHERE pack_key=?", (PACK_KEY,)).fetchone()
+        " FROM demo_packs WHERE pack_key=?",
+        (pack_key or PACK_KEY,)).fetchone()
     if not row:
         return None
     keys = ("pack_key", "batch_id", "workspace", "imported_by",
@@ -279,11 +280,12 @@ def remaining_counts(conn, batch_id):
     return out
 
 
-def pack_status(conn):
+def pack_status(conn, pack_key=None):
     """Receipt + live remaining counts; derives partially_removed."""
-    receipt = _receipt_row(conn)
+    pack_key = pack_key or PACK_KEY
+    receipt = _receipt_row(conn, pack_key)
     if receipt is None:
-        return {"status": "not_added", "pack_key": PACK_KEY,
+        return {"status": "not_added", "pack_key": pack_key,
                 "receipt": None, "remaining": {}, "imported": {},
                 "campaigns": []}
     try:
@@ -297,7 +299,7 @@ def pack_status(conn):
         if imp_ads and remaining.get("ads_rows", 0) < imp_ads:
             status = "partially_removed"
             conn.execute("UPDATE demo_packs SET status=? WHERE pack_key=?",
-                         (status, PACK_KEY))
+                         (status, pack_key))
             conn.commit()
             receipt["status"] = status
     campaigns = [
@@ -306,7 +308,7 @@ def pack_status(conn):
             "SELECT campaign_id, campaign FROM ads WHERE import_id=?"
             " GROUP BY campaign_id ORDER BY campaign",
             (receipt["batch_id"],)).fetchall()]
-    return {"status": status, "pack_key": PACK_KEY, "receipt": receipt,
+    return {"status": status, "pack_key": pack_key, "receipt": receipt,
             "remaining": remaining, "imported": imported,
             "campaigns": campaigns}
 
@@ -346,12 +348,14 @@ def _date_range():
     return start.isoformat(), end.isoformat(), days
 
 
-def _import_ads_rows(conn, batch_id, day_list):
+def _import_ads_rows(conn, batch_id, day_list, keep=None):
     """Deterministic daily facts via the real upsert path."""
     from creative_intel import ingest as _ingest
     rng = _random.Random(20260913)
     rows = []
-    for ci, camp in enumerate(CAMPAIGNS):
+    indices = tuple(keep) if keep is not None else tuple(range(len(CAMPAIGNS)))
+    for ci in indices:
+        camp = CAMPAIGNS[ci]
         (slug, name, client, project, vertical, market, team,
          objective, funnel, weight, ctr, cvr, rpc, spend_scale,
          ramp, meta_share) = camp
@@ -414,6 +418,9 @@ def _import_ads_rows(conn, batch_id, day_list):
                         "market": market, "objective": objective,
                         "funnel_stage": funnel, "date": iso,
                         "revenue": round(max(0.0, revenue), 2),
+                        # Synthetic facts report revenue, so ROAS
+                        # computes honestly over this pack.
+                        "revenue_reported": True,
                         "campaign_id": cid, "currency": "USD",
                         "format": spec[2], "import_id": batch_id,
                     })
@@ -994,13 +1001,14 @@ def delete_sample_file(conn, batch_id, file_key, media_dir=None):
     return {"deleted": file_key}
 
 
-def remove_pack(conn, batch_id, media_dir=None):
+def remove_pack(conn, batch_id, media_dir=None, pack_key=None):
     """Remove ALL remaining pack rows (batch-scoped only). The
     receipt survives with status removed; nothing is re-added."""
     import os as _os
     import shutil as _shutil
     from ci_backend.actions import _media_dir
-    receipt = _receipt_row(conn)
+    pack_key = pack_key or PACK_KEY
+    receipt = _receipt_row(conn, pack_key)
     if receipt is None or receipt["batch_id"] != batch_id:
         raise ValueError("unknown sample batch")
     if receipt["status"] == "removed":
@@ -1042,7 +1050,684 @@ def remove_pack(conn, batch_id, media_dir=None):
     except OSError:
         pass
     conn.execute("UPDATE demo_packs SET status='removed', removed_at=?"
-                 " WHERE pack_key=?", (_utcnow(), PACK_KEY))
+                 " WHERE pack_key=?", (_utcnow(), pack_key))
     conn.commit()
-    return {"removed": True, "receipt": _receipt_row(conn)}
+    return {"removed": True, "receipt": _receipt_row(conn, pack_key)}
+
+
+# ============================================================
+# v2 presentation pack: exactly 5 campaigns x 3 creatives.
+#
+# v2 keeps the v1 catalogue identities it needs (campaign IDs
+# SMP-01/03/05/07/09 and slug-based creative keys are unchanged, so
+# provenance survives) and drops the other five campaigns. v1 rows
+# and receipts are never mutated except through the explicit,
+# authorised migration below.
+# ============================================================
+
+PACK_KEY_V2 = "foap-presentation-pack-v2"
+
+# Indices into the v1 CAMPAIGNS/CREATIVES catalogue.
+V2_KEPT = (0, 2, 4, 6, 8)
+
+V2_CAMPAIGN_IDS = tuple("SMP-%02d" % (i + 1) for i in V2_KEPT)
+
+V2_CONV_IDS = tuple("sample-conv-%02d" % (i + 1) for i in range(6))
+
+# Stale-importing guard: a receipt stuck in importing with no writer
+# for longer than this is recoverable by an explicit admin retry.
+STALE_IMPORTING_SECONDS = 15 * 60
+
+SAMPLE_VIEWS_V2 = (
+    ("Sample \u2014 Benchmark: Platform ROAS",
+     {"filters": {}, "kpi": "roas", "view": "benchmark",
+      "benchmark": "platform", "benchmark_scope": "filters",
+      "rank_by": "roas"}),
+    ("Sample \u2014 Benchmark: Hook CTR",
+     {"filters": {}, "kpi": "ctr", "view": "benchmark",
+      "benchmark": "hook_type", "benchmark_scope": "filters",
+      "rank_by": "ctr"}),
+    ("Sample \u2014 Benchmark: Creator Vs Branded CPA",
+     {"filters": {"vertical": ["Beauty"]}, "kpi": "cpa",
+      "view": "benchmark", "benchmark": "creator_vs_branded",
+      "benchmark_scope": "global", "rank_by": "cpa"}),
+    ("Sample \u2014 Benchmark: Format CPM",
+     {"filters": {"market": ["United Kingdom"]}, "kpi": "cpm",
+      "view": "benchmark", "benchmark": "format",
+      "benchmark_scope": "filters", "rank_by": "cpm"}),
+    ("Sample \u2014 Benchmark: Market CPA",
+     {"filters": {}, "kpi": "cpa", "view": "benchmark",
+      "benchmark": "market", "benchmark_scope": "global",
+      "rank_by": "cpa"}),
+    ("Sample \u2014 Benchmark: Objective ROAS",
+     {"filters": {"platform": ["meta"]}, "kpi": "roas",
+      "view": "benchmark", "benchmark": "objective",
+      "benchmark_scope": "filters", "rank_by": "roas"}),
+    ("Sample \u2014 Compare: Four Contrasts (ROAS)",
+     {"filters": {"campaign": ["First Light Ritual", "One Sip Ahead",
+                               "The 6AM Commitment", "Find Your Focus"]},
+      "kpi": "roas", "view": "compare", "benchmark": "campaign",
+      "benchmark_scope": "filters", "rank_by": "roas",
+      "compare_mode": "campaigns"}),
+    ("Sample \u2014 Compare: Morning Rituals (CTR)",
+     {"filters": {"campaign": ["First Light Ritual", "One Sip Ahead"]},
+      "kpi": "ctr", "view": "compare", "benchmark": "campaign",
+      "benchmark_scope": "filters", "rank_by": "ctr",
+      "compare_mode": "campaigns"}),
+    ("Sample \u2014 Compare: Home Fitness (CPA)",
+     {"filters": {"campaign": ["Make Room For Better",
+                               "The 6AM Commitment"]},
+      "kpi": "cpa", "view": "compare", "benchmark": "platform",
+      "benchmark_scope": "global", "rank_by": "cpa",
+      "compare_mode": "campaigns"}),
+    ("Sample \u2014 Compare: Focus Creatives (CTR)",
+     {"filters": {"campaign": ["Find Your Focus"]},
+      "kpi": "ctr", "view": "compare", "benchmark": "hook_type",
+      "benchmark_scope": "filters", "rank_by": "ctr",
+      "compare_mode": "creatives"}),
+)
+
+SAMPLE_QUESTIONS_V2 = SAMPLE_QUESTIONS
+
+V2_REPORT_JOBS = (
+    ("Sample Report \u2014 Pack Overview (Markdown)", "one-pager",
+     None, ["roas", "ctr"]),
+    ("Sample Report \u2014 Avenlo Skin (Markdown)", "one-pager",
+     ["First Light Ritual"], ["ctr", "cpa"]),
+    ("Sample Report \u2014 Pack Overview (CSV)", "csv", None,
+     ["roas", "ctr", "cpa", "spend"]),
+    ("Sample Report \u2014 Client Comparison (CSV)",
+     "csv", None, ["ctr", "cpa", "conversions"]),
+    ("Sample Report \u2014 Fitness Push (Excel)", "xlsx",
+     ["The 6AM Commitment"], ["ctr", "cpa"]),
+    ("Sample Report \u2014 Pack Overview (Slides)", "pptx", None,
+     ["roas", "ctr"]),
+)
+
+V2_WORKBOOKS = (
+    "Sample Workbook \u2014 Pack Overview",
+    "Sample Workbook \u2014 Avenlo Skin",
+    "Sample Workbook \u2014 Folden Home",
+)
+
+
+def _v2_campaign_name(v1_idx):
+    return CAMPAIGNS[v1_idx][1]
+
+
+def preview_v2(conn, workspace=""):
+    """What Add Demo Data Once (v2) will create (no writes)."""
+    return {
+        "pack_key": PACK_KEY_V2,
+        "workspace": workspace,
+        "synthetic": True,
+        "campaigns": [
+            {"campaign_id": campaign_id(i), "name": CAMPAIGNS[i][1],
+             "client": CAMPAIGNS[i][2], "project": CAMPAIGNS[i][3],
+             "vertical": CAMPAIGNS[i][4], "market": CAMPAIGNS[i][5],
+             "team": CAMPAIGNS[i][6],
+             "creatives": [CREATIVES[i * 3 + j][1] for j in range(3)]}
+            for i in V2_KEPT],
+        "totals": {"campaigns": 5, "creatives": 15,
+                   "days": PACK_DAYS,
+                   "saved_views": len(SAMPLE_VIEWS_V2),
+                   "conversations": len(SAMPLE_QUESTIONS_V2),
+                   "reports": len(V2_REPORT_JOBS),
+                   "workbooks": len(V2_WORKBOOKS)},
+        "replenish": False,
+    }
+
+
+def _v1_active_receipt(conn):
+    row = _receipt_row(conn, PACK_KEY)
+    if row is None or row["status"] == "removed":
+        return None
+    return row
+
+
+def migration_preview(conn):
+    """Explicit preview of a v1 -> v2 migration (no writes).
+
+    Only demonstrably sample-owned surplus records are listed for
+    deletion (v1 batch members under surplus campaign IDs, verified
+    live). v1-tracked views/conversations are listed as review-only:
+    name-adoption in v1 means ownership is uncertain, so they are
+    NEVER auto-deleted.
+    """
+    v1 = _receipt_row(conn, PACK_KEY)
+    if v1 is None:
+        return {"eligible": False, "reason": "no v1 pack receipt"}
+    if v1["status"] == "removed":
+        return {"eligible": False,
+                "reason": "v1 pack was removed; removal is retained,"
+                          " import v2 explicitly for a fresh pack"}
+    batch = v1["batch_id"]
+    surplus_ids = ["SMP-%02d" % (i + 1) for i in range(10)
+                   if i not in V2_KEPT]
+    surplus = []
+    for cid in surplus_ids:
+        live = conn.execute(
+            "SELECT COUNT(*) FROM ads WHERE import_id=? AND campaign_id=?",
+            (batch, cid)).fetchone()[0]
+        name = conn.execute(
+            "SELECT campaign FROM ads WHERE import_id=? AND campaign_id=?"
+            " LIMIT 1", (batch, cid)).fetchone()
+        keys = [r[0] for r in conn.execute(
+            "SELECT DISTINCT creative_key FROM ads WHERE import_id=?"
+            " AND campaign_id=?", (batch, cid))]
+        members = set(_member_keys(conn, batch, "creatives"))
+        owned_keys = [k for k in keys if k in members]
+        media_n = conn.execute(
+            "SELECT COUNT(*) FROM media WHERE creative_key IN (%s)" % (
+                ",".join("?" * len(keys)) or "SELECT '' WHERE 0"),
+            keys).fetchone()[0] if keys else 0
+        surplus.append({"campaign_id": cid,
+                        "campaign": name[0] if name else "",
+                        "already_deleted": live == 0,
+                        "ads_rows": live,
+                        "creatives": owned_keys,
+                        "media_rows": media_n})
+    review_views = [
+        {"id": vid}
+        for vid in _member_keys(conn, batch, "saved_views")
+        if conn.execute("SELECT 1 FROM saved_views WHERE id=?",
+                        (vid,)).fetchone()]
+    review_convs = [
+        {"id": cid}
+        for cid in _member_keys(conn, batch, "analyst_conversations")
+        if conn.execute("SELECT 1 FROM analyst_conversations WHERE id=?",
+                        (cid,)).fetchone()]
+    return {"eligible": True, "v1_status": v1["status"],
+            "v1_batch_id": batch,
+            "retain": [{"campaign_id": campaign_id(i),
+                        "campaign": _v2_campaign_name(i)} for i in V2_KEPT],
+            "surplus": surplus,
+            "review_only": {"saved_views": review_views,
+                            "analyst_conversations": review_convs,
+                            "note": "v1 name-adopted rows: ownership"
+                                    " uncertain, never auto-deleted"},
+            "v1_data_window": {"start": v1["data_start"],
+                               "end": v1["data_end"]}}
+
+
+def _v2_set_status(conn, status, counts=None, error=""):
+    if counts is None:
+        receipt = _receipt_row(conn, PACK_KEY_V2)
+        try:
+            counts = _json.loads(receipt["counts_json"] or "{}")
+        except ValueError:
+            counts = {}
+    counts = dict(counts)
+    if error:
+        counts["error"] = str(error)
+    else:
+        counts.pop("error", None)
+    conn.execute("UPDATE demo_packs SET status=?, counts_json=?"
+                 " WHERE pack_key=?",
+                 (status, _json.dumps(counts), PACK_KEY_V2))
+    conn.commit()
+
+
+def _v2_stale_importing(conn):
+    receipt = _receipt_row(conn, PACK_KEY_V2)
+    if receipt is None or receipt["status"] != "importing":
+        return False
+    try:
+        started = _dt.datetime.strptime(
+            receipt["imported_at"], "%Y-%m-%dT%H:%M:%SZ").replace(
+                tzinfo=_dt.timezone.utc)
+        age = (_dt.datetime.now(_dt.timezone.utc) - started).total_seconds()
+    except (ValueError, TypeError):
+        return True
+    return age > STALE_IMPORTING_SECONDS
+
+
+def import_pack_v2(conn, imported_by="", workspace="", media_dir=None):
+    """One-time v2 import (5 campaigns x 3 creatives). Never installs
+    beside an active v1 pack: an added/partial v1 pack refuses with a
+    migration pointer instead.
+    """
+    from creative_intel import ingest as _ingest
+    v1 = _v1_active_receipt(conn)
+    if v1 is not None:
+        return {"created": False, "migration_required": True,
+                "status": pack_status(conn, PACK_KEY_V2),
+                "preview": migration_preview(conn)}
+    existing = _receipt_row(conn, PACK_KEY_V2)
+    if existing is not None and existing["status"] not in ("failed",):
+        if existing["status"] == "importing" and not _v2_stale_importing(conn):
+            st = pack_status(conn, PACK_KEY_V2)
+            st["created"] = False
+            return st
+        if existing["status"] == "importing":
+            conn.execute("UPDATE demo_packs SET status='failed',"
+                         " counts_json=? WHERE pack_key=?",
+                         (_json.dumps({"error": "stale importing receipt;"
+                                                " safe to retry"}),
+                          PACK_KEY_V2))
+            conn.commit()
+            existing = _receipt_row(conn, PACK_KEY_V2)
+        else:
+            st = pack_status(conn, PACK_KEY_V2)
+            st["created"] = False
+            return st
+    if existing is not None:
+        batch_id = existing["batch_id"]
+        start, end = existing["data_start"], existing["data_end"]
+        day_list = [(start and _dt.date.fromisoformat(start)
+                     + _dt.timedelta(days=i)).isoformat()
+                    for i in range(PACK_DAYS)] if start else []
+        if not day_list:
+            _, _, day_list = _date_range()
+        conn.execute("UPDATE demo_packs SET status='importing'"
+                     " WHERE pack_key=?", (PACK_KEY_V2,))
+        conn.commit()
+    else:
+        batch_id = "smp2-%s" % _uuid.uuid4().hex[:12]
+        start, end, day_list = _date_range()
+        try:
+            conn.execute(
+                "INSERT INTO demo_packs (pack_key, batch_id, workspace,"
+                " imported_by, imported_at, data_start, data_end,"
+                " status, counts_json) VALUES (?, ?, ?, ?, ?, ?, ?,"
+                " 'importing', '{}')",
+                (PACK_KEY_V2, batch_id, workspace, imported_by,
+                 _utcnow(), start, end))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            st = pack_status(conn, PACK_KEY_V2)
+            st["created"] = False
+            return st
+    counts = {}
+    try:
+        res = _import_ads_rows(conn, batch_id, day_list, keep=V2_KEPT)
+        counts["ads_rows"] = res["inserted"] + res["updated"]
+        _ingest.record_import(
+            conn, {"filename": "sample-pack-v2", "mapping": "generated",
+                   "unmapped": []}, "meta", PACK_SOURCE,
+            filename="sample-pack-v2", imported_by=imported_by,
+            counts={"imported": counts["ads_rows"], "quarantined": 0})
+        from creative_intel import creative as _creative
+        from creative_intel import media as _media
+        from creative_intel import demo_art as _art
+        from ci_backend.actions import _media_dir
+        for ci in V2_KEPT:
+            for ki in range(3):
+                key = creative_key(ci, ki)
+                spec = CREATIVES[ci * 3 + ki]
+                conn.execute(
+                    "INSERT OR IGNORE INTO creatives (creative_key,"
+                    " platform, name, duration_s, status, transcript,"
+                    " pipeline_json) VALUES (?, 'meta/tiktok', ?, ?,"
+                    " 'auto', '', ?)",
+                    (key, spec[1], float(spec[3]),
+                     _json.dumps({"provenance": "sample",
+                                  "pack_key": PACK_KEY_V2,
+                                  "batch_id": batch_id})))
+                _track(conn, batch_id, "creatives", key)
+                _creative.save_annotation(conn, key,
+                                          _pack_annotation(ci, ki))
+                _track(conn, batch_id, "annotations", key)
+                pts = _pack_retention_points(spec[3], ki)
+                conn.execute(
+                    "INSERT OR REPLACE INTO retention (creative_key,"
+                    " t_sec, retention_pct, source) VALUES %s" % (
+                        ",".join(["(?, ?, ?, 'sample-curve')"]
+                                 * len(pts),)),
+                    [v for p in pts for v in (key, p[0], p[1])])
+                _track(conn, batch_id, "retention", key)
+        counts["creatives"] = len(
+            _member_keys(conn, batch_id, "creatives"))
+        counts["campaigns"] = len(V2_KEPT)
+        store = _media_dir(media_dir)
+        _media.ensure_schema(conn)
+        n_media = 0
+        for ci in V2_KEPT:
+            for ki in range(3):
+                key = creative_key(ci, ki)
+                have = conn.execute(
+                    "SELECT 1 FROM media WHERE creative_key=?"
+                    " AND mime LIKE 'image/%%' LIMIT 1",
+                    (key,)).fetchone()
+                if not have:
+                    slug = CREATIVES[ci * 3 + ki][0]
+                    blob, w, h, _aspect = _art.v2_art_for_creative(slug)
+                    rec = _media.save_media_bytes(
+                        conn, store, key, key + ".png", blob,
+                        width=w, height=h)
+                    _track(conn, batch_id, "media", rec["id"])
+                    n_media += 1
+        counts["media"] = n_media
+        conn.commit()
+    except Exception as exc:
+        conn.rollback()
+        _v2_set_status(conn, "failed", {"error": "core: %s" % exc})
+        raise
+    return {"batch_id": batch_id, "phase": "core", "counts": counts,
+            "data_start": start, "data_end": end, "created": True,
+            "pack_key": PACK_KEY_V2}
+
+
+def _v2_checkpoint(conn, batch_id, phase, extra=None):
+    receipt = _receipt_row(conn, PACK_KEY_V2)
+    try:
+        counts = _json.loads(receipt["counts_json"] or "{}")
+    except ValueError:
+        counts = {}
+    counts["phase"] = phase
+    if extra:
+        counts.update(extra)
+    conn.execute("UPDATE demo_packs SET counts_json=? WHERE pack_key=?",
+                 (_json.dumps(counts), PACK_KEY_V2))
+    conn.commit()
+
+
+def _v2_own_view_id(conn, batch_id, name):
+    """Id of OUR tracked view with this name, else None. A same-named
+    untracked row is user-owned and must never be adopted."""
+    for vid in _member_keys(conn, batch_id, "saved_views"):
+        row = conn.execute("SELECT id, name FROM saved_views WHERE id=?",
+                           (vid,)).fetchone()
+        if row and row[1] == name:
+            return row[0]
+    return None
+
+
+def _v2_claim_view(conn, batch_id, name, state):
+    """Create-or-reuse ONLY our own view; disambiguate on collision."""
+    from ci_backend.actions import save_view
+    own = _v2_own_view_id(conn, batch_id, name)
+    if own is not None:
+        return own, False
+    target = name
+    if conn.execute("SELECT 1 FROM saved_views WHERE name=?",
+                    (target,)).fetchone():
+        n = 2
+        while conn.execute("SELECT 1 FROM saved_views WHERE name=?",
+                           ("%s (Sample %d)" % (target, n),)).fetchone():
+            n += 1
+        target = "%s (Sample %d)" % (target, n)
+    rec = save_view(conn, target, dict(state))
+    _track(conn, batch_id, "saved_views", rec["id"])
+    conn.commit()
+    return rec["id"], True
+
+
+def _v2_claim_conversation(conn, batch_id, imported_by, question, scope,
+                           objective, language):
+    """Create-or-reuse ONLY our own conversation. Identity is the
+    tracked batch id — never a title match. Crash recovery: a row
+    with our exact fingerprint created after the import started may
+    be adopted; anything else is left alone."""
+    from creative_intel import analyst_chat as _chat
+    title = question[:60]
+    scope_json = _json.dumps(dict(scope))
+    for cid in _member_keys(conn, batch_id, "analyst_conversations"):
+        row = conn.execute(
+            "SELECT id, title FROM analyst_conversations WHERE id=?",
+            (cid,)).fetchone()
+        if row and row[1] == title:
+            return row[0], False
+    # Crash-orphan recovery (NOT name adoption): adopt only a row
+    # with our exact fingerprint (owner/title/scope created after
+    # this import started) when no tracked row carries that title.
+    # Anything else is user-owned and left alone.
+    receipt = _receipt_row(conn, PACK_KEY_V2)
+    started = receipt["imported_at"] if receipt else ""
+    cand = conn.execute(
+        "SELECT id FROM analyst_conversations WHERE owner_employee_id=?"
+        " AND title=? AND scope_json=? AND created_at>=?"
+        " ORDER BY created_at LIMIT 1",
+        (imported_by, title, scope_json, started)).fetchone()
+    if cand:
+        titled = [c for c in _member_keys(conn, batch_id,
+                                          "analyst_conversations")
+                  if (conn.execute(
+                      "SELECT title FROM analyst_conversations WHERE id=?",
+                      (c,)).fetchone() or [""])[0] == title]
+        if not titled:
+            _track(conn, batch_id, "analyst_conversations", cand[0])
+            for (mid,) in conn.execute(
+                    "SELECT id FROM analyst_messages WHERE conversation_id=?",
+                    (cand[0],)):
+                _track(conn, batch_id, "analyst_messages", mid)
+            for (fid,) in conn.execute(
+                    "SELECT id FROM analyst_findings WHERE conversation_id=?",
+                    (cand[0],)):
+                _track(conn, batch_id, "analyst_findings", fid)
+            conn.commit()
+            if conn.execute("SELECT COUNT(*) FROM analyst_messages"
+                            " WHERE conversation_id=?",
+                            (cand[0],)).fetchone()[0]:
+                return cand[0], False
+            conn.execute("DELETE FROM analyst_conversations WHERE id=?",
+                         (cand[0],))
+            conn.commit()
+    turn = _chat.answer_turn(
+        conn, imported_by, question, None, scope=dict(scope),
+        objective=objective, language=language)
+    conv_id = turn["conversation_id"]
+    _track(conn, batch_id, "analyst_conversations", conv_id)
+    for (mid,) in conn.execute(
+            "SELECT id FROM analyst_messages WHERE conversation_id=?",
+            (conv_id,)):
+        _track(conn, batch_id, "analyst_messages", conv_id)
+    for (fid,) in conn.execute(
+            "SELECT id FROM analyst_findings WHERE conversation_id=?",
+            (conv_id,)):
+        _track(conn, batch_id, "analyst_findings", fid)
+    conn.commit()
+    return conv_id, True
+
+
+def verify_pack_v2(conn, batch_id, media_dir=None):
+    """Check required records AND file references. Returns (ok, detail).
+    DB and filesystem failures are reported separately."""
+    import os as _os
+    from ci_backend.actions import _media_dir
+    detail = {"db": {}, "files": {}}
+    camps = conn.execute(
+        "SELECT COUNT(DISTINCT campaign_id) FROM ads WHERE import_id=?",
+        (batch_id,)).fetchone()[0]
+    detail["db"]["campaigns"] = camps
+    keys = _member_keys(conn, batch_id, "creatives")
+    alive = conn.execute(
+        "SELECT COUNT(*) FROM creatives WHERE creative_key IN (%s)" % (
+            ",".join("?" * len(keys)) or "SELECT '' WHERE 0"),
+        keys).fetchone()[0] if keys else 0
+    detail["db"]["creatives"] = alive
+    media_ids = _member_keys(conn, batch_id, "media")
+    detail["db"]["media_rows"] = len(media_ids)
+    fkeys = _member_keys(conn, batch_id, "sample_files")
+    detail["db"]["sample_files"] = conn.execute(
+        "SELECT COUNT(*) FROM sample_files WHERE file_key IN (%s)" % (
+            ",".join("?" * len(fkeys)) or "SELECT '' WHERE 0"),
+        fkeys).fetchone()[0] if fkeys else 0
+    ok = camps == 5 and alive == 15
+    missing_media, missing_files = [], []
+    if ok:
+        store = _media_dir(media_dir)
+        for mid in media_ids:
+            row = conn.execute("SELECT stored_name FROM media WHERE id=?",
+                               (mid,)).fetchone()
+            if not row:
+                continue
+            path = _os.path.join(store, row[0])
+            if not _os.path.isfile(path):
+                missing_media.append(mid)
+        for fk in fkeys:
+            row = conn.execute("SELECT name FROM sample_files WHERE file_key=?",
+                               (fk,)).fetchone()
+            if not row:
+                continue
+            path = _os.path.join(store, "sample", batch_id, row[0])
+            if not _os.path.isfile(path):
+                missing_files.append(fk)
+    detail["files"]["missing_media"] = missing_media
+    detail["files"]["missing_sample_files"] = missing_files
+    if missing_media or missing_files:
+        ok = False
+    return ok, detail
+
+
+def finalize_pack_v2(conn, batch_id, imported_by="", media_dir=None,
+                     core_counts=None):
+    """Showcase layer with durable per-item checkpoints. Skip-if-ours
+    (tracked) so retries never duplicate rows or overwrite user edits;
+    same-named user rows are never adopted. Sets added only after
+    verify_pack_v2 passes on records AND files."""
+    import base64 as _b64
+    from ci_backend.actions import _media_dir, save_view
+    from creative_intel import benchmarks as _bench
+    from creative_intel import analyst_workbook as _wb
+    _ = save_view
+    counts = dict(core_counts or {})
+    store = _media_dir(media_dir)
+    n_views = 0
+    for name, state in SAMPLE_VIEWS_V2:
+        _, created = _v2_claim_view(conn, batch_id, name, state)
+        n_views += int(created)
+    counts["saved_views"] = n_views
+    _v2_checkpoint(conn, batch_id, "views", counts)
+    n_convs = 0
+    for question, scope, objective, language in SAMPLE_QUESTIONS_V2:
+        _, created = _v2_claim_conversation(
+            conn, batch_id, imported_by, question, scope,
+            objective, language)
+        n_convs += int(created)
+    counts["conversations"] = n_convs
+    counts["findings"] = len(_member_keys(conn, batch_id,
+                                          "analyst_findings"))
+    _v2_checkpoint(conn, batch_id, "conversations", counts)
+    ext_by_fmt = {"one-pager": ("md", "text/markdown"),
+                  "csv": ("csv", "text/csv"),
+                  "xlsx": ("xlsx", "application/vnd.openxmlformats-"
+                           "officedocument.spreadsheetml.sheet"),
+                  "pptx": ("pptx", "application/vnd.openxmlformats-"
+                           "officedocument.presentationml.presentation")}
+    n_reports = 0
+    for title, fmt, camps, kpis in V2_REPORT_JOBS:
+        fname = "%s.%s" % (title.replace(" \u2014 ", " - "),
+                           ext_by_fmt[fmt][0])
+        present = conn.execute(
+            "SELECT 1 FROM sample_files WHERE file_key=?",
+            ("%s/%s" % (batch_id, fname),)).fetchone()
+        if present:
+            continue
+        rep = _bench.build_report(conn, camps, kpis, "platform", fmt,
+                                  filters={}, benchmark_scope="filters",
+                                  rank_by=kpis[0])
+        if fmt == "one-pager":
+            blob = ("> Sample Data \u2014 synthetic demonstration figures,"
+                    " not real client performance.\n\n"
+                    + rep["markdown"]).encode("utf-8")
+        elif fmt == "csv":
+            blob = rep["csv"].encode("utf-8")
+        elif fmt == "pptx":
+            blob = _b64.b64decode(rep["pptx_b64"])
+        else:
+            blob = _b64.b64decode(rep["xlsx_b64"])
+        _store_sample_file(conn, store, batch_id, fname, fmt,
+                           ext_by_fmt[fmt][1], blob)
+        n_reports += 1
+    counts["reports"] = n_reports
+    n_books = 0
+    for title in V2_WORKBOOKS:
+        fname = "%s.xlsx" % title.replace(" \u2014 ", " - ")
+        present = conn.execute(
+            "SELECT 1 FROM sample_files WHERE file_key=?",
+            ("%s/%s" % (batch_id, fname),)).fetchone()
+        if present:
+            continue
+        blob = _wb.build_blank_workbook(
+            cover={"name": title,
+                   "description": "Sample configuration over the"
+                   " one-time presentation pack (%s). Synthetic"
+                   " demonstration data." % PACK_KEY_V2,
+                   "modules": ["Metrics", "Benchmarks"],
+                   "kpis": ["ROAS", "CTR", "CPA"]})
+        _store_sample_file(
+            conn, store, batch_id, fname, "workbook",
+            "application/vnd.openxmlformats-officedocument."
+            "spreadsheetml.sheet", blob)
+        n_books += 1
+    counts["workbooks"] = n_books
+    _v2_checkpoint(conn, batch_id, "files", counts)
+    if not counts.get("ads_rows"):
+        counts["ads_rows"] = conn.execute(
+            "SELECT COUNT(*) FROM ads WHERE import_id=?",
+            (batch_id,)).fetchone()[0]
+    if not counts.get("campaigns"):
+        counts["campaigns"] = conn.execute(
+            "SELECT COUNT(DISTINCT campaign_id) FROM ads WHERE import_id=?",
+            (batch_id,)).fetchone()[0]
+    if not counts.get("creatives"):
+        counts["creatives"] = len(
+            _member_keys(conn, batch_id, "creatives"))
+    ok, detail = verify_pack_v2(conn, batch_id, media_dir)
+    if not ok:
+        _v2_set_status(conn, "failed",
+                       dict(counts, verify=detail,
+                            error="verify failed; safe to retry"))
+        return {"created": False, "counts": counts, "verify": detail,
+                "receipt": _receipt_row(conn, PACK_KEY_V2)}
+    receipt = _receipt_row(conn, PACK_KEY_V2)
+    merged = dict(_json.loads(receipt["counts_json"] or "{}"))
+    merged.update(counts)
+    merged.pop("error", None)
+    merged["phase"] = "added"
+    conn.execute("UPDATE demo_packs SET status='added', counts_json=?"
+                 " WHERE pack_key=?",
+                 (_json.dumps(merged), PACK_KEY_V2))
+    conn.commit()
+    return {"created": True, "counts": merged,
+            "receipt": _receipt_row(conn, PACK_KEY_V2)}
+
+
+def migrate_to_v2(conn, imported_by="", authorize=False):
+    """Authorised v1 -> v2 migration. Deletes ONLY live surplus
+    sample-owned campaigns (never restores user-deleted ones, never
+    touches review-only views/conversations), then writes the v2
+    receipt over the same batch with the frozen v1 data window."""
+    prev = migration_preview(conn)
+    if not prev.get("eligible"):
+        raise ValueError(prev.get("reason", "migration not eligible"))
+    if not authorize:
+        return {"authorized": False, "preview": prev}
+    batch = prev["v1_batch_id"]
+    deleted, kept_deleted = [], []
+    for item in prev["surplus"]:
+        if item["already_deleted"]:
+            kept_deleted.append(item["campaign_id"])
+            continue
+        delete_campaign(conn, batch, item["campaign_id"])
+        deleted.append(item["campaign_id"])
+    v1 = _receipt_row(conn, PACK_KEY)
+    counts = {
+        "campaigns": len(V2_KEPT), "creatives": 15,
+        "ads_rows": conn.execute(
+            "SELECT COUNT(*) FROM ads WHERE import_id=?",
+            (batch,)).fetchone()[0],
+        "migrated_from": PACK_KEY, "phase": "added",
+    }
+    try:
+        conn.execute(
+            "INSERT INTO demo_packs (pack_key, batch_id, workspace,"
+            " imported_by, imported_at, data_start, data_end,"
+            " status, counts_json) VALUES (?, ?, ?, ?, ?, ?, ?,"
+            " 'added', ?)",
+            (PACK_KEY_V2, batch, v1["workspace"], imported_by,
+             _utcnow(), v1["data_start"], v1["data_end"],
+             _json.dumps(counts)))
+    except Exception:
+        conn.execute("UPDATE demo_packs SET status='added', counts_json=?"
+                     " WHERE pack_key=?",
+                     (_json.dumps(counts), PACK_KEY_V2))
+    conn.execute("UPDATE demo_packs SET status='migrated' WHERE pack_key=?",
+                 (PACK_KEY,))
+    conn.commit()
+    return {"authorized": True, "deleted": deleted,
+            "kept_deleted": kept_deleted,
+            "receipt": _receipt_row(conn, PACK_KEY_V2)}
 

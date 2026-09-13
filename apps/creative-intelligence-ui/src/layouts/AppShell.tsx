@@ -4,6 +4,7 @@ import { useAuth } from "@/auth/AuthProvider";
 import { AccountMenu } from "@/auth/AccountMenu";
 import { Icon } from "@/components/icons";
 import { GlobalSearch } from "@/components/GlobalSearch";
+import { SampleScopeBanner } from "@/components/SampleScopeBanner";
 
 const NAV = [
   { to: "/", label: "Dashboard", icon: "dashboard", end: true },
@@ -74,6 +75,7 @@ export function AppShell() {
           </div>
         </header>
         <main className="page">
+          <SampleScopeBanner />
           <Outlet />
         </main>
       </div>

@@ -1736,6 +1736,62 @@ def index_alias():
     return _index_response()
 
 
+@router.get("/api/sample-files")
+def sample_files(request: Request, conn=Depends(get_product_conn),
+                 _emp=Depends(get_current_employee)):
+    """Employee-visible sample report/workbook history.
+
+    Read-only view over the persisted sample_files table (never a
+    render-time fixture): ordinary employees can list and download;
+    mutation stays behind the admin pack endpoints.
+    """
+    _ = request
+    from creative_intel import demo_pack
+
+    st = demo_pack.pack_status(conn, demo_pack.PACK_KEY_V2)
+    batch = (st["receipt"]["batch_id"] if st["receipt"] else "")
+    rows = conn.execute(
+        "SELECT file_key, name, format, mime, bytes, sha256, created_at"
+        " FROM sample_files WHERE file_key LIKE ? ORDER BY created_at",
+        (batch + "/%",)).fetchall() if batch else []
+    return {"pack_key": demo_pack.PACK_KEY_V2, "batch_id": batch,
+            "files": [{"key": r[0], "name": r[1], "format": r[2],
+                       "mime": r[3], "bytes": r[4], "sha256": r[5],
+                       "created_at": r[6],
+                       "url": "/api/sample-files/%s" % r[0]}
+                      for r in rows]}
+
+
+@router.get("/api/sample-files/{file_key:path}")
+def sample_file_download(file_key: str, request: Request,
+                         conn=Depends(get_product_conn),
+                         _emp=Depends(get_current_employee)):
+    """Download a persisted sample file (viewer permission)."""
+    import os as _os
+
+    from ci_backend.actions import _media_dir
+    from creative_intel import demo_pack
+
+    _ = request
+    st = demo_pack.pack_status(conn, demo_pack.PACK_KEY_V2)
+    batch = (st["receipt"]["batch_id"] if st["receipt"] else "")
+    if not batch or not file_key.startswith(batch + "/"):
+        raise HTTPException(status_code=404,
+                            detail={"error": "Sample file not found."})
+    row = conn.execute(
+        "SELECT name, mime FROM sample_files WHERE file_key=?",
+        (file_key,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404,
+                            detail={"error": "Sample file not found."})
+    path = _os.path.join(_media_dir(None), "sample", batch, row[0])
+    if not _os.path.isfile(path):
+        raise HTTPException(status_code=410, detail={
+            "error": "Sample file was deleted from disk. The import"
+                     " receipt is kept; files are not regenerated."})
+    return FileResponse(path, media_type=row[1], filename=row[0])
+
+
 # React Router client paths: serve the app shell so deep links and
 # refreshes work (item 51). Explicit list — unknown paths still 404.
 _SPA_PATHS = ("campaigns", "creatives", "compare", "benchmarks",

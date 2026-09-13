@@ -203,10 +203,10 @@ export function AskPage() {
   }, [platforms.data, hooks.data, answer]);
 
   const kpis = compare ? [
-    { label: "Total Spend", metric: "spend", display: fmtMoney(num(compare.metrics.spend?.current)) },
+    { label: "Total Spend", metric: "spend", display: compare.metrics.spend?.current == null ? "—" : fmtMoney(compare.metrics.spend.current) },
     { label: "Conversions", metric: "conversions", display: fmtCompact(num(compare.metrics.conversions?.current)) },
-    { label: "Average CPA", metric: "cpa", display: fmtMoney(num(compare.metrics.cpa?.current)) },
-    { label: "Average ROAS", metric: "roas", display: fmtMult(num(compare.metrics.roas?.current)) },
+    { label: "Average CPA", metric: "cpa", display: compare.metrics.cpa?.current == null ? "—" : fmtMoney(compare.metrics.cpa.current) },
+    { label: "Average ROAS", metric: "roas", display: compare.metrics.roas?.current == null ? "—" : fmtMult(compare.metrics.roas.current) },
   ] : [];
 
   return (
@@ -342,7 +342,8 @@ export function AskPage() {
               chats.length ? (
                 <div>
                   {chats.slice(0, 5).map((c) => (
-                    <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 9, padding: "7px 0", borderBottom: "1px solid var(--shell-line)" }}>
+                    <Link key={c.id} to={`/analyst?conversation=${encodeURIComponent(c.id)}`}
+                      style={{ display: "flex", alignItems: "center", gap: 9, padding: "7px 0", borderBottom: "1px solid var(--shell-line)", textDecoration: "none" }}>
                       <span className="insight-ico" style={{ background: "#E7F1FB", width: 30, height: 30, borderRadius: 9 }}>
                         <Icon name="chat" size={15} />
                       </span>
@@ -352,7 +353,7 @@ export function AskPage() {
                         </p>
                         <p className="panel-sub" style={{ margin: 0, fontSize: 11.5 }}>{friendlyDate(c.updated_at)}</p>
                       </div>
-                    </div>
+                    </Link>
                   ))}
                 </div>
               ) : <EmptyState compact icon="chat" title="No recent chats" text="Your conversations will appear here." />

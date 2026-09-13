@@ -353,6 +353,15 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
     void loadConversations();
   }, [loadConversations]);
 
+  // Deep links (?conversation=<id>, e.g. from Ask recent chats) open
+  // the chosen conversation once the list arrives.
+  useEffect(() => {
+    if (activeId || !conversations.length) return;
+    const id = new URLSearchParams(window.location.search).get("conversation");
+    if (id && conversations.some((c) => c.id === id)) setActiveId(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversations]);
+
   // A07: even if a remount is skipped, changing identity clears all
   // account-specific chat state before reloading. busy resets too:
   // the in-flight request's finally-block stands down because its

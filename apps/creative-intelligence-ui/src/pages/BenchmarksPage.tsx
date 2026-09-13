@@ -39,7 +39,7 @@ interface BenchRow {
 interface SavedView {
   id: number;
   name: string;
-  state: { filters?: Record<string, string[]>; kpi?: string; view?: string };
+  state: { filters?: Record<string, string[]>; kpi?: string; view?: string; compare_mode?: string };
 }
 
 const VIEW_ROUTES: Record<string, string> = {

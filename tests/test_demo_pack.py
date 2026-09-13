@@ -262,7 +262,7 @@ def test_j_non_admin_blocked_admin_allowed(tmp_path):
     http, admin = _pack_client(tmp_path, "admin")
     r = http.get("/api/admin/demo/pack/preview", headers=admin)
     assert r.status_code == 200, r.text
-    assert r.json()["pack_key"] == "foap-presentation-pack-v1"
+    assert r.json()["pack_key"] == "foap-presentation-pack-v2"
     r = http.post("/api/admin/demo/pack/import", headers=admin)
     assert r.status_code == 200, r.text
     assert r.json()["created"] is True

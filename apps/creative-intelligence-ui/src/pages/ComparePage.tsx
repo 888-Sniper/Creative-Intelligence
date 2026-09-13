@@ -347,11 +347,29 @@ export function ComparePage() {
     }
   }
 
-  // Auto-run once the option lists arrive: top 4 campaigns by spend.
+  // Auto-run once the option lists arrive: top 4 campaigns by spend,
+  // unless a saved comparison deep-links ?mode= & ?campaigns=/?
+  // creatives= with the FULL selection (all 2-4 entries restored).
   const [booted, setBooted] = useState(false);
   useEffect(() => {
     if (booted || !campaignOptions.data || !creativeOptions.data) return;
     setBooted(true);
+    const params = new URLSearchParams(window.location.search);
+    const linkMode = params.get("mode");
+    if (linkMode === "campaigns" || linkMode === "creatives") {
+      const names = (params.get(linkMode === "campaigns" ? "campaigns" : "creatives") ?? "")
+        .split(",").map((s) => s.trim()).filter(Boolean).slice(0, 4);
+      const valid = names.filter((n) => linkMode === "campaigns"
+        ? Object.hasOwn(campaignOptions.data ?? {}, n)
+        : (creativeOptions.data ?? []).some((c) => c.creative_key === n));
+      if (valid.length >= 2) {
+        setMode(linkMode);
+        setPicked(valid);
+        if (linkMode === "campaigns") void runCampaigns(valid, "roas");
+        else void runCreatives(valid, "ctr");
+        return;
+      }
+    }
     const top = Object.entries(campaignOptions.data)
       .sort((a, b) => num(b[1].spend) - num(a[1].spend))
       .slice(0, 4)

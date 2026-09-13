@@ -247,7 +247,17 @@ def compare_kpis(conn, scope):
             cur_val = _metric_value(cur_sums, cur_pooled, metric)
             prev_val = _metric_value(prev_sums, prev_pooled, metric)
         if metric in MONEY_METRICS and not money_ok:
-            cur_val, prev_val = None, None
+            if not cur_rows or not prev_rows:
+                # One side is empty: no cross-currency comparison
+                # exists, so each side keeps its own single-currency
+                # facts (the missing side stays None, hence no
+                # percentage). A mixed side itself stays unmeasurable.
+                if cur_pooled.get("mixed_currency"):
+                    cur_val = None
+                if prev_pooled.get("mixed_currency"):
+                    prev_val = None
+            else:
+                cur_val, prev_val = None, None
         metrics[metric] = compare_metric(cur_val, prev_val, metric, prev_has_rows=bool(prev_rows))
     return {
         "current_period": {"start": cur_start, "end": cur_end},

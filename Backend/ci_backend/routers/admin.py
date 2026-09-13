@@ -226,7 +226,7 @@ def pack_status(request: Request, conn=Depends(get_product_conn),
     _ = admin
     from creative_intel import demo_pack
 
-    return demo_pack.pack_status(conn)
+    return demo_pack.pack_status(conn, demo_pack.PACK_KEY_V2)
 
 
 @router.get("/demo/pack/preview")
@@ -237,9 +237,11 @@ def pack_preview(request: Request, conn=Depends(get_product_conn),
     _ = admin
     from creative_intel import demo_pack
 
-    out = demo_pack.preview(
+    out = demo_pack.preview_v2(
         conn, workspace=(settings.environment or "local"))
-    out["status"] = demo_pack.pack_status(conn)["status"]
+    out["status"] = demo_pack.pack_status(
+        conn, demo_pack.PACK_KEY_V2)["status"]
+    out["migration"] = demo_pack.migration_preview(conn)
     return out
 
 
@@ -248,33 +250,67 @@ def pack_import(request: Request, conn=Depends(get_product_conn),
                 admin=Depends(get_current_admin),
                 settings=Depends(get_settings),
                 _rl=Depends(admin_rate_limit)):
-    """Add Demo Data Once. Receipt-gated: a completed import retried
-    returns the existing receipt without touching data; concurrent
-    callers collapse onto the single receipt row."""
+    """Add Demo Data Once (v2: 5 campaigns x 3 creatives).
+    Receipt-gated: a completed import retried returns the existing
+    receipt without touching data; concurrent callers collapse onto
+    the single receipt row. An active v1 pack refuses with a
+    migration pointer instead of installing beside it."""
     from creative_intel import demo_pack
 
-    before = demo_pack.pack_status(conn)
-    if before["status"] in ("added", "partially_removed", "removed",
-                            "importing"):
+    before = demo_pack.pack_status(conn, demo_pack.PACK_KEY_V2)
+    if before["status"] in ("added", "partially_removed", "removed"):
         security_log.event("demo_pack_import_skip", actor=admin.id,
-                           target=demo_pack.PACK_KEY,
+                           target=demo_pack.PACK_KEY_V2,
                            detail="status=%s" % before["status"])
         out = dict(before)
         out["created"] = False
         return out
-    core = demo_pack.import_pack(
+    core = demo_pack.import_pack_v2(
         conn, imported_by=admin.id,
         workspace=(settings.environment or "local"))
-    if not core.get("created", True) or core.get("phase") != "core":
+    if core.get("migration_required") or not core.get("created", True) \
+            or core.get("phase") != "core":
         return core
-    final = demo_pack.finalize_pack(
+    final = demo_pack.finalize_pack_v2(
         conn, core["batch_id"], imported_by=admin.id,
         core_counts=core["counts"])
     security_log.event("demo_pack_import", actor=admin.id,
-                       target=demo_pack.PACK_KEY,
-                       detail="batch=%s campaigns=10 creatives=30"
+                       target=demo_pack.PACK_KEY_V2,
+                       detail="batch=%s campaigns=5 creatives=15"
                        % core["batch_id"])
     return final
+
+
+@router.get("/demo/pack/migration/preview")
+def pack_migration_preview(request: Request,
+                           conn=Depends(get_product_conn),
+                           admin=Depends(get_current_admin)):
+    """Explicit v1 -> v2 migration preview. No writes."""
+    _ = admin
+    from creative_intel import demo_pack
+
+    return demo_pack.migration_preview(conn)
+
+
+@router.post("/demo/pack/migration/apply")
+async def pack_migration_apply(request: Request,
+                         conn=Depends(get_product_conn),
+                         admin=Depends(get_current_admin),
+                         _rl=Depends(admin_rate_limit)):
+    """Authorised v1 -> v2 migration. Requires explicit
+    {authorize: true}; deletes only live surplus sample-owned
+    campaigns and writes the v2 receipt over the same batch."""
+    from creative_intel import demo_pack
+
+    raw = await json_payload(request)
+    out = demo_pack.migrate_to_v2(conn, imported_by=admin.id,
+                                  authorize=bool(raw.get("authorize")))
+    if not out.get("authorized"):
+        return out
+    security_log.event("demo_pack_migrate", actor=admin.id,
+                       target=demo_pack.PACK_KEY_V2,
+                       detail="deleted=%s" % ",".join(out["deleted"]))
+    return out
 
 
 @router.post("/demo/pack/remove")
@@ -289,15 +325,15 @@ async def pack_remove(request: Request, conn=Depends(get_product_conn),
     if not raw.get("confirm"):
         raise HTTPException(status_code=409, detail={
             "error": "Confirmation required.",
-            "preview": demo_pack.pack_status(conn)["remaining"]})
-    receipt = demo_pack.pack_status(conn)["receipt"]
+            "preview": demo_pack.pack_status(conn, demo_pack.PACK_KEY_V2)["remaining"]})
+    receipt = demo_pack.pack_status(conn, demo_pack.PACK_KEY_V2)["receipt"]
     if receipt is None or raw.get("batch_id") != receipt["batch_id"]:
         raise HTTPException(status_code=409, detail={
             "error": "Batch mismatch: removal is scoped to the"
                      " imported pack only."})
     out = demo_pack.remove_pack(conn, receipt["batch_id"])
     security_log.event("demo_pack_remove", actor=admin.id,
-                       target=demo_pack.PACK_KEY,
+                       target=demo_pack.PACK_KEY_V2,
                        detail="batch=%s" % receipt["batch_id"])
     return out
 
@@ -309,7 +345,7 @@ def pack_impact(request: Request, conn=Depends(get_product_conn),
     _ = admin
     from creative_intel import demo_pack
 
-    st = demo_pack.pack_status(conn)
+    st = demo_pack.pack_status(conn, demo_pack.PACK_KEY_V2)
     if st["receipt"] is None:
         raise HTTPException(status_code=404,
                             detail={"error": "Pack never imported."})
@@ -325,7 +361,7 @@ def pack_delete_campaign(campaign_id: str, request: Request,
                          _rl=Depends(admin_rate_limit)):
     from creative_intel import demo_pack
 
-    st = demo_pack.pack_status(conn)
+    st = demo_pack.pack_status(conn, demo_pack.PACK_KEY_V2)
     try:
         out = demo_pack.delete_campaign(conn, st["receipt"]["batch_id"],
                                         campaign_id)
@@ -346,7 +382,7 @@ def pack_delete_creative(creative_key: str, request: Request,
                          _rl=Depends(admin_rate_limit)):
     from creative_intel import demo_pack
 
-    st = demo_pack.pack_status(conn)
+    st = demo_pack.pack_status(conn, demo_pack.PACK_KEY_V2)
     try:
         out = demo_pack.delete_creative(conn, st["receipt"]["batch_id"],
                                         creative_key)
@@ -367,7 +403,7 @@ async def pack_rename(request: Request, conn=Depends(get_product_conn),
     from creative_intel import demo_pack
 
     body = _validated(PackRename, await json_payload(request))
-    st = demo_pack.pack_status(conn)
+    st = demo_pack.pack_status(conn, demo_pack.PACK_KEY_V2)
     try:
         if body.kind == "campaign":
             out = demo_pack.rename_campaign(conn,
@@ -392,7 +428,7 @@ def pack_delete_conversation(conversation_id: str, request: Request,
                              _rl=Depends(admin_rate_limit)):
     from creative_intel import demo_pack
 
-    st = demo_pack.pack_status(conn)
+    st = demo_pack.pack_status(conn, demo_pack.PACK_KEY_V2)
     try:
         out = demo_pack.delete_conversation(
             conn, st["receipt"]["batch_id"], conversation_id)
@@ -413,7 +449,7 @@ def pack_delete_finding(finding_id: str, request: Request,
                         _rl=Depends(admin_rate_limit)):
     from creative_intel import demo_pack
 
-    st = demo_pack.pack_status(conn)
+    st = demo_pack.pack_status(conn, demo_pack.PACK_KEY_V2)
     try:
         out = demo_pack.delete_finding(conn, st["receipt"]["batch_id"],
                                        finding_id)
@@ -431,7 +467,7 @@ def pack_delete_view(view_id: int, request: Request,
                      _rl=Depends(admin_rate_limit)):
     from creative_intel import demo_pack
 
-    st = demo_pack.pack_status(conn)
+    st = demo_pack.pack_status(conn, demo_pack.PACK_KEY_V2)
     try:
         out = demo_pack.delete_sample_view(conn,
                                            st["receipt"]["batch_id"],
@@ -449,7 +485,7 @@ def pack_files(request: Request, conn=Depends(get_product_conn),
     _ = (request, admin)
     from creative_intel import demo_pack
 
-    st = demo_pack.pack_status(conn)
+    st = demo_pack.pack_status(conn, demo_pack.PACK_KEY_V2)
     if st["receipt"] is None:
         return {"files": []}
     rows = conn.execute(
@@ -480,7 +516,7 @@ def pack_file_download(file_key: str, request: Request,
                             detail={"error": "Sample file not found."})
     from creative_intel import demo_pack
 
-    st = demo_pack.pack_status(conn)
+    st = demo_pack.pack_status(conn, demo_pack.PACK_KEY_V2)
     batch = (file_key.split("/")[0] if "/" in file_key else "")
     if st["receipt"] is None or batch != st["receipt"]["batch_id"]:
         raise HTTPException(status_code=404,
@@ -501,7 +537,7 @@ def pack_delete_file(file_key: str, request: Request,
                      _rl=Depends(admin_rate_limit)):
     from creative_intel import demo_pack
 
-    st = demo_pack.pack_status(conn)
+    st = demo_pack.pack_status(conn, demo_pack.PACK_KEY_V2)
     try:
         out = demo_pack.delete_sample_file(
             conn, st["receipt"]["batch_id"], file_key)

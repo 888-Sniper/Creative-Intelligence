@@ -1,9 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, scopedPath } from "@/api/client";
+import { useAuth } from "@/auth/AuthProvider";
 import { useFilters } from "@/state/FilterContext";
 import { Icon } from "@/components/icons";
 import { LoadingButton } from "@/components/LoadingButton";
 import { EmptyState, PageHeader, Panel, Skeleton, plural, useCampaignMeta } from "@/components/product";
+
+interface SampleFileRow {
+  key: string; name: string; format: string; mime: string;
+  bytes: number; created_at: string; url: string;
+}
 
 const KPI_OPTIONS = [
   "spend",
@@ -44,7 +50,7 @@ const BENCH_OPTIONS = [
   { id: "campaign", label: "Campaign" },
 ];
 
-type ReportFormat = "pptx" | "xlsx" | "one-pager";
+type ReportFormat = "pptx" | "xlsx" | "one-pager" | "csv" | "workbook";
 
 const FORMATS: Array<{ id: ReportFormat; title: string; body: string }> = [
   { id: "pptx", title: "PPTX", body: "Presentation Deck" },
@@ -75,6 +81,8 @@ interface HistoryRow {
   isDemo: boolean;
   body: Record<string, unknown> | null;
   note?: string;
+  /** Persisted sample-pack file key (backend /api/sample-files). */
+  sampleKey?: string;
 }
 
 const HISTORY_KEY = "ci-reports-history";
@@ -92,6 +100,14 @@ function scopeFilterBody(scope: URLSearchParams): Record<string, string[]> {
     else out[key] = [value];
   });
   return out;
+}
+
+function useAdminFlag(): boolean {
+  try {
+    return useAuth().me?.is_admin === true;
+  } catch {
+    return false;
+  }
 }
 
 function b64Download(filename: string, mime: string, b64: string): { filename: string; href: string } {
@@ -330,6 +346,36 @@ export function ReportsPage() {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [history, setHistory] = useState<HistoryRow[]>(() => loadSessionHistory());
+  const isAdmin = useAdminFlag();
+  /* Persisted sample-pack files from the backend report-history API
+   * (never a render-time fixture): list + download for every
+   * employee; delete stays admin-gated. */
+  const [sampleFiles, setSampleFiles] = useState<SampleFileRow[] | null>(null);
+  const [sampleError, setSampleError] = useState("");
+  const loadSampleFiles = useCallback(async () => {
+    try {
+      const r = await api<{ files: SampleFileRow[] }>("GET", "/api/sample-files");
+      setSampleFiles(Array.isArray(r.files) ? r.files : []);
+      setSampleError("");
+    } catch (e) {
+      setSampleFiles([]);
+      setSampleError(e instanceof Error ? e.message : "Request Failed.");
+    }
+  }, []);
+  useEffect(() => { void loadSampleFiles(); }, [loadSampleFiles]);
+  const [deletingSample, setDeletingSample] = useState<string | null>(null);
+  const deleteSampleFile = async (key: string) => {
+    if (deletingSample) return;
+    setDeletingSample(key);
+    try {
+      await api("DELETE", `/api/admin/demo/pack/files/${encodeURIComponent(key)}`);
+      await loadSampleFiles();
+    } catch (e) {
+      setSampleError(e instanceof Error ? e.message : "Request Failed.");
+    } finally {
+      setDeletingSample(null);
+    }
+  };
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("All Statuses");
   const [formatFilter, setFormatFilter] = useState("All Formats");
@@ -346,18 +392,6 @@ export function ReportsPage() {
       for (const h of list) URL.revokeObjectURL(h);
     };
   }, []);
-
-  const persist = (rows: HistoryRow[]) => {
-    setHistory(rows);
-    try {
-      window.localStorage.setItem(
-        HISTORY_KEY,
-        JSON.stringify(rows.filter((r) => !r.isDemo).map(({ href: _h, ...rest }) => rest)),
-      );
-    } catch {
-      /* private mode: history simply does not persist */
-    }
-  };
 
   useEffect(() => {
     let cancelled = false;
@@ -419,9 +453,26 @@ export function ReportsPage() {
     return textDownload("one-pager.md", "text/markdown", r.markdown ?? "");
   };
 
+  /* Atomic history updates: overlapping generations each apply to
+   *  the latest list instead of a stale closure snapshot. */
+  const applyHistory = (fn: (prev: HistoryRow[]) => HistoryRow[]) => {
+    setHistory((prev) => {
+      const next = fn(prev);
+      try {
+        window.localStorage.setItem(
+          HISTORY_KEY,
+          JSON.stringify(next.filter((r) => !r.isDemo).map(({ href: _h, ...rest }) => rest)),
+        );
+      } catch {
+        /* private mode: history simply does not persist */
+      }
+      return next;
+    });
+  };
+
   const runReport = async (fmt: ReportFormat, body: Record<string, unknown>, title: string, chips: string[], rowId?: string) => {
     if (rowId) {
-      persist(history.map((h) => (h.id === rowId ? { ...h, status: "Generating" as const, note: "" } : h)));
+      applyHistory((prev) => prev.map((h) => (h.id === rowId ? { ...h, status: "Generating" as const, note: "" } : h)));
     } else {
       setBusy(true);
     }
@@ -444,12 +495,12 @@ export function ReportsPage() {
         isDemo: false,
         body,
       };
-      persist(rowId ? history.map((h) => (h.id === rowId ? row : h)) : [row, ...history]);
+      applyHistory((prev) => (rowId ? prev.map((h) => (h.id === rowId ? row : h)) : [row, ...prev]));
       setStatus(`${FORMATS.find((f) => f.id === fmt)?.title} Built: ${dl.filename}.`);
     } catch (err) {
       const message = errMessage(err, "Report Blocked.");
       if (rowId) {
-        persist(history.map((h) => (h.id === rowId ? { ...h, status: "Failed" as const, note: message } : h)));
+        applyHistory((prev) => prev.map((h) => (h.id === rowId ? { ...h, status: "Failed" as const, note: message } : h)));
       }
       setStatus(`BLOCKED: ${message}`);
     } finally {
@@ -476,9 +527,26 @@ export function ReportsPage() {
     }
   };
 
+  const sampleRows: HistoryRow[] = (sampleFiles ?? []).map((f) => ({
+    id: `sample:${f.key}`,
+    title: f.name.replace(/\.[^.]+$/, ""),
+    kind: f.format === "workbook" ? "Workbook" : "Sample Pack Report",
+    status: "Completed",
+    format: f.format as ReportFormat,
+    created: f.created_at ? new Date(f.created_at).toLocaleString("en-US",
+      { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }) : "",
+    by: "Sample Pack",
+    chips: ["Sample Data", f.format],
+    href: f.url,
+    filename: f.name,
+    isDemo: false,
+    body: null,
+    sampleKey: f.key,
+  }));
+
   const rows = useMemo(() => {
     const demo = demoMode && campaigns ? demoHistory(campaigns) : [];
-    const merged = [...history.filter((h) => !h.isDemo), ...demo];
+    const merged = [...sampleRows, ...history.filter((h) => !h.isDemo), ...demo];
     const q = query.trim().toLowerCase();
     const windowDays = timeFilter === "Last 7 Days" ? 7 : timeFilter === "Last 30 Days" ? 30 : 0;
     return merged.filter((r) => {
@@ -491,7 +559,7 @@ export function ReportsPage() {
       if (q && !`${r.title} ${r.kind} ${r.by}`.toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [history, campaigns, demoMode, query, statusFilter, formatFilter, timeFilter]);
+  }, [history, sampleFiles, campaigns, demoMode, query, statusFilter, formatFilter, timeFilter]);
 
   const latest = useMemo(() => rows.filter((r) => r.status === "Completed").slice(0, 5), [rows]);
 
@@ -569,6 +637,7 @@ export function ReportsPage() {
               </div>
             </div>
             {status ? <p className="panel-sub" role="status" style={{ marginTop: 8 }}>{status}</p> : null}
+            {sampleError ? <p className="panel-sub" role="alert" style={{ marginTop: 8 }}>Sample files unavailable: {sampleError}</p> : null}
           </Panel>
           <Panel
             title="Generated Reports"
@@ -634,6 +703,14 @@ export function ReportsPage() {
                         </td>
                         <td>
                           <span className="row-actions">
+                            {r.sampleKey && isAdmin ? (
+                              <button type="button" className="icon-btn"
+                                aria-label={`Delete ${r.title}`}
+                                disabled={deletingSample !== null}
+                                onClick={() => void deleteSampleFile(r.sampleKey as string)}>
+                                <Icon name="x" size={16} />
+                              </button>
+                            ) : null}
                             {r.href ? (
                               <a className="icon-btn" download={r.filename ?? "report"} href={r.href} aria-label={`Download ${r.title}`}>
                                 <Icon name="download" size={16} />

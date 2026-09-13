@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, scopedPath } from "@/api/client";
 import { scopeParams, useFilters } from "@/state/FilterContext";
 import { KpiTrend } from "@/components/KpiTrend";
@@ -311,30 +311,46 @@ export function __resetCampaignMetaCache(): void {
 }
 function fetchMeta(): Promise<CampaignMeta> {
   if (!metaPromise) {
+    // A failed fetch must never be cached for the app lifetime: clear
+    // so the next caller retries, and surface the error to the hook.
     metaPromise = api<CampaignMeta>("GET", "/api/campaigns/meta")
-      .catch(() => ({ campaigns: [], demo: false }));
+      .catch((e: unknown) => {
+        metaPromise = null;
+        throw e;
+      });
   }
   return metaPromise;
 }
 
+/** Drop the cached metadata so selectors refetch (call after import,
+ *  rename, deletion or removal). */
+export function refreshCampaignMeta(): void {
+  metaPromise = null;
+}
+
 /** Shared campaign-attribute metadata (clients, projects, teams,
- *  campaigns, verticals, markets) plus the demo-workspace flag.
- *  Fetched once per app lifetime; every selector on every page reads
- *  the same lists, and every synthetic showcase gates on `demo`. */
+ *  campaigns, verticals, markets) plus the demo-workspace flag. */
 export function useCampaignMeta(): {
   data: CampaignMeta | null;
-  error: string; loading: boolean;
+  error: string; loading: boolean; refresh: () => void;
 } {
   const [data, setData] = useState<CampaignMeta | null>(null);
   const [error, setError] = useState("");
+  const [nonce, setNonce] = useState(0);
+  const refresh = useCallback(() => {
+    refreshCampaignMeta();
+    setData(null);
+    setError("");
+    setNonce((n) => n + 1);
+  }, []);
   useEffect(() => {
     let live = true;
     fetchMeta()
       .then((r) => live && setData(r))
       .catch((e) => live && setError(e instanceof Error ? e.message : String(e)));
     return () => { live = false; };
-  }, []);
-  return { data, error, loading: data === null && error === "" };
+  }, [nonce]);
+  return { data, error, loading: data === null && error === "", refresh };
 }
 
 function distinct(rows: CampaignMetaRow[], pick: (r: CampaignMetaRow) => string[]): string[] {
@@ -647,11 +663,13 @@ export function Panel({ title, action, sub, icon, tint, children }: {
       <div className="panel-head">
         {icon ? (
           <span className="insight-ico" aria-hidden="true"
-            style={{ background: tint ?? "#E7F1FB", flex: "0 0 auto", marginRight: 2 }}>
+            style={{ background: tint ?? "#E7F1FB", flex: "0 0 auto", marginRight: 2, alignSelf: "flex-start" }}>
             <Icon name={icon} size={20} />
           </span>
         ) : null}
-        <div style={{ flex: "1 1 auto", minWidth: 0 }}>
+        {/* Titles start at the head top even beside taller actions:
+          row members keep matching title baselines. */}
+        <div style={{ flex: "1 1 auto", minWidth: 0, alignSelf: "flex-start" }}>
           <h2 className="panel-title">{title}</h2>
           {sub ? <p className="panel-sub">{sub}</p> : null}
         </div>

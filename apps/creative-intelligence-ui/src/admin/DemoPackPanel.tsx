@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+
 import { api } from "@/api/client";
 import { Icon } from "@/components/icons";
 import { LoadingButton } from "@/components/LoadingButton";
-import { DemoDataBadge, EmptyState, Panel, Skeleton } from "@/components/product";
+import { DemoDataBadge, EmptyState, Panel } from "@/components/product";
+import { SAMPLE_SCOPE_KEY } from "@/components/SampleScopeBanner";
 
 interface PackCampaign { campaign_id: string; campaign: string; }
 interface PackStatus {
@@ -23,8 +24,23 @@ interface PackPreview {
   synthetic: boolean;
   campaigns: { name: string; client: string; project: string; creatives: string[] }[];
   totals: Record<string, number | string>;
-  legacy_demo: { campaigns: number; creatives: number };
   replenish: boolean;
+  migration: MigrationPreview;
+}
+interface MigrationPreview {
+  eligible: boolean;
+  reason?: string;
+  v1_status?: string;
+  retain?: { campaign_id: string; campaign: string }[];
+  surplus?: {
+    campaign_id: string; campaign: string; already_deleted: boolean;
+    ads_rows: number; creatives: string[]; media_rows: number;
+  }[];
+  review_only?: {
+    saved_views: { id: number }[]; analyst_conversations: { id: string }[];
+    note: string;
+  };
+  v1_data_window?: { start: string; end: string };
 }
 interface PackFile { file_key: string; name: string; format: string; mime: string; bytes: number; }
 interface PackImpact {
@@ -44,11 +60,13 @@ export function DemoPackPanel() {
   const [files, setFiles] = useState<PackFile[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
+  const [loadError, setLoadError] = useState("");
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [impact, setImpact] = useState<PackImpact | null>(null);
   const [impactFor, setImpactFor] = useState("");
   const [renameId, setRenameId] = useState("");
   const [renameName, setRenameName] = useState("");
+  const [confirmMigrate, setConfirmMigrate] = useState(false);
 
   const refresh = useCallback(async () => {
     const s = await api<PackStatus>("GET", "/api/admin/demo/pack/status");
@@ -66,7 +84,15 @@ export function DemoPackPanel() {
     }
   }, []);
 
-  useEffect(() => { void refresh().catch((e: unknown) => setNotice(msg(e))); }, [refresh]);
+  const reload = useCallback(() => {
+    setLoadError("");
+    void refresh().then(
+      () => undefined,
+      (e: unknown) => setLoadError(msg(e)),
+    );
+  }, [refresh]);
+
+  useEffect(() => { reload(); }, [reload]);
 
   async function run(key: string, fn: () => Promise<void>): Promise<void> {
     if (busy) return;
@@ -83,10 +109,37 @@ export function DemoPackPanel() {
   }
 
   const importOnce = () => run("import", async () => {
-    const r = await api<{ created: boolean }>("POST", "/api/admin/demo/pack/import", {});
-    setNotice(r.created ? "Sample Data Added." : "Pack Already Imported — Nothing Duplicated.");
+    const r = await api<{ created: boolean; migration_required?: boolean }>(
+      "POST", "/api/admin/demo/pack/import", {});
+    if (r.migration_required) {
+      setNotice("An Earlier Sample Pack Is Active — Review The Migration Preview Below Before Adding.");
+    } else {
+      setNotice(r.created ? "Sample Data Added." : "Pack Already Imported — Nothing Duplicated.");
+    }
     setConfirmRemove(false);
   });
+
+  const migrate = () => run("migrate", async () => {
+    const r = await api<{ authorized: boolean; deleted?: string[]; kept_deleted?: string[] }>(
+      "POST", "/api/admin/demo/pack/migration/apply", { authorize: true });
+    if (r.authorized) {
+      setNotice(`Migration Complete. Removed ${(r.deleted ?? []).length} Surplus Campaign(s); ` +
+        `Kept ${(r.kept_deleted ?? []).length} Earlier Deletion(s).`);
+    }
+    setConfirmMigrate(false);
+  });
+
+  const openDemoDashboard = () => {
+    if (!status?.receipt) return;
+    try {
+      localStorage.setItem(SAMPLE_SCOPE_KEY, JSON.stringify({
+        from: status.receipt.data_start,
+        to: status.receipt.data_end,
+        batch: status.receipt.batch_id,
+      }));
+    } catch { /* storage unavailable: still navigate */ }
+    window.location.assign("/");
+  };
 
   const removeAll = () => run("remove", async () => {
     if (!status?.receipt) return;
@@ -124,19 +177,36 @@ export function DemoPackPanel() {
     setNotice("Sample File Deleted.");
   });
 
-  if (!status) return <Skeleton height={120} />;
+  if (loadError && !status) {
+    return (
+      <Panel title="Demo Data">
+        <EmptyState icon="compare" title="Could Not Load Sample Status"
+          text={`Sample pack status unavailable: ${loadError}`}
+          action={<button type="button" className="btn-outline" onClick={reload}>Retry</button>} />
+      </Panel>
+    );
+  }
+  if (!status) {
+    return (
+      <Panel title="Demo Data">
+        <EmptyState icon="clock" title="Loading Sample Status" text="Fetching the import receipt…" />
+      </Panel>
+    );
+  }
 
   const receipt = status.receipt;
   const imported = status.imported ?? {};
   const remaining = status.remaining ?? {};
+  const migration = preview?.migration;
 
   return (
     <Panel
       title="Demo Data"
-      sub="One-time presentation pack (foap-presentation-pack-v1). Synthetic demonstration figures — never real client performance. Deleted samples stay deleted."
+      sub="One-time presentation pack (foap-presentation-pack-v2): 5 campaigns × 3 creatives. Synthetic demonstration figures — never real client performance. Deleted samples stay deleted."
       action={<DemoDataBadge />}
     >
       {notice ? <p className="panel-sub" role="status" style={{ margin: "0 0 8px" }}>{notice}</p> : null}
+      {loadError ? <p className="panel-sub" role="alert" style={{ margin: "0 0 8px" }}>Sample pack status unavailable: {loadError}</p> : null}
 
       {receipt ? (
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
@@ -151,16 +221,24 @@ export function DemoPackPanel() {
 
       {(status.status === "added" || status.status === "partially_removed") && receipt ? (
         <p className="panel-sub" style={{ margin: "0 0 8px" }}>
-          Remaining: {remaining.campaigns ?? 0}/{imported.campaigns ?? 10} Campaign(s),{" "}
-          {remaining.creatives ?? 0}/{imported.creatives ?? 30} Creative(s),{" "}
+          Remaining: {remaining.campaigns ?? 0}/{imported.campaigns ?? 5} Campaign(s),{" "}
+          {remaining.creatives ?? 0}/{imported.creatives ?? 15} Creative(s),{" "}
           {remaining.ads_rows ?? 0} Performance Row(s).{" "}
-          <Link className="link-teal" to="/">Open Demo Dashboard</Link>
+          <button type="button" className="link-btn" onClick={openDemoDashboard}>
+            Open Demo Dashboard
+          </button>
           {receipt ? ` (Suggested Range: ${receipt.data_start} → ${receipt.data_end}.)` : ""}
         </p>
       ) : null}
 
       {status.status === "not_added" || status.status === "failed" ? (
         <>
+          {status.status === "failed" ? (
+            <p className="panel-sub" role="alert" style={{ margin: "0 0 8px" }}>
+              The Last Import Did Not Finish. Nothing Was Left Half-Visible: Fix The Cause,
+              Then Retry — Completed Work Is Kept And Missing Work Resumes.
+            </p>
+          ) : null}
           {preview ? (
             <div style={{ marginBottom: 8 }}>
               <p className="panel-sub" style={{ margin: "0 0 4px" }}>
@@ -168,17 +246,55 @@ export function DemoPackPanel() {
                 Replenishes Itself: {preview.replenish ? "Yes" : "No — Deleted Samples Stay Deleted."}
               </p>
               <p className="panel-sub" style={{ margin: "0 0 4px" }}>
-                Will Create: 10 Campaign(s), 30 Creative(s), {preview.totals.days} Day(s) Of
+                Will Create: 5 Campaign(s), 15 Creative(s), {preview.totals.days} Day(s) Of
                 Performance Rows, {preview.totals.saved_views} Saved View(s),{" "}
                 {preview.totals.conversations} Conversation(s), {preview.totals.reports} Report(s),{" "}
                 {preview.totals.workbooks} Workbook(s).
               </p>
-              {preview.legacy_demo.campaigns > 0 || preview.legacy_demo.creatives > 0 ? (
-                <p className="panel-sub" style={{ margin: "0 0 4px" }}>
-                  Older Sample Records Present: {preview.legacy_demo.campaigns} Campaign(s),{" "}
-                  {preview.legacy_demo.creatives} Creative(s). They Are Left Untouched.
-                </p>
-              ) : null}
+            </div>
+          ) : null}
+          {migration?.eligible ? (
+            <div style={{ marginBottom: 8 }}>
+              <p className="panel-sub" style={{ margin: "0 0 4px" }}>
+                An Earlier 10-Campaign Pack Is Active ({migration.v1_status}). A Fresh Import
+                Will Not Install Beside It. Migration Keeps The Five Matching Campaigns And
+                Removes Only Sample-Owned Surplus Records.
+              </p>
+              <ul className="plain" style={{ margin: "0 0 4px", padding: 0, listStyle: "none" }}>
+                {(migration.surplus ?? []).map((s) => (
+                  <li key={s.campaign_id} className="panel-sub" style={{ margin: 0 }}>
+                    {s.already_deleted
+                      ? `Already Deleted By You (Stays Deleted): ${s.campaign_id}`
+                      : `Remove: ${s.campaign || s.campaign_id} — ${s.ads_rows} Row(s), ` +
+                        `${s.creatives.length} Creative(s), ${s.media_rows} Media File(s)`}
+                  </li>
+                ))}
+              </ul>
+              <p className="panel-sub" style={{ margin: "0 0 4px" }}>
+                Saved Views ({migration.review_only?.saved_views.length ?? 0}) And Conversations
+                ({migration.review_only?.analyst_conversations.length ?? 0}) Are Never Auto-Deleted.
+              </p>
+              {!confirmMigrate ? (
+                <button type="button" className="btn-outline" disabled={busy !== null}
+                  onClick={() => setConfirmMigrate(true)}>
+                  Review Migration…
+                </button>
+              ) : (
+                <>
+                  <span className="panel-sub" style={{ margin: 0 }}>
+                    Apply The Migration Described Above? Your Earlier Deletions Stay Deleted.
+                  </span>{" "}
+                  <LoadingButton type="button" className="btn-outline" loading={busy === "migrate"}
+                    loadingLabel="Migrating…" spinnerClass="spinner dark" disabled={busy !== null}
+                    onClick={() => void migrate()}>
+                    Confirm Migration
+                  </LoadingButton>{" "}
+                  <button type="button" className="btn-outline" disabled={busy !== null}
+                    onClick={() => setConfirmMigrate(false)}>
+                    Cancel
+                  </button>
+                </>
+              )}
             </div>
           ) : null}
           <LoadingButton type="button" className="btn-outline" loading={busy === "import"}
@@ -295,7 +411,7 @@ export function DemoPackPanel() {
       ) : null}
 
       {status.status === "removed" ? (
-        <EmptyState text="Sample Data Removed. The Import Receipt Is Kept — This Pack Will Not Be Offered Again." />
+        <EmptyState text="Sample Data Removed. The Import Receipt Is Kept — This Pack Will Not Return On Its Own." />
       ) : null}
     </Panel>
   );

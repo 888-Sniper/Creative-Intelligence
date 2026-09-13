@@ -13,6 +13,7 @@ import datetime
 import hashlib
 import os
 import re
+import sqlite3
 
 MAX_BYTES = 100 * 1024 * 1024
 CHUNK_BYTES = 1024 * 1024
@@ -48,7 +49,33 @@ CREATE TABLE IF NOT EXISTS media (
 
 def ensure_schema(conn):
     conn.executescript(DDL)
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(media)")]
+    for name in ("width", "height"):
+        if name in cols:
+            continue
+        try:
+            conn.execute("ALTER TABLE media ADD COLUMN %s INTEGER NOT NULL DEFAULT 0" % name)
+        except sqlite3.OperationalError as exc:
+            # Concurrent first-touch race: another request added the
+            # column between our PRAGMA check and this ALTER. Only a
+            # duplicate-column conflict is safe to absorb.
+            if "duplicate column" not in str(exc).lower():
+                raise
     conn.commit()
+
+
+def png_dimensions(content):
+    """(width, height) from PNG IHDR bytes; (0, 0) when unparseable."""
+    try:
+        if bytes(content)[:8] != b"\x89PNG\r\n\x1a\n":
+            return 0, 0
+        w = int.from_bytes(bytes(content)[16:20], "big")
+        h = int.from_bytes(bytes(content)[20:24], "big")
+        if w > 0 and h > 0 and w <= 16384 and h <= 16384:
+            return w, h
+    except Exception:
+        pass
+    return 0, 0
 
 
 def check_key(creative_key):
@@ -173,7 +200,8 @@ def save_media(conn, store, creative_key, filename, content_b64, mime=None):
                             bytes(content), mime)
 
 
-def save_media_bytes(conn, store, creative_key, filename, content, mime=None):
+def save_media_bytes(conn, store, creative_key, filename, content, mime=None,
+                     width=0, height=0):
     """Persist raw upload bytes; returns the metadata record (no bytes).
 
     The multipart path: bytes ride outside JSON so the real 100 MB
@@ -191,7 +219,8 @@ def save_media_bytes(conn, store, creative_key, filename, content, mime=None):
     ensure_schema(conn)
     digest = hashlib.sha256(bytes(content)).hexdigest()
     dupe = conn.execute(
-        "SELECT id, stored_name, mime, bytes, sha256, created_at FROM media"
+        "SELECT id, stored_name, mime, bytes, sha256, created_at, width,"
+        " height FROM media"
         " WHERE creative_key=? AND sha256=?", (creative_key, digest)).fetchone()
     if dupe:
         return _record(creative_key, filename, dupe)
@@ -201,23 +230,32 @@ def save_media_bytes(conn, store, creative_key, filename, content, mime=None):
         with open(dest, "wb") as fh:
             fh.write(bytes(content))
     now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    if not width or not height:
+        width, height = png_dimensions(content)
     cur = conn.execute(
         "INSERT INTO media (creative_key, filename, stored_name, mime,"
-        " bytes, sha256, created_at) VALUES (?,?,?,?,?,?,?)",
+        " bytes, sha256, created_at, width, height)"
+        " VALUES (?,?,?,?,?,?,?,?,?)",
         (creative_key, os.path.basename(filename), stored, sniffed,
-         len(content), digest, now))
+         len(content), digest, now, int(width or 0), int(height or 0)))
     conn.commit()
-    row = (cur.lastrowid, stored, sniffed, len(content), digest, now)
+    row = (cur.lastrowid, stored, sniffed, len(content), digest, now,
+           int(width or 0), int(height or 0))
     _link_source_url(conn, creative_key, cur.lastrowid)
     return _record(creative_key, filename, row)
 
 
 def _record(creative_key, filename, row):
-    rid, _stored, mime, nbytes, digest, created = row
-    return {"id": rid, "creative_key": creative_key,
-            "filename": os.path.basename(filename), "mime": mime,
-            "bytes": nbytes, "sha256": digest, "created_at": created,
-            "url": "/media/%d" % rid}
+    rid, _stored, mime, nbytes, digest, created = row[:6]
+    width, height = (row[6], row[7]) if len(row) > 7 else (0, 0)
+    rec = {"id": rid, "creative_key": creative_key,
+           "filename": os.path.basename(filename), "mime": mime,
+           "bytes": nbytes, "sha256": digest, "created_at": created,
+           "url": "/media/%d" % rid}
+    if width and height:
+        rec["width"] = width
+        rec["height"] = height
+    return rec
 
 
 def _link_source_url(conn, creative_key, rid):

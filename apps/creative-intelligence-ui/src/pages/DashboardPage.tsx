@@ -448,8 +448,8 @@ export function DashboardPage() {
   const kpiConfigs = [
     { label: "Total Impressions", metric: "impressions", display: compare ? fmtCompact(num(compare.metrics.impressions?.current)) : "", icon: "users", tint: "#E5F5F2", color: "#0A9183" },
     { label: "Total Clicks", metric: "clicks", display: compare ? fmtCompact(num(compare.metrics.clicks?.current)) : "", icon: "click", tint: "#E7F1FB", color: "#2F6FBE" },
-    { label: "Total Spend", metric: "spend", display: compare ? fmtMoney(num(compare.metrics.spend?.current)) : "", icon: "coin", tint: "#E4F4ED", color: "#0E7C5B" },
-    { label: "Average ROAS", metric: "roas", display: compare ? fmtMult(num(compare.metrics.roas?.current)) : "", icon: "bars", tint: "#E7F1FB", color: "#2F6FBE" },
+    { label: "Total Spend", metric: "spend", display: compare ? (compare.metrics.spend?.current == null ? "—" : fmtMoney(compare.metrics.spend.current)) : "", icon: "coin", tint: "#E4F4ED", color: "#0E7C5B" },
+    { label: "Average ROAS", metric: "roas", display: compare ? (compare.metrics.roas?.current == null ? "—" : fmtMult(compare.metrics.roas.current)) : "", icon: "bars", tint: "#E7F1FB", color: "#2F6FBE" },
   ];
 
   return (

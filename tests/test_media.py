@@ -41,6 +41,36 @@ class MediaUnitTest(unittest.TestCase):
     def tearDown(self):
         self.conn.close()
 
+    def test_ensure_schema_absorbs_concurrent_add_column(self):
+        import threading
+        fd, path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        try:
+            errors = []
+
+            def worker():
+                try:
+                    conn = sqlite3.connect(path, timeout=10)
+                    try:
+                        media.ensure_schema(conn)
+                    finally:
+                        conn.close()
+                except Exception as exc:  # noqa: BLE001
+                    errors.append(exc)
+
+            threads = [threading.Thread(target=worker) for _ in range(8)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+            self.assertEqual(errors, [])
+            cols = [r[1] for r in
+                    sqlite3.connect(path).execute("PRAGMA table_info(media)")]
+            self.assertIn("width", cols)
+            self.assertIn("height", cols)
+        finally:
+            os.unlink(path)
+
     def test_upload_roundtrip(self):
         rec = media.save_media(self.conn, self.tmp, "m1", "spot.png", B64PNG)
         self.assertEqual(rec["mime"], "image/png")

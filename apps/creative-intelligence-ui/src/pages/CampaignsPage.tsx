@@ -4,6 +4,7 @@ import { api, ApiError } from "@/api/client";
 import { useFilters } from "@/state/FilterContext";
 import { Icon } from "@/components/icons";
 import { LoadingButton } from "@/components/LoadingButton";
+import { SampleCampaignDelete } from "@/components/SampleDelete";
 import { GroupBars, TrendChart } from "@/components/charts";
 import {
   DateRangeField,
@@ -517,7 +518,7 @@ export function CampaignsPage() {
                 icon="megaphone" tint="#E5F5F2" metricLabel="Impressions" compare={compare} />
               <KpiCard label="Total Clicks" display={fmtCompact(num(compare.metrics.clicks?.current))}
                 icon="click" tint="#E7F1FB" metricLabel="Clicks" compare={compare} />
-              <KpiCard label="Average ROAS" display={fmtMult(num(compare.metrics.roas?.current))}
+              <KpiCard label="Average ROAS" display={compare.metrics.roas?.current == null ? "—" : fmtMult(compare.metrics.roas.current)}
                 icon="coin" tint="#E4F4ED" metricLabel="ROAS" compare={compare} />
             </div>
           ) : compareError ? (
@@ -622,11 +623,15 @@ export function CampaignsPage() {
                           <td className="num">{r.roas == null ? "—" : `${r.roas.toFixed(1)}x`}</td>
                           <td className="num">{fmtBench(benchVal)}</td>
                           <td>
-                            <button type="button" className="icon-btn" aria-expanded={expanded === r.name}
-                              aria-label={`Details for ${r.name}`}
-                              onClick={() => setExpanded((cur) => (cur === r.name ? null : r.name))}>
-                              <Icon name="dots" size={18} />
-                            </button>
+                            <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
+                              <button type="button" className="icon-btn" aria-expanded={expanded === r.name}
+                                aria-label={`Details for ${r.name}`}
+                                onClick={() => setExpanded((cur) => (cur === r.name ? null : r.name))}>
+                                <Icon name="dots" size={18} />
+                              </button>
+                              <SampleCampaignDelete campaignName={r.name}
+                                onDeleted={() => setApplied((a) => a + 1)} />
+                            </span>
                           </td>
                         </tr>
                       ))}
@@ -635,7 +640,12 @@ export function CampaignsPage() {
                 </div>
               ) : <EmptyState compact icon="campaign" title="No campaigns match" text="Try loosening the current filters." />
             ) : campaigns.error ? (
-              <EmptyState text={campaigns.error} />
+              <EmptyState text={campaigns.error} action={(
+                <button type="button" className="btn-outline"
+                  onClick={() => setApplied((a) => a + 1)}>
+                  Retry
+                </button>
+              )} />
             ) : <Skeleton height={220} />}
           </Panel>
           {expanded ? (

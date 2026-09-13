@@ -79,35 +79,35 @@ def test_demo_seed_disabled_by_default(tmp_path):
     assert not os.path.exists(db)
 
 
-def test_demo_seed_loads_once_on_fresh_database(tmp_path):
+def test_demo_seed_retired_even_on_fresh_database(tmp_path):
+    # Boot-time seeding is retired: it always returns 0, creates no
+    # database, and can never resurrect deleted samples. Sample data
+    # arrives only via Admin -> Demo Data -> Add Demo Data Once
+    # (covered in test_demo_pack.py).
     db = str(tmp_path / "demo.db")
     settings = _local_settings(tmp_path, demo_seed=True)
-    first = maybe_seed_demo(db, settings, fresh=True)
-    assert first > 0, "expected the bundled fixtures to insert rows"
-    with sqlite3.connect(db) as conn:
-        creatives = conn.execute("SELECT COUNT(*) FROM creatives").fetchone()[0]
-    assert creatives > 0
-    # Same running instance, existing database: never touched again.
+    assert maybe_seed_demo(db, settings, fresh=True) == 0
+    assert not os.path.exists(db)
     assert maybe_seed_demo(db, settings, fresh=False) == 0
-    with sqlite3.connect(db) as conn:
-        again = conn.execute("SELECT COUNT(*) FROM creatives").fetchone()[0]
-    assert again == creatives
 
 
 def test_demo_seed_never_overwrites_existing_rows(tmp_path):
     from ci_backend.actions import load_demo_dataset
+    from creative_intel import schema as _schema
 
     db = str(tmp_path / "demo.db")
-    settings = _local_settings(tmp_path, demo_seed=True)
-    assert maybe_seed_demo(db, settings, fresh=True) > 0
+    _schema.init_db(sqlite3.connect(db))
     with sqlite3.connect(db) as conn:
         conn.execute(
             "INSERT OR IGNORE INTO creatives (creative_key, platform, name)"
             " VALUES ('sentinel', 'meta', 'Sentinel')"
         )
         conn.commit()
-    # A second first-boot-style load inserts nothing new (ingest
-    # upserts) and the sentinel row survives: no duplication, no wipe.
+    # The retired boot path touches nothing; the isolated fixture
+    # loader still works for e2e/unit fixtures and the sentinel
+    # survives it (a repeat load inserts nothing new).
+    assert maybe_seed_demo(db, _local_settings(tmp_path), fresh=True) == 0
+    assert load_demo_dataset(db, media_dir=str(tmp_path / "media")) > 0
     assert load_demo_dataset(db, media_dir=str(tmp_path / "media")) == 0
     with sqlite3.connect(db) as conn:
         assert (
@@ -121,7 +121,6 @@ def test_demo_seed_never_overwrites_existing_rows(tmp_path):
 def _seeded_client(tmp_path):
     db = str(tmp_path / "demo.db")
     settings = _local_settings(tmp_path, demo_seed=True)
-    assert maybe_seed_demo(db, settings, fresh=True) > 0
     app = create_app(db, settings)
     return TestClient(app, raise_server_exceptions=False)
 

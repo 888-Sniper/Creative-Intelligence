@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "@/api/client";
 import { Icon } from "@/components/icons";
 import { LoadingButton } from "@/components/LoadingButton";
-import { DemoDataBadge, EmptyState, PageHeader, Panel, Skeleton } from "@/components/product";
+import { DemoPackPanel } from "./DemoPackPanel";
+import { EmptyState, PageHeader, Panel, Skeleton } from "@/components/product";
 
 /** Admin employee management (port of legacy Web/Index.html v-admin).
  *
@@ -158,8 +159,6 @@ export function AdminEmployeesPage() {
   const [teamOpen, setTeamOpen] = useState(false);
   const [teamName, setTeamName] = useState("");
   const [localTeams, setLocalTeams] = useState<string[]>(loadLocalTeams);
-  const [seedBusy, setSeedBusy] = useState(false);
-  const [seedResult, setSeedResult] = useState("");
   /* One in-flight admin mutation at a time: every async action sets
    * its key so repeated clicks cannot double-submit while slow. */
   const [busyKey, setBusyKey] = useState<string | null>(null);
@@ -275,23 +274,6 @@ export function AdminEmployeesPage() {
       setNotice(msg(e));
     } finally {
       setBusyKey((cur) => (cur === key ? null : cur));
-    }
-  }
-
-  async function seedDemo(): Promise<void> {
-    setSeedBusy(true);
-    setSeedResult("");
-    try {
-      const r = await api<{ ok: boolean; inserted: number; campaigns: number; creatives: number; demo_campaigns: number; demo_creatives: number }>(
-        "POST", "/api/admin/demo/seed", {});
-      setSeedResult(
-        r.inserted > 0
-          ? `Seeded ${r.inserted} Row(s): ${r.demo_campaigns}/10 Demo Campaign(s), ${r.demo_creatives}/10 Demo Creative(s).`
-          : `Already Populated: ${r.demo_campaigns}/10 Demo Campaign(s), ${r.demo_creatives}/10 Demo Creative(s). Nothing Duplicated.`);
-    } catch (e) {
-      setSeedResult(msg(e));
-    } finally {
-      setSeedBusy(false);
     }
   }
 
@@ -710,23 +692,7 @@ export function AdminEmployeesPage() {
           <span className="panel-sub">Synthetic dataset controls for demo environments — not production access management.</span>
         </summary>
         <div style={{ marginTop: 10 }}>
-          <Panel
-            title="Demo Dataset"
-            sub="Populate the ten synthetic campaigns and creatives. Upserts only: existing rows are never duplicated or deleted."
-            action={<DemoDataBadge />}
-          >
-            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-              <LoadingButton type="button" className="btn-outline" loading={seedBusy}
-                loadingLabel="Seeding…" spinnerClass="spinner dark" disabled={seedBusy}
-                onClick={() => void seedDemo()}>
-                <Icon name="download" size={15} /> Seed Demo Data
-              </LoadingButton>
-              {seedResult ? <span className="panel-sub" role="status" style={{ margin: 0 }}>{seedResult}</span> : null}
-            </div>
-            <p className="panel-sub" style={{ marginTop: 8 }}>
-              Demo-only: synthetic campaigns and creatives are namespaced separately and never mix with real employee access data above.
-            </p>
-          </Panel>
+          <DemoPackPanel />
         </div>
       </details>
 

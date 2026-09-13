@@ -14,6 +14,7 @@ from ci_backend.deps import (
     admin_rate_limit,
     get_current_admin,
     get_db,
+    get_product_conn,
     get_settings,
     json_payload,
 )
@@ -140,48 +141,17 @@ def seed_demo(request: Request, db=Depends(get_db),
               admin=Depends(get_current_admin),
               settings=Depends(get_settings),
               _rl=Depends(admin_rate_limit)):
-    """Admin: populate the synthetic demo dataset on demand (audited).
-
-    Safe by construction: refused anywhere but the demo environment
-    (production stays protected even if CREATIVE_INTEL_DEMO_SEED is
-    accidentally enabled there), and the loader upserts, so existing
-    rows are never duplicated or deleted. Returns live counts,
-    including demo-namespaced proof (source="demo" campaigns and
-    annotated demo-* creatives), so the caller can verify the ten
-    synthetic examples specifically — not just totals.
-    """
-    _ = db
-    env = (settings.environment or "").strip().lower()
-    if env != "demo":
-        raise HTTPException(status_code=403, detail={
-            "error": "Demo seeding is only available on demo environments."})
-    import sqlite3
-
-    from ci_backend.actions import load_demo_dataset
-
-    db_path = str(request.app.state.ci_db_path)
-    inserted = load_demo_dataset(db_path)
-    conn = sqlite3.connect(db_path, check_same_thread=False)
-    try:
-        campaigns = conn.execute(
-            "SELECT COUNT(DISTINCT campaign) FROM ads").fetchone()[0]
-        creatives = conn.execute(
-            "SELECT COUNT(*) FROM creatives").fetchone()[0]
-        demo_campaigns = conn.execute(
-            "SELECT COUNT(DISTINCT campaign) FROM ads"
-            " WHERE source='demo'").fetchone()[0]
-        demo_creatives = conn.execute(
-            "SELECT COUNT(*) FROM creatives AS c JOIN annotations AS a"
-            " USING (creative_key) WHERE c.creative_key LIKE 'demo-%'"
-            ).fetchone()[0]
-    finally:
-        conn.close()
-    security_log.event("demo_seed", actor=admin.id, target="demo",
-                       detail="%d row(s) inserted by admin" % inserted)
-    return {"ok": True, "inserted": inserted,
-            "campaigns": campaigns, "creatives": creatives,
-            "demo_campaigns": demo_campaigns,
-            "demo_creatives": demo_creatives}
+    """Retired: the legacy refillable demo filler is superseded by the
+    one-time presentation pack (Admin -> Advanced -> Demo Data ->
+    Add Demo Data Once), which records a persistent receipt and never
+    resurrects deleted rows. Returns 410 so old callers fail loudly
+    instead of silently repopulating."""
+    _ = (request, db, settings, _rl)
+    security_log.event("demo_seed_retired", actor=admin.id,
+                       target="demo", detail="legacy seed route retired")
+    raise HTTPException(status_code=410, detail={
+        "error": "The legacy demo seed is retired. Use Admin -> Advanced"
+                 " -> Demo Data -> Add Demo Data Once."})
 
 
 @router.get("/audit/product")
@@ -241,3 +211,302 @@ async def employee_action(employee_id: str, verb: str, request: Request,
     except emp.StoreError as exc:
         raise HTTPException(status_code=409, detail={"error": str(exc)})
     return _employee_payload(employee)
+
+
+class PackRename(BaseModel):
+    kind: str = Field(pattern="^(campaign|creative)$")
+    id: str = Field(min_length=1, max_length=160)
+    name: str = Field(min_length=1, max_length=120)
+
+
+@router.get("/demo/pack/status")
+def pack_status(request: Request, conn=Depends(get_product_conn),
+                admin=Depends(get_current_admin)):
+    """One-time pack receipt + live remaining counts (audited read)."""
+    _ = admin
+    from creative_intel import demo_pack
+
+    return demo_pack.pack_status(conn)
+
+
+@router.get("/demo/pack/preview")
+def pack_preview(request: Request, conn=Depends(get_product_conn),
+                 admin=Depends(get_current_admin),
+                 settings=Depends(get_settings)):
+    """What Add Demo Data Once will create. No writes."""
+    _ = admin
+    from creative_intel import demo_pack
+
+    out = demo_pack.preview(
+        conn, workspace=(settings.environment or "local"))
+    out["status"] = demo_pack.pack_status(conn)["status"]
+    return out
+
+
+@router.post("/demo/pack/import")
+def pack_import(request: Request, conn=Depends(get_product_conn),
+                admin=Depends(get_current_admin),
+                settings=Depends(get_settings),
+                _rl=Depends(admin_rate_limit)):
+    """Add Demo Data Once. Receipt-gated: a completed import retried
+    returns the existing receipt without touching data; concurrent
+    callers collapse onto the single receipt row."""
+    from creative_intel import demo_pack
+
+    before = demo_pack.pack_status(conn)
+    if before["status"] in ("added", "partially_removed", "removed",
+                            "importing"):
+        security_log.event("demo_pack_import_skip", actor=admin.id,
+                           target=demo_pack.PACK_KEY,
+                           detail="status=%s" % before["status"])
+        out = dict(before)
+        out["created"] = False
+        return out
+    core = demo_pack.import_pack(
+        conn, imported_by=admin.id,
+        workspace=(settings.environment or "local"))
+    if not core.get("created", True) or core.get("phase") != "core":
+        return core
+    final = demo_pack.finalize_pack(
+        conn, core["batch_id"], imported_by=admin.id,
+        core_counts=core["counts"])
+    security_log.event("demo_pack_import", actor=admin.id,
+                       target=demo_pack.PACK_KEY,
+                       detail="batch=%s campaigns=10 creatives=30"
+                       % core["batch_id"])
+    return final
+
+
+@router.post("/demo/pack/remove")
+async def pack_remove(request: Request, conn=Depends(get_product_conn),
+                      admin=Depends(get_current_admin),
+                      _rl=Depends(admin_rate_limit)):
+    """Remove All Demo Data: batch-scoped only. Requires explicit
+    confirmation ({confirm: true}) plus the batch id."""
+    from creative_intel import demo_pack
+
+    raw = await json_payload(request)
+    if not raw.get("confirm"):
+        raise HTTPException(status_code=409, detail={
+            "error": "Confirmation required.",
+            "preview": demo_pack.pack_status(conn)["remaining"]})
+    receipt = demo_pack.pack_status(conn)["receipt"]
+    if receipt is None or raw.get("batch_id") != receipt["batch_id"]:
+        raise HTTPException(status_code=409, detail={
+            "error": "Batch mismatch: removal is scoped to the"
+                     " imported pack only."})
+    out = demo_pack.remove_pack(conn, receipt["batch_id"])
+    security_log.event("demo_pack_remove", actor=admin.id,
+                       target=demo_pack.PACK_KEY,
+                       detail="batch=%s" % receipt["batch_id"])
+    return out
+
+
+@router.get("/demo/pack/impact")
+def pack_impact(request: Request, conn=Depends(get_product_conn),
+                admin=Depends(get_current_admin)):
+    """Exact affected-record counts before a campaign delete."""
+    _ = admin
+    from creative_intel import demo_pack
+
+    st = demo_pack.pack_status(conn)
+    if st["receipt"] is None:
+        raise HTTPException(status_code=404,
+                            detail={"error": "Pack never imported."})
+    cid = request.query_params.get("campaign_id", "")
+    return demo_pack.campaign_impact(conn, st["receipt"]["batch_id"],
+                                     cid)
+
+
+@router.delete("/demo/pack/campaigns/{campaign_id}")
+def pack_delete_campaign(campaign_id: str, request: Request,
+                         conn=Depends(get_product_conn),
+                         admin=Depends(get_current_admin),
+                         _rl=Depends(admin_rate_limit)):
+    from creative_intel import demo_pack
+
+    st = demo_pack.pack_status(conn)
+    try:
+        out = demo_pack.delete_campaign(conn, st["receipt"]["batch_id"],
+                                        campaign_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404,
+                            detail={"error": str(exc)})
+    security_log.event("demo_pack_delete_campaign", actor=admin.id,
+                       target=campaign_id, detail="batch=%s" %
+                       st["receipt"]["batch_id"])
+    _ = request
+    return out
+
+
+@router.delete("/demo/pack/creatives/{creative_key}")
+def pack_delete_creative(creative_key: str, request: Request,
+                         conn=Depends(get_product_conn),
+                         admin=Depends(get_current_admin),
+                         _rl=Depends(admin_rate_limit)):
+    from creative_intel import demo_pack
+
+    st = demo_pack.pack_status(conn)
+    try:
+        out = demo_pack.delete_creative(conn, st["receipt"]["batch_id"],
+                                        creative_key)
+    except ValueError as exc:
+        raise HTTPException(status_code=404,
+                            detail={"error": str(exc)})
+    security_log.event("demo_pack_delete_creative", actor=admin.id,
+                       target=creative_key, detail="batch=%s" %
+                       st["receipt"]["batch_id"])
+    _ = request
+    return out
+
+
+@router.post("/demo/pack/rename")
+async def pack_rename(request: Request, conn=Depends(get_product_conn),
+                      admin=Depends(get_current_admin),
+                      _rl=Depends(admin_rate_limit)):
+    from creative_intel import demo_pack
+
+    body = _validated(PackRename, await json_payload(request))
+    st = demo_pack.pack_status(conn)
+    try:
+        if body.kind == "campaign":
+            out = demo_pack.rename_campaign(conn,
+                                            st["receipt"]["batch_id"],
+                                            body.id, body.name)
+        else:
+            out = demo_pack.rename_creative(conn,
+                                            st["receipt"]["batch_id"],
+                                            body.id, body.name)
+    except ValueError as exc:
+        raise HTTPException(status_code=404,
+                            detail={"error": str(exc)})
+    security_log.event("demo_pack_rename", actor=admin.id,
+                       target=body.id, detail="kind=%s" % body.kind)
+    return out
+
+
+@router.delete("/demo/pack/conversations/{conversation_id}")
+def pack_delete_conversation(conversation_id: str, request: Request,
+                             conn=Depends(get_product_conn),
+                             admin=Depends(get_current_admin),
+                             _rl=Depends(admin_rate_limit)):
+    from creative_intel import demo_pack
+
+    st = demo_pack.pack_status(conn)
+    try:
+        out = demo_pack.delete_conversation(
+            conn, st["receipt"]["batch_id"], conversation_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404,
+                            detail={"error": str(exc)})
+    security_log.event("demo_pack_delete_conversation", actor=admin.id,
+                       target=conversation_id, detail="batch=%s" %
+                       st["receipt"]["batch_id"])
+    _ = request
+    return out
+
+
+@router.delete("/demo/pack/findings/{finding_id}")
+def pack_delete_finding(finding_id: str, request: Request,
+                        conn=Depends(get_product_conn),
+                        admin=Depends(get_current_admin),
+                        _rl=Depends(admin_rate_limit)):
+    from creative_intel import demo_pack
+
+    st = demo_pack.pack_status(conn)
+    try:
+        out = demo_pack.delete_finding(conn, st["receipt"]["batch_id"],
+                                       finding_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404,
+                            detail={"error": str(exc)})
+    _ = request
+    return out
+
+
+@router.delete("/demo/pack/views/{view_id}")
+def pack_delete_view(view_id: int, request: Request,
+                     conn=Depends(get_product_conn),
+                     admin=Depends(get_current_admin),
+                     _rl=Depends(admin_rate_limit)):
+    from creative_intel import demo_pack
+
+    st = demo_pack.pack_status(conn)
+    try:
+        out = demo_pack.delete_sample_view(conn,
+                                           st["receipt"]["batch_id"],
+                                           view_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404,
+                            detail={"error": str(exc)})
+    _ = request
+    return out
+
+
+@router.get("/demo/pack/files")
+def pack_files(request: Request, conn=Depends(get_product_conn),
+               admin=Depends(get_current_admin)):
+    _ = (request, admin)
+    from creative_intel import demo_pack
+
+    st = demo_pack.pack_status(conn)
+    if st["receipt"] is None:
+        return {"files": []}
+    rows = conn.execute(
+        "SELECT file_key, name, format, mime, bytes, created_at"
+        " FROM sample_files WHERE batch_id=? ORDER BY name",
+        (st["receipt"]["batch_id"],)).fetchall()
+    return {"files": [
+        {"file_key": r[0], "name": r[1], "format": r[2], "mime": r[3],
+         "bytes": r[4], "created_at": r[5]} for r in rows]}
+
+
+@router.get("/demo/pack/files/{file_key:path}")
+def pack_file_download(file_key: str, request: Request,
+                       conn=Depends(get_product_conn),
+                       admin=Depends(get_current_admin)):
+    import os as _os
+
+    from fastapi.responses import FileResponse
+
+    from ci_backend.actions import _media_dir
+
+    _ = admin
+    row = conn.execute(
+        "SELECT name, mime FROM sample_files WHERE file_key=?",
+        (file_key,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404,
+                            detail={"error": "Sample file not found."})
+    from creative_intel import demo_pack
+
+    st = demo_pack.pack_status(conn)
+    batch = (file_key.split("/")[0] if "/" in file_key else "")
+    if st["receipt"] is None or batch != st["receipt"]["batch_id"]:
+        raise HTTPException(status_code=404,
+                            detail={"error": "Sample file not found."})
+    path = _os.path.join(_media_dir(None), "sample", batch, row[0])
+    if not _os.path.isfile(path):
+        raise HTTPException(status_code=410, detail={
+            "error": "Sample file was deleted from disk. The import"
+                     " receipt is kept; files are not regenerated."})
+    _ = request
+    return FileResponse(path, media_type=row[1], filename=row[0])
+
+
+@router.delete("/demo/pack/files/{file_key:path}")
+def pack_delete_file(file_key: str, request: Request,
+                     conn=Depends(get_product_conn),
+                     admin=Depends(get_current_admin),
+                     _rl=Depends(admin_rate_limit)):
+    from creative_intel import demo_pack
+
+    st = demo_pack.pack_status(conn)
+    try:
+        out = demo_pack.delete_sample_file(
+            conn, st["receipt"]["batch_id"], file_key)
+    except ValueError as exc:
+        raise HTTPException(status_code=404,
+                            detail={"error": str(exc)})
+    _ = request
+    return out

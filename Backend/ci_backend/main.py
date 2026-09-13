@@ -71,20 +71,14 @@ def resolve_bind(args) -> tuple:
 
 
 def maybe_seed_demo(db_path: str, settings, fresh: bool) -> int:
-    """Seed the demo dataset on first boot of a fresh database.
-
-    Returns the number of fixture rows inserted (0 when seeding is
-    disabled or the database already existed). Callers compute
-    ``fresh`` BEFORE create_app() runs migrations (which creates the
-    file), so an existing database from the same running instance is
-    never touched and rows cannot duplicate on restart.
+    """Retired: boot-time seeding could resurrect deliberately deleted
+    samples, violating the one-time pack receipt. Sample data is added
+    only through Admin -> Advanced -> Demo Data -> Add Demo Data
+    Once. Always returns 0; load_demo_dataset stays available for
+    isolated e2e fixtures and unit tests.
     """
-    if not settings.demo_seed or not fresh:
-        return 0
-    from ci_backend.actions import load_demo_dataset
-    # Default media store: the same canonical store the thumbnail and
-    # /media routes serve from, so seeded art is actually reachable.
-    return load_demo_dataset(db_path)
+    _ = (db_path, settings, fresh)
+    return 0
 
 
 def main() -> None:

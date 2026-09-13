@@ -35,12 +35,13 @@ def test_sample_svg_is_deterministic_and_escaped():
 
 
 def test_thumbnail_endpoint_serves_seeded_art(tmp_path):
-    # Demo seeding stores a distinct uploaded image per creative, so
+    # Pack import stores a distinct uploaded image per creative, so
     # the thumbnail prefers real media over the generated fallback.
     http, headers = _demo_client(tmp_path)
-    r = http.post("/api/admin/demo/seed", headers=headers)
+    r = http.post("/api/admin/demo/pack/import", headers=headers)
     assert r.status_code == 200, r.text
-    r = http.get("/api/creatives/demo-glowskin-01/thumbnail",
+    assert r.json()["created"] is True
+    r = http.get("/api/creatives/smp-first-light-mirror-test/thumbnail",
                  headers=headers, follow_redirects=False)
     assert r.status_code == 302, r.text
     assert r.headers["location"].startswith("/media/")
@@ -56,20 +57,21 @@ def test_thumbnail_falls_back_to_sample_svg(tmp_path):
     import sqlite3 as _sqlite3
 
     http, headers = _demo_client(tmp_path)
-    r = http.post("/api/admin/demo/seed", headers=headers)
+    r = http.post("/api/admin/demo/pack/import", headers=headers)
     assert r.status_code == 200, r.text
+    assert r.json()["created"] is True
     conn = _sqlite3.connect(str(tmp_path / "seed.db"))
     try:
         conn.execute("DELETE FROM media WHERE creative_key=?",
-                     ("demo-glowskin-01",))
+                     ("smp-first-light-mirror-test",))
         conn.commit()
     finally:
         conn.close()
-    r = http.get("/api/creatives/demo-glowskin-01/thumbnail",
+    r = http.get("/api/creatives/smp-first-light-mirror-test/thumbnail",
                  headers=headers)
     assert r.status_code == 200, r.text
     assert r.headers["content-type"].startswith("image/svg+xml")
-    assert "Glowing Skin Made Easy" in r.text
+    assert "The Mirror Test" in r.text
     assert "SAMPLE" in r.text
 
 
@@ -81,7 +83,7 @@ def test_thumbnail_unknown_key_404s(tmp_path):
 
 def test_thumbnail_requires_auth(tmp_path):
     http, _headers = _demo_client(tmp_path)
-    r = http.get("/api/creatives/demo-glowskin-01/thumbnail")
+    r = http.get("/api/creatives/smp-first-light-mirror-test/thumbnail")
     assert r.status_code in (401, 403), r.text
 
 
@@ -93,25 +95,26 @@ def test_thumbnail_prefers_uploaded_media(tmp_path, monkeypatch):
     store = str(tmp_path / "media")
     monkeypatch.setenv("CREATIVE_INTEL_MEDIA_DIR", store)
     http, headers = _demo_client(tmp_path)
-    r = http.post("/api/admin/demo/seed", headers=headers)
+    r = http.post("/api/admin/demo/pack/import", headers=headers)
     assert r.status_code == 200, r.text
+    assert r.json()["created"] is True
     png = _b64.b64encode(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64).decode()
     import sqlite3 as _sqlite3
 
     db = str(tmp_path / "seed.db")
     conn = _sqlite3.connect(db)
     try:
-        # Seeding already stored art; clear it so this upload is the
+        # Pack import already stored art; clear it so this upload is the
         # only image row (stable oldest-first ordering keeps serving
         # deterministic when several uploads exist).
         conn.execute("DELETE FROM media WHERE creative_key=?",
-                     ("demo-glowskin-01",))
+                     ("smp-first-light-mirror-test",))
         conn.commit()
-        rec = _media.save_media(conn, store, "demo-glowskin-01", "shot.png",
+        rec = _media.save_media(conn, store, "smp-first-light-mirror-test", "shot.png",
                                 png)
     finally:
         conn.close()
-    r = http.get("/api/creatives/demo-glowskin-01/thumbnail",
+    r = http.get("/api/creatives/smp-first-light-mirror-test/thumbnail",
                  headers=headers, follow_redirects=False)
     assert r.status_code == 302, r.text
     assert r.headers["location"] == "/media/%s" % rec["id"]

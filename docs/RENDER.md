@@ -43,7 +43,7 @@ Non-secret values ship in `render.yaml`. Secrets are dashboard-only.
 | `CREATIVE_INTEL_COOKIE_SECURE` | `true` (Render is HTTPS-only) |
 | `CREATIVE_INTEL_PROVIDER_MODE` | `live` (demo must never serve mock AI) |
 | `CREATIVE_INTEL_DATA_DIR` | `/app/data` (ephemeral; see below) |
-| `CREATIVE_INTEL_DEMO_SEED` | `true` (seed fixtures on first boot) |
+| `CREATIVE_INTEL_DEMO_SEED` | `false` (boot seeding retired; use Admin → Advanced → Demo Data → Add Demo Data Once) |
 | `CREATIVE_INTEL_ADMIN_EMAIL` | dashboard secret (first admin + approvals) |
 | `CREATIVE_INTEL_WORKOS_CLIENT_ID` | dashboard secret |
 | `CREATIVE_INTEL_KEY_WORKOS` | dashboard secret (WorkOS API key) |
@@ -84,29 +84,31 @@ Render Free has an **ephemeral filesystem**: anything written under
 1. On boot, `main.py` creates `/app/data` if missing.
 2. `create_app()` runs the Alembic migrations to head (same
    authoritative path as local/Oracle — no separate migration step).
-3. Because `CREATIVE_INTEL_DEMO_SEED=true` and the database file did
-   not exist before this boot, the ten synthetic demo campaigns, ten
-   annotated demo creatives and their artwork are seeded once via
-   `load_demo_dataset()` (120 days of rows ending yesterday, so KPI
-   comparisons, charts and trends compute for real), plus populated-
-   screen showcase content: seven demo saved views (four benchmark
-   cards, three compare views) and three demo-owner analyst
-   conversations with stored findings, every row demo-attributed and
-   skipped when already present. Report history needs no rows: the
-   Reports page regenerates its demo rows client-side from the
-   campaign catalog.
+3. No data is seeded at boot. The database starts empty; an admin
+   adds the one-time presentation pack (`foap-presentation-pack-v1`:
+   ten synthetic campaigns, thirty annotated creatives with artwork,
+   180 days of rows ending the day before import, ten saved views,
+   six analyst conversations, nine sample files) via Admin →
+   Advanced → Demo Data → Add Demo Data Once. `load_demo_dataset()`
+   remains available only for isolated e2e fixtures and unit tests.
 4. An existing database is never touched: a second boot of the same
    instance skips seeding entirely, so rows cannot duplicate and demo
    edits made during the session survive until the instance stops.
-   If the dashboard ever shows `demo seed skipped:
-   CREATIVE_INTEL_DEMO_SEED is not true`, the Render dashboard has the
-   variable unset/overridden to false — set it to `true` and redeploy,
-   or use the Admin page's **Seed Demo Data** button (audited upsert,
-   demo environment only: existing rows are never duplicated or
-   deleted, accounts and uploads preserved).
+   Boot-time seeding is retired: it could resurrect deliberately
+   deleted samples. After deploy, an admin opens Admin → Advanced →
+   Demo Data → **Add Demo Data Once** (one-time pack
+   `foap-presentation-pack-v1` with a persistent receipt; deleted
+   samples stay deleted, repeat clicks never duplicate).
 5. After a Render restart/redeploy the slate is clean again: fresh
-   migrations + fresh seed. That data loss is expected and acceptable
-   for a demo; it is not production storage.
+   migrations and an empty database — no automatic reseeding (that
+   would violate the one-time receipt). That data loss is expected
+   and acceptable for a demo; it is not production storage.
+   STORAGE LIMITATION (no silent paid infra added): the free tier has
+   no persistent disk, so the receipt and deletions cannot survive a
+   redeploy — after one, an admin re-runs Add Demo Data Once on the
+   fresh database (nothing exists to resurrect). For deletions that
+   survive redeploys, attach a persistent disk (paid tier) or move
+   the database to managed Postgres.
 
 Security is not weakened for the demo: `environment=demo` keeps
 `require_public_safety()` active, so boot fails closed (missing
@@ -122,7 +124,7 @@ serve). Never set `environment=local` on Render to work around this.
 ## Render Free Spin-Down
 
 Free instances spin down after inactivity and need a cold start
-(usually under a minute: migrations + seed on a fresh filesystem)
+(usually under a minute: migrations on a fresh filesystem)
 on the next visit. That is appropriate for demo/testing, not for
 production. Do not add artificial keep-alive traffic.
 

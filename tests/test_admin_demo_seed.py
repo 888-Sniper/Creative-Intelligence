@@ -49,30 +49,22 @@ def _demo_client(tmp_path):
 
 
 def test_admin_seed_populates_and_verifies(tmp_path, monkeypatch):
+    # Legacy refill route is retired: it must fail loudly (410) and
+    # insert nothing, so deleted samples can never be resurrected.
+    # The one-time pack path is covered in test_demo_pack.py.
     _ = monkeypatch
     http, headers = _demo_client(tmp_path)
     r = http.post("/api/admin/demo/seed", headers=headers)
-    assert r.status_code == 200, r.text
-    body = r.json()
-    assert body["ok"] is True
-    assert body["inserted"] > 0
-    assert body["campaigns"] == 10
-    assert body["creatives"] == 10
-    # Demo-namespaced proof: the ten synthetic examples specifically.
-    assert body["demo_campaigns"] == 10
-    assert body["demo_creatives"] == 10
-    # Second call is a verified no-op: counts hold, nothing duplicated.
+    assert r.status_code == 410, r.text
+    assert "Add Demo Data Once" in r.text
     r = http.post("/api/admin/demo/seed", headers=headers)
-    assert r.status_code == 200, r.text
-    assert r.json()["inserted"] == 0
-    assert r.json()["campaigns"] == 10
-    assert r.json()["creatives"] == 10
-    assert r.json()["demo_campaigns"] == 10
-    assert r.json()["demo_creatives"] == 10
+    assert r.status_code == 410, r.text
 
 
 def test_admin_seed_refused_outside_demo(tmp_path, monkeypatch):
+    # Retired in every environment (410), so the env gate it used to
+    # carry is irrelevant: nothing can repopulate through this route.
     db = str(tmp_path / "local.db")
     http = _authed_client(tmp_path, db, monkeypatch)
     r = http.post("/api/admin/demo/seed")
-    assert r.status_code == 403, r.text
+    assert r.status_code == 410, r.text

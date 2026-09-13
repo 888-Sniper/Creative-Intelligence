@@ -312,6 +312,47 @@ CREATE INDEX IF NOT EXISTS idx_product_audit_created
     ON product_audit (created_at);
 CREATE INDEX IF NOT EXISTS idx_product_audit_employee
     ON product_audit (employee_id);
+-- One-time sample-data import ledger (demo_pack version of the
+-- "persistent receipt"). One row per pack_key, never deleted:
+-- normal record deletes and Remove All Demo Data keep the receipt
+-- so deleted samples can never be mistaken for "never imported".
+-- Batch membership (which rows belong to the pack) lives in
+-- demo_batch_members, keyed by stable record identity — never by
+-- display name, so renames keep their cleanup provenance.
+CREATE TABLE IF NOT EXISTS demo_packs (
+    pack_key TEXT PRIMARY KEY,
+    batch_id TEXT NOT NULL DEFAULT '',
+    workspace TEXT NOT NULL DEFAULT '',
+    imported_by TEXT NOT NULL DEFAULT '',
+    imported_at TEXT NOT NULL DEFAULT '',
+    data_start TEXT NOT NULL DEFAULT '',
+    data_end TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'added',
+    counts_json TEXT NOT NULL DEFAULT '{}',
+    removed_at TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS demo_batch_members (
+    batch_id TEXT NOT NULL DEFAULT '',
+    table_name TEXT NOT NULL DEFAULT '',
+    record_key TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (batch_id, table_name, record_key)
+);
+CREATE INDEX IF NOT EXISTS demo_batch_members_batch
+    ON demo_batch_members (batch_id);
+-- Generated sample files (reports, workbooks) with real bytes on
+-- disk under the media store. file_key is "<batch_id>/<name>".
+CREATE TABLE IF NOT EXISTS sample_files (
+    file_key TEXT PRIMARY KEY,
+    batch_id TEXT NOT NULL DEFAULT '',
+    name TEXT NOT NULL DEFAULT '',
+    format TEXT NOT NULL DEFAULT '',
+    mime TEXT NOT NULL DEFAULT '',
+    bytes INTEGER NOT NULL DEFAULT 0,
+    sha256 TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS sample_files_batch
+    ON sample_files (batch_id);
 """
 
 # Natural dedup key for re-imports: the same fact from the same origin
@@ -500,6 +541,41 @@ def migrate(conn):
                  " ON product_audit (created_at)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_product_audit_employee"
                  " ON product_audit (employee_id)")
+    # One-time sample-import ledger + batch membership + sample
+    # files (see DDL above). CREATE IF NOT EXISTS: safe on every
+    # open, and a migration never inserts presentation data.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS demo_packs ("
+        "pack_key TEXT PRIMARY KEY,"
+        " batch_id TEXT NOT NULL DEFAULT '',"
+        " workspace TEXT NOT NULL DEFAULT '',"
+        " imported_by TEXT NOT NULL DEFAULT '',"
+        " imported_at TEXT NOT NULL DEFAULT '',"
+        " data_start TEXT NOT NULL DEFAULT '',"
+        " data_end TEXT NOT NULL DEFAULT '',"
+        " status TEXT NOT NULL DEFAULT 'added',"
+        " counts_json TEXT NOT NULL DEFAULT '{}',"
+        " removed_at TEXT NOT NULL DEFAULT '')")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS demo_batch_members ("
+        "batch_id TEXT NOT NULL DEFAULT '',"
+        " table_name TEXT NOT NULL DEFAULT '',"
+        " record_key TEXT NOT NULL DEFAULT '',"
+        " PRIMARY KEY (batch_id, table_name, record_key))")
+    conn.execute("CREATE INDEX IF NOT EXISTS demo_batch_members_batch"
+                 " ON demo_batch_members (batch_id)")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS sample_files ("
+        "file_key TEXT PRIMARY KEY,"
+        " batch_id TEXT NOT NULL DEFAULT '',"
+        " name TEXT NOT NULL DEFAULT '',"
+        " format TEXT NOT NULL DEFAULT '',"
+        " mime TEXT NOT NULL DEFAULT '',"
+        " bytes INTEGER NOT NULL DEFAULT 0,"
+        " sha256 TEXT NOT NULL DEFAULT '',"
+        " created_at TEXT NOT NULL DEFAULT '')")
+    conn.execute("CREATE INDEX IF NOT EXISTS sample_files_batch"
+                 " ON sample_files (batch_id)")
     ensure_sync_key(conn)
     conn.execute(
         "CREATE TABLE IF NOT EXISTS sync_runs ("

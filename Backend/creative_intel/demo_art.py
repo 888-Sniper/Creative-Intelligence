@@ -208,3 +208,26 @@ def art_for_key(key):
         raise ValueError("no demo artwork for %r" % (key,))
     return _scene((top, bottom), paint)
 
+
+# Presentation-pack subjects reuse the proven painters; each variant
+# shifts the palette so the thirty pack thumbnails are distinct.
+SUBJECT_SCENES = {
+    "skincare": ((252, 222, 210), (196, 130, 140), _glowskin),
+    "coffee": ((245, 230, 205), (140, 96, 62), _coffee),
+    "home": ((246, 232, 204), (150, 108, 72), _reallife),
+    "fitness": ((255, 200, 190), (70, 60, 70), _move),
+    "headphones": ((60, 70, 110), (22, 26, 48), _nook),
+}
+
+
+def art_for_subject(subject, variant=0):
+    """PNG bytes for a pack subject (ValueError for unknown subjects)."""
+    try:
+        top, bottom, paint = SUBJECT_SCENES[subject]
+    except KeyError:
+        raise ValueError("no sample artwork for %r" % (subject,))
+    shift = (int(variant) % 3) * 14
+    top = tuple(min(255, c + shift) for c in top)
+    bottom = tuple(max(0, c - shift) for c in bottom)
+    return _scene((top, bottom), paint)
+

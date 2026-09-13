@@ -19,11 +19,14 @@ services:
         value: "true"
       - key: CREATIVE_INTEL_PROVIDER_MODE
         value: live
-      # Ephemeral demo storage + first-boot fixture seed (see docs/RENDER.md).
+      # Ephemeral demo storage; sample data is added ONLY through
+      # Admin -> Advanced -> Demo Data -> Add Demo Data Once (one-time
+      # pack with a persistent receipt). Boot-time seeding is retired
+      # because it could resurrect deliberately deleted samples.
       - key: CREATIVE_INTEL_DATA_DIR
         value: /app/data
       - key: CREATIVE_INTEL_DEMO_SEED
-        value: "true"
+        value: "false"
       # Secrets below are placeholders: fill them in the Render
       # dashboard AFTER creating the service (never commit values).
       # The service stays unhealthy until the required ones are set.

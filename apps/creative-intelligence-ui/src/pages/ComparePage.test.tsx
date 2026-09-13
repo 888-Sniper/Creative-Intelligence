@@ -139,15 +139,75 @@ describe("ComparePage", () => {
     expect(screen.getByText("Performance Over Time")).toBeDefined();
   });
 
-  it("renders API errors", async () => {
+  it("shows no pre-action alert when options fail: Apply stays disabled", async () => {
     window.fetch = vi.fn(async () =>
       Response.json({ error: "boom" }, { status: 500 }),
     ) as unknown as typeof fetch;
     renderPage();
-    fireEvent.click(screen.getByRole("button", { name: "Apply Comparison" }));
     await waitFor(() => {
-      expect(screen.getByRole("alert").textContent).toBe("Select at least two campaigns to compare.");
+      expect(screen.getByText("No Comparison Yet")).toBeDefined();
     });
+    // A failed option request is not a verified zero: selection copy,
+    // not the no-data state.
+    expect(screen.getByText("Select two to four campaigns to compare.")).toBeDefined();
+    // No standalone validation line before the user has done anything.
+    expect(screen.queryByRole("alert")).toBeNull();
+    const apply = screen.getByRole("button", { name: "Apply Comparison" }) as HTMLButtonElement;
+    expect(apply.disabled).toBe(true);
+  });
+
+  it("distinguishes incomplete selection from genuinely missing data", async () => {
+    window.fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.startsWith("/api/creatives")) return Response.json(creativeOptions);
+      if (url.startsWith("/api/campaigns")) return Response.json({ "Only One": campaignOptions["Camp A"] });
+      return Response.json({ error: "not found" }, { status: 404 });
+    }) as unknown as typeof fetch;
+    renderPage();
+    // One campaign option: no auto-run, selection copy (not no-data).
+    await waitFor(() => {
+      expect(screen.getByText("No Comparison Yet")).toBeDefined();
+    });
+    expect(screen.getByText("Select two to four campaigns to compare.")).toBeDefined();
+    fireEvent.change(screen.getByLabelText("Compare By"), { target: { value: "creatives" } });
+    await waitFor(() => {
+      expect(screen.getByText("Select two to four creatives to compare.")).toBeDefined();
+    });
+  });
+
+  it("names genuinely empty catalogues instead of an incomplete pick", async () => {
+    window.fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.startsWith("/api/creatives")) return Response.json([]);
+      if (url.startsWith("/api/campaigns")) return Response.json({});
+      return Response.json({ error: "not found" }, { status: 404 });
+    }) as unknown as typeof fetch;
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("No Campaigns Yet")).toBeDefined();
+    });
+    expect(screen.getByText("Add campaigns to start comparing.")).toBeDefined();
+    fireEvent.change(screen.getByLabelText("Compare By"), { target: { value: "creatives" } });
+    await waitFor(() => {
+      expect(screen.getByText("No Creatives Yet")).toBeDefined();
+    });
+    expect(screen.getByText("Add creatives to start comparing.")).toBeDefined();
+  });
+
+  it("disables Apply until two items are picked, then enables it", async () => {
+    mockFetchAll();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("Performance Over Time")).toBeDefined();
+    });
+    fireEvent.change(screen.getByLabelText("Compare By"), { target: { value: "creatives" } });
+    const isDisabled = () =>
+      (screen.getByRole("button", { name: "Apply Comparison" }) as HTMLButtonElement).disabled;
+    expect(isDisabled()).toBe(true);
+    fireEvent.change(screen.getByLabelText("Select Creatives"), { target: { value: "kb" } });
+    expect(isDisabled()).toBe(true);
+    fireEvent.change(screen.getByLabelText("Select Creatives"), { target: { value: "ka" } });
+    expect(isDisabled()).toBe(false);
   });
 
   it("compares periods with a B−A delta table", async () => {

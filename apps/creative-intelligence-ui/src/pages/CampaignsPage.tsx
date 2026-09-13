@@ -15,9 +15,11 @@ import {
   PageHeader,
   Panel,
   Skeleton,
+  fmtCell,
   fmtCompact,
   fmtMoney,
-  fmtMult,
+  kpiDisplay,
+  kpiPlaceholderNote,
   platformLabel,
   useCompareState,
   useDaily,
@@ -355,14 +357,13 @@ export function CampaignsPage() {
     value: filters[key] === "all" ? "" : filters[key],
     onChange: (e: React.ChangeEvent<HTMLSelectElement>) => setFilter(key, e.target.value),
   });
-  const fmtBench = (v: number | null) => {
-    if (v == null) return "—";
+  const fmtBench = (v: number | null) => fmtCell(v, (n) => {
     const k = kpiKey;
-    if (k === "roas") return `${v.toFixed(1)}x`;
-    if (k === "spend" || k === "cpa" || k === "cpc") return fmtMoney(v);
-    if (k === "ctr") return `${(v * 100).toFixed(1)}%`;
-    return fmtCompact(v);
-  };
+    if (k === "roas") return `${n.toFixed(1)}x`;
+    if (k === "spend" || k === "cpa" || k === "cpc") return fmtMoney(n);
+    if (k === "ctr") return `${(n * 100).toFixed(1)}%`;
+    return fmtCompact(n);
+  });
 
   return (
     <div className="campaigns">
@@ -514,12 +515,13 @@ export function CampaignsPage() {
                   <div className="kpi-value">{rows.length}</div>
                 </div>
               </div>
-              <KpiCard label="Total Impressions" display={fmtCompact(num(compare.metrics.impressions?.current))}
+              <KpiCard label="Total Impressions" display={kpiDisplay("count", compare.metrics.impressions?.current, compare.current_n_ads === 0)}
                 icon="megaphone" tint="#E5F5F2" metricLabel="Impressions" compare={compare} />
-              <KpiCard label="Total Clicks" display={fmtCompact(num(compare.metrics.clicks?.current))}
+              <KpiCard label="Total Clicks" display={kpiDisplay("count", compare.metrics.clicks?.current, compare.current_n_ads === 0)}
                 icon="click" tint="#E7F1FB" metricLabel="Clicks" compare={compare} />
-              <KpiCard label="Average ROAS" display={compare.metrics.roas?.current == null ? "—" : fmtMult(compare.metrics.roas.current)}
-                icon="coin" tint="#E4F4ED" metricLabel="ROAS" compare={compare} />
+              <KpiCard label="Average ROAS" display={kpiDisplay("mult", compare.metrics.roas?.current, compare.current_n_ads === 0)}
+                icon="coin" tint="#E4F4ED" metricLabel="ROAS" compare={compare}
+                note={kpiPlaceholderNote("mult", compare.metrics.roas?.current, compare.current_n_ads === 0)} />
             </div>
           ) : compareError ? (
             <div className="panel"><EmptyState text={compareError} /></div>
@@ -618,9 +620,9 @@ export function CampaignsPage() {
                           ) : "—"}</td>
                           <td className="num">{fmtCompact(num(r.impressions))}</td>
                           <td className="num">{fmtCompact(num(r.clicks))}</td>
-                          <td className="num">{r.ctr == null ? "—" : `${(r.ctr * 100).toFixed(1)}%`}</td>
+                          <td className="num">{fmtCell(r.ctr, (n) => `${(n * 100).toFixed(1)}%`)}</td>
                           <td className="num">{fmtMoney(num(r.spend))}</td>
-                          <td className="num">{r.roas == null ? "—" : `${r.roas.toFixed(1)}x`}</td>
+                          <td className="num">{fmtCell(r.roas, (n) => `${n.toFixed(1)}x`)}</td>
                           <td className="num">{fmtBench(benchVal)}</td>
                           <td>
                             <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
@@ -656,8 +658,8 @@ export function CampaignsPage() {
                     <div><span>Impressions</span><strong>{fmtCompact(num(details[expanded]?.totals.impressions))}</strong></div>
                     <div><span>Clicks</span><strong>{fmtCompact(num(details[expanded]?.totals.clicks))}</strong></div>
                     <div><span>Spend</span><strong>{fmtMoney(num(details[expanded]?.totals.spend))}</strong></div>
-                    <div><span>ROAS</span><strong>{details[expanded]?.totals.roas == null ? "—" : `${details[expanded]?.totals.roas.toFixed(1)}x`}</strong></div>
-                    <div><span>CTR</span><strong>{details[expanded]?.totals.ctr == null ? "—" : `${(details[expanded]?.totals.ctr as number * 100).toFixed(1)}%`}</strong></div>
+                    <div><span>ROAS</span><strong>{fmtCell(details[expanded]?.totals.roas, (n) => `${n.toFixed(1)}x`)}</strong></div>
+                    <div><span>CTR</span><strong>{fmtCell(details[expanded]?.totals.ctr, (n) => `${(n * 100).toFixed(1)}%`)}</strong></div>
                     <div><span>Conversions</span><strong>{fmtCompact(num(details[expanded]?.totals.conversions))}</strong></div>
                   </div>
                   <h4 style={{ margin: "14px 0 8px", fontSize: 14 }}>Top Creatives</h4>
@@ -673,8 +675,8 @@ export function CampaignsPage() {
                             <td>{platformLabel(c.platform)}</td>
                             <td>{c.format}</td>
                             <td className="num">{fmtCompact(num(c.metrics.impressions))}</td>
-                            <td className="num">{c.metrics.ctr == null ? "—" : `${(c.metrics.ctr * 100).toFixed(1)}%`}</td>
-                            <td className="num">{c.metrics.roas == null ? "—" : `${c.metrics.roas.toFixed(1)}x`}</td>
+                            <td className="num">{fmtCell(c.metrics.ctr, (n) => `${(n * 100).toFixed(1)}%`)}</td>
+                            <td className="num">{fmtCell(c.metrics.roas, (n) => `${n.toFixed(1)}x`)}</td>
                           </tr>
                         ))}
                       </tbody>

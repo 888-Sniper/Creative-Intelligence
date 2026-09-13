@@ -191,6 +191,28 @@ describe("AdminEmployeesPage", () => {
     });
   });
 
+  it("renders each employee's own photo, falling back to initials", async () => {
+    setupFetch();
+    const photoAdmin = { ...empAdmin, avatar_url: "https://pics.test/ada.jpg" };
+    const base = window.fetch;
+    window.fetch = (async (url: unknown, init?: RequestInit) => {
+      if (String(url).startsWith("/api/admin/employees")) {
+        return Response.json({ employees: [photoAdmin, empPending] });
+      }
+      return (base as typeof fetch)(url as string, init);
+    }) as unknown as typeof fetch;
+    const { container } = render(<AdminEmployeesPage />);
+    await waitFor(() => {
+      expect(screen.getByText("Ada Admin")).toBeDefined();
+    });
+    // THAT employee's photo renders in their row…
+    expect(
+      container.querySelector('img.avatar[src="https://pics.test/ada.jpg"]'),
+    ).not.toBeNull();
+    // …while a photo-less row falls back to initials, never a broken image.
+    expect(screen.getByText("PP")).toBeDefined();
+  });
+
   it("asks for confirmation before revoke, and posts only on accept", async () => {
     const calls = setupFetch();
     stubConfirm(false);
@@ -309,7 +331,7 @@ describe("AdminEmployeesPage", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Approve" })).toBeDefined();
     });
-    fireEvent.change(screen.getByPlaceholderText("search name or email"), {
+    fireEvent.change(screen.getByPlaceholderText("Search name or email"), {
       target: { value: "ada" },
     });
     await waitFor(() => {
@@ -356,6 +378,19 @@ describe("AdminEmployeesPage", () => {
     expect(screen.getByText("Active Users")).toBeDefined();
     expect(screen.getByText("Pending Approvals")).toBeDefined();
     expect(screen.getByText("Admins")).toBeDefined();
+  });
+
+  it("orders Admins, Teams and Employees rows with real counts", async () => {
+    setupFetch();
+    const { container } = render(<AdminEmployeesPage />);
+    await waitFor(() => {
+      expect(screen.getByText("Teams (2)")).toBeDefined();
+    });
+    const heads = Array.from(container.querySelectorAll(".insight h4"))
+      .map((h) => h.textContent);
+    expect(heads.indexOf("Admins (1)")).toBeGreaterThanOrEqual(0);
+    expect(heads.indexOf("Teams (2)")).toBeGreaterThan(heads.indexOf("Admins (1)"));
+    expect(heads.indexOf("Employees (3)")).toBeGreaterThan(heads.indexOf("Teams (2)"));
   });
 
   it("lists multiple real teams from campaign metadata", async () => {

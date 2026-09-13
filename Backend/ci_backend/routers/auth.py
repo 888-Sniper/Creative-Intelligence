@@ -364,6 +364,17 @@ def logout(request: Request, db=Depends(get_db),
                   secure=settings.cookie_secure)
 
 
+@router.get("/sessions")
+def own_session_count(request: Request, db=Depends(get_db)):
+    """How many live sessions the caller has (drives the single
+    Log Out / Log Out All Sessions button). Own sessions only."""
+    caller = emp.valid_session(db, bearer_token(request))
+    if caller is None:
+        raise HTTPException(status_code=401, detail={
+            "error": "Sign in to continue.", "gate": "login"})
+    return {"count": emp.count_live_sessions(db, caller.id)}
+
+
 @router.post("/sessions/revoke-all")
 def revoke_own_sessions(request: Request, db=Depends(get_db),
                         settings: Settings = Depends(get_settings)):

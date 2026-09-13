@@ -7,9 +7,10 @@ import {
   PageHeader,
   Panel,
   Skeleton,
+  fmtCell,
   fmtCompact,
-  fmtMoney,
-  fmtMult,
+  KPI_UNAVAILABLE,
+  kpiDisplay,
   useCompare,
   useScopedApi,
 } from "@/components/product";
@@ -115,8 +116,8 @@ function PreviewDoc({ name, today, modules, kpis, previewKpis, top }: {
                         </span>
                       </td>
                       <td className="num">{fmtCompact(num(c.metrics?.impressions))}</td>
-                      <td className="num">{c.metrics?.ctr == null ? "—" : `${(c.metrics.ctr * 100).toFixed(1)}%`}</td>
-                      <td className="num">{c.metrics?.roas == null ? "—" : `${c.metrics.roas.toFixed(1)}x`}</td>
+                      <td className="num">{fmtCell(c.metrics?.ctr, (n) => `${(n * 100).toFixed(1)}%`)}</td>
+                      <td className="num">{fmtCell(c.metrics?.roas, (n) => `${n.toFixed(1)}x`)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -225,30 +226,28 @@ export function WorkbookPage() {
   const previewKpis = useMemo(() => {
     if (!compare) return [];
     const m = compare.metrics;
+    const empty = compare.current_n_ads === 0;
+    const ratioPct = (v: number | null | undefined): string => {
+      if (v == null) return empty ? "0.0%" : KPI_UNAVAILABLE;
+      return `${(v * 100).toFixed(1)}%`;
+    };
     const get = (label: string): string => {
       switch (label) {
-        case "Impressions": return fmtCompact(num(m.impressions?.current));
-        case "Clicks": return fmtCompact(num(m.clicks?.current));
-        case "CTR": {
-          const v = m.ctr?.current;
-          return v == null ? "—" : `${(v * 100).toFixed(1)}%`;
-        }
+        case "Impressions": return kpiDisplay("count", m.impressions?.current, empty);
+        case "Clicks": return kpiDisplay("count", m.clicks?.current, empty);
+        case "CTR": return ratioPct(m.ctr?.current);
         case "CVR": {
-          const conv = num(m.conversions?.current);
-          const cl = num(m.clicks?.current);
-          return cl ? `${((conv / cl) * 100).toFixed(1)}%` : "—";
+          const conv = m.conversions?.current;
+          const cl = m.clicks?.current;
+          if (cl == null || cl === 0) return empty ? "0.0%" : KPI_UNAVAILABLE;
+          if (conv == null) return KPI_UNAVAILABLE;
+          return `${((conv / cl) * 100).toFixed(1)}%`;
         }
-        case "ROAS": {
-          const v = m.roas?.current;
-          return v == null ? "—" : fmtMult(v);
-        }
-        case "CPA": {
-          const v = m.cpa?.current;
-          return v == null ? "—" : fmtMoney(v);
-        }
-        case "Spend": return fmtMoney(num(m.spend?.current));
-        case "Conversions": return fmtCompact(num(m.conversions?.current));
-        default: return "—";
+        case "ROAS": return kpiDisplay("mult", m.roas?.current, empty);
+        case "CPA": return kpiDisplay("money", m.cpa?.current, empty);
+        case "Spend": return kpiDisplay("money", m.spend?.current, empty);
+        case "Conversions": return kpiDisplay("count", m.conversions?.current, empty);
+        default: return KPI_UNAVAILABLE;
       }
     };
     return kpis.map((k) => ({ label: k, value: get(k) }));

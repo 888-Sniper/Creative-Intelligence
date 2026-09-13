@@ -318,6 +318,26 @@ def test_alembic_migration_builds_tables(tmp_path):
         engine.dispose()
 
 
+def test_avatar_removal_survives_provider_relogin(session):
+    """Provider photos fill a blank once, never overwrite a chosen
+    photo, and never restore a deliberately cleared avatar."""
+    admin = emp.admin_create(session, "root", "ada@foap.test", role="admin")
+    ident = dict(IDENT, avatar_url="http://provider/pic.jpg")
+    _t, linked, _c = emp.login_identity(session, ident)
+    assert linked.id == admin.id
+    assert linked.avatar_url == "http://provider/pic.jpg"
+    emp.update_profile(session, admin.id,
+                       avatar_url="http://custom/pic.jpg")
+    _t2, again, _c2 = emp.login_identity(session, ident)
+    assert again.avatar_url == "http://custom/pic.jpg"
+    emp.update_profile(session, admin.id, avatar_url="")
+    assert emp.get_employee(session, admin.id).avatar_url == ""
+    _t3, cleared, _c3 = emp.login_identity(session, ident)
+    assert cleared.avatar_url == ""
+    rows = emp.admin_list(session)
+    assert rows and rows[0].avatar_url == ""
+
+
 def test_non_ascii_cookie_token_fails_closed(session):
     """A crafted non-ASCII session cookie denies (401 path), never 500s."""
     assert emp._token_hash("sésame-…-tokén") == ""

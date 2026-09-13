@@ -255,7 +255,11 @@ def ensure_identity(db: Session, identity: dict, settings=None) -> tuple[Employe
         if identity.get(field) and not getattr(emp, field):
             setattr(emp, field, identity[field])
             changed = True
-    if identity.get("avatar_url") and not emp.avatar_url:
+    # Provider photos fill only a blank the employee never deliberately
+    # cleared: an explicit removal (avatar_removed) is respected across
+    # later logins, and a chosen photo is never overwritten.
+    if identity.get("avatar_url") and not emp.avatar_url \
+            and (getattr(emp, "avatar_removed", "") or "") != "1":
         emp.avatar_url = identity["avatar_url"]
         changed = True
     if changed:
@@ -390,6 +394,13 @@ def destroy_employee_sessions(db: Session, employee_id: str) -> None:
     db.execute(delete(AuthSession).where(
         AuthSession.employee_id == employee_id))
     db.commit()
+
+
+def count_live_sessions(db: Session, employee_id: str) -> int:
+    """Number of the employee's sessions that have not expired yet."""
+    rows = db.scalars(select(AuthSession).where(
+        AuthSession.employee_id == employee_id)).all()
+    return sum(1 for r in rows if not _expired(r))
 
 
 def revoke_all_sessions(db: Session, actor_id: str,
@@ -602,6 +613,9 @@ def update_profile(db: Session, employee_id: str, first_name=None,
         if cleaned != (emp.avatar_url or ""):
             changes.append(("avatar_url", emp.avatar_url or "", cleaned))
             emp.avatar_url = cleaned
+            # Clearing is a deliberate removal choice (do not refill
+            # from the provider later); any new URL revokes it.
+            emp.avatar_removed = "1" if not cleaned else ""
     if changes:
         emp.updated_at = utcnow()
         db.commit()
@@ -661,6 +675,9 @@ def save_avatar(db: Session, employee_id: str, filename: str,
         fh.write(bytes(content))
     prev = emp.avatar_url or ""
     emp.avatar_url = "/api/auth/avatar/" + employee_id
+    # An explicit upload is a deliberate selection: it revokes any
+    # earlier removal choice so future logins keep this photo.
+    emp.avatar_removed = ""
     emp.updated_at = utcnow()
     db.commit()
     _audit(db, emp.id, emp.id, "PROFILE_UPDATED",

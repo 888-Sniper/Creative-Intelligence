@@ -10,7 +10,10 @@ import {
   Panel,
   Skeleton,
   compareDisplayed,
+  fmtCell,
   fmtCompact,
+  KPI_UNAVAILABLE,
+  kpiDisplay,
   platformLabel,
   useCampaignMeta,
   useScopedApi,
@@ -681,23 +684,34 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
     return parts.join(" ");
   }, [scopeReady, creatives.data, bestHook, hookLift, bestPlat, bestLength]);
 
+  // Empty loaded scope shows zero placeholders; loaded errors say
+  // Unavailable. Loading renders a skeleton upstream, never these.
+  const scopeFailed = Boolean(hooks.error || plats.error);
+  // Loading renders a skeleton upstream (never these cards), so no
+  // loading flag is needed here: unready + unfailed post-load means
+  // the loaded scope genuinely holds no records.
+  const emptyScope = !scopeReady && !scopeFailed;
+  const liftDisplay = (lift: number | null | undefined): string => {
+    if (lift == null) return emptyScope ? "0%" : KPI_UNAVAILABLE;
+    return `${lift > 0 ? "+" : ""}${lift.toFixed(0)}%`;
+  };
   const statCards = [
     {
-      value: hookLift != null && hookLift > 0 ? `+${hookLift.toFixed(0)}%` : "—",
+      value: liftDisplay(hookLift),
       label: "Higher CTR",
       sub: bestHook ? `${titleCase(bestHook.key)} hooks` : "No Hook Data",
       icon: "click",
       tint: "#E7F1FB",
     },
     {
-      value: roasLift != null && roasLift > 0 ? `+${roasLift.toFixed(0)}%` : "—",
+      value: liftDisplay(roasLift),
       label: "Higher ROAS",
       sub: bestPlat ? `${platformLabel(bestPlat.key)} leading` : "No Platform Data",
       icon: "coin",
       tint: "#E5F5EC",
     },
     {
-      value: engagement.mult != null && engagement.ready ? `${engagement.mult.toFixed(1)}x` : "—",
+      value: kpiDisplay("mult", engagement.ready ? engagement.mult : null, emptyScope),
       label: "More Engagement",
       sub: "Top Creative Vs Average",
       icon: "users",
@@ -937,7 +951,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
             Try asking:
           </span>
           {TRY_ASKING.map((q) => (
-            <button key={q} type="button" className="chip"
+            <button key={q} type="button" className="chip chip-sugg"
               onClick={() => { setInput(q); void send('ask', undefined, q); }}>
               {q}
             </button>
@@ -1136,7 +1150,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
                       {(m.answer.follow_ups ?? []).length > 0 && (
                         <div className="prompt-chips">
                           {(m.answer.follow_ups ?? []).map((q) => (
-                            <button key={q} type="button" className="chip"
+                            <button key={q} type="button" className="chip chip-sugg"
                               onClick={() => { setInput(q); void send('ask', undefined, q); }}>
                               {q}
                             </button>
@@ -1167,14 +1181,14 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
               rows={hookRows.rows.slice(0, 5).map((r) => ({ label: titleCase(r.key), value: r.ctr ?? 0 }))}
               format={(v) => `${v.toFixed(1)}%`}
             />
-          ) : <EmptyState text="No hook benchmarks in scope." />}
+          ) : <EmptyState lift text="No hook benchmarks in scope." />}
         </Panel>
         <Panel title="Video Length" sub="CTR bars with ROAS trend by duration band.">
           {creatives.data === null ? <Skeleton height={200} /> : lengthRows.some((r) => r.ctr != null) ? (
             <LengthCombo rows={lengthRows.map((r) => ({
               label: r.label, ctr: r.ctr ?? 0, roas: r.roas,
             }))} />
-          ) : <EmptyState text="No duration data in scope." />}
+          ) : <EmptyState lift text="No duration data in scope." />}
         </Panel>
         <Panel title="Brand Timing" sub="CTR by first brand appearance.">
           {creatives.data === null ? <Skeleton height={200} /> : brandRows.some((r) => r.ctr != null) ? (
@@ -1183,7 +1197,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
               format={(v) => `${v.toFixed(1)}%`}
               color="#3B82C4"
             />
-          ) : <EmptyState text="No brand-timing annotations in scope." />}
+          ) : <EmptyState lift text="No brand-timing annotations in scope." />}
         </Panel>
       </div>
 
@@ -1194,7 +1208,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
             <ol style={{ margin: 0, paddingLeft: 20, display: "grid", gap: 8, fontSize: 13, color: "var(--shell-navy)" }}>
               {testNext.map((t) => <li key={t}>{t}</li>)}
             </ol>
-          ) : <EmptyState text="Ask a question to generate test ideas." />}
+          ) : <EmptyState lift text="Ask a question to generate test ideas." />}
         </Panel>
         <Panel title="Related Insights" sub="Signals behind the current analysis.">
           {relatedInsights.length ? (
@@ -1211,12 +1225,12 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
                 </div>
               ))}
             </div>
-          ) : <EmptyState text="No related insights in scope." />}
+          ) : <EmptyState lift text="No related insights in scope." />}
         </Panel>
         <Panel title="Stored Findings" sub="Saved findings with accept / dismiss decisions.">
           {storedFindings.length ? (
             <div>{storedFindings.map((f) => findingCard(f))}</div>
-          ) : <EmptyState compact icon="bookmark" title="No stored findings" text="Ask a question to generate findings, then accept the ones to keep." />}
+          ) : <EmptyState lift compact icon="bookmark" title="No stored findings" text="Ask a question, then save useful findings." />}
         </Panel>
       </div>
 
@@ -1239,14 +1253,14 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
                     (c.campaigns ?? [])[0] || ""].filter(Boolean).join(" · ")}
                 </p>
                 <div className="creative-stats">
-                  <span>CTR {c.metrics?.ctr == null ? "—" : `${(c.metrics.ctr * 100).toFixed(1)}%`}</span>
-                  <span>ROAS {c.metrics?.roas == null ? "—" : `${c.metrics.roas.toFixed(1)}x`}</span>
+                  <span>CTR {fmtCell(c.metrics?.ctr, (n) => `${(n * 100).toFixed(1)}%`)}</span>
+                  <span>ROAS {fmtCell(c.metrics?.roas, (n) => `${n.toFixed(1)}x`)}</span>
                   <span>{fmtCompact(num(c.metrics?.impressions))} impr</span>
                 </div>
               </div>
             ))}
           </div>
-        ) : <EmptyState compact icon="creatives" title="No creatives in scope" text="The creative strip populates once creatives are in scope." />}
+        ) : <EmptyState lift compact icon="creatives" title="No creatives in scope" text="The creative strip populates once creatives are in scope." />}
       </Panel>
     </>
   );

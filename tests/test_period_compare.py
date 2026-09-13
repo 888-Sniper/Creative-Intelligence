@@ -249,6 +249,22 @@ class CompareKpisTest(unittest.TestCase):
         self.assertIsNone(got["comparison"])
         self.assertEqual(got["metrics"], {})
 
+    def test_record_counts_distinguish_empty_from_uncomputable(self):
+        # Empty scope reports zero current rows (zero placeholders);
+        # a populated scope reports its row counts (missing measures
+        # there mean Unavailable, never a placeholder zero).
+        conn = _db(HDR)
+        try:
+            got = period_compare.compare_kpis(conn, {})
+        finally:
+            conn.close()
+        self.assertEqual(got["current_n_ads"], 0)
+        self.assertEqual(got["previous_n_ads"], 0)
+        got = self._got_seeded({"date_from": "2024-01-01",
+                                "date_to": "2024-01-07"})
+        self.assertGreater(got["current_n_ads"], 0)
+        self.assertGreater(got["previous_n_ads"], 0)
+
     def test_no_dates_uses_dataset_extent_as_current(self):
         got = self._got_seeded({})
         self.assertEqual(got["current_period"], {"start": "2023-12-25", "end": "2024-01-05"})

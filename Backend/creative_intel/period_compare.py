@@ -219,7 +219,8 @@ def compare_kpis(conn, scope):
     else:
         current = resolve_current_range(conn, filt)
     if current is None:
-        return {"current_period": None, "previous_period": None, "comparison": None, "metrics": {}}
+        return {"current_period": None, "previous_period": None, "comparison": None, "metrics": {},
+                "current_n_ads": 0, "previous_n_ads": 0}
     cur_start, cur_end = current
     prev_start, prev_end = previous_period(cur_start, cur_end)
     rows = benchmarks.all_rows(conn)
@@ -230,7 +231,8 @@ def compare_kpis(conn, scope):
         # satisfies): report no comparison rather than dataset-extent
         # periods with null metrics.
         return {"current_period": None, "previous_period": None,
-                "comparison": None, "metrics": {}}
+                "comparison": None, "metrics": {},
+                "current_n_ads": 0, "previous_n_ads": 0}
     cur_sums, prev_sums = _raw_sums(cur_rows), _raw_sums(prev_rows)
     cur_pooled = benchmarks.kpis_for_rows(cur_rows)
     prev_pooled = benchmarks.kpis_for_rows(prev_rows)
@@ -264,4 +266,6 @@ def compare_kpis(conn, scope):
         "previous_period": {"start": prev_start, "end": prev_end},
         "comparison": "previous_period",
         "metrics": metrics,
+        "current_n_ads": len(cur_rows),
+        "previous_n_ads": len(prev_rows),
     }

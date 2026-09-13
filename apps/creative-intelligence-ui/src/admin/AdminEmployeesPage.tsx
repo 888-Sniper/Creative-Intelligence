@@ -3,7 +3,7 @@ import { api } from "@/api/client";
 import { Icon } from "@/components/icons";
 import { LoadingButton } from "@/components/LoadingButton";
 import { DemoPackPanel } from "./DemoPackPanel";
-import { EmptyState, PageHeader, Panel, Skeleton } from "@/components/product";
+import { EmployeeAvatar, EmptyState, PageHeader, Panel, Skeleton, plural, titleCase } from "@/components/product";
 
 /** Admin employee management (port of legacy Web/Index.html v-admin).
  *
@@ -24,6 +24,7 @@ interface AdminEmployee {
   email: string;
   first_name: string;
   last_name: string;
+  avatar_url: string;
   role: string;
   status: string;
   approved_at: string;
@@ -170,16 +171,22 @@ export function AdminEmployeesPage() {
         const [rows, evs, meta] = await Promise.all([
           queryEmployees(search, statusFilter || roleFilter || ""),
           queryAudit(),
-          api<{ campaigns?: CampaignMeta[] }>("GET", "/api/campaigns/meta").catch(() => ({ campaigns: [] as CampaignMeta[] })),
+          api<{ campaigns?: CampaignMeta[] } | null>("GET", "/api/campaigns/meta").catch(() => null),
         ]);
         if (!live) return;
         setEmployees(applyLocalFilters(rows, statusFilter, roleFilter));
         setEvents(evs);
-        const counts = new Map<string, number>();
-        for (const c of meta.campaigns ?? []) {
-          if (c.team) counts.set(c.team, (counts.get(c.team) ?? 0) + 1);
+        /* A failed team lookup stays null (no verified count), never a
+         * silent zero: Teams (0) renders only for a resolved empty set. */
+        if (meta === null) {
+          setTeams(null);
+        } else {
+          const counts = new Map<string, number>();
+          for (const c of meta.campaigns ?? []) {
+            if (c.team) counts.set(c.team, (counts.get(c.team) ?? 0) + 1);
+          }
+          setTeams([...counts.entries()].map(([name, campaigns]) => ({ name, campaigns })).sort((a, b) => a.name.localeCompare(b.name)));
         }
-        setTeams([...counts.entries()].map(([name, campaigns]) => ({ name, campaigns })).sort((a, b) => a.name.localeCompare(b.name)));
         setNotice("");
       } catch (e) {
         if (!live) return;
@@ -357,12 +364,12 @@ export function AdminEmployeesPage() {
   const stats = useMemo(() => {
     const rows = employees ?? [];
     const total = rows.length;
-    const pct = (n: number) => (total ? `${Math.round((n / total) * 100)}% of employees` : "No Employees Yet");
+    const pct = (n: number) => (total ? `${Math.round((n / total) * 100)}% of Employees` : "No Employees Yet");
     const active = rows.filter((e) => e.status === "active").length;
     const pending = rows.filter((e) => e.status === "pending").length;
     const admins = rows.filter((e) => e.role === "admin").length;
     return [
-      { label: "Total Employees", value: String(total), icon: "users", tint: "#E7F1FB", trend: total ? `${rows.filter((e) => e.role !== "admin").length} employees · ${admins} admins` : "No Employees Yet" },
+      { label: "Total Employees", value: String(total), icon: "users", tint: "#E7F1FB", trend: total ? `${plural(rows.filter((e) => e.role !== "admin").length, "Employee")} · ${plural(admins, "Admin")}` : "No Employees Yet" },
       { label: "Active Users", value: String(active), icon: "check", tint: "#E5F5EC", trend: pct(active) },
       /* "Pending Approvals", not "Pending Invites": no invitation
        *  email exists — pending rows await an approval decision. */
@@ -373,6 +380,29 @@ export function AdminEmployeesPage() {
 
   const adminCount = stats[3].value;
   const employeeCount = String((employees ?? []).filter((e) => e.role !== "admin").length);
+  /* Audit-trail identity cells: a target/admin id that matches a loaded
+   * employee renders THAT employee's avatar + name (authorised data
+   * already fetched); unknown ids keep the honest truncated-id form. */
+  const employeeById = useMemo(() => {
+    const map = new Map<string, AdminEmployee>();
+    for (const e of employees ?? []) map.set(e.id, e);
+    return map;
+  }, [employees]);
+  const identityCell = (id: string) => {
+    const match = employeeById.get(id || "");
+    if (!match) return <>{(id || "").slice(0, 8)}</>;
+    return (
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+        <EmployeeAvatar
+          url={match.avatar_url || ""}
+          name={displayName(match)}
+          email={match.email || ""}
+          size={24}
+        />
+        <span className="cell-main">{displayName(match)}</span>
+      </span>
+    );
+  };
   const allTeams = useMemo(() => {
     const real = (teams ?? []).map((t) => ({ ...t, local: false }));
     const have = new Set(real.map((t) => t.name.toLowerCase()));
@@ -424,7 +454,7 @@ export function AdminEmployeesPage() {
             <input
               type="text"
               id="admin-search"
-              placeholder="search name or email"
+              placeholder="Search name or email"
               aria-label="Search Name Or Email"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -489,20 +519,22 @@ export function AdminEmployeesPage() {
                   employees.map((e) => {
                     const nextRole =
                       e.role === "admin" ? "employee" : "admin";
-                    const initials = displayName(e).split(/\s+/)
-                      .map((w) => w[0]).join("").slice(0, 2).toUpperCase() || "•";
                     return (
                       <tr key={e.id}>
                         <td>
                           <span style={{ display: "inline-flex", alignItems: "center", gap: 9 }}>
-                            <span className="avatar" aria-hidden="true">{initials}</span>
+                            <EmployeeAvatar
+                              url={e.avatar_url || ""}
+                              name={displayName(e)}
+                              email={e.email || ""}
+                            />
                             <span className="cell-main">{displayName(e)}</span>
                           </span>
                         </td>
                         <td>{e.email}</td>
                         <td>
                           <span className={e.role === "admin" ? "pill pill-info" : "chip-static"}>
-                            {e.role}
+                            {titleCase(e.role)}
                           </span>
                         </td>
                         <td title="The backend stores no per-employee team">—</td>
@@ -512,7 +544,7 @@ export function AdminEmployeesPage() {
                             : e.status === "pending" ? "pill pill-info"
                             : e.status === "revoked" ? "pill pill-bad" : "chip-static"
                           }>
-                            {e.status}
+                            {titleCase(e.status)}
                           </span>
                         </td>
                         <td>{e.last_login_at ? friendlyDate(e.last_login_at) : "Never Signed In"}</td>
@@ -625,6 +657,23 @@ export function AdminEmployeesPage() {
                 <p>Approve, suspend, revoke, and re-activate employees; change roles; invalidate sessions; read the audit trail.</p>
               </div>
             </div>
+            {/* Teams count row (§8): server-authoritative team names
+              only — browser-local labels are details below, never the
+              shared count. Zero shows Teams (0); an unresolved lookup
+              shows no count rather than a fabricated zero. */}
+            <div className="insight">
+              <span className="insight-ico" style={{ background: "var(--shell-green-soft)" }}>
+                <Icon name="users" size={18} />
+              </span>
+              <div>
+                <h4>Teams{teams !== null ? ` (${teams.length})` : ""}</h4>
+                <p>{teams === null
+                  ? "Loading teams…"
+                  : teams.length === 0
+                    ? "None yet — teams appear when campaigns carry a team name."
+                    : `${plural(teams.length, "Team")} named in the current dataset.`}</p>
+              </div>
+            </div>
             <div className="insight">
               <span className="insight-ico" style={{ background: "var(--shell-teal-soft)" }}>
                 <Icon name="user" size={18} />
@@ -647,9 +696,6 @@ export function AdminEmployeesPage() {
               </div>
             ))}
             {teams === null ? <Skeleton height={60} /> : null}
-            {teams !== null && allTeams.length === 0 ? (
-              <EmptyState text="No teams yet — teams appear when campaigns carry a team name." />
-            ) : null}
           </div>
         </Panel>
         <Panel title="Access Rules" sub="Rules the server enforces on every change.">
@@ -664,15 +710,6 @@ export function AdminEmployeesPage() {
               </div>
             </li>
             <li>
-              <span className="insight-ico" style={{ background: "var(--shell-amber-soft)" }}>
-                <Icon name="lock" size={18} />
-              </span>
-              <div>
-                <h4>Last-Admin Protection</h4>
-                <p>Suspending the last active admin is refused by the server, so the workspace can never lock itself out.</p>
-              </div>
-            </li>
-            <li>
               <span className="insight-ico" style={{ background: "var(--shell-blue-soft)" }}>
                 <Icon name="clock" size={18} />
               </span>
@@ -681,20 +718,18 @@ export function AdminEmployeesPage() {
                 <p>Approve, suspend, revoke, and session invalidation apply instantly — including on live sessions.</p>
               </div>
             </li>
+            <li>
+              <span className="insight-ico" style={{ background: "var(--shell-amber-soft)" }}>
+                <Icon name="lock" size={18} />
+              </span>
+              <div>
+                <h4>Last-Admin Protection</h4>
+                <p>Suspending the last active admin is refused by the server, so the workspace can never lock itself out.</p>
+              </div>
+            </li>
           </ul>
         </Panel>
       </div>
-
-      <div className="section-gap" />
-      <details className="adv-disclosure">
-        <summary>
-          <span className="adv-title">Advanced · Demo Tools</span>
-          <span className="panel-sub">Synthetic dataset controls for demo environments — not production access management.</span>
-        </summary>
-        <div style={{ marginTop: 10 }}>
-          <DemoPackPanel />
-        </div>
-      </details>
 
       <div className="section-gap" />
       <Panel
@@ -721,8 +756,8 @@ export function AdminEmployeesPage() {
                   <tr key={v.id}>
                     <td>{friendlyDate(v.created_at)}</td>
                     <td className="cell-main">{auditAction(v.action)}</td>
-                    <td>{(v.target_id || "").slice(0, 8)}</td>
-                    <td>{(v.admin_id || "").slice(0, 8)}</td>
+                    <td>{identityCell(v.target_id)}</td>
+                    <td>{identityCell(v.admin_id)}</td>
                     <td>
                       {v.prev_value} → {v.new_value}
                     </td>
@@ -733,6 +768,19 @@ export function AdminEmployeesPage() {
           </div>
         )}
       </Panel>
+
+      {/* Advanced Demo Tools (§8): directly below Workspace Activity in
+        normal flow — same column, same width, disclosure unchanged. */}
+      <div className="section-gap" />
+      <details className="adv-disclosure">
+        <summary>
+          <span className="adv-title">Advanced · Demo Tools</span>
+          <span className="panel-sub">Synthetic dataset controls for demo environments — not production access management.</span>
+        </summary>
+        <div style={{ marginTop: 10 }}>
+          <DemoPackPanel />
+        </div>
+      </details>
 
       {inviteOpen ? (
         <div

@@ -14,8 +14,11 @@ import {
   Panel,
   Skeleton,
   compareDisplayed,
+  fmtCell,
   fmtCompact,
   formatDuration,
+  kpiDisplay,
+  kpiPlaceholderNote,
   platformLabel,
   useCompareState,
   useScopedApi,
@@ -467,12 +470,13 @@ export function CreativesPage() {
                 </div>
                 {length === "all" && compare ? (
                   <>
-                    <KpiCard label="Total Impressions" display={fmtCompact(num(compare.metrics.impressions?.current))}
+                    <KpiCard label="Total Impressions" display={kpiDisplay("count", compare.metrics.impressions?.current, compare.current_n_ads === 0)}
                       icon="bars" tint="#E7F1FB" metricLabel="Impressions" compare={compare} />
-                    <KpiCard label="Total Clicks" display={fmtCompact(num(compare.metrics.clicks?.current))}
+                    <KpiCard label="Total Clicks" display={kpiDisplay("count", compare.metrics.clicks?.current, compare.current_n_ads === 0)}
                       icon="click" tint="#E7F1FB" metricLabel="Clicks" compare={compare} />
-                    <KpiCard label="Average ROAS" display={compare.metrics.roas?.current == null ? "—" : `${compare.metrics.roas.current.toFixed(1)}x`}
-                      icon="users" tint="#E5F5F2" metricLabel="ROAS" compare={compare} />
+                    <KpiCard label="Average ROAS" display={kpiDisplay("mult", compare.metrics.roas?.current, compare.current_n_ads === 0)}
+                      icon="users" tint="#E5F5F2" metricLabel="ROAS" compare={compare}
+                      note={kpiPlaceholderNote("mult", compare.metrics.roas?.current, compare.current_n_ads === 0)} />
                   </>
                 ) : (
                   <>
@@ -480,8 +484,9 @@ export function CreativesPage() {
                       icon="bars" tint="#E7F1FB" metricLabel="Impressions" compare={null} />
                     <KpiCard label="Total Clicks" display={fmtCompact(pooled.clicks)}
                       icon="click" tint="#E7F1FB" metricLabel="Clicks" compare={null} />
-                    <KpiCard label="Average ROAS" display={pooled.roas == null ? "—" : `${pooled.roas.toFixed(1)}x`}
-                      icon="users" tint="#E5F5F2" metricLabel="ROAS" compare={null} />
+                    <KpiCard label="Average ROAS" display={kpiDisplay("mult", pooled.roas, lengthRows.length === 0)}
+                      icon="users" tint="#E5F5F2" metricLabel="ROAS" compare={null}
+                      note={kpiPlaceholderNote("mult", pooled.roas, lengthRows.length === 0)} />
                   </>
                 )}
               </div>
@@ -516,8 +521,8 @@ export function CreativesPage() {
                         <p className="creative-name">{[(c.campaigns ?? [])[0], c.format].filter(Boolean).join(" • ") || "—"}</p>
                         <div className="creative-stats">
                           <span><Icon name="play" size={12} /> {fmtCompact(num(c.metrics.impressions))}</span>
-                          <span><Icon name="click" size={12} /> {c.metrics.ctr == null ? "—" : `${(c.metrics.ctr * 100).toFixed(1)}%`}</span>
-                          <span><Icon name="coin" size={12} /> {c.metrics.roas == null ? "—" : `${c.metrics.roas.toFixed(1)}x`}</span>
+                          <span><Icon name="click" size={12} /> {fmtCell(c.metrics.ctr, (n) => `${(n * 100).toFixed(1)}%`)}</span>
+                          <span><Icon name="coin" size={12} /> {fmtCell(c.metrics.roas, (n) => `${n.toFixed(1)}x`)}</span>
                         </div>
                       </div>
                     );
@@ -605,8 +610,8 @@ export function CreativesPage() {
                               <td>{s ? `${s}s` : "—"}</td>
                               <td>{platformLabel(c.platform)}</td>
                               <td className="num">{fmtCompact(num(c.metrics.impressions))}</td>
-                              <td className="num">{c.metrics.ctr == null ? "—" : `${(c.metrics.ctr * 100).toFixed(1)}%`}</td>
-                              <td className="num">{c.metrics.roas == null ? "—" : `${c.metrics.roas.toFixed(1)}x`}</td>
+                              <td className="num">{fmtCell(c.metrics.ctr, (n) => `${(n * 100).toFixed(1)}%`)}</td>
+                              <td className="num">{fmtCell(c.metrics.roas, (n) => `${n.toFixed(1)}x`)}</td>
                               <td><RetentionSpark creativeKey={c.creative_key} /></td>
                               <td><span className="badge-demo" style={{ color: perf.tone }}>{perf.text}</span></td>
                             </tr>
@@ -629,8 +634,8 @@ export function CreativesPage() {
                           <p className="creative-name">{[(c.campaigns ?? [])[0], c.format].filter(Boolean).join(" • ") || "—"}</p>
                           <div className="creative-stats">
                             <span>{fmtCompact(num(c.metrics.impressions))}</span>
-                            <span>{c.metrics.ctr == null ? "—" : `${(c.metrics.ctr * 100).toFixed(1)}%`}</span>
-                            <span>{c.metrics.roas == null ? "—" : `${c.metrics.roas.toFixed(1)}x`}</span>
+                            <span>{fmtCell(c.metrics.ctr, (n) => `${(n * 100).toFixed(1)}%`)}</span>
+                            <span>{fmtCell(c.metrics.roas, (n) => `${n.toFixed(1)}x`)}</span>
                           </div>
                         </div>
                       );

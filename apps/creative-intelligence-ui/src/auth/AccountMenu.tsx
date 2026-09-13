@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { api, ApiError } from "@/api/client";
 import { useAuth } from "@/auth/AuthProvider";
 import { Icon } from "@/components/icons";
+import { EmployeeAvatar } from "@/components/product";
 
 interface StoredAccount {
   employee_id: string;
@@ -15,19 +16,10 @@ interface StoredAccount {
   status: string;
 }
 
+/* Compat alias: new code uses EmployeeAvatar directly so every face
+ *  resolves THAT employee's photo with error fallback. */
 export function Avatar({ url, label }: { url: string; label: string }) {
-  if (url) return <img className="avatar" src={url} alt="" />;
-  const init = label
-    .split(/\s+/)
-    .map((w) => w.charAt(0))
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
-  return (
-    <span className="avatar" aria-hidden="true" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 700 }}>
-      {init || "?"}
-    </span>
-  );
+  return <EmployeeAvatar url={url} name={label} email="" />;
 }
 
 /** Employee account menu + switcher. Switching re-runs authorization via
@@ -101,7 +93,7 @@ export function AccountMenu() {
         aria-controls="account-menu-body"
         onClick={() => setExpanded((v) => !v)}
       >
-        <Avatar url={employee.avatar_url} label={name} />
+        <EmployeeAvatar url={employee.avatar_url} name={name} email={employee.email} />
         <span>
           <strong>{name}</strong>
           <br />
@@ -128,6 +120,12 @@ export function AccountMenu() {
                 .map((a) => (
                   <li key={a.employee_id}>
                     <button type="button" className="link-btn" disabled={switching} onClick={() => void switchTo(a.employee_id)}>
+                      <EmployeeAvatar
+                        url={a.avatar_url}
+                        name={`${a.first_name} ${a.last_name}`.trim()}
+                        email={a.email}
+                        size={24}
+                      />
                       Switch To {`${a.first_name} ${a.last_name}`.trim() || a.email}
                     </button>{" "}
                     <span className="muted">

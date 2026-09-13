@@ -9,15 +9,26 @@ import { LoadingButton } from "@/components/LoadingButton";
 export function GoogleDriveCard() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [connected, setConnected] = useState<boolean | null>(null);
+  const [statusError, setStatusError] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
 
+  /* One truthful state source (§10): a failed status lookup is retryable
+   * feedback, never a silent "disconnected". */
+  const loadStatus = async () => {
+    setStatusError(false);
+    try {
+      const res = await api<{ connected: boolean }>("GET", "/api/auth/google/status");
+      setConnected(res.connected === true);
+    } catch {
+      setConnected(null);
+      setStatusError(true);
+    }
+  };
+
   useEffect(() => {
-    let live = true;
-    api<{ connected: boolean }>("GET", "/api/auth/google/status")
-      .then((res) => { if (live) setConnected(res.connected); })
-      .catch(() => { if (live) setConnected(false); });
-    return () => { live = false; };
+    void loadStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -67,20 +78,34 @@ export function GoogleDriveCard() {
       <div style={{ flex: 1 }}>
         <h4>Google Drive</h4>
         <p>Read-only access to analyze your creative assets.</p>
-        <p>
-          Status: <strong>{connected === null ? "…" : connected ? "Connected" : "Not Connected"}</strong>
-        </p>
         {notice ? <p role="status" style={{ margin: "4px 0 0" }}>{notice}</p> : null}
       </div>
-      {connected ? (
-        <LoadingButton type="button" className="btn-outline" loading={busy} loadingLabel="Working…" spinnerClass="spinner dark" disabled={busy} onClick={() => void disconnect()}>
-          Disconnect
-        </LoadingButton>
-      ) : (
-        <LoadingButton type="button" className="btn-outline" loading={busy} loadingLabel="Connecting…" spinnerClass="spinner dark" disabled={busy || connected === null} onClick={() => void connect()}>
-          Connect
-        </LoadingButton>
-      )}
+      {/* Single right-side state/action area (§10): no duplicate status
+        line beside it. Google sign-in alone never marks this connected —
+        only the Drive authorisation status does. */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+        {connected === true ? <span className="pill pill-ok">Connected</span> : null}
+        {statusError && connected === null ? (
+          <>
+            <span className="panel-sub">Could not check status.</span>
+            <button type="button" className="btn-outline" onClick={() => void loadStatus()}>
+              Retry
+            </button>
+          </>
+        ) : connected === true ? (
+          <LoadingButton type="button" className="btn-outline" loading={busy} loadingLabel="Working…" spinnerClass="spinner dark" disabled={busy} onClick={() => void disconnect()}>
+            Disconnect
+          </LoadingButton>
+        ) : connected === false ? (
+          <LoadingButton type="button" className="btn-outline" loading={busy} loadingLabel="Connecting…" spinnerClass="spinner dark" disabled={busy} onClick={() => void connect()}>
+            Connect
+          </LoadingButton>
+        ) : (
+          <button type="button" className="btn-outline" disabled aria-busy="true">
+            Checking…
+          </button>
+        )}
+      </div>
     </div>
   );
 }

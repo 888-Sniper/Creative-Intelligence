@@ -38,7 +38,7 @@ const patternsData = {
 
 const cohortsData = [{ id: 3, name: "Beauty", filters: { platform: ["tiktok"] }, created_at: "" }];
 
-function mockFetch(opts?: { googleConnected?: boolean; me?: MeResponse }) {
+function mockFetch(opts?: { googleConnected?: boolean; me?: MeResponse; sessions?: number }) {
   const calls: Array<[string, RequestInit | undefined]> = [];
   const googleConnected = opts?.googleConnected ?? false;
   window.fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
@@ -46,6 +46,7 @@ function mockFetch(opts?: { googleConnected?: boolean; me?: MeResponse }) {
     calls.push([url, init]);
     const method = init?.method ?? "GET";
     if (url === "/api/auth/me") return Response.json(opts?.me ?? authed);
+    if (url === "/api/auth/sessions") return Response.json({ count: opts?.sessions ?? 2 });
     if (url === "/api/auth/google/status") return Response.json({ connected: googleConnected });
     if (url.startsWith("/api/retention/patterns")) return Response.json(patternsData);
     if (url === "/api/cohorts" && method === "GET") return Response.json(cohortsData);
@@ -107,7 +108,7 @@ describe("SettingsPage", () => {
       expect(screen.getByText("General Settings")).toBeDefined();
     });
     expect((screen.getByLabelText("Workspace Name") as HTMLInputElement).value).toBe("Foap Creative Intelligence");
-    expect((screen.getByLabelText("Theme") as HTMLSelectElement).value).toBe("light");
+    expect((screen.getByLabelText("Theme") as HTMLSelectElement).value).toBe("dark");
     expect((screen.getByLabelText("Accent Color") as HTMLSelectElement).value).toBe("Teal (Default)");
     expect((screen.getByLabelText("Interface Density") as HTMLSelectElement).value).toBe("Comfortable");
     expect(screen.getByText("Notifications")).toBeDefined();
@@ -115,7 +116,9 @@ describe("SettingsPage", () => {
     expect(screen.getByText("Security")).toBeDefined();
     expect(screen.getByText("Advanced")).toBeDefined();
     expect(screen.getByRole("button", { name: "Save Changes" })).toBeDefined();
-    expect(screen.getByText("No unsaved changes.")).toBeDefined();
+    // No idle footer text and no reserved status space when clean.
+    expect(screen.queryByText("No unsaved changes.")).toBeNull();
+    expect(screen.queryByText("Unsaved changes.")).toBeNull();
   });
 
   it("retires the legacy mock workspace name on load", async () => {
@@ -126,6 +129,24 @@ describe("SettingsPage", () => {
       expect((screen.getByLabelText("Workspace Name") as HTMLInputElement).value)
         .toBe("Foap Creative Intelligence");
     });
+  });
+
+  it("preserves an explicitly saved Light preference", async () => {
+    window.localStorage.setItem("ci-theme", "light");
+    mockFetch();
+    renderSettings();
+    await waitFor(() => {
+      expect((screen.getByLabelText("Theme") as HTMLSelectElement).value).toBe("light");
+    });
+    // Explicit choice wins over the dark default, before and after save.
+    expect(document.documentElement.dataset["theme"] ?? "").toBe("");
+    fireEvent.change(screen.getByLabelText("Workspace Name"), { target: { value: "Kept Light" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+    await waitFor(() => {
+      expect(screen.getByText("Settings Saved.")).toBeDefined();
+    });
+    expect(window.localStorage.getItem("ci-theme")).toBe("light");
+    expect(document.documentElement.dataset["theme"] ?? "").toBe("");
   });
 
   it("saves and resets workspace preferences", async () => {
@@ -157,10 +178,10 @@ describe("SettingsPage", () => {
     });
     const appliedTeal = document.documentElement.style.getPropertyValue("--shell-teal");
     fireEvent.change(screen.getByLabelText("Accent Color"), { target: { value: "Blue" } });
-    fireEvent.change(screen.getByLabelText("Theme"), { target: { value: "dark" } });
+    fireEvent.change(screen.getByLabelText("Theme"), { target: { value: "light" } });
     // Staged only: live appearance is untouched until Save.
     expect(document.documentElement.style.getPropertyValue("--shell-teal")).toBe(appliedTeal);
-    expect(document.documentElement.dataset["theme"] ?? "").not.toBe("dark");
+    expect(document.documentElement.dataset["theme"] ?? "").toBe("dark");
     const save = screen.getByRole("button", { name: "Save Changes" }) as HTMLButtonElement;
     expect(save.disabled).toBe(false);
     fireEvent.click(save);
@@ -168,7 +189,7 @@ describe("SettingsPage", () => {
       expect(screen.getByText("Settings Saved.")).toBeDefined();
     });
     expect(document.documentElement.style.getPropertyValue("--shell-teal")).toBe("#2F6FBE");
-    expect(document.documentElement.dataset["theme"]).toBe("dark");
+    expect(document.documentElement.dataset["theme"] ?? "").toBe("");
   });
 
   it("sends a password reset email from Security", async () => {
@@ -210,6 +231,21 @@ describe("SettingsPage", () => {
     expect(calls.some(([url]) => url === "/api/auth/sessions/revoke-all")).toBe(false);
   });
 
+  it("shows a single Log Out button with one live session", async () => {
+    const calls = mockFetch({ sessions: 1 });
+    renderSettings();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Log Out" })).toBeDefined();
+    });
+    // Exactly one session control: no separate "all sessions" button.
+    expect(screen.queryByRole("button", { name: "Log Out All Sessions" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Log Out" }));
+    await waitFor(() => {
+      expect(calls.some(([url, init]) => url === "/api/auth/logout" && init?.method === "POST")).toBe(true);
+    });
+    expect(calls.some(([url]) => url === "/api/auth/sessions/revoke-all")).toBe(false);
+  });
+
   it("shows Google Drive as not connected by default", async () => {
     mockFetch({ googleConnected: false });
     renderSettings();
@@ -218,7 +254,10 @@ describe("SettingsPage", () => {
     await waitFor(() => {
       expect(within(panel as HTMLElement).getByRole("button", { name: "Connect" })).toBeDefined();
     });
+    // Other integrations keep honest badges; Drive itself carries no
+    // duplicate "Status:" description line.
     expect(within(panel as HTMLElement).getAllByText("Not Connected").length).toBeGreaterThan(0);
+    expect(within(panel as HTMLElement).queryByText(/Status:/)).toBeNull();
   });
 
   it("shows disconnect when Google Drive is connected", async () => {
@@ -227,6 +266,7 @@ describe("SettingsPage", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Disconnect" })).toBeDefined();
     });
+    expect(screen.getByText("Connected")).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
     await waitFor(() => {
       expect(screen.getByText("Google Drive Disconnected.")).toBeDefined();

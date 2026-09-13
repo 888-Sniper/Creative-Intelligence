@@ -82,6 +82,25 @@ describe("ReportsPage", () => {
     expect(screen.getByText("Latest Generated Files")).toBeDefined();
   });
 
+  it("labels the estimate briefly and orders tips Tailor before Benchmarks", async () => {
+    mockCatalog();
+    const { container } = renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("Report Tips")).toBeDefined();
+    });
+    expect(screen.getByText("Estimated time: 1–2 minutes")).toBeDefined();
+    expect(screen.queryByText(/Estimated generation time/i)).toBeNull();
+    const tips = Array.from(
+      container.querySelectorAll(".tips-list h4"),
+    ).map((h) => h.textContent);
+    expect(tips.slice(0, 4)).toEqual([
+      "Focus on Key KPIs",
+      "Tailor to Your Audience",
+      "Choose the Right Format",
+      "Use Benchmarks for Context",
+    ]);
+  });
+
   it("singularizes the multiselect count at exactly one", async () => {
     mockCatalog();
     renderPage();

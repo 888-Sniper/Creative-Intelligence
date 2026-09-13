@@ -69,6 +69,9 @@ test.describe("employee journey", () => {
 
   test("signed out sees login, employee sees dashboard, profile, logout", async ({ page, context }) => {
     await page.goto("/");
+    // Dark default with no saved choice: the pre-render script sets it
+    // before first paint (no white flash), React keeps it.
+    expect(await page.evaluate(() => document.documentElement.dataset["theme"] ?? "")).toBe("dark");
     await expect(page.getByRole("heading", { name: "Welcome Back" })).toBeVisible();
     // No dashboard behind the gate.
     await expect(page.getByRole("link", { name: "Dashboard" })).toHaveCount(0);
@@ -83,15 +86,15 @@ test.describe("employee journey", () => {
 
     await page.getByRole("link", { name: "Profile" }).click();
     await expect(page.getByRole("heading", { name: "Profile" }).first()).toBeVisible();
-    // Verified email is shown read-only: visible text, never an editable field.
-    // Exact match: the address also appears in Personal Info and
-    // Connections rows by design.
-    await expect(page.getByText("ada@foap.test", { exact: true })).toBeVisible();
+    // Email is shown read-only (bare address, no verified suffix): hero
+    // and Workspace surfaces carry it, never an editable field.
+    await expect(page.getByText("ada@foap.test", { exact: true })).toHaveCount(2);
     await expect(page.getByRole("textbox", { name: /email/i })).toHaveCount(0);
 
-    // The account menu ships collapsed; expand it to reach Log Out.
+    // The account menu ships collapsed; expand it to reach Log Out
+    // (scoped: Profile Security carries its own adaptive Log Out now).
     await page.getByRole("button", { name: "Toggle Account Menu" }).click();
-    await page.getByRole("button", { name: "Log Out", exact: true }).click();
+    await page.locator("#account-menu-body").getByRole("button", { name: "Log Out", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Welcome Back" })).toBeVisible();
   });
 
@@ -155,20 +158,34 @@ test.describe("employee journey", () => {
     await expect(page.getByText("Google Drive is not configured.")).toBeVisible();
   });
 
-  test("settings shows account, provider, appearance and logout-all", async ({ page, context }) => {
+  test("settings shows appearance and logout-all; identity lives in profile", async ({ page, context }) => {
     const seeds = readSeeds();
     // NOTE: the admin session (the employee session is destroyed by the
     // logout step of the first journey in this file).
     await loginAs(context, page, seeds.admin, "/settings");
     await expect(page.getByRole("heading", { name: "Settings", exact: true })).toBeVisible();
-    // Reskinned account line: email, role, status, provider.
-    await expect(page.getByText(/boss@foap\.test/)).toBeVisible();
+    // No duplicate identity block in General Settings: the account email
+    // is absent here and intact on the Profile page.
+    await expect(page.getByText(/boss@foap\.test/)).toHaveCount(0);
+    await page.getByRole("link", { name: "Profile" }).click();
+    await expect(page.getByText("boss@foap.test", { exact: true }).first()).toBeVisible();
+    await page.getByRole("link", { name: "Settings" }).click();
     // Reskinned appearance control is a Theme select with a System option.
     await expect(page.getByLabel("Theme")).toBeVisible();
     await expect(page.getByLabel("Theme").locator("option", { hasText: "System" })).toHaveCount(1);
+    // Exactly one adaptive logout control, labelled by the server count
+    // (the seeded admin holds a single session → Log Out). Signing out
+    // returns the gate to login.
+    const logoutAll = page.getByRole("button", { name: "Log Out All Sessions" });
+    const logoutOne = page.getByRole("button", { name: "Log Out", exact: true });
+    const shown = await logoutAll.count() + await logoutOne.count();
+    expect(shown).toBe(1);
     page.on("dialog", (d) => void d.accept());
-    await page.getByRole("button", { name: "Log Out All Sessions" }).click();
-    // Revoking includes the current session, so the gate returns to login.
+    if (await logoutAll.count()) {
+      await logoutAll.click();
+    } else {
+      await logoutOne.click();
+    }
     await expect(page.getByRole("heading", { name: "Welcome Back" })).toBeVisible();
   });
 });

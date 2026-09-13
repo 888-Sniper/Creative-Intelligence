@@ -11,9 +11,9 @@ import {
   PageHeader,
   Panel,
   Skeleton,
-  fmtCompact,
-  fmtMoney,
-  fmtMult,
+  KpiKind,
+  kpiDisplay,
+  kpiPlaceholderNote,
   scopeBody,
   useCampaignMeta,
   useCompareState,
@@ -202,12 +202,18 @@ export function AskPage() {
     return out.slice(0, 3);
   }, [platforms.data, hooks.data, answer]);
 
-  const kpis = compare ? [
-    { label: "Total Spend", metric: "spend", display: compare.metrics.spend?.current == null ? "—" : fmtMoney(compare.metrics.spend.current) },
-    { label: "Conversions", metric: "conversions", display: fmtCompact(num(compare.metrics.conversions?.current)) },
-    { label: "Average CPA", metric: "cpa", display: compare.metrics.cpa?.current == null ? "—" : fmtMoney(compare.metrics.cpa.current) },
-    { label: "Average ROAS", metric: "roas", display: compare.metrics.roas?.current == null ? "—" : fmtMult(compare.metrics.roas.current) },
+  const emptyScope = compare ? compare.current_n_ads === 0 : false;
+  const kpiDefs: Array<{ label: string; metric: string; kind: KpiKind; value: number | null | undefined }> = compare ? [
+    { label: "Total Spend", metric: "spend", kind: "money", value: compare.metrics.spend?.current },
+    { label: "Conversions", metric: "conversions", kind: "count", value: compare.metrics.conversions?.current },
+    { label: "Average CPA", metric: "cpa", kind: "money", value: compare.metrics.cpa?.current },
+    { label: "Average ROAS", metric: "roas", kind: "mult", value: compare.metrics.roas?.current },
   ] : [];
+  const kpis = kpiDefs.map((k) => ({
+    ...k,
+    display: kpiDisplay(k.kind, k.value, emptyScope),
+    note: kpiPlaceholderNote(k.kind, k.value, emptyScope),
+  }));
 
   return (
     <>
@@ -259,6 +265,7 @@ export function AskPage() {
                           key={k.metric}
                           label={k.label}
                           display={k.display}
+                          note={k.note}
                           icon={k.metric === "spend" ? "coin" : k.metric === "conversions" ? "click" : k.metric === "cpa" ? "users" : "bars"}
                           tint="#E7F1FB"
                           metricLabel={k.metric === "roas" ? "ROAS" : k.metric === "cpa" ? "CPA" : k.label.replace("Average ", "").replace("Total ", "")}
@@ -306,7 +313,7 @@ export function AskPage() {
                   <Panel title="Suggested Follow-Ups">
                     <div className="prompt-chips" style={{ marginTop: 0 }}>
                       {FOLLOW_UPS.map((f) => (
-                        <button key={f} type="button" className="chip" onClick={() => { setQuestion(f); void ask(f); }}>
+                        <button key={f} type="button" className="chip chip-sugg" onClick={() => { setQuestion(f); void ask(f); }}>
                           {f}
                         </button>
                       ))}
@@ -329,7 +336,7 @@ export function AskPage() {
           <Panel title="Suggested Questions">
             <div className="rail-stack" style={{ gap: 6 }}>
               {SUGGESTED.map((s) => (
-                <button key={s} type="button" className="btn-outline" style={{ justifyContent: "space-between", textAlign: "left", minHeight: 30, padding: "6px 12px", fontSize: 12.5 }}
+                <button key={s} type="button" className="btn-outline chip-sugg" style={{ justifyContent: "space-between", textAlign: "left", minHeight: 30, padding: "6px 12px", fontSize: 12.5 }}
                   onClick={() => { setQuestion(s); void ask(s); }}>
                   <span style={{ minWidth: 0, whiteSpace: "normal" }}>{s}</span>
                   <span style={{ flex: "none" }} aria-hidden="true"><Icon name="chev" size={14} /></span>

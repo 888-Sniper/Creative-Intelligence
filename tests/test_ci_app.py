@@ -622,6 +622,25 @@ def test_revoke_all_requires_login(client):
     assert r.status_code == 401
 
 
+def test_own_session_count_single_then_multi(tmp_path, monkeypatch):
+    http, db = make_client(tmp_path, admin_email="boss@foap.test")
+    boss_user = dict(IDENT, id="w-boss", email="boss@foap.test")
+    oauth_login(http, monkeypatch, boss_user)
+    assert http.get("/api/auth/sessions").json() == {"count": 1}
+    # Second session for the same employee (another device).
+    http2 = TestClient(http.app, raise_server_exceptions=False)
+    stub_exchange(monkeypatch, boss_user)
+    r = http2.post("/api/auth/oauth/start", json={"provider": "google"})
+    http2.post("/api/auth/oauth/finish",
+               json={"code": "auth_code", "state": r.json()["state"]})
+    assert http.get("/api/auth/sessions").json() == {"count": 2}
+
+
+def test_own_session_count_requires_login(client):
+    r = client.get("/api/auth/sessions")
+    assert r.status_code == 401
+
+
 def test_switch_rechecks_authorization(tmp_path):
     http, db = make_client(tmp_path, admin_email="boss@foap.test")
     with employee_session(db) as sess:
@@ -1050,3 +1069,32 @@ class TestCsrfOriginGuard:
         authed = self._owner_client(tmp_path)
         resp = authed.post("/api/ask", json={"question": "hi"})
         assert resp.status_code in (200, 429)
+
+
+def test_root_csp_permits_shipped_inline_scripts(client):
+    """The React entry's strict CSP must hash-allow its bare inline
+    scripts (the pre-render theme boot) — otherwise browsers block the
+    boot and first paint flashes light. The policy must never fall back
+    to 'unsafe-inline' for scripts."""
+    import base64 as _b64
+    import hashlib as _hl
+    import re as _re
+
+    from ci_backend import actions as legacy
+
+    if os.path.normpath(legacy.react_index()) == os.path.normpath(legacy.WEB_INDEX):
+        pytest.skip("React dist not built in this checkout")
+    r = client.get("/")
+    assert r.status_code == 200, r.text
+    csp = r.headers.get("content-security-policy", "")
+    assert "default-src 'self'" in csp
+    assert "script-src" not in csp
+    default_src = csp.split("default-src", 1)[1].split(";", 1)[0]
+    assert "'unsafe-inline'" not in default_src
+    with open(legacy.react_index(), "rb") as fh:
+        html = fh.read().decode("utf-8")
+    bodies = _re.findall(r"<script>(.*?)</script>", html, _re.DOTALL)
+    assert bodies, "expected at least the theme boot inline script"
+    for body in bodies:
+        digest = _b64.b64encode(_hl.sha256(body.encode("utf-8")).digest()).decode("ascii")
+        assert f"'sha256-{digest}'" in default_src

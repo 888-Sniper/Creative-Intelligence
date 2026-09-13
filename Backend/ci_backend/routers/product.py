@@ -9,10 +9,13 @@ so both shells run identical logic during the transition.
 from __future__ import annotations
 
 import asyncio
+import base64
 import concurrent.futures
 import functools
+import hashlib
 import inspect
 import mimetypes
+import re
 import os
 import sqlite3
 import sys
@@ -1664,16 +1667,51 @@ _ALLOWED_ASSET_EXTS = (".png", ".svg", ".ico", ".webp")
 _ALLOWED_DIST_EXTS = (".js", ".css", ".woff2")
 
 
+_INLINE_SCRIPT_RE = re.compile(rb"<script>(.*?)</script>", re.DOTALL)
+_INDEX_CSP_CACHE: dict = {}
+
+
+def _react_csp(entry: str) -> dict:
+    """Strict CSP for the React entry, with sha256 hashes for its bare
+    inline scripts (currently only the pre-render theme boot: the only
+    inline script the build ships). Per CSP fallback the hashes live in
+    default-src, so no script-src directive is needed and the policy is
+    never loosened to 'unsafe-inline'. External module scripts stay
+    covered by 'self'; the hashes are recomputed when the file changes,
+    so rebuilds need no code edit."""
+    try:
+        mtime = os.path.getmtime(entry)
+    except OSError:
+        mtime = -1
+    cached = _INDEX_CSP_CACHE.get(entry)
+    if cached and cached[0] == mtime:
+        return cached[1]
+    hashes = []
+    try:
+        with open(entry, "rb") as fh:
+            html = fh.read()
+        for body in _INLINE_SCRIPT_RE.findall(html):
+            digest = hashlib.sha256(body).digest()
+            hashes.append("'sha256-%s'"
+                          % base64.b64encode(digest).decode("ascii"))
+    except OSError:
+        hashes = []
+    headers = {"Content-Security-Policy":
+               "default-src 'self'%s; "
+               "img-src 'self' data: https:; "
+               "style-src 'self' 'unsafe-inline'"
+               % (" " + " ".join(hashes) if hashes else "")}
+    _INDEX_CSP_CACHE[entry] = (mtime, headers)
+    return headers
+
+
 def _index_response():
     entry = legacy.react_index()
     headers = None
     if os.path.normpath(entry) != os.path.normpath(legacy.WEB_INDEX):
-        # React build ships zero inline scripts, so a strict policy is
-        # safe here. The legacy fallback still uses inline scripts and
-        # keeps relying on the other headers (see _security_headers).
-        headers = {"Content-Security-Policy": "default-src 'self'; "
-                   "img-src 'self' data: https:; "
-                   "style-src 'self' 'unsafe-inline'"}
+        # The legacy fallback still uses inline scripts and keeps relying
+        # on the other headers (see _security_headers).
+        headers = _react_csp(entry)
     return FileResponse(entry, media_type="text/html; charset=utf-8",
                         headers=headers)
 

@@ -270,7 +270,7 @@ export function InsightsPage() {
                 <EmptyState
                   icon="spark"
                   title="No saved insights yet"
-                  text="Run AI Analyst or save a finding to start building your insight library."
+                  text="Run AI Analyst or save a finding."
                   action={<Link className="btn-soft" to="/analyst">Open AI Analyst</Link>}
                 />
               )
@@ -301,7 +301,7 @@ export function InsightsPage() {
                   compact
                   icon="bookmark"
                   title="No saved insights yet"
-                  text="Run AI Analyst or save a finding to start building your insight library."
+                  text="Run AI Analyst or save a finding."
                   action={<Link className="btn-soft" to="/analyst">Open AI Analyst</Link>}
                 />
               )

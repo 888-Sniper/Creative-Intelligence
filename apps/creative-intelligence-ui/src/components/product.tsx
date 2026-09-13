@@ -24,6 +24,54 @@ export function fmtMult(n: number): string {
 export function fmtPct(n: number, digits = 1): string {
   return `${n.toFixed(digits)}%`;
 }
+
+/* ------- numeric KPI data states (shared; §4 empty-vs-unknown) --------
+ * A successfully loaded scope with no performance records shows
+ * formatted zeros (an empty-state display placeholder, NOT a new
+ * calculated fact). A loaded NONEMPTY scope with an uncomputable
+ * metric (missing revenue, mixed currencies, undefined denominator)
+ * shows "Unavailable". Loading stays skeleton; request failures stay
+ * error UI — callers must not feed those states here. */
+export type KpiKind = "money" | "mult" | "count" | "pct";
+export const KPI_UNAVAILABLE = "Unavailable";
+export const EMPTY_KPI_NOTE = "No data yet; displayed zero is a placeholder.";
+export function kpiDisplay(
+  kind: KpiKind, value: number | null | undefined, empty: boolean,
+): string {
+  if (value == null || !Number.isFinite(value)) {
+    if (!empty) return KPI_UNAVAILABLE;
+    switch (kind) {
+      case "money": return "$0.00";
+      case "mult": return "0.0x";
+      case "pct": return "0.0%";
+      case "count": return "0";
+    }
+  }
+  switch (kind) {
+    case "money": return fmtMoney(value);
+    case "mult": return fmtMult(value);
+    case "pct": return fmtPct(value);
+    case "count": return fmtCompact(value);
+  }
+}
+/** Accessible context for empty ratio/percentage zero placeholders. */
+export function kpiPlaceholderNote(
+  kind: KpiKind, value: number | null | undefined, empty: boolean,
+): string | null {
+  if (empty && (value == null || !Number.isFinite(value))
+    && (kind === "mult" || kind === "pct")) {
+    return EMPTY_KPI_NOTE;
+  }
+  return null;
+}
+/** Table numeric cell: a missing or non-finite measure in loaded data
+ *  is an honest "Unavailable", never a dash masquerading as zero or
+ *  vice versa. Non-numeric display values pass through untouched. */
+export function fmtCell<T>(value: T | null | undefined, fmt: (v: T) => string): string {
+  if (value == null) return KPI_UNAVAILABLE;
+  if (typeof value === "number" && !Number.isFinite(value)) return KPI_UNAVAILABLE;
+  return fmt(value);
+}
 /** Count-aware unit: plural(1, "Campaign") is "1 Campaign",
  *  plural(2, "Campaign") is "2 Campaigns". Pass an explicit plural
  *  for irregular nouns (plural(1, "KPI", "KPIs")). */
@@ -42,6 +90,8 @@ export interface CompareResp {
   current_period: KpiPeriod | null;
   previous_period: KpiPeriod | null;
   comparison: string | null;
+  current_n_ads?: number;
+  previous_n_ads?: number;
   metrics: Record<string, CompareMetric>;
 }
 export function useCompareState(refreshKey = 0): {
@@ -572,9 +622,11 @@ export function FilterPanel({ onApply, kpi = true, creative = false, trailing, a
 }
 
 /* ------------------------------- KPI card ------------------------------ */
-export function KpiCard({ label, display, icon, tint, metricLabel, compare }: {
+export function KpiCard({ label, display, icon, tint, metricLabel, compare, note }: {
   label: string; display: string; icon: string; tint: string;
   metricLabel: string; compare: CompareResp | null;
+  /** Unobtrusive accessible context (e.g. empty zero-placeholder note). */
+  note?: string | null;
 }) {
   // Backend metric keys are lowercase ("impressions"); pages pass Title
   // Case display labels ("Impressions"). Resolve case-insensitively so a
@@ -593,7 +645,7 @@ export function KpiCard({ label, display, icon, tint, metricLabel, compare }: {
       </span>
       <div className="kpi-body">
         <div className="kpi-label">{label}</div>
-        <div className="kpi-value">{display}</div>
+        <div className="kpi-value">{display}{note ? <span className="sr-only"> ({note})</span> : null}</div>
         <div className="kpi-trend-slot">
           {m && compare ? (
             <KpiTrend metricLabel={metricLabel}
@@ -671,13 +723,19 @@ export function InfoTip({ label, text }: { label: string; text: string }) {
   );
 }
 
-export function Panel({ title, action, sub, icon, tint, children }: {
-  title: string; action?: React.ReactNode; sub?: string;
+export function Panel({ title, action, sub, icon, tint, children, style }: {
+  /** Optional: hero-style cards (§2) render no header at all. */
+  title?: string; action?: React.ReactNode; sub?: string;
   icon?: string; tint?: string;
   children: React.ReactNode;
+  /** Optional outer-style override (e.g. flex grow inside a rail
+   *  stack so row members share a bottom edge). */
+  style?: React.CSSProperties;
 }) {
+  const showHead = Boolean(title || sub || icon || action);
   return (
-    <section className="panel">
+    <section className="panel" style={style}>
+      {showHead ? (
       <div className="panel-head">
         {icon ? (
           <span className="insight-ico" aria-hidden="true"
@@ -686,15 +744,56 @@ export function Panel({ title, action, sub, icon, tint, children }: {
           </span>
         ) : null}
         {/* Titles start at the head top even beside taller actions:
-          row members keep matching title baselines. */}
-        <div style={{ flex: "1 1 auto", minWidth: 0, alignSelf: "flex-start" }}>
-          <h2 className="panel-title">{title}</h2>
+          row members keep matching title baselines. Beside an icon,
+          a short title centres against the 44px icon box instead of
+          hugging its top edge. */}
+        <div style={{
+          flex: "1 1 auto", minWidth: 0, alignSelf: "flex-start",
+          ...(icon ? {
+            minHeight: 44, display: "flex",
+            flexDirection: "column", justifyContent: "center",
+          } : null),
+        }}>
+          {title ? <h2 className="panel-title">{title}</h2> : null}
           {sub ? <p className="panel-sub">{sub}</p> : null}
         </div>
         {action}
       </div>
+      ) : null}
       {children}
     </section>
+  );
+}
+
+/* Shared preference switch (Settings + Profile §3 rows). Same 40×22
+ * control everywhere so row padding and action alignment match. */
+export function Toggle({ label, body, checked, onChange }: {
+  label: string; body: string; checked: boolean; onChange: (v: boolean) => void;
+}) {
+  /* Row breathing room (§11): 14px vertical — ~10% over the old 13px. */
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", padding: "14px 0", borderBottom: "1px solid var(--shell-line)" }}>
+      <div style={{ minWidth: 0 }}>
+        <strong style={{ display: "block", fontSize: 13 }}>{label}</strong>
+        <span className="panel-sub" style={{ fontSize: 12 }}>{body}</span>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        aria-label={label}
+        onClick={() => onChange(!checked)}
+        style={{
+          width: 40, height: 22, borderRadius: 999, border: 0, cursor: "pointer", flex: "none",
+          background: checked ? "var(--shell-teal)" : "#CBD5E1", position: "relative",
+        }}
+      >
+        <span style={{
+          position: "absolute", top: 2, left: checked ? 20 : 2, width: 18, height: 18,
+          borderRadius: "50%", background: "#fff", transition: "left .15s",
+        }} />
+      </button>
+    </div>
   );
 }
 
@@ -709,15 +808,72 @@ export function titleCase(value: string): string {
   return value.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-export function EmptyState({ text, title, icon, action, compact }: {
-  text?: string; title?: string; icon?: string; action?: React.ReactNode; compact?: boolean;
+/* ---------------- shared employee avatar (§1 avatar consistency) ------
+ * Single resolver/component for every employee face in the app: Admin
+ * rows, Profile hero, header/account menu, and activity entries that
+ * name a known employee. The employee's own photo (custom upload or
+ * provider photo — the server fills blanks once and never overwrites
+ * a chosen or deliberately cleared avatar) wins; initials render only
+ * when there is no URL or the image genuinely fails to load. Every
+ * call site passes THAT employee's fields, never the signed-in user's.
+ * Cropping comes from the .avatar class (object-fit: cover); a failed
+ * load swaps to initials via local state so a retry/reset is instant. */
+export function avatarInitials(name: string, email: string): string {
+  const init = (name || "")
+    .split(/\s+/)
+    .map((w) => w.charAt(0))
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+  if (init) return init;
+  const mail = (email || "").trim().charAt(0).toUpperCase();
+  return mail || "?";
+}
+
+export function EmployeeAvatar({ url, name, email, size }: {
+  url: string; name: string; email: string; size?: number;
 }) {
-  if (!title && !icon && !action) {
-    const body = text && /^\s*No\b/.test(text) ? titleCase(text) : text;
-    return <div className="empty">{body}</div>;
+  const [failed, setFailed] = useState(false);
+  useEffect(() => { setFailed(false); }, [url]);
+  const label = (name || "").trim() || (email || "").trim() || "Employee";
+  if (url && !failed) {
+    return (
+      <img
+        className="avatar"
+        src={url}
+        alt=""
+        referrerPolicy="no-referrer"
+        draggable={false}
+        style={size ? { width: size, height: size, fontSize: Math.round(size * 0.38) } : undefined}
+        onError={() => setFailed(true)}
+      />
+    );
   }
   return (
-    <div className={`empty-structured${compact ? " empty-compact" : ""}`}>
+    <span
+      className="avatar"
+      role="img"
+      aria-label={label}
+      style={size ? { width: size, height: size, fontSize: Math.round(size * 0.38) } : undefined}
+    >
+      {avatarInitials(name, email)}
+    </span>
+  );
+}
+
+export function EmptyState({ text, title, icon, action, compact, lift }: {
+  text?: string; title?: string; icon?: string; action?: React.ReactNode; compact?: boolean;
+  /** Small optical lift (§13): shifts the text/icon group ~8px upward
+   *  without touching panel borders, dimensions or grid positions. */
+  lift?: boolean;
+}) {
+  const liftClass = lift ? " empty-lift" : "";
+  if (!title && !icon && !action) {
+    const body = text && /^\s*No\b/.test(text) ? titleCase(text) : text;
+    return <div className={`empty${liftClass}`}>{body}</div>;
+  }
+  return (
+    <div className={`empty-structured${compact ? " empty-compact" : ""}${liftClass}`}>
       {icon ? (
         <span className="empty-ico" aria-hidden="true">
           <Icon name={icon} size={20} />

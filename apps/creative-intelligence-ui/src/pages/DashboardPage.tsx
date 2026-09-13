@@ -16,8 +16,9 @@ import {
   Skeleton,
   compareDisplayed,
   fmtCompact,
-  fmtMoney,
-  fmtMult,
+  KpiKind,
+  kpiDisplay,
+  kpiPlaceholderNote,
   platformLabel,
   useCompareState,
   useDaily,
@@ -445,11 +446,18 @@ export function DashboardPage() {
     return curve.slice().sort((a, b) => Math.abs(a[0] - 3) - Math.abs(b[0] - 3))[0];
   }, [curve]);
 
+  // Empty scope (no current records) shows formatted zero placeholders;
+  // a loaded nonempty scope with an uncomputable metric says Unavailable.
+  const emptyScope = compare ? compare.current_n_ads === 0 : false;
+  const kpi = (kind: KpiKind, value: number | null | undefined) => ({
+    display: compare ? kpiDisplay(kind, value, emptyScope) : "",
+    note: compare ? kpiPlaceholderNote(kind, value, emptyScope) : null,
+  });
   const kpiConfigs = [
-    { label: "Total Impressions", metric: "impressions", display: compare ? fmtCompact(num(compare.metrics.impressions?.current)) : "", icon: "users", tint: "#E5F5F2", color: "#0A9183" },
-    { label: "Total Clicks", metric: "clicks", display: compare ? fmtCompact(num(compare.metrics.clicks?.current)) : "", icon: "click", tint: "#E7F1FB", color: "#2F6FBE" },
-    { label: "Total Spend", metric: "spend", display: compare ? (compare.metrics.spend?.current == null ? "—" : fmtMoney(compare.metrics.spend.current)) : "", icon: "coin", tint: "#E4F4ED", color: "#0E7C5B" },
-    { label: "Average ROAS", metric: "roas", display: compare ? (compare.metrics.roas?.current == null ? "—" : fmtMult(compare.metrics.roas.current)) : "", icon: "bars", tint: "#E7F1FB", color: "#2F6FBE" },
+    { label: "Total Impressions", metric: "impressions", ...kpi("count", compare?.metrics.impressions?.current), icon: "users", tint: "#E5F5F2", color: "#0A9183" },
+    { label: "Total Clicks", metric: "clicks", ...kpi("count", compare?.metrics.clicks?.current), icon: "click", tint: "#E7F1FB", color: "#2F6FBE" },
+    { label: "Total Spend", metric: "spend", ...kpi("money", compare?.metrics.spend?.current), icon: "coin", tint: "#E4F4ED", color: "#0E7C5B" },
+    { label: "Average ROAS", metric: "roas", ...kpi("mult", compare?.metrics.roas?.current), icon: "bars", tint: "#E7F1FB", color: "#2F6FBE" },
   ];
 
   return (
@@ -497,6 +505,7 @@ export function DashboardPage() {
                 tint={k.tint}
                 metricLabel={k.metric === "roas" ? "ROAS" : titleCase(k.metric)}
                 compare={compare}
+                note={k.note}
               />
             </div>
           ))}

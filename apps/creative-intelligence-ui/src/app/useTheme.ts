@@ -5,14 +5,18 @@ export type Theme = "light" | "dark";
 
 const KEY = "ci-theme";
 
+/* Dark is the default (§5): first-time users and browsers with no
+ * explicit saved choice render dark. A stored "light" is preserved —
+ * the hook writes the mode on mount, so a legacy stored value cannot
+ * be distinguished from a deliberate choice and must not be erased. */
 function stored(): ThemeMode {
   try {
     const v = window.localStorage.getItem(KEY);
-    if (v === "dark" || v === "system") return v;
+    if (v === "light" || v === "dark" || v === "system") return v;
   } catch {
-    /* private mode: fall through to light */
+    /* private mode: fall through to dark */
   }
-  return "light";
+  return "dark";
 }
 
 function systemDark(): boolean {

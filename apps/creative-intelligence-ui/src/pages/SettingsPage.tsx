@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react";
 import { api, ApiError } from "@/api/client";
 import { useAuth } from "@/auth/AuthProvider";
-import { Avatar } from "@/auth/AccountMenu";
 import { GoogleDriveCard } from "@/components/GoogleDriveCard";
 import { CohortBuilder, RetentionPatterns } from "@/components/DataTools";
 import { useTheme } from "@/app/useTheme";
 import type { ThemeMode } from "@/app/useTheme";
 import { Icon } from "@/components/icons";
-import { PageHeader, Panel } from "@/components/product";
+import { PageHeader, Panel, Toggle } from "@/components/product";
 import { LoadingButton } from "@/components/LoadingButton";
+import { useSessionCount } from "@/auth/useSessionCount";
 
 /* Settings matches the approved reference. Workspace preferences persist
  * locally per browser; identity/security/drive actions stay backend-backed
@@ -64,7 +64,7 @@ function guessTimezone(): string {
 const DEFAULTS: Prefs = {
   workspace: "Foap Creative Intelligence",
   timezone: guessTimezone(),
-  theme: "light",
+  theme: "dark",
   defaultView: "Dashboard",
   currency: "USD – US Dollar",
   dateRange: "Last 30 Days",
@@ -80,10 +80,14 @@ const DEFAULTS: Prefs = {
   density: "Comfortable",
 };
 
-const ACCENTS: Record<string, { teal: string; dark: string }> = {
-  "Teal (Default)": { teal: "#0A9183", dark: "#08786E" },
-  "Blue": { teal: "#2F6FBE", dark: "#1F4E86" },
-  "Violet": { teal: "#6D5BD0", dark: "#4A3F96" },
+/* Accent overrides repoint the shared primary token (§6) so saved
+ * choices keep working: Teal resolves to the logo teal with a dark
+ * label (7.2:1; white would be 2.1:1), Blue/Violet keep white labels
+ * (5.1:1 / 5.2:1). Hover/pressed derive via color-mix in CSS. */
+const ACCENTS: Record<string, { teal: string; dark: string; ink: string }> = {
+  "Teal (Default)": { teal: "#00C7B2", dark: "#08786E", ink: "#182536" },
+  "Blue": { teal: "#2F6FBE", dark: "#1F4E86", ink: "#FFFFFF" },
+  "Violet": { teal: "#6D5BD0", dark: "#4A3F96", ink: "#FFFFFF" },
 };
 
 const PREFS_KEY = "ci-settings-prefs";
@@ -129,35 +133,6 @@ function loadPrefs(): Prefs {
   return { ...DEFAULTS };
 }
 
-function Toggle({ label, body, checked, onChange }: {
-  label: string; body: string; checked: boolean; onChange: (v: boolean) => void;
-}) {
-  return (
-    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", padding: "7px 0", borderBottom: "1px solid var(--shell-line)" }}>
-      <div style={{ minWidth: 0 }}>
-        <strong style={{ display: "block", fontSize: 13 }}>{label}</strong>
-        <span className="panel-sub" style={{ fontSize: 12 }}>{body}</span>
-      </div>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={checked}
-        aria-label={label}
-        onClick={() => onChange(!checked)}
-        style={{
-          width: 40, height: 22, borderRadius: 999, border: 0, cursor: "pointer", flex: "none",
-          background: checked ? "var(--shell-teal)" : "#CBD5E1", position: "relative",
-        }}
-      >
-        <span style={{
-          position: "absolute", top: 2, left: checked ? 20 : 2, width: 18, height: 18,
-          borderRadius: "50%", background: "#fff", transition: "left .15s",
-        }} />
-      </button>
-    </div>
-  );
-}
-
 /** Provider mark for integrations with no backend connection endpoint.
  *  Uses the shared stroke icon set (never letter placeholders) tinted per
  *  provider. The mark is iconography only — connection state stays honest
@@ -180,7 +155,7 @@ function IntegrationMark({ name }: { name: string }) {
  *  density choices with plain boxes (no live app preview). */
 function AppearancePreview({ accent, density, mode }: { accent: string; density: string; mode: string }) {
   const accents: Record<string, string> = {
-    "Teal (Default)": "#0A9183",
+    "Teal (Default)": "#00C7B2",
     "Blue": "#2F6FBE",
     "Violet": "#6D5BD0",
   };
@@ -221,6 +196,11 @@ export function SettingsPage() {
   const [saved, setSaved] = useState<Prefs>(() => ({ ...loadPrefs(), theme: mode }));
   const [status, setStatus] = useState("");
   const [sessionOp, setSessionOp] = useState<null | "password" | "logout" | "logout-all">(null);
+  // One adaptive button (§9): "Log Out All Sessions" only when the
+  // server reports several live sessions, plain "Log Out" for exactly
+  // one. An unknown count renders loading/retry — never a guess.
+  const { count: sessionCount, error: sessionError, reload: reloadSessions } = useSessionCount();
+  const multiSession = (sessionCount ?? 0) > 1;
   const employee = me?.employee;
   const dirty = JSON.stringify(prefs) !== JSON.stringify(saved);
 
@@ -228,11 +208,12 @@ export function SettingsPage() {
     const accent = ACCENTS[saved.accent] ?? ACCENTS["Teal (Default)"];
     document.documentElement.style.setProperty("--shell-teal", accent.teal);
     document.documentElement.style.setProperty("--shell-teal-dark", accent.dark);
+    document.documentElement.style.setProperty("--brand-teal", accent.teal);
+    document.documentElement.style.setProperty("--brand-teal-ink", accent.ink);
     document.body.dataset.density = saved.density === "Compact" ? "compact" : "";
   }, [saved.accent, saved.density]);
 
   if (!employee) return <p className="muted">Sign In To Manage Settings.</p>;
-  const name = `${employee.first_name} ${employee.last_name}`.trim() || employee.email;
   const setPref = <K extends keyof Prefs>(k: K, v: Prefs[K]) =>
     setPrefs((p) => ({ ...p, [k]: v }));
 
@@ -248,10 +229,10 @@ export function SettingsPage() {
     setStatus("Settings Saved.");
   };
   const reset = () => {
-    const next = { ...DEFAULTS, theme: "light" as const };
+    const next = { ...DEFAULTS, theme: "dark" as const };
     setPrefs(next);
     setSaved(next);
-    set("light");
+    set("dark");
     storageRemove();
     setStatus("Defaults Restored.");
   };
@@ -303,8 +284,8 @@ export function SettingsPage() {
   };
 
   const modes: Array<{ id: ThemeMode; label: string }> = [
-    { id: "light", label: "Light (Default)" },
-    { id: "dark", label: "Dark" },
+    { id: "light", label: "Light" },
+    { id: "dark", label: "Dark (Default)" },
     { id: "system", label: "System" },
   ];
 
@@ -316,13 +297,6 @@ export function SettingsPage() {
       />
       <div className="cols-2-even" style={{ marginTop: 12 }}>
           <Panel title="General Settings" icon="gear">
-            <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 12 }}>
-              <Avatar url={employee.avatar_url} label={name} />
-              <div>
-                <strong style={{ fontSize: 14 }}>{name}</strong>
-                <p className="panel-sub" style={{ margin: 0 }}>{employee.email}</p>
-              </div>
-            </div>
             <div className="filter-grid" style={{ gridTemplateColumns: "repeat(2,minmax(0,1fr))" }}>
               <div className="field">
                 <label htmlFor="s-workspace">Workspace Name</label>
@@ -376,7 +350,7 @@ export function SettingsPage() {
               checked={prefs.dataUsage} onChange={(v) => setPref("dataUsage", v)} />
             <Toggle label="Share Analytics Data" body="Contribute Anonymous Data To Benchmarks."
               checked={prefs.shareAnalytics} onChange={(v) => setPref("shareAnalytics", v)} />
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", padding: "10px 0" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", padding: "11px 0" }}>
               <div>
                 <strong style={{ display: "block", fontSize: 13.5 }}>Data Retention Period</strong>
                 <span className="panel-sub" title="Browser preference only — actual workspace retention is managed by your administrator.">Choose Your Preferred Data Retention Period.</span>
@@ -385,7 +359,7 @@ export function SettingsPage() {
                 {["12 Months", "24 Months", "36 Months"].map((o) => <option key={o}>{o}</option>)}
               </select>
             </div>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", padding: "10px 0" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", padding: "11px 0" }}>
               <div>
                 <strong style={{ display: "block", fontSize: 13.5 }}>Export Your Data</strong>
                 <span className="panel-sub">Download Your Account And Workspace Data.</span>
@@ -441,7 +415,7 @@ export function SettingsPage() {
             {dirty ? <p className="panel-sub">Unsaved changes — click Save Changes to apply.</p> : null}
           </Panel>
           <Panel title="Security" icon="lock">
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", padding: "10px 0", borderBottom: "1px solid var(--shell-line)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", padding: "11px 0", borderBottom: "1px solid var(--shell-line)" }}>
               <div>
                 <strong style={{ display: "block", fontSize: 13.5 }}>Password</strong>
                 <span className="panel-sub">Reset your password by email.</span>
@@ -453,26 +427,37 @@ export function SettingsPage() {
             {/* Two-factor enrolment lives with the sign-in provider, not
               in a browser preference: this control is explicitly
               unavailable rather than a toggle that proves nothing. */}
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", padding: "10px 0", borderBottom: "1px solid var(--shell-line)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", padding: "11px 0", borderBottom: "1px solid var(--shell-line)" }}>
               <div>
                 <strong style={{ display: "block", fontSize: 13.5 }}>Two-Factor Authentication</strong>
                 <span className="panel-sub">Managed by your sign-in provider or administrator.</span>
               </div>
               <span className="badge-demo" style={{ marginTop: 2, flexShrink: 0 }} title="Two-factor status comes from your sign-in provider">Unavailable</span>
             </div>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", padding: "10px 0", flexWrap: "wrap" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", padding: "11px 0", flexWrap: "wrap" }}>
               <div>
                 <strong style={{ display: "block", fontSize: 13.5 }}>Active Sessions</strong>
-                <span className="panel-sub">Manage your active sessions across devices.</span>
+                <span className="panel-sub">
+                  {sessionCount !== null
+                    ? `${sessionCount} Active Session${sessionCount === 1 ? "" : "s"} On This Account.`
+                    : sessionError
+                      ? "Could Not Load Sessions."
+                      : "Checking Sessions…"}
+                </span>
               </div>
-              <span style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <LoadingButton type="button" className="btn-outline" loading={sessionOp === "logout"} loadingLabel="Signing Out…" spinnerClass="spinner dark" disabled={sessionOp !== null} onClick={() => void runSessionOp("logout", logout)}>
-                  Log Out
+              {sessionCount !== null ? (
+                <LoadingButton type="button" className="btn-outline" loading={sessionOp !== null && sessionOp !== "password"} loadingLabel="Signing Out…" spinnerClass="spinner dark" disabled={sessionOp !== null} onClick={() => void runSessionOp(multiSession ? "logout-all" : "logout", multiSession ? logoutAll : logout)}>
+                  {multiSession ? "Log Out All Sessions" : "Log Out"}
                 </LoadingButton>
-                <LoadingButton type="button" className="btn-outline" loading={sessionOp === "logout-all"} loadingLabel="Signing Out…" spinnerClass="spinner dark" disabled={sessionOp !== null} onClick={() => void runSessionOp("logout-all", logoutAll)}>
-                  Log Out All Sessions
-                </LoadingButton>
-              </span>
+              ) : sessionError ? (
+                <button type="button" className="btn-outline" onClick={reloadSessions}>
+                  Retry
+                </button>
+              ) : (
+                <button type="button" className="btn-outline" disabled aria-busy="true">
+                  Checking Sessions…
+                </button>
+              )}
             </div>
           </Panel>
       </div>
@@ -489,9 +474,11 @@ export function SettingsPage() {
         </div>
       </details>
       <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10, marginTop: 12 }}>
-        <span className="panel-sub" role="status" style={{ marginRight: "auto" }}>
-          {status || (!dirty ? "No unsaved changes." : "Unsaved changes.")}
-        </span>
+        {status ? (
+          <span className="panel-sub" role="status" style={{ marginRight: "auto" }}>
+            {status}
+          </span>
+        ) : null}
         <button type="button" className="btn-outline" onClick={reset}>Reset Defaults</button>
         <button type="button" className="btn-primary" disabled={!dirty} onClick={save}>Save Changes</button>
       </div>

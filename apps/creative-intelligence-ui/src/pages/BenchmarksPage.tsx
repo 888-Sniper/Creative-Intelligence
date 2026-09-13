@@ -11,6 +11,7 @@ import {
   PageHeader,
   Panel,
   Skeleton,
+  fmtCell,
   fmtMoney,
   platformLabel,
   useCampaignMeta,
@@ -292,9 +293,13 @@ export function BenchmarksPage() {
               ) : <EmptyState compact icon="bookmark" title="No saved benchmarks" text="Use Create Benchmark to save the current setup." />
             )}
           </Panel>
+          {/* Both left panels share leftover column height so the
+            column bottom edge meets Learn More (right rail-stack is
+            grid-stretched to the same height; no fixed heights). */}
           <Panel
             title="Benchmark Results"
             sub="Benchmarks From Current Campaign Data"
+            style={{ flex: "1 0 auto" }}
             action={(
               <div className="panel-controls">
                 <label htmlFor="b-axis" className="panel-sub" style={{ margin: 0 }}>Group By</label>
@@ -338,10 +343,10 @@ export function BenchmarksPage() {
                           <td><span className="cell-main">{axisLabel(axis, r.key)}</span></td>
                           <td>All {axis === "platform" ? "Verticals" : "Platforms"}</td>
                           <td>{axis === "platform" ? axisLabel(axis, r.key) : "All Platforms"}</td>
-                          <td className="num">{metricVal(r, "cpm") == null ? "—" : fmtMoney(metricVal(r, "cpm") as number)}</td>
-                          <td className="num">{metricVal(r, "ctr") == null ? "—" : `${(metricVal(r, "ctr") as number).toFixed(1)}%`}</td>
-                          <td className="num">{metricVal(r, "cpa") == null ? "—" : fmtMoney(metricVal(r, "cpa") as number)}</td>
-                          <td className="num">{r.roas == null ? "—" : `${r.roas.toFixed(1)}x`}</td>
+                          <td className="num">{fmtCell(metricVal(r, "cpm"), (n) => fmtMoney(n as number))}</td>
+                          <td className="num">{fmtCell(metricVal(r, "ctr"), (n) => `${(n as number).toFixed(1)}%`)}</td>
+                          <td className="num">{fmtCell(metricVal(r, "cpa"), (n) => fmtMoney(n as number))}</td>
+                          <td className="num">{fmtCell(r.roas, (n) => `${n.toFixed(1)}x`)}</td>
                           <td className="num">{num(r.n_ads).toLocaleString()}</td>
                         </tr>
                       ))}
@@ -354,6 +359,7 @@ export function BenchmarksPage() {
             ) : <Skeleton height={200} />}
           </Panel>
           <Panel title="Compare Benchmarks" sub="Select up to 3 benchmarks to compare key metrics."
+            style={{ flex: "1 0 auto" }}
             action={selected.size ? (
               <button type="button" className="link-teal" onClick={() => setSelected(new Set())}>Clear All</button>
             ) : undefined}>

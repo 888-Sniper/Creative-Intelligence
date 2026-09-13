@@ -11,6 +11,7 @@ import {
   Panel,
   Skeleton,
   fmtCompact,
+  fmtCell,
   fmtMoney,
   platformLabel,
   useScopedApi,
@@ -127,33 +128,37 @@ function num(v: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+/* Missing measures in loaded data are an honest "Unavailable" via the
+ * shared cell helper — never a dash, never a fabricated zero. */
 function fmtPct(v: number | null | undefined): string {
-  if (v == null || !Number.isFinite(v)) return "—";
-  return `${(v > 1 ? v : v * 100).toFixed(1)}%`;
+  return fmtCell(v, (n) => `${(n > 1 ? n : n * 100).toFixed(1)}%`);
 }
 
 function fmtCard(kpi: (typeof CARD_KPIS)[number], v: number | null | undefined): string {
-  if (v == null || !Number.isFinite(v)) return "—";
-  if (kpi === "cpm" || kpi === "cpa") return fmtMoney(v);
-  if (kpi === "roas") return `${v.toFixed(1)}x`;
-  return fmtPct(v);
+  return fmtCell(v, (n) => {
+    if (kpi === "cpm" || kpi === "cpa") return fmtMoney(n);
+    if (kpi === "roas") return `${n.toFixed(1)}x`;
+    return `${(n > 1 ? n : n * 100).toFixed(1)}%`;
+  });
 }
 
 /* Period table values are formatted by unit — never dumped raw. Deltas
  * are absolute B−A differences with an explicit sign. */
 function fmtPeriod(kpi: string, v: number | null | undefined): string {
-  if (v == null || !Number.isFinite(v)) return "—";
-  if (kpi === "spend" || kpi === "cpm" || kpi === "cpc" || kpi === "cpa") return fmtMoney(v);
-  if (kpi === "roas") return `${v.toFixed(2)}x`;
-  if (kpi === "ctr" || kpi === "vtr" || kpi === "view_rate") return fmtPct(v);
-  return fmtCompact(v);
+  return fmtCell(v, (n) => {
+    if (kpi === "spend" || kpi === "cpm" || kpi === "cpc" || kpi === "cpa") return fmtMoney(n);
+    if (kpi === "roas") return `${n.toFixed(2)}x`;
+    if (kpi === "ctr" || kpi === "vtr" || kpi === "view_rate") return fmtPct(n);
+    return fmtCompact(n);
+  });
 }
 
 function fmtDelta(kpi: string, v: number | null | undefined): string {
-  if (v == null || !Number.isFinite(v)) return "—";
-  if (v === 0) return fmtPeriod(kpi, 0);
-  const sign = v > 0 ? "+" : "−";
-  return `${sign}${fmtPeriod(kpi, Math.abs(v))}`;
+  return fmtCell(v, (n) => {
+    if (n === 0) return fmtPeriod(kpi, 0);
+    const sign = n > 0 ? "+" : "−";
+    return `${sign}${fmtPeriod(kpi, Math.abs(n))}`;
+  });
 }
 
 function sideOf(data: CompareResponse, key: string): CreativeSide {
@@ -362,20 +367,25 @@ export function ComparePage() {
       const valid = names.filter((n) => linkMode === "campaigns"
         ? Object.hasOwn(campaignOptions.data ?? {}, n)
         : (creativeOptions.data ?? []).some((c) => c.creative_key === n));
+      // Preselect whatever the link resolves to, but only auto-run a
+      // genuinely comparable selection: no validation text before the
+      // user has attempted anything (the empty-state panel instructs).
+      setMode(linkMode);
+      setPicked(valid);
       if (valid.length >= 2) {
-        setMode(linkMode);
-        setPicked(valid);
         if (linkMode === "campaigns") void runCampaigns(valid, "roas");
         else void runCreatives(valid, "ctr");
-        return;
       }
+      return;
     }
     const top = Object.entries(campaignOptions.data)
       .sort((a, b) => num(b[1].spend) - num(a[1].spend))
       .slice(0, 4)
       .map(([n]) => n);
     setPicked(top);
-    void runCampaigns(top, "roas");
+    // Fewer than two available options: leave the empty state —
+    // never an alert before the user has done anything.
+    if (top.length >= 2) void runCampaigns(top, "roas");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [booted, campaignOptions.data, creativeOptions.data]);
 
@@ -589,6 +599,8 @@ export function ComparePage() {
   const addOption = (v: string) => {
     if (!v || picked.includes(v) || picked.length >= 4) return;
     setPicked((p) => [...p, v]);
+    // A fresh valid selection clears any earlier attempt validation.
+    setError("");
   };
   const removeOption = (v: string) => setPicked((p) => p.filter((x) => x !== v));
 
@@ -608,6 +620,13 @@ export function ComparePage() {
   const options = mode === "campaigns"
     ? Object.keys(campaignOptions.data ?? {})
     : (creativeOptions.data ?? []).map((c) => c.creative_key);
+  /* Empty-state hierarchy (§4): "no data" only when the mode's option
+   * request resolved cleanly with zero options — loading or failure
+   * is an incomplete selection, never a verified zero. */
+  const modeOptionsResolved = mode === "campaigns"
+    ? !campaignOptions.loading && campaignOptions.error === ""
+    : !creativeOptions.loading && creativeOptions.error === "";
+  const modeEmpty = modeOptionsResolved && options.length === 0;
   const optionLabel = (v: string) => {
     if (mode === "campaigns") return v;
     return metaByKey[v]?.name || v;
@@ -667,7 +686,7 @@ export function ComparePage() {
               ))}
             </select>
           </div>
-          <LoadingButton type="button" className="btn-primary" loading={loading} loadingLabel="Comparing…" disabled={loading} onClick={apply}>
+          <LoadingButton type="button" className="btn-primary" loading={loading} loadingLabel="Comparing…" disabled={loading || picked.length < 2} onClick={apply} title={picked.length < 2 ? "Select at least two items to compare" : undefined}>
             Apply Comparison
           </LoadingButton>
         </div>
@@ -843,7 +862,16 @@ export function ComparePage() {
           <EmptyState
             compact
             icon="compare"
-            text="Pick two to four campaigns or creatives above, then Apply Comparison."
+            title={modeEmpty
+              ? (mode === "creatives" ? "No Creatives Yet" : "No Campaigns Yet")
+              : "No Comparison Yet"}
+            text={modeEmpty
+              ? (mode === "creatives"
+                ? "Add creatives to start comparing."
+                : "Add campaigns to start comparing.")
+              : (mode === "creatives"
+                ? "Select two to four creatives to compare."
+                : "Select two to four campaigns to compare.")}
           />
         </Panel>
       ) : null}

@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "@/api/client";
+import { useAuth } from "@/auth/AuthProvider";
+import { useSessionCount } from "@/auth/useSessionCount";
 import { Icon } from "@/components/icons";
-import { EmptyState, PageHeader, Panel } from "@/components/product";
+import { EmployeeAvatar, EmptyState, PageHeader, Panel, Toggle, plural } from "@/components/product";
 import { LoadingButton } from "@/components/LoadingButton";
+import { loadNotificationPrefs, saveNotificationPrefs } from "@/state/notificationPrefs";
 import type { MeResponse, PublicEmployee } from "@/types/auth";
 
 interface ProfileResponse {
@@ -37,54 +40,18 @@ export function friendlyDate(raw: string): string {
   });
 }
 
-function daypart(): string {
-  const h = new Date().getHours();
-  if (h < 12) return "Good Morning";
-  if (h < 18) return "Good Afternoon";
-  return "Good Evening";
-}
-
-/** Legacy avatar_html parity: provider avatar URL when set, else initials.
- *  Display logic only — a manual avatar is never overwritten on login
- *  (the server fills empty fields when linking, never clobbers). */
-function ProfileAvatar({ employee, size = 64 }: { employee: PublicEmployee; size?: number }) {
-  const url = employee.avatar_url || "";
-  if (url) {
-    return (
-      <img
-        className="avatar"
-        src={url}
-        alt=""
-        referrerPolicy="no-referrer"
-        style={{ width: size, height: size }}
-      />
-    );
-  }
-  const first = ((employee.first_name || "") || " ")[0] || "?";
-  const last = ((employee.last_name || "") || " ")[0] || "";
-  return (
-    <span
-      className="avatar"
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        fontWeight: 700,
-        width: size,
-        height: size,
-        fontSize: Math.round(size * 0.32),
-      }}
-    >
-      {`${first}${last}`.trim() || "?"}
-    </span>
-  );
-}
-
 /** Employee profile (legacy Web/Index.html v-profile). Email is a verified
  *  identity and stays read-only; first/last name plus avatar URL save via
  *  PATCH /api/auth/me, manual image uploads go to POST /api/auth/me/avatar
  *  as multipart FormData, and removal clears via {avatar_url: ""}. */
 export function ProfilePage() {
+  const { logout, refresh } = useAuth();
+  // Genuine session state for the single adaptive logout action (§9):
+  // unknown renders loading/retry, never an invented count.
+  const { count: sessionCount, error: sessionError, reload: reloadSessions } = useSessionCount();
+  const multiSession = (sessionCount ?? 0) > 1;
+  const [notif, setNotif] = useState(loadNotificationPrefs);
+  const [notifStatus, setNotifStatus] = useState("");
   const [employee, setEmployee] = useState<PublicEmployee | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -163,6 +130,9 @@ export function ProfilePage() {
       const r = await api<ProfileResponse>("PATCH", "/api/auth/me", payload);
       applyEmployee(r.employee);
       if (fileRef.current) fileRef.current.value = "";
+      // Header/account menu reads the auth identity: re-fetch it so the
+      // new photo appears everywhere without a hard reload.
+      void refresh();
       setStatus("Saved.");
     } catch (e: unknown) {
       setStatus(e instanceof Error ? e.message : String(e));
@@ -178,6 +148,7 @@ export function ProfilePage() {
     try {
       const r = await api<ProfileResponse>("PATCH", "/api/auth/me", { avatar_url: "" });
       applyEmployee(r.employee);
+      void refresh();
       setStatus("Avatar Removed.");
     } catch (e: unknown) {
       setStatus(e instanceof Error ? e.message : String(e));
@@ -186,18 +157,37 @@ export function ProfilePage() {
     }
   };
 
-  const revokeAll = async () => {
-    if (op !== null) return;
+  /* Single adaptive logout (§9): the action always matches the label
+   *  rendered from the same server count — one session ends just this
+   *  session, several revoke everything (with confirmation). */
+  const signOut = async () => {
+    if (op !== null || sessionCount === null) return;
+    if (multiSession && !window.confirm(
+      "Log Out All Sessions? Every device and browser signed in as this account is signed out immediately.",
+    )) return;
     setOp("revoke");
     setSessionStatus("");
     try {
-      const r = await api<RevokeResponse>("POST", "/api/auth/sessions/revoke-all", {});
-      setSessionStatus(`Signed Out Of ${Number(r.revoked ?? 0)} Session(s).`);
+      if (multiSession) {
+        const r = await api<RevokeResponse>("POST", "/api/auth/sessions/revoke-all", {});
+        await refresh();
+        setSessionStatus(`Signed Out Of ${plural(Number(r.revoked ?? 0), "Session")}.`);
+      } else {
+        await logout();
+      }
     } catch (e: unknown) {
       setSessionStatus(e instanceof Error ? e.message : String(e));
     } finally {
       setOp((cur) => (cur === "revoke" ? null : cur));
     }
+  };
+
+  /* Notification quick-preferences (§3): same localStorage source and
+   * merge semantics as Settings — preference only, no delivery claim. */
+  const setNotifPref = (patch: { emailReports?: boolean; productUpdates?: boolean }) => {
+    const { prefs, saved } = saveNotificationPrefs(patch);
+    setNotif(prefs);
+    setNotifStatus(saved ? "Preferences Saved." : "Could Not Save Preferences In This Browser.");
   };
 
   const heroStats = employee ? [
@@ -223,12 +213,18 @@ export function ProfilePage() {
       {!loading && !loadError && !employee && <p className="muted">Signed Out.</p>}
       {!loading && !loadError && employee && (
         <>
-          <Panel title="Profile Card" sub="How you appear across the workspace.">
-            {/* Hero: left = avatar + identity + actions, right =
-              greeting + account stats (not a full-width row below). */}
+          {/* Hero card (§2): no "Profile Card" header, no greeting — the
+            account-summary stack sits at the top, aligned with the
+            identity block. */}
+          <Panel>
             <div className="profile-hero">
               <div className="profile-hero-left">
-                <ProfileAvatar employee={employee} size={140} />
+                <EmployeeAvatar
+                  url={employee.avatar_url || ""}
+                  name={displayName(employee)}
+                  email={employee.email || ""}
+                  size={140}
+                />
                 <div style={{ minWidth: 0 }}>
                   <p style={{ margin: "2px 0 0", fontSize: 22, fontWeight: 800, color: "var(--shell-navy)" }}>
                     {displayName(employee)}
@@ -245,16 +241,18 @@ export function ProfilePage() {
                     <button type="button" className="btn-outline" onClick={() => firstRef.current?.focus()}>
                       <Icon name="user" size={14} /> Edit Profile
                     </button>
-                    <button type="button" className="btn-primary" onClick={() => fileRef.current?.click()}>
+                    <button
+                      type="button"
+                      className="btn-primary"
+                      title="JPEG, PNG or WebP, up to 2 MB"
+                      onClick={() => fileRef.current?.click()}
+                    >
                       <Icon name="download" size={14} /> Upload Photo
                     </button>
                   </div>
                 </div>
               </div>
               <div className="profile-hero-right">
-                <p style={{ margin: 0, fontSize: 15, color: "var(--shell-muted)" }}>
-                  {daypart()}, {employee.first_name || displayName(employee)}
-                </p>
                 {heroStats.map((s) => (
                   <div key={s.label} style={{ background: "var(--shell-bg)", border: "1px solid var(--shell-line)", borderRadius: 10, padding: "10px 12px", minWidth: 0 }}>
                     <p className="panel-sub" style={{ margin: 0, fontSize: 11.5 }}>{s.label}</p>
@@ -313,9 +311,6 @@ export function ProfilePage() {
                   />
                 </div>
               </details>
-              <p className="panel-sub" style={{ marginTop: 10 }}>
-                …Or upload an image (JPEG/PNG/WebP, up to 2 MB) with Upload Photo above.
-              </p>
               <div className="chip-row" style={{ marginTop: 12 }}>
                 <LoadingButton type="button" className="btn-primary" loading={op === "save"} loadingLabel="Saving…" disabled={op !== null} onClick={() => void save()}>
                   Save Profile
@@ -359,7 +354,7 @@ export function ProfilePage() {
                 </div>
                 <div>
                   <dt>Work Email</dt>
-                  <dd>{employee.email ? `${employee.email} (verified)` : "—"}</dd>
+                  <dd>{employee.email || "—"}</dd>
                 </div>
                 <div>
                   <dt>Role</dt>
@@ -407,26 +402,55 @@ export function ProfilePage() {
 
           <div className="section-gap" />
           <div className="cols-3">
-            <Panel title="Security" sub="Protect every session on every device.">
-              <p className="panel-sub" style={{ marginTop: 0 }}>
-                Signing out everywhere revokes all sessions immediately — you will need to sign in again on each device.
-              </p>
-              <div className="chip-row" style={{ marginTop: 12 }}>
-                <LoadingButton type="button" className="btn-outline" loading={op === "revoke"} loadingLabel="Signing Out…" spinnerClass="spinner dark" disabled={op !== null} onClick={() => void revokeAll()}>
-                  Log Out Everywhere
-                </LoadingButton>
-                <span className="panel-sub" role="status" style={{ margin: 0 }}>
+            <Panel title="Security">
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", padding: "14px 0", borderBottom: "1px solid var(--shell-line)" }}>
+                <div style={{ minWidth: 0 }}>
+                  <strong style={{ display: "block", fontSize: 13 }}>Two-Factor Authentication</strong>
+                  <span className="panel-sub" style={{ fontSize: 12 }}>Managed by your sign-in provider or administrator.</span>
+                </div>
+                <span className="badge-demo" style={{ flexShrink: 0 }} title="Two-factor status comes from your sign-in provider">Unavailable</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", padding: "14px 0" }}>
+                <div style={{ minWidth: 0 }}>
+                  <strong style={{ display: "block", fontSize: 13 }}>Active Sessions</strong>
+                  <span className="panel-sub" style={{ fontSize: 12 }}>
+                    {sessionCount !== null
+                      ? `${plural(sessionCount, "Active Session")} On This Account.`
+                      : sessionError
+                        ? "Could Not Load Sessions."
+                        : "Checking Sessions…"}
+                  </span>
+                </div>
+                {sessionCount !== null ? (
+                  <LoadingButton type="button" className="btn-outline" loading={op === "revoke"} loadingLabel="Signing Out…" spinnerClass="spinner dark" disabled={op !== null} onClick={() => void signOut()}>
+                    {multiSession ? "Log Out All Sessions" : "Log Out"}
+                  </LoadingButton>
+                ) : sessionError ? (
+                  <button type="button" className="btn-outline" onClick={reloadSessions}>
+                    Retry
+                  </button>
+                ) : (
+                  <button type="button" className="btn-outline" disabled aria-busy="true">
+                    Checking Sessions…
+                  </button>
+                )}
+              </div>
+              {sessionStatus ? (
+                <p className="panel-sub" role="status" style={{ margin: "4px 0 0", fontSize: 12 }}>
                   {sessionStatus}
-                </span>
-              </div>
+                </p>
+              ) : null}
             </Panel>
-            <Panel title="Notifications" sub="Choose what you want to be notified about.">
-              <p className="panel-sub" style={{ marginTop: 0 }}>
-                Email and in-app notification preferences live in Settings and apply to this account.
-              </p>
-              <div style={{ marginTop: 12 }}>
-                <a className="btn-soft" href="/settings">Manage In Settings</a>
-              </div>
+            <Panel title="Notifications">
+              <Toggle label="Email Reports" body="Receive Reports And Insights By Email."
+                checked={notif.emailReports} onChange={(v) => setNotifPref({ emailReports: v })} />
+              <Toggle label="Product Updates" body="Get Updates On New Features."
+                checked={notif.productUpdates} onChange={(v) => setNotifPref({ productUpdates: v })} />
+              {notifStatus ? (
+                <p className="panel-sub" role="status" style={{ margin: "8px 0 0", fontSize: 12 }}>
+                  {notifStatus}
+                </p>
+              ) : null}
             </Panel>
             <Panel title="Recent Activity" sub="Latest account events.">
               {activity.every((a) => a.value === "—") ? (

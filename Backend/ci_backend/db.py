@@ -32,6 +32,10 @@ class Employee(Base):
     first_name: Mapped[str] = mapped_column(String, default="")
     last_name: Mapped[str] = mapped_column(String, default="")
     avatar_url: Mapped[str] = mapped_column(String, default="")
+    # "1" when the employee deliberately cleared their avatar: later
+    # provider photos must not silently restore it. Any explicit new
+    # photo (upload or URL) resets this to "".
+    avatar_removed: Mapped[str] = mapped_column(String, default="")
     role: Mapped[str] = mapped_column(String, default="employee")
     status: Mapped[str] = mapped_column(String, default="pending")
     created_at: Mapped[str] = mapped_column(String, default="")

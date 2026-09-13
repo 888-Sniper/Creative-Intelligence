@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { AuthProvider } from "@/auth/AuthProvider";
 import { ProfilePage } from "@/profile/ProfilePage";
 import type { MeResponse } from "@/types/auth";
 
@@ -28,9 +29,10 @@ const me: MeResponse = {
   workos_configured: true,
 };
 
-function mockMeFetch() {
+function mockMeFetch(sessions = 1) {
   window.fetch = vi.fn(async (input: string | URL | Request) => {
     if (String(input) === "/api/auth/me") return Response.json(me);
+    if (String(input) === "/api/auth/sessions") return Response.json({ count: sessions });
     return Response.json({});
   }) as unknown as typeof fetch;
 }
@@ -43,11 +45,12 @@ describe("ProfilePage", () => {
 
   it("renders with mocked data", async () => {
     mockMeFetch();
-    render(<ProfilePage />);
+    render(<AuthProvider><ProfilePage /></AuthProvider>);
     await waitFor(() => {
       expect(screen.getByText("Ada Lovelace")).toBeDefined();
     });
-    expect(screen.getByText("ada@foap.test")).toBeDefined();
+    // Bare address on both the hero and Workspace surfaces — no suffix.
+    expect(screen.getAllByText("ada@foap.test")).toHaveLength(2);
     expect(screen.getByText("Employee · Active")).toBeDefined();
     expect(screen.getByText(/Team — · Member since/)).toBeDefined();
     expect(screen.getByText(/Signed in via Google/)).toBeDefined();
@@ -63,7 +66,20 @@ describe("ProfilePage", () => {
     ).toBe("");
     expect(screen.getByRole("button", { name: "Save Profile" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Remove Avatar" })).toBeDefined();
-    expect(screen.getByRole("button", { name: "Log Out Everywhere" })).toBeDefined();
+    // Single live session: exactly one adaptive logout button.
+    expect(screen.getByRole("button", { name: "Log Out" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Log Out All Sessions" })).toBeNull();
+    expect(screen.getByText("1 Active Session On This Account.")).toBeDefined();
+    // Security rows: provider-managed 2FA, no fake setup flow.
+    expect(screen.getByText("Two-Factor Authentication")).toBeDefined();
+    expect(screen.getByText("Managed by your sign-in provider or administrator.")).toBeDefined();
+    // Notification quick-preferences mirror Settings controls.
+    expect(screen.getByRole("switch", { name: "Email Reports" })).toBeDefined();
+    expect(screen.getByRole("switch", { name: "Product Updates" })).toBeDefined();
+    // Simplified hero: no card title, no greeting, no verified suffix.
+    expect(screen.queryByText("Profile Card")).toBeNull();
+    expect(screen.queryByText(/Good (Morning|Afternoon|Evening)/)).toBeNull();
+    expect(screen.queryByText(/\(verified\)/)).toBeNull();
     // No avatar URL set: initials fallback.
     expect(screen.getByText("AL")).toBeDefined();
   });
@@ -75,7 +91,7 @@ describe("ProfilePage", () => {
         employee: { ...employee, avatar_url: "https://cdn.test/a.png" },
       }),
     ) as unknown as typeof fetch;
-    render(<ProfilePage />);
+    render(<AuthProvider><ProfilePage /></AuthProvider>);
     await waitFor(() => {
       expect(screen.getByText("Ada Lovelace")).toBeDefined();
     });
@@ -90,7 +106,7 @@ describe("ProfilePage", () => {
     window.fetch = vi.fn(
       () => new Promise<Response>(() => {}),
     ) as unknown as typeof fetch;
-    render(<ProfilePage />);
+    render(<AuthProvider><ProfilePage /></AuthProvider>);
     expect(screen.getByText("Loading Profile…")).toBeDefined();
   });
 
@@ -98,7 +114,7 @@ describe("ProfilePage", () => {
     window.fetch = vi.fn(async () =>
       Response.json({ error: "db is locked" }, { status: 409 }),
     ) as unknown as typeof fetch;
-    render(<ProfilePage />);
+    render(<AuthProvider><ProfilePage /></AuthProvider>);
     await waitFor(() => {
       expect(screen.getByText("db is locked")).toBeDefined();
     });
@@ -115,7 +131,7 @@ describe("ProfilePage", () => {
       }
       return Response.json({});
     }) as unknown as typeof fetch;
-    render(<ProfilePage />);
+    render(<AuthProvider><ProfilePage /></AuthProvider>);
     await waitFor(() => {
       expect(screen.getByText("Ada Lovelace")).toBeDefined();
     });
@@ -155,7 +171,7 @@ describe("ProfilePage", () => {
       }
       return Response.json({});
     }) as unknown as typeof fetch;
-    render(<ProfilePage />);
+    render(<AuthProvider><ProfilePage /></AuthProvider>);
     await waitFor(() => {
       expect(screen.getByText("Ada Lovelace")).toBeDefined();
     });
@@ -197,7 +213,7 @@ describe("ProfilePage", () => {
       }
       return Response.json({});
     }) as unknown as typeof fetch;
-    render(<ProfilePage />);
+    render(<AuthProvider><ProfilePage /></AuthProvider>);
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Remove Avatar" })).toBeDefined();
     });
@@ -207,23 +223,46 @@ describe("ProfilePage", () => {
     });
   });
 
-  it("logs out everywhere via POST /api/auth/sessions/revoke-all", async () => {
+  it("revokes all sessions only when the server reports several", async () => {
     window.fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
       const method = init?.method ?? "GET";
       if (url === "/api/auth/me" && method === "GET") return Response.json(me);
+      if (url === "/api/auth/sessions" && method === "GET") return Response.json({ count: 2 });
       if (url === "/api/auth/sessions/revoke-all" && method === "POST") {
         return Response.json({ ok: true, revoked: 2 });
       }
       return Response.json({});
     }) as unknown as typeof fetch;
-    render(<ProfilePage />);
+    window.confirm = vi.fn(() => true) as unknown as typeof window.confirm;
+    render(<AuthProvider><ProfilePage /></AuthProvider>);
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Log Out Everywhere" })).toBeDefined();
+      expect(screen.getByRole("button", { name: "Log Out All Sessions" })).toBeDefined();
     });
-    fireEvent.click(screen.getByRole("button", { name: "Log Out Everywhere" }));
+    expect(screen.queryByRole("button", { name: "Log Out" })).toBeNull();
+    expect(screen.getByText("2 Active Sessions On This Account.")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Log Out All Sessions" }));
     await waitFor(() => {
-      expect(screen.getByText("Signed Out Of 2 Session(s).")).toBeDefined();
+      expect(screen.getByText("Signed Out Of 2 Sessions.")).toBeDefined();
     });
+  });
+
+  it("shows a retry state instead of inventing a session count", async () => {
+    window.fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url === "/api/auth/me" && method === "GET") return Response.json(me);
+      if (url === "/api/auth/sessions" && method === "GET") {
+        return Response.json({ error: "db is locked" }, { status: 409 });
+      }
+      return Response.json({});
+    }) as unknown as typeof fetch;
+    render(<AuthProvider><ProfilePage /></AuthProvider>);
+    await waitFor(() => {
+      expect(screen.getByText("Could Not Load Sessions.")).toBeDefined();
+    });
+    expect(screen.getByRole("button", { name: "Retry" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Log Out" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Log Out All Sessions" })).toBeNull();
   });
 });

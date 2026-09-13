@@ -633,7 +633,7 @@ export function ReportsPage() {
                 <LoadingButton type="button" className="btn-primary" loading={busy} loadingLabel="Generating…" disabled={busy || campaigns === null} onClick={generate}>
                   <Icon name="spark" size={16} /> Generate Report
                 </LoadingButton>
-                <p className="panel-sub">Estimated generation time: 1–2 minutes</p>
+                <p className="panel-sub">Estimated time: 1–2 minutes</p>
               </div>
             </div>
             {status ? <p className="panel-sub" role="status" style={{ marginTop: 8 }}>{status}</p> : null}
@@ -750,16 +750,16 @@ export function ReportsPage() {
                 <div><h4>Focus on Key KPIs</h4><p>Include 3–5 core metrics to keep your report clear and impactful.</p></div>
               </li>
               <li>
-                <span className="insight-ico" style={{ background: "#E5F5EC" }}><Icon name="users" size={18} /></span>
-                <div><h4>Use Benchmarks for Context</h4><p>Compare against workspace benchmarks to highlight performance.</p></div>
+                <span className="insight-ico" style={{ background: "#E5F5EC" }}><Icon name="target" size={18} /></span>
+                <div><h4>Tailor to Your Audience</h4><p>Customize your report based on stakeholders – from creative teams to executive leadership.</p></div>
               </li>
               <li>
                 <span className="insight-ico" style={{ background: "#E7F1FB" }}><Icon name="report" size={18} /></span>
                 <div><h4>Choose the Right Format</h4><p>Use a deck for presentations, XLSX for deep analysis, or a one-pager for quick sharing.</p></div>
               </li>
               <li>
-                <span className="insight-ico" style={{ background: "#E5F5EC" }}><Icon name="target" size={18} /></span>
-                <div><h4>Tailor to Your Audience</h4><p>Customize your report based on stakeholders – from creative teams to executive leadership.</p></div>
+                <span className="insight-ico" style={{ background: "#E5F5EC" }}><Icon name="users" size={18} /></span>
+                <div><h4>Use Benchmarks for Context</h4><p>Compare against workspace benchmarks to highlight performance.</p></div>
               </li>
             </ul>
           </Panel>

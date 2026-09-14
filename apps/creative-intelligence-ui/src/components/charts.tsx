@@ -11,9 +11,20 @@ function niceTicks(max: number, count = 5): number[] {
   const step = niceMax(max) / (count - 1);
   return Array.from({ length: count }, (_, i) => step * i);
 }
-export function fmtAxis(n: number): string {
-  if (n >= 1_000_000) return `${+(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${+(n / 1_000).toFixed(1)}K`;
+export function fmtAxis(n: number, locale = "en"): string {
+  // Axis tick labels through the UI locale; English output matches the
+  // previous literals exactly (compact, at most one decimal).
+  const abs = Math.abs(n);
+  if (abs >= 1_000) {
+    try {
+      return new Intl.NumberFormat(locale, {
+        notation: "compact", maximumFractionDigits: 1,
+      }).format(n);
+    } catch {
+      if (abs >= 1_000_000) return `${+(n / 1_000_000).toFixed(1)}M`;
+      return `${+(n / 1_000).toFixed(1)}K`;
+    }
+  }
   return `${Math.round(n)}`;
 }
 
@@ -23,7 +34,7 @@ export interface TrendSeries {
 export function TrendChart({ series, labels, height = 240, ticks = 5 }: {
   series: TrendSeries[]; labels: string[]; height?: number; ticks?: number;
 }) {
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
   const W = 640, H = 240, PL = 40, PB = 24, PT = 8, PR = 40;
   const leftMax = Math.max(1, ...series.filter((s) => (s.axis ?? "left") === "left").flatMap((s) => s.points));
   const rightValues = series.filter((s) => s.axis === "right").flatMap((s) => s.points);
@@ -50,13 +61,13 @@ export function TrendChart({ series, labels, height = 240, ticks = 5 }: {
         <g key={g}>
           <line x1={PL} x2={W - PR} y1={y(g)} y2={y(g)} stroke="#E5EAF1" strokeWidth={1} />
           <text x={PL - 7} y={y(g) + 4} textAnchor="end" fontSize={10.5} fill="#8CA0B5">
-            {fmtAxis(g)}
+            {fmtAxis(g, locale)}
           </text>
         </g>
       ))}
       {rightGrid.map((g) => (
         <text key={`r-${g}`} x={W - PR + 7} y={y(g, "right") + 4} textAnchor="start" fontSize={10.5} fill="#8CA0B5">
-          {fmtAxis(g)}
+          {fmtAxis(g, locale)}
         </text>
       ))}
       {series.map((s) => (
@@ -94,7 +105,7 @@ export function GroupBars({ groups, height = 230, format }: {
   groups: BarGroup[]; height?: number;
   format?: (v: number) => string;
 }) {
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
   const W = 560, H = 230, PL = 36, PB = 24, PT = 8, PR = 8;
   const max = Math.max(1, ...groups.flatMap((g) => [g.yours, g.bench]));
   const top = niceMax(max);
@@ -102,7 +113,7 @@ export function GroupBars({ groups, height = 230, format }: {
   const y = (v: number) => PT + (H - PT - PB) * (1 - v / top);
   const slot = (W - PL - PR) / Math.max(1, groups.length);
   const bw = Math.min(30, slot / 4.4);
-  const fmt = format ?? fmtAxis;
+  const fmt = format ?? ((v: number) => fmtAxis(v, locale));
   return (
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height, display: "block" }}
       role="img" aria-label={t("charts.bars")}>

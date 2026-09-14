@@ -1,6 +1,22 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useLocale } from "@/i18n";
 
+/* Local one-decimal percent (product.tsx already imports this
+ * module, so the shared fmtPct would be a module cycle): the %
+ * sign travels with the number because every trend.* template
+ * expects it inside {abs}. */
+function pct1(v: number, locale: string): string {
+  // Up to one decimal (never forced): integers still print "+12%",
+  // matching the previous display exactly in English.
+  try {
+    return `${new Intl.NumberFormat(locale, {
+      maximumFractionDigits: 1,
+    }).format(v)}%`;
+  } catch {
+    return `${v}%`;
+  }
+}
+
 export type TrendDirection = "up" | "down" | "flat";
 export type TrendSentiment = "good" | "bad" | "neutral";
 export type TrendState = "compared" | "new" | "none";
@@ -58,9 +74,9 @@ export function formatRange(period: KpiPeriod, locale = "en-US"): string {
 
 const ARROWS: Record<TrendDirection, string> = { up: "↑", down: "↓", flat: "→" };
 
-function signed(pct: number): string {
+function signed(pct: number, locale = "en"): string {
   const rounded = Math.round(pct * 10) / 10;
-  return rounded > 0 ? `+${rounded}%` : `${rounded}%`;
+  return (rounded > 0 ? "+" : "") + pct1(rounded, locale);
 }
 
 export interface KpiTrendProps {
@@ -191,13 +207,13 @@ export function KpiTrend({ metricLabel, comparison, previous }: KpiTrendProps) {
     tip = range ? t("trend.flatWithRange", { range })
       : t("trend.flat");
   } else {
-    const abs = pct === null ? "" : `${Math.abs(Math.round(pct * 10) / 10)}%`;
+    const abs = pct === null ? "" : pct1(Math.abs(Math.round(pct * 10) / 10), locale);
     const word = direction === "up" ? t("trend.higher") : t("trend.lower");
     tip = range ? t("trend.deltaWithRange", { metric: metricLabel, abs, word, range })
       : t("trend.delta", { metric: metricLabel, abs, word });
   }
 
-  const shown = state === "new" ? t("trend.isNew") : pct === null ? null : signed(pct);
+  const shown = state === "new" ? t("trend.isNew") : pct === null ? null : signed(pct, locale);
   if (shown === null) return null;
 
   return (

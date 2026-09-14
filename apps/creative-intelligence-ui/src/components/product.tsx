@@ -7,23 +7,66 @@ import { Icon } from "@/components/icons";
 import { useLocale } from "@/i18n";
 
 /* ---------- formatting (display only; calculations stay backend-side) --- */
-export function fmtCompact(n: number): string {
+/* All numeric formatters take the UI locale (§9): Intl renders the
+ * decimal separators, grouping and compact suffixes; English output
+ * is byte-identical to the previous literals. Calculations stay
+ * backend-side — these only shape display strings. */
+function decimal(n: number, locale: string, min: number, max: number): string {
+  return new Intl.NumberFormat(locale, {
+    minimumFractionDigits: min, maximumFractionDigits: max,
+  }).format(n);
+}
+export function fmtCompact(n: number, locale = "en"): string {
   const abs = Math.abs(n);
-  if (abs >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (abs >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  if (abs >= 1_000) {
+    try {
+      // Always one decimal ("25.0K"), matching the previous literals.
+      return new Intl.NumberFormat(locale, {
+        notation: "compact",
+        minimumFractionDigits: 1, maximumFractionDigits: 1,
+      }).format(n);
+    } catch {
+      if (abs >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+      return `${(n / 1_000).toFixed(1)}K`;
+    }
+  }
   return `${Math.round(n)}`;
 }
-export function fmtMoney(n: number): string {
+export function fmtMoney(n: number, locale = "en"): string {
   const abs = Math.abs(n);
-  if (abs >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
-  if (abs >= 1_000) return `$${(n / 1_000).toFixed(1)}K`;
-  return `$${n.toFixed(0)}`;
+  if (abs >= 1_000) {
+    try {
+      return new Intl.NumberFormat(locale, {
+        style: "currency", currency: "USD",
+        notation: "compact",
+        minimumFractionDigits: 1, maximumFractionDigits: 1,
+      }).format(n);
+    } catch {
+      if (abs >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+      return `$${(n / 1_000).toFixed(1)}K`;
+    }
+  }
+  try {
+    return new Intl.NumberFormat(locale, {
+      style: "currency", currency: "USD", maximumFractionDigits: 0,
+    }).format(n);
+  } catch {
+    return `$${n.toFixed(0)}`;
+  }
 }
-export function fmtMult(n: number): string {
-  return `${n.toFixed(1)}x`;
+export function fmtMult(n: number, locale = "en"): string {
+  try {
+    return `${decimal(n, locale, 1, 1)}x`;
+  } catch {
+    return `${n.toFixed(1)}x`;
+  }
 }
-export function fmtPct(n: number, digits = 1): string {
-  return `${n.toFixed(digits)}%`;
+export function fmtPct(n: number, digits = 1, locale = "en"): string {
+  try {
+    return `${decimal(n, locale, digits, digits)}%`;
+  } catch {
+    return `${n.toFixed(digits)}%`;
+  }
 }
 
 /* ------- numeric KPI data states (shared; §4 empty-vs-unknown) --------
@@ -38,21 +81,31 @@ export const KPI_UNAVAILABLE = "Unavailable";
 export const EMPTY_KPI_NOTE = "No data yet; displayed zero is a placeholder.";
 export function kpiDisplay(
   kind: KpiKind, value: number | null | undefined, empty: boolean,
+  locale = "en", unavailable: string = KPI_UNAVAILABLE,
 ): string {
   if (value == null || !Number.isFinite(value)) {
-    if (!empty) return KPI_UNAVAILABLE;
+    if (!empty) return unavailable;
+    // Empty-scope zero placeholders render through the UI locale.
     switch (kind) {
-      case "money": return "$0.00";
-      case "mult": return "0.0x";
-      case "pct": return "0.0%";
-      case "count": return "0";
+      case "money":
+        try {
+          return new Intl.NumberFormat(locale, {
+            style: "currency", currency: "USD",
+            minimumFractionDigits: 2, maximumFractionDigits: 2,
+          }).format(0);
+        } catch {
+          return "$0.00";
+        }
+      case "mult": return fmtMult(0, locale);
+      case "pct": return fmtPct(0, 1, locale);
+      case "count": return fmtCompact(0, locale);
     }
   }
   switch (kind) {
-    case "money": return fmtMoney(value);
-    case "mult": return fmtMult(value);
-    case "pct": return fmtPct(value);
-    case "count": return fmtCompact(value);
+    case "money": return fmtMoney(value, locale);
+    case "mult": return fmtMult(value, locale);
+    case "pct": return fmtPct(value, 1, locale);
+    case "count": return fmtCompact(value, locale);
   }
 }
 /** Accessible context for empty ratio/percentage zero placeholders. */
@@ -68,9 +121,12 @@ export function kpiPlaceholderNote(
 /** Table numeric cell: a missing or non-finite measure in loaded data
  *  is an honest "Unavailable", never a dash masquerading as zero or
  *  vice versa. Non-numeric display values pass through untouched. */
-export function fmtCell<T>(value: T | null | undefined, fmt: (v: T) => string): string {
-  if (value == null) return KPI_UNAVAILABLE;
-  if (typeof value === "number" && !Number.isFinite(value)) return KPI_UNAVAILABLE;
+export function fmtCell<T>(
+  value: T | null | undefined, fmt: (v: T) => string,
+  unavailable: string = KPI_UNAVAILABLE,
+): string {
+  if (value == null) return unavailable;
+  if (typeof value === "number" && !Number.isFinite(value)) return unavailable;
   return fmt(value);
 }
 /** Count-aware unit: plural(1, "Campaign") is "1 Campaign",

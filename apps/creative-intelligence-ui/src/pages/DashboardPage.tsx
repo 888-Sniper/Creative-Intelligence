@@ -18,6 +18,8 @@ import {
   Skeleton,
   compareDisplayed,
   fmtCompact,
+  fmtMult,
+  fmtPct,
   KpiKind,
   kpiDisplay,
   kpiPlaceholderNote,
@@ -117,20 +119,22 @@ function percentDiff(current: number, base: number): number | null {
   return ((current - base) / Math.abs(base)) * 100;
 }
 
+// Option values are stable backend ids; display names always go
+// through kpiName() (filters.kpis.*) so ES/PL render localized.
 const TREND_METRICS = [
-  { value: "impressions", label: "Impressions" },
-  { value: "clicks", label: "Clicks" },
-  { value: "spend", label: "Spend" },
-  { value: "conversions", label: "Conversions" },
+  { value: "impressions" },
+  { value: "clicks" },
+  { value: "spend" },
+  { value: "conversions" },
 ] as const;
 
 type TrendMetric = (typeof TREND_METRICS)[number]["value"];
 
 const BENCH_METRICS = [
-  { value: "ctr", label: "CTR" },
-  { value: "roas", label: "ROAS" },
-  { value: "cpa", label: "CPA" },
-  { value: "cpc", label: "CPC" },
+  { value: "ctr" },
+  { value: "roas" },
+  { value: "cpa" },
+  { value: "cpc" },
 ] as const;
 
 type BenchMetric = (typeof BENCH_METRICS)[number]["value"];
@@ -154,16 +158,30 @@ function baselineValue(groups: BenchGroup[], metric: BenchMetric): number | null
   return clicks ? spend / clicks : null;
 }
 
-function formatBench(metric: BenchMetric, value: number | null): string {
+function formatBench(metric: BenchMetric, value: number | null, locale = "en"): string {
   if (value == null || !Number.isFinite(value)) return "—";
-  if (metric === "ctr") return `${value.toFixed(1)}%`;
-  if (metric === "roas") return `${value.toFixed(1)}x`;
-  return `$${value.toFixed(2)}`;
+  if (metric === "ctr") return fmtPct(value, 1, locale);
+  if (metric === "roas") return fmtMult(value, locale);
+  try {
+    return new Intl.NumberFormat(locale, {
+      style: "currency", currency: "USD",
+      minimumFractionDigits: 2, maximumFractionDigits: 2,
+    }).format(value);
+  } catch {
+    return `$${value.toFixed(2)}`;
+  }
 }
 
 export function DashboardPage() {
   const { me } = useAuth();
-  const { t, locale } = useLocale();
+  const { t, locale, fmtNum } = useLocale();
+  const unavailable = t("common.unavailable");
+  const emptyNote = t("dashboard.emptyKpiNote");
+  // Bare decimals for sentence templates (the % / x suffix lives in
+  // the template so ES can space it: "{ctr} %").
+  const dec1 = (v: number): string =>
+    fmtNum(v, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const dec0 = (v: number): string => fmtNum(v, { maximumFractionDigits: 0 });
   const kpiName = (id: string): string => {
     const key = `filters.kpis.${id.toLowerCase()}`;
     const hit = t(key);
@@ -367,12 +385,12 @@ export function DashboardPage() {
             ? t("dashboard.insights.hookTieTitle", { a: hookName(a.key), b: hookName(b.key) })
             : t("dashboard.insights.hookLeadTitle", { a: hookName(a.key) }),
           body: tied
-            ? t("dashboard.insights.hookTieBody", { a: hookName(a.key), b: hookName(b.key), ctr: (a.ctr ?? 0).toFixed(1) })
+            ? t("dashboard.insights.hookTieBody", { a: hookName(a.key), b: hookName(b.key), ctr: dec1(a.ctr ?? 0) })
             : t("dashboard.insights.hookLeadBody", {
                 a: hookName(a.key),
-                ctr: (a.ctr ?? 0).toFixed(1),
+                ctr: dec1(a.ctr ?? 0),
                 diff: diff != null
-                  ? t("dashboard.insights.vsDiff", { sign: diff >= 0 ? "+" : "", pct: diff.toFixed(0), b: hookName(b.key) })
+                  ? t("dashboard.insights.vsDiff", { sign: diff >= 0 ? "+" : "", pct: dec0(diff), b: hookName(b.key) })
                   : "",
               }),
           action: t("dashboard.insights.viewCreatives"),
@@ -400,13 +418,13 @@ export function DashboardPage() {
             ? t("dashboard.insights.creatorTieTitle")
             : t("dashboard.insights.creatorLeadTitle", { top: topName, bottom: bottomName }),
           body: verdict === "tie"
-            ? t("dashboard.insights.creatorTieBody", { ctr: topCtr.toFixed(1) })
+            ? t("dashboard.insights.creatorTieBody", { ctr: dec1(topCtr) })
             : t("dashboard.insights.creatorLeadBody", {
                 top: topName,
-                topCtr: topCtr.toFixed(1),
-                bottomCtr: bottomCtr.toFixed(1),
+                topCtr: dec1(topCtr),
+                bottomCtr: dec1(bottomCtr),
                 bottom: bottomName,
-                diff: diff != null ? t("dashboard.insights.pctDiff", { sign: diff >= 0 ? "+" : "", pct: diff.toFixed(0) }) : "",
+                diff: diff != null ? t("dashboard.insights.pctDiff", { sign: diff >= 0 ? "+" : "", pct: dec0(diff) }) : "",
               }),
           action: t("dashboard.insights.exploreCreatives"),
           href: "/creatives",
@@ -424,7 +442,7 @@ export function DashboardPage() {
             icon: "tiktok",
             tint: "var(--shell-blue-soft)",
             title: t("dashboard.insights.platformTieTitle"),
-            body: t("dashboard.insights.platformTieBody", { roas: tiktok.roas.toFixed(1) }),
+            body: t("dashboard.insights.platformTieBody", { roas: dec1(tiktok.roas) }),
             action: t("dashboard.insights.viewCampaigns"),
             href: "/campaigns",
           });
@@ -438,10 +456,10 @@ export function DashboardPage() {
             title: t("dashboard.insights.platformLeadTitle", { leader: platformLabel(leader.key) }),
             body: t("dashboard.insights.platformLeadBody", {
               leader: platformLabel(leader.key),
-              leaderRoas: (leader.roas ?? 0).toFixed(1),
-              trailerRoas: (trailer.roas ?? 0).toFixed(1),
+              leaderRoas: dec1(leader.roas ?? 0),
+              trailerRoas: dec1(trailer.roas ?? 0),
               trailer: platformLabel(trailer.key),
-              diff: diff != null ? t("dashboard.insights.pctDiff", { sign: diff >= 0 ? "+" : "", pct: diff.toFixed(0) }) : "",
+              diff: diff != null ? t("dashboard.insights.pctDiff", { sign: diff >= 0 ? "+" : "", pct: dec0(diff) }) : "",
             }),
             action: t("dashboard.insights.viewCampaigns"),
             href: "/campaigns",
@@ -463,8 +481,8 @@ export function DashboardPage() {
           tint: "var(--shell-blue-soft)",
           title: t("dashboard.insights.durationLeadTitle"),
           body: t("dashboard.insights.durationLeadBody", {
-            ctr: sweet.ctr.toFixed(1),
-            diff: diff != null ? t("dashboard.insights.aboveNext", { sign: diff >= 0 ? "+" : "", pct: diff.toFixed(0) }) : "",
+            ctr: dec1(sweet.ctr),
+            diff: diff != null ? t("dashboard.insights.aboveNext", { sign: diff >= 0 ? "+" : "", pct: dec0(diff) }) : "",
           }),
           action: t("dashboard.insights.seeRecommendations"),
           href: "/insights",
@@ -474,14 +492,14 @@ export function DashboardPage() {
           icon: "play",
           tint: "var(--shell-blue-soft)",
           title: t("dashboard.insights.durationTieTitle"),
-          body: t("dashboard.insights.durationTieBody", { ctr: sweet.ctr.toFixed(1) }),
+          body: t("dashboard.insights.durationTieBody", { ctr: dec1(sweet.ctr) }),
           action: t("dashboard.insights.seeRecommendations"),
           href: "/insights",
         });
       }
     }
     return items.slice(0, 4);
-  }, [hookRows, modeRows, platforms.data, durationRows, t]);
+  }, [hookRows, modeRows, platforms.data, durationRows, t, fmtNum]);
 
   const nearThree = useMemo(() => {
     if (!curve?.length) return null;
@@ -492,8 +510,8 @@ export function DashboardPage() {
   // a loaded nonempty scope with an uncomputable metric says Unavailable.
   const emptyScope = compare ? compare.current_n_ads === 0 : false;
   const kpi = (kind: KpiKind, value: number | null | undefined) => ({
-    display: compare ? kpiDisplay(kind, value, emptyScope) : "",
-    note: compare ? kpiPlaceholderNote(kind, value, emptyScope) : null,
+    display: compare ? kpiDisplay(kind, value, emptyScope, locale, unavailable) : "",
+    note: compare && kpiPlaceholderNote(kind, value, emptyScope) ? emptyNote : null,
   });
   const kpiConfigs = [
     { label: t("dashboard.totalImpressions"), metric: "impressions", ...kpi("count", compare?.metrics.impressions?.current), icon: "users", tint: "var(--shell-teal-soft)", color: "var(--glyph-teal)" },
@@ -567,7 +585,7 @@ export function DashboardPage() {
               <select aria-label={t("dashboard.trends.leftAria")} value={leftMetric} onChange={(e) => setLeftMetric(e.target.value as TrendMetric)}>
                 {TREND_METRICS.map((m) => <option key={m.value} value={m.value}>{kpiName(m.value)}</option>)}
               </select>
-              <span className="mini-vs">vs.</span>
+              <span className="mini-vs">{t("dashboard.trends.versus")}</span>
               <select aria-label={t("dashboard.trends.rightAria")} value={rightMetric} onChange={(e) => setRightMetric(e.target.value as TrendMetric)}>
                 {TREND_METRICS.map((m) => <option key={m.value} value={m.value}>{kpiName(m.value)}</option>)}
               </select>
@@ -594,7 +612,7 @@ export function DashboardPage() {
               <select aria-label={t("dashboard.bench.metricAria")} value={benchMetric} onChange={(e) => setBenchMetric(e.target.value as BenchMetric)}>
                 {BENCH_METRICS.map((m) => <option key={m.value} value={m.value}>{kpiName(m.value)}</option>)}
               </select>
-              <span className="mini-vs">vs.</span>
+              <span className="mini-vs">{t("dashboard.trends.versus")}</span>
               <select aria-label={t("dashboard.bench.baselineAria")} value={baseline} onChange={(e) => setBaseline(e.target.value)}>
                 <option value="Scope Average">{t("dashboard.bench.scopeAverage")}</option>
                 <option value="Top Performer">{t("dashboard.bench.topPerformer")}</option>
@@ -614,7 +632,7 @@ export function DashboardPage() {
                       ? Math.max(...platformGroups.map((x) => x.value ?? 0))
                       : platformBaseline ?? 0,
                   }))}
-                  format={(v) => formatBench(benchMetric, v)}
+                  format={(v) => formatBench(benchMetric, v, locale)}
                 />
                 <div className="legend">
                   <span><i style={{ background: "#0A9183", borderRadius: 2 }} />{t("dashboard.bench.yours")}</span>
@@ -669,10 +687,10 @@ export function DashboardPage() {
                               </span>
                             </td>
                             <td title={c.campaigns?.[0] ?? undefined}>{c.campaigns?.[0] ?? "—"}</td>
-                            <td className="num">{fmtCompact(num(c.metrics?.impressions))}</td>
-                            <td className="num">{ctr == null ? "—" : `${ctr.toFixed(1)}%`}</td>
-                            <td className="num">{cvr == null ? "—" : `${cvr.toFixed(1)}%`}</td>
-                            <td className="num">{roas == null ? "—" : `${roas.toFixed(1)}x`}</td>
+                            <td className="num">{fmtCompact(num(c.metrics?.impressions), locale)}</td>
+                            <td className="num">{ctr == null ? "—" : fmtPct(ctr, 1, locale)}</td>
+                            <td className="num">{cvr == null ? "—" : fmtPct(cvr, 1, locale)}</td>
+                            <td className="num">{roas == null ? "—" : fmtMult(roas, locale)}</td>
                             <td>
                               <Link className="icon-btn" to="/creatives" aria-label={t("dashboard.topCreatives.openIn", { name: c.name || c.creative_key })}>
                                 <Icon name="dots" size={18} />
@@ -726,10 +744,10 @@ export function DashboardPage() {
                       <li><Icon name="check" size={13} /><span>{t("dashboard.retention.watchingAt3", { pct: Math.round(nearThree[1]), name: topCreatives[0]?.name || t("dashboard.retention.topCreative") })}</span></li>
                     ) : null}
                     {hookRows[0]?.ctr != null ? (
-                      <li><Icon name="check" size={13} /><span>{t("dashboard.retention.hooksLead", { hook: hookName(hookRows[0].key), ctr: (hookRows[0].ctr ?? 0).toFixed(1) })}</span></li>
+                      <li><Icon name="check" size={13} /><span>{t("dashboard.retention.hooksLead", { hook: hookName(hookRows[0].key), ctr: dec1(hookRows[0].ctr ?? 0) })}</span></li>
                     ) : null}
                     {durationRows.find((r) => r.key === "15–30s")?.ctr != null ? (
-                      <li><Icon name="check" size={13} /><span>{t("dashboard.retention.sweetLength", { ctr: (durationRows.find((r) => r.key === "15–30s")?.ctr ?? 0).toFixed(1) })}</span></li>
+                      <li><Icon name="check" size={13} /><span>{t("dashboard.retention.sweetLength", { ctr: dec1(durationRows.find((r) => r.key === "15–30s")?.ctr ?? 0) })}</span></li>
                     ) : null}
                     {!nearThree && hookRows[0]?.ctr == null && durationRows.find((r) => r.key === "15–30s")?.ctr == null ? (
                       <li className="muted">{t("dashboard.retention.noTakeaways")}</li>
@@ -742,21 +760,21 @@ export function DashboardPage() {
               hooks.loading ? (
                 <Skeleton height={190} />
               ) : hookCompare.length ? (
-                <GroupBars height={190} groups={hookCompare} format={(v) => `${v.toFixed(1)}%`} />
+                <GroupBars height={190} groups={hookCompare} format={(v) => fmtPct(v, 1, locale)} />
               ) : <EmptyState compact verbatim icon="spark" title={t("dashboard.retention.hookEmptyTitle")} text={t("dashboard.retention.hookEmptyBody")} />
             ) : null}
             {tab === "length" ? (
               creatives.loading ? (
                 <Skeleton height={190} />
               ) : lengthCompare.length ? (
-                <GroupBars height={190} groups={lengthCompare} format={(v) => `${v.toFixed(1)}%`} />
+                <GroupBars height={190} groups={lengthCompare} format={(v) => fmtPct(v, 1, locale)} />
               ) : <EmptyState compact verbatim icon="play" title={t("dashboard.retention.durationEmptyTitle")} text={t("dashboard.retention.durationEmptyBody")} />
             ) : null}
             {tab === "format" ? (
               creatives.loading ? (
                 <Skeleton height={190} />
               ) : formatCompare.length ? (
-                <GroupBars height={190} groups={formatCompare} format={(v) => `${v.toFixed(1)}%`} />
+                <GroupBars height={190} groups={formatCompare} format={(v) => fmtPct(v, 1, locale)} />
               ) : <EmptyState compact verbatim icon="grid" title={t("dashboard.retention.formatEmptyTitle")} text={t("dashboard.retention.formatEmptyBody")} />
             ) : null}
           </Panel>

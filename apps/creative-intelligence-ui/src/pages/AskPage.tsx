@@ -86,7 +86,11 @@ export function bucket(points: Array<{ date: string; revenue: number }>): { labe
 
 export function AskPage() {
   const { scope } = useFilters();
-  const { t, fmtDate } = useLocale();
+  const { t, fmtDate, fmtNum, locale } = useLocale();
+  const unavailable = t("common.unavailable");
+  const emptyNote = t("ask.emptyKpiNote");
+  const dec1 = (v: number): string =>
+    fmtNum(v, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
   const defaultQuestion = t("ask.defaultQuestion");
   const [question, setQuestion] = useState(defaultQuestion);
   const [asked, setAsked] = useState("");
@@ -163,8 +167,8 @@ export function AskPage() {
       const tied = rows.filter((r) => (r.roas ?? -1).toFixed(1) === top.toFixed(1));
       const name = (k: string) => (k === "meta" ? "Meta" : k === "tiktok" ? "TikTok" : k);
       out.push(tied.length > 1
-        ? t("ask.takeTie", { a: name(tied[0].key), b: tied.slice(1).map((r) => name(r.key)).join(", "), roas: top.toFixed(1) })
-        : t("ask.takeLead", { a: name(rows[0].key), roas: top.toFixed(1) }));
+        ? t("ask.takeTie", { a: name(tied[0].key), b: tied.slice(1).map((r) => name(r.key)).join(", "), roas: dec1(top) })
+        : t("ask.takeLead", { a: name(rows[0].key), roas: dec1(top) }));
     }
     const hookRows = Object.entries(hooks.data ?? {})
       .map(([key, g]) => ({ key, ctr: g.ctr == null ? null : g.ctr * 100 }))
@@ -175,13 +179,13 @@ export function AskPage() {
       const hit = t(`filters.hooks.${raw}`);
       const hook = hit === `filters.hooks.${raw}` ? raw.replace(/_/g, " ") : hit;
       const cap = hook.charAt(0).toUpperCase() + hook.slice(1);
-      out.push(t("ask.takeHook", { hook: cap, ctr: (hookRows[0].ctr ?? 0).toFixed(1) }));
+      out.push(t("ask.takeHook", { hook: cap, ctr: dec1(hookRows[0].ctr ?? 0) }));
     }
     if (answer?.sources?.length) {
       out.push(t("ask.takeGrounded", { sources: answer.sources.join(", "), scope: answer.scope || t("ask.allData") }));
     }
     return out.slice(0, 3);
-  }, [platforms.data, hooks.data, answer, t]);
+  }, [platforms.data, hooks.data, answer, t, fmtNum]);
 
   const emptyScope = compare ? compare.current_n_ads === 0 : false;
   const kpiDefs: Array<{ label: string; metric: string; kind: KpiKind; value: number | null | undefined }> = compare ? [
@@ -192,8 +196,8 @@ export function AskPage() {
   ] : [];
   const kpis = kpiDefs.map((k) => ({
     ...k,
-    display: kpiDisplay(k.kind, k.value, emptyScope),
-    note: kpiPlaceholderNote(k.kind, k.value, emptyScope),
+    display: kpiDisplay(k.kind, k.value, emptyScope, locale, unavailable),
+    note: kpiPlaceholderNote(k.kind, k.value, emptyScope) ? emptyNote : null,
   }));
 
   return (
@@ -278,7 +282,10 @@ export function AskPage() {
                       {platforms.data ? (
                         <p className="panel-sub">
                           {Object.entries(platforms.data).map(([k, g]) =>
-                            `${k === "meta" ? "Meta" : k === "tiktok" ? "TikTok" : k}: ${g.roas == null ? "—" : `${g.roas.toFixed(1)}x`} ROAS`,
+                            g.roas == null ? "—" : t("ask.platformRoas", {
+                              platform: k === "meta" ? "Meta" : k === "tiktok" ? "TikTok" : k,
+                              roas: dec1(g.roas),
+                            }),
                           ).join(" · ") || t("ask.noPlatforms")}
                         </p>
                       ) : <Skeleton height={60} />}

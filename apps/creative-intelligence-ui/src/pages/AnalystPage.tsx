@@ -13,7 +13,8 @@ import {
   compareDisplayed,
   fmtCell,
   fmtCompact,
-  KPI_UNAVAILABLE,
+  fmtMult,
+  fmtPct,
   kpiDisplay,
   platformLabel,
   useCampaignMeta,
@@ -235,7 +236,9 @@ function LabeledBars({ rows, format, color = "#0A9183" }: {
 function LengthCombo({ rows }: {
   rows: Array<{ label: string; ctr: number; roas: number | null }>;
 }) {
-  const { t } = useLocale();
+  const { t, fmtNum, locale } = useLocale();
+  const dec1 = (v: number): string =>
+    fmtNum(v, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
   const w = 560;
   const h = 190;
   const padL = 44;
@@ -254,7 +257,7 @@ function LengthCombo({ rows }: {
   return (
     <div>
       <svg viewBox={`0 0 ${w} ${h}`} role="img"
-        aria-label={rows.map((r) => t("analyst.comboAria", { label: r.label, ctr: r.ctr.toFixed(1) })).join("; ")}
+        aria-label={rows.map((r) => t("analyst.comboAria", { label: r.label, ctr: dec1(r.ctr) })).join("; ")}
         style={{ width: "100%", height: "auto", display: "block" }}>
         {[0, 0.5, 1].map((t) => {
           const y = padT + ih * (1 - t);
@@ -262,7 +265,7 @@ function LengthCombo({ rows }: {
             <g key={t}>
               <line x1={padL} x2={w - 6} y1={y} y2={y} stroke="var(--shell-line)" strokeWidth="1" />
               <text x={padL - 7} y={y + 4} textAnchor="end" fontSize="11" fill="var(--shell-faint)">
-                {(maxCtr * t).toFixed(1)}%
+                {fmtPct(maxCtr * t, 1, locale)}
               </text>
             </g>
           );
@@ -277,7 +280,7 @@ function LengthCombo({ rows }: {
               <rect x={x} y={y} width={bw} height={bh} rx="5" fill="#0A9183" />
               <text x={x + bw / 2} y={y - 6} textAnchor="middle" fontSize="12"
                 fontWeight="700" fill="var(--shell-navy)">
-                {r.ctr.toFixed(1)}%
+                {fmtPct(r.ctr, 1, locale)}
               </text>
               <text x={padL + slot * i + slot / 2} y={h - 8} textAnchor="middle"
                 fontSize="12" fill="var(--shell-muted)">
@@ -310,7 +313,13 @@ function LengthCombo({ rows }: {
 
 export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
   const { filters, setFilter, clearFilters, applyPresetDays, scope } = useFilters();
-  const { t, tp, fmtDate } = useLocale();
+  const { t, tp, fmtDate, fmtNum, locale: uiLocale } = useLocale();
+  const unavailable = t("common.unavailable");
+  // Bare decimals for sentence templates (the % / x suffix lives in
+  // the template so ES can space it: "{ctr} %").
+  const dec1 = (v: number): string =>
+    fmtNum(v, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const dec0 = (v: number): string => fmtNum(v, { maximumFractionDigits: 0 });
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -678,18 +687,18 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
     if (bestHook?.ctr != null) {
       parts.push(t("analyst.hookLead", {
         hook: hookName(t, bestHook.key),
-        ctr: bestHook.ctr.toFixed(1),
-        lift: hookLift != null && hookLift > 0 ? t("analyst.liftAbove", { pct: hookLift.toFixed(0) }) : "",
+        ctr: dec1(bestHook.ctr),
+        lift: hookLift != null && hookLift > 0 ? t("analyst.liftAbove", { pct: dec0(hookLift) }) : "",
       }));
     }
     if (bestPlat?.roas != null) {
-      parts.push(t("analyst.platLead", { plat: platformLabel(bestPlat.key), roas: bestPlat.roas.toFixed(1) }));
+      parts.push(t("analyst.platLead", { plat: platformLabel(bestPlat.key), roas: dec1(bestPlat.roas) }));
     }
     if (bestLength?.ctr != null) {
-      parts.push(t("analyst.lenLead", { band: bestLength.label, ctr: bestLength.ctr.toFixed(1) }));
+      parts.push(t("analyst.lenLead", { band: bestLength.label, ctr: dec1(bestLength.ctr) }));
     }
     return parts.join(" ");
-  }, [scopeReady, creatives.data, bestHook, hookLift, bestPlat, bestLength, t, tp]);
+  }, [scopeReady, creatives.data, bestHook, hookLift, bestPlat, bestLength, t, tp, fmtNum]);
 
   // Empty loaded scope shows zero placeholders; loaded errors say
   // Unavailable. Loading renders a skeleton upstream, never these.
@@ -699,8 +708,8 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
   // the loaded scope genuinely holds no records.
   const emptyScope = !scopeReady && !scopeFailed;
   const liftDisplay = (lift: number | null | undefined): string => {
-    if (lift == null) return emptyScope ? "0%" : KPI_UNAVAILABLE;
-    return `${lift > 0 ? "+" : ""}${lift.toFixed(0)}%`;
+    if (lift == null) return emptyScope ? fmtPct(0, 0, uiLocale) : unavailable;
+    return (lift > 0 ? "+" : "") + fmtPct(lift, 0, uiLocale);
   };
   const statCards = [
     {
@@ -718,7 +727,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
       tint: "var(--shell-green-soft)",
     },
     {
-      value: kpiDisplay("mult", engagement.ready ? engagement.mult : null, emptyScope),
+      value: kpiDisplay("mult", engagement.ready ? engagement.mult : null, emptyScope, uiLocale, unavailable),
       label: t("analyst.moreEng"),
       sub: t("analyst.topVsAvg"),
       icon: "users",
@@ -727,7 +736,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
     {
       value: bestLength ? bestLength.label.replace("–", "-") : "—",
       label: t("analyst.optLen"),
-      sub: bestLength?.ctr != null ? t("analyst.ctrInBand", { ctr: bestLength.ctr.toFixed(1) }) : t("analyst.noDur"),
+      sub: bestLength?.ctr != null ? t("analyst.ctrInBand", { ctr: dec1(bestLength.ctr) }) : t("analyst.noDur"),
       icon: "bars",
       tint: "var(--shell-amber-soft)",
     },
@@ -747,7 +756,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
     const out: string[] = [];
     if (bestHook) out.push(t("analyst.testScale", { hook: hookName(t, bestHook.key) }));
     if (bestPlat?.roas != null) {
-      out.push(t("analyst.testShift", { plat: platformLabel(bestPlat.key), roas: bestPlat.roas.toFixed(1) }));
+      out.push(t("analyst.testShift", { plat: platformLabel(bestPlat.key), roas: dec1(bestPlat.roas) }));
     }
     if (bestLength) out.push(t("analyst.testCut", { band: bestLength.label }));
     if (brandRows.some((r) => r.ctr != null)) {
@@ -755,7 +764,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
       if (top) out.push(t("analyst.testBrand", { band: top.label }));
     }
     return out.slice(0, 4);
-  }, [storedFindings, bestHook, bestPlat, bestLength, brandRows, t]);
+  }, [storedFindings, bestHook, bestPlat, bestLength, brandRows, t, fmtNum]);
 
   const relatedInsights = useMemo(() => {
     // Stat-derived only: finding signals render once, in Stored
@@ -770,12 +779,12 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
         const hb = hookName(t, runner.key);
         out.push(verdict === "tie" ? {
           title: t("analyst.relHookTieTitle", { a: ha, b: hb }),
-          body: t("analyst.relHookTieBody", { a: ha, b: hb, ctr: bestHook.ctr.toFixed(1) }),
+          body: t("analyst.relHookTieBody", { a: ha, b: hb, ctr: dec1(bestHook.ctr) }),
         } : {
           title: t("analyst.relHookLeadTitle", { a: ha }),
           body: t("analyst.relHookLeadBody", {
-            a: ha, ctr: bestHook.ctr.toFixed(1),
-            diff: `${diff >= 0 ? "+" : ""}${diff.toFixed(1)}`, b: hb,
+            a: ha, ctr: dec1(bestHook.ctr),
+            diff: (diff >= 0 ? "+" : "") + dec1(diff), b: hb,
           }),
         });
       }
@@ -790,18 +799,18 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
         const pb = platformLabel(runner.key);
         out.push({
           title: t("analyst.relPlatTieTitle", { a: pa, b: pb }),
-          body: t("analyst.relPlatTieBody", { a: pa, b: pb, roas: bestPlat.roas.toFixed(1) }),
+          body: t("analyst.relPlatTieBody", { a: pa, b: pb, roas: dec1(bestPlat.roas) }),
         });
       } else if (verdict === "lead") {
         out.push({
           title: t("analyst.relPlatLeadTitle", { a: pa }),
-          body: t("analyst.relPlatLeadBody", { a: pa, roas: bestPlat.roas.toFixed(1) }),
+          body: t("analyst.relPlatLeadBody", { a: pa, roas: dec1(bestPlat.roas) }),
         });
       } else if (verdict === "unknown" && !runner) {
         // Single platform in scope: state the number without crowning it.
         out.push({
           title: t("analyst.relPlatSnapTitle", { a: pa }),
-          body: t("analyst.relPlatSnapBody", { a: pa, roas: bestPlat.roas.toFixed(1) }),
+          body: t("analyst.relPlatSnapBody", { a: pa, roas: dec1(bestPlat.roas) }),
         });
       }
     }
@@ -813,17 +822,17 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
       if (verdict === "tie") {
         out.push({
           title: t("analyst.relLenTieTitle", { a: bestLength.label }),
-          body: t("analyst.relLenTieBody", { a: bestLength.label, ctr: bestLength.ctr.toFixed(1) }),
+          body: t("analyst.relLenTieBody", { a: bestLength.label, ctr: dec1(bestLength.ctr) }),
         });
       } else if (verdict === "lead") {
         out.push({
           title: t("analyst.relLenLeadTitle", { a: bestLength.label }),
-          body: t("analyst.relLenLeadBody", { a: bestLength.label, ctr: bestLength.ctr.toFixed(1) }),
+          body: t("analyst.relLenLeadBody", { a: bestLength.label, ctr: dec1(bestLength.ctr) }),
         });
       }
     }
     return out.slice(0, 3);
-  }, [bestHook, hookRows.rows, bestPlat, bestLength, t]);
+  }, [bestHook, hookRows.rows, bestPlat, bestLength, t, fmtNum]);
 
   const topCreatives = useMemo(() => {
     const rows = creatives.data ?? [];
@@ -1194,7 +1203,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
           {hooks.data === null ? <Skeleton height={200} /> : hookRows.rows.length ? (
             <LabeledBars
               rows={hookRows.rows.slice(0, 5).map((r) => ({ label: hookName(t, r.key), value: r.ctr ?? 0 }))}
-              format={(v) => `${v.toFixed(1)}%`}
+              format={(v) => fmtPct(v, 1, uiLocale)}
             />
           ) : <EmptyState lift text={t("analyst.noHooks")} />}
         </Panel>
@@ -1209,7 +1218,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
           {creatives.data === null ? <Skeleton height={200} /> : brandRows.some((r) => r.ctr != null) ? (
             <LabeledBars
               rows={brandRows.filter((r) => r.ctr != null).map((r) => ({ label: r.label, value: r.ctr ?? 0 }))}
-              format={(v) => `${v.toFixed(1)}%`}
+              format={(v) => fmtPct(v, 1, uiLocale)}
               color="#3B82C4"
             />
           ) : <EmptyState lift text={t("analyst.noBrand")} />}
@@ -1268,9 +1277,9 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
                     (c.campaigns ?? [])[0] || ""].filter(Boolean).join(" · ")}
                 </p>
                 <div className="creative-stats">
-                  <span>{t("analyst.statCtr", { v: fmtCell(c.metrics?.ctr, (n) => `${(n * 100).toFixed(1)}%`) })}</span>
-                  <span>{t("analyst.statRoas", { v: fmtCell(c.metrics?.roas, (n) => `${n.toFixed(1)}x`) })}</span>
-                  <span>{t("analyst.statImpr", { n: fmtCompact(num(c.metrics?.impressions)) })}</span>
+                  <span>{t("analyst.statCtr", { v: fmtCell(c.metrics?.ctr, (n) => fmtPct(n * 100, 1, uiLocale), unavailable) })}</span>
+                  <span>{t("analyst.statRoas", { v: fmtCell(c.metrics?.roas, (n) => fmtMult(n, uiLocale), unavailable) })}</span>
+                  <span>{t("analyst.statImpr", { n: fmtCompact(num(c.metrics?.impressions), uiLocale) })}</span>
                 </div>
               </div>
             ))}

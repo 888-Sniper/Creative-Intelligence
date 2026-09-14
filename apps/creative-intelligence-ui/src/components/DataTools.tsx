@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, scopedPath } from "@/api/client";
 import { useFilters } from "@/state/FilterContext";
+import { useLocale } from "@/i18n";
 import { EmptyState, Panel, Skeleton } from "@/components/product";
 import { LoadingButton } from "@/components/LoadingButton";
 
@@ -53,13 +54,15 @@ interface CohortBuild {
 
 const METRIC_OPTIONS = ["cpa", "cpm", "ctr", "vtr", "roas"];
 
-function patternBits(p: RetentionPattern): string {
+type TFn = (key: string, vars?: Record<string, string | number>) => string;
+
+function patternBits(t: TFn, p: RetentionPattern): string {
   const bits: (string | null)[] = [
-    p.slot ? `during ${p.slot}` : "any segment",
-    p.product_demo ? "product demo on screen" : null,
-    p.brand_visible ? "brand visible" : null,
-    p.cta_present ? "CTA present" : null,
-    p.voiceover ? "voiceover running" : null,
+    p.slot ? t("dataTools.bits.during", { slot: p.slot }) : t("dataTools.bits.anySegment"),
+    p.product_demo ? t("dataTools.bits.demoOn") : null,
+    p.brand_visible ? t("dataTools.bits.brandVisible") : null,
+    p.cta_present ? t("dataTools.bits.ctaPresent") : null,
+    p.voiceover ? t("dataTools.bits.voiceover") : null,
   ];
   return bits.filter((b): b is string => b !== null).join(" · ");
 }
@@ -70,6 +73,7 @@ function splitList(raw: string): string[] {
 
 export function RetentionPatterns() {
   const { scope } = useFilters();
+  const { t, tp, fmtNum } = useLocale();
   const scopeKey = scope.toString();
   const [patterns, setPatterns] = useState<PatternsResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -102,30 +106,40 @@ export function RetentionPatterns() {
   const patternList = patterns?.patterns ?? [];
   return (
     <Panel
-      title="Retention Patterns"
-      sub="Where the scoped population normally loses viewers, aggregated across creatives."
+      title={t("dataTools.retentionTitle")}
+      sub={t("dataTools.retentionSub")}
     >
       {loading ? (
-        <p className="muted">Loading Retention Patterns…</p>
+        <DataToolsSkeleton />
       ) : error ? (
         <EmptyState text={error} />
       ) : !patternList.length ? (
         <EmptyState
-          text={`No steep drops in scope (${patterns?.scope || "All data"}, ${String(patterns?.n_creatives ?? 0)} creatives with curves).`}
+          text={t("dataTools.retentionEmpty", {
+            scope: patterns?.scope || t("dataTools.allData"),
+            n: patterns?.n_creatives ?? 0,
+          })}
         />
       ) : (
         <>
           <p className="panel-sub">
-            Scope: {patterns?.scope || "All data"} · {String(patterns?.n_creatives)} Creatives,{" "}
-            {String(patterns?.n_events)} Drop Events.
+            {t("dataTools.retentionScope", {
+              scope: patterns?.scope || t("dataTools.allData"),
+              n: patterns?.n_creatives ?? 0,
+              e: patterns?.n_events ?? 0,
+            })}
           </p>
           <ul className="rec-list">
             {patternList.slice(0, 8).map((pt, i) => (
               <li key={i}>
                 <strong>
-                  {pt.n_creatives} creative{pt.n_creatives === 1 ? "" : "s"}
+                  {pt.n_creatives} {tp("dataTools.creative", pt.n_creatives, { count: pt.n_creatives })}
                 </strong>{" "}
-                Lose ~{pt.avg_drop_pts} Pts (Max {pt.max_drop_pts}) {patternBits(pt)} — E.g.{" "}
+                {t("dataTools.loseLine", {
+                  avg: fmtNum(pt.avg_drop_pts, { maximumFractionDigits: 2 }),
+                  max: fmtNum(pt.max_drop_pts, { maximumFractionDigits: 2 }),
+                })}{" "}
+                {patternBits(t, pt)} — {t("dataTools.egPrefix")}{" "}
                 {(pt.examples || []).join(", ")}
               </li>
             ))}
@@ -138,6 +152,7 @@ export function RetentionPatterns() {
 
 export function CohortBuilder() {
   const { scope } = useFilters();
+  const { t, tp, fmtNum, fmtDate } = useLocale();
   const scopeKey = scope.toString();
   const [cohortName, setCohortName] = useState("");
   const [cohortMetric, setCohortMetric] = useState("cpa");
@@ -217,7 +232,9 @@ export function CohortBuilder() {
   async function createCohort(): Promise<void> {
     setBuildError("");
     try {
-      const name = cohortName.trim() || `Cohort ${new Date().toISOString().slice(0, 10)}`;
+      const name = cohortName.trim() || t("dataTools.defaultName", {
+        date: fmtDate(new Date().toISOString(), { month: "short", day: "numeric", year: "numeric" }),
+      });
       const saved = await api<Cohort>("POST", "/api/cohorts", {
         name,
         filters: cohortFiltersFromUi(),
@@ -230,26 +247,29 @@ export function CohortBuilder() {
   }
 
   const stats = build?.stats;
+  // Backend facts render through the UI locale; missing stays an em dash.
+  const fmtStat = (v: number | null | undefined): string =>
+    v == null || !Number.isFinite(v) ? "—" : fmtNum(v, { maximumFractionDigits: 2 });
   return (
     <Panel
-      title="Benchmark Builder"
-      sub="Saved cohorts persist server-side and start from the active filter scope."
+      title={t("dataTools.cohortTitle")}
+      sub={t("dataTools.cohortSub")}
     >
       <div className="filter-grid" style={{ gridTemplateColumns: "repeat(4,minmax(0,1fr))" }}>
         <div className="field">
-          <label htmlFor="dt-cohort-name">Name</label>
+          <label htmlFor="dt-cohort-name">{t("dataTools.nameLabel")}</label>
           <input
             id="dt-cohort-name"
             type="text"
-            aria-label="Cohort Name"
-            placeholder="e.g. Beauty TikTok lower"
+            aria-label={t("dataTools.nameAria")}
+            placeholder={t("dataTools.namePh")}
             value={cohortName}
             onChange={(e) => setCohortName(e.target.value)}
           />
         </div>
         <div className="field">
-          <label htmlFor="dt-cohort-metric">Metric</label>
-          <select id="dt-cohort-metric" aria-label="Cohort Metric" value={cohortMetric} onChange={(e) => setCohortMetric(e.target.value)}>
+          <label htmlFor="dt-cohort-metric">{t("dataTools.metricLabel")}</label>
+          <select id="dt-cohort-metric" aria-label={t("dataTools.metricAria")} value={cohortMetric} onChange={(e) => setCohortMetric(e.target.value)}>
             {METRIC_OPTIONS.map((m) => (
               <option key={m} value={m}>
                 {m.toUpperCase()}
@@ -258,23 +278,23 @@ export function CohortBuilder() {
           </select>
         </div>
         <div className="field">
-          <label htmlFor="dt-include">Include Projects (Comma-Separated)</label>
+          <label htmlFor="dt-include">{t("dataTools.includeLabel")}</label>
           <input
             id="dt-include"
             type="text"
-            aria-label="Include Projects"
-            placeholder="optional"
+            aria-label={t("dataTools.includeAria")}
+            placeholder={t("dataTools.optionalPh")}
             value={includeProjects}
             onChange={(e) => setIncludeProjects(e.target.value)}
           />
         </div>
         <div className="field">
-          <label htmlFor="dt-exclude">Exclude Projects (Comma-Separated)</label>
+          <label htmlFor="dt-exclude">{t("dataTools.excludeLabel")}</label>
           <input
             id="dt-exclude"
             type="text"
-            aria-label="Exclude Projects"
-            placeholder="optional"
+            aria-label={t("dataTools.excludeAria")}
+            placeholder={t("dataTools.optionalPh")}
             value={excludeProjects}
             onChange={(e) => setExcludeProjects(e.target.value)}
           />
@@ -282,36 +302,36 @@ export function CohortBuilder() {
       </div>
       <div className="filter-actions">
         <button type="button" className="btn-primary" onClick={() => void createCohort()}>
-          Create
+          {t("dataTools.create")}
         </button>
       </div>
       <div style={{ marginTop: 8 }}>
         {cohortsLoading ? (
-          <p className="muted">Loading Saved Cohorts…</p>
+          <DataToolsSkeleton />
         ) : cohortsError ? (
           <EmptyState text={cohortsError} />
         ) : !(cohorts ?? []).length ? (
-          <EmptyState text="No Saved Cohorts Yet." />
+          <EmptyState text={t("dataTools.noCohorts")} />
         ) : (
           <div className="tbl-wrap">
             <table className="tbl">
               <thead>
                 <tr>
-                  <th scope="col">Cohort</th>
-                  <th scope="col">Filters</th>
-                  <th scope="col"><span className="sr-only">Actions</span></th>
+                  <th scope="col">{t("dataTools.cohortCol")}</th>
+                  <th scope="col">{t("dataTools.filtersCol")}</th>
+                  <th scope="col"><span className="sr-only">{t("dataTools.actionsCol")}</span></th>
                 </tr>
               </thead>
               <tbody>
                 {(cohorts ?? []).map((c) => (
                   <tr key={c.id}>
                     <td><span className="cell-main">{c.name}</span></td>
-                    <td>{Object.keys(c.filters ?? {}).length} axes</td>
+                    <td>{tp("dataTools.axes", Object.keys(c.filters ?? {}).length, { count: Object.keys(c.filters ?? {}).length })}</td>
                     <td>
-                      <LoadingButton type="button" className="btn-outline" loading={buildingId === c.id} loadingLabel="Building…" spinnerClass="spinner dark"
+                      <LoadingButton type="button" className="btn-outline" loading={buildingId === c.id} loadingLabel={t("dataTools.building")} spinnerClass="spinner dark"
                         disabled={buildingId === c.id}
                         onClick={() => void buildCohort(c.id, cohorts ?? [])}>
-                        Build
+                        {t("dataTools.build")}
                       </LoadingButton>
                     </td>
                   </tr>
@@ -323,10 +343,16 @@ export function CohortBuilder() {
         {buildError ? <EmptyState text={buildError} /> : null}
         {build ? (
           <p className="panel-sub">
-            Cohort: {build.cohort?.name ?? build.name ?? "—"} · Metric {build.metric ?? cohortMetric} ·{" "}
-            n={String(stats?.n ?? build.n_ads ?? "—")} · Mean {String(stats?.mean_weighted ?? "—")} · Median{" "}
-            {String(stats?.median ?? "—")} · P25 {String(stats?.p25 ?? "—")} · P75 {String(stats?.p75 ?? "—")} —{" "}
-            {build.status ?? "ok"}
+            {t("dataTools.buildSummary", {
+              name: build.cohort?.name ?? build.name ?? "—",
+              metric: (build.metric ?? cohortMetric).toUpperCase(),
+              n: fmtStat(stats?.n ?? build.n_ads),
+              mean: fmtStat(stats?.mean_weighted),
+              median: fmtStat(stats?.median),
+              p25: fmtStat(stats?.p25),
+              p75: fmtStat(stats?.p75),
+              status: build.status ?? t("dataTools.buildOk"),
+            })}
           </p>
         ) : null}
       </div>

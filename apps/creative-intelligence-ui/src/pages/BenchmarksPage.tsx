@@ -15,6 +15,8 @@ import {
   Skeleton,
   fmtCell,
   fmtMoney,
+  fmtMult,
+  fmtPct,
   platformLabel,
   useCampaignMeta,
   useScopedApi,
@@ -87,7 +89,8 @@ function BenchmarkViewSub({ view }: { view: SavedView }) {
 
 export function BenchmarksPage() {
   const { filters, setFilter, clearFilters } = useFilters();
-  const { t, tp, fmtDate, fmtNum } = useLocale();
+  const { t, tp, fmtDate, fmtNum, locale } = useLocale();
+  const unavailable = t("common.unavailable");
   const [axis, setAxis] = useState<Axis>("platform");
   const [applied, setApplied] = useState(0);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -362,10 +365,10 @@ export function BenchmarksPage() {
                           <td><span className="cell-main">{axisLabel(t, axis, r.key)}</span></td>
                           <td>{axis === "platform" ? t("filters.allVerticals") : t("filters.allPlatforms")}</td>
                           <td>{axis === "platform" ? axisLabel(t, axis, r.key) : t("filters.allPlatforms")}</td>
-                          <td className="num">{fmtCell(metricVal(r, "cpm"), (n) => fmtMoney(n as number))}</td>
-                          <td className="num">{fmtCell(metricVal(r, "ctr"), (n) => `${(n as number).toFixed(1)}%`)}</td>
-                          <td className="num">{fmtCell(metricVal(r, "cpa"), (n) => fmtMoney(n as number))}</td>
-                          <td className="num">{fmtCell(r.roas, (n) => `${n.toFixed(1)}x`)}</td>
+                          <td className="num">{fmtCell(metricVal(r, "cpm"), (n) => fmtMoney(n as number, locale), unavailable)}</td>
+                          <td className="num">{fmtCell(metricVal(r, "ctr"), (n) => fmtPct(n as number, 1, locale), unavailable)}</td>
+                          <td className="num">{fmtCell(metricVal(r, "cpa"), (n) => fmtMoney(n as number, locale), unavailable)}</td>
+                          <td className="num">{fmtCell(r.roas, (n) => fmtMult(n, locale), unavailable)}</td>
                           <td className="num">{fmtNum(num(r.n_ads))}</td>
                         </tr>
                       ))}
@@ -389,7 +392,7 @@ export function BenchmarksPage() {
                     <strong style={{ fontSize: 13 }}>{m.toUpperCase()}</strong>
                     <MiniBars
                       values={compared.map((r) => metricVal(r, m) ?? 0)}
-                      format={(v) => (m === "ctr" ? `${v.toFixed(1)}%` : m === "roas" ? `${v.toFixed(1)}x` : fmtMoney(v))}
+                      format={(v) => (m === "ctr" ? fmtPct(v, 1, locale) : m === "roas" ? fmtMult(v, locale) : fmtMoney(v, locale))}
                     />
                     <div className="legend" style={{ justifyContent: "flex-start" }}>
                       {compared.map((r) => <span key={r.key}>{axisLabel(t, axis, r.key)}</span>)}

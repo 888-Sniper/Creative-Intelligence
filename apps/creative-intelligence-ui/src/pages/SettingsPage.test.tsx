@@ -184,7 +184,15 @@ describe("SettingsPage", () => {
       expect(screen.getByText("Defaults restored.")).toBeDefined();
     });
     expect((screen.getByLabelText("Workspace Name") as HTMLInputElement).value).toBe("Foap Creative Intelligence");
-    expect(window.localStorage.getItem("ci-settings-prefs:e1")).toBeNull();
+    // Reset persists defaults under the employee key (never deletes it):
+    // a stale legacy global record must not resurface on the next load.
+    window.localStorage.setItem(
+      "ci-settings-prefs",
+      JSON.stringify({ language: "pl", timezone: "Europe/Warsaw", accent: "Violet" }),
+    );
+    const { loadPrefs } = await import("@/state/prefs");
+    expect(loadPrefs("e1").workspace).toBe("Foap Creative Intelligence");
+    expect(loadPrefs("e1").language).toBe("en");
   });
 
   it("stages appearance choices and applies them only on Save", async () => {

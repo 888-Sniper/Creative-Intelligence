@@ -53,6 +53,11 @@ export interface ApiOptions {
 /** Same-origin JSON API client. Auth rides the HttpOnly session cookie;
  *  the raw token is never exposed to JavaScript (item 9). */
 export async function api<T>(method: string, path: string, body?: unknown, opts?: ApiOptions): Promise<T> {
+  // Honor an already-aborted caller signal instead of issuing a request
+  // whose result can never be consumed.
+  if (opts?.signal?.aborted) {
+    throw new DOMException(`Request aborted (${path})`, "AbortError");
+  }
   const ctrl = new AbortController();
   const forward = () => ctrl.abort();
   opts?.signal?.addEventListener("abort", forward);
@@ -68,10 +73,11 @@ export async function api<T>(method: string, path: string, body?: unknown, opts?
       reject(new Error(`Request timed out (${path})`));
     };
   });
-  try {
-    if (opts?.timeoutMs && opts.timeoutMs > 0) {
-      timer = window.setTimeout(onTimeout, opts.timeoutMs);
-    }
+  // The timeout covers the whole fetch-and-parse operation: fetch()
+  // can resolve on response headers while the JSON body is still
+  // streaming, so racing headers alone can leave parsing (and the
+  // caller's loading state) pending forever.
+  const run = async (): Promise<T> => {
     const req = fetch(path, {
       method,
       headers: { "Content-Type": "application/json" },
@@ -79,8 +85,14 @@ export async function api<T>(method: string, path: string, body?: unknown, opts?
       signal: ctrl.signal,
     });
     void req.catch(() => {});
-    const res = timer ? await Promise.race([req, timeout]) : await req;
+    const res = await req;
     return parse<T>(res);
+  };
+  try {
+    if (opts?.timeoutMs && opts.timeoutMs > 0) {
+      timer = window.setTimeout(onTimeout, opts.timeoutMs);
+    }
+    return timer ? await Promise.race([run(), timeout]) : await run();
   } finally {
     if (timer !== null) window.clearTimeout(timer);
     opts?.signal?.removeEventListener("abort", forward);

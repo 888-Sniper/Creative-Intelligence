@@ -23,7 +23,6 @@ import { useLocale } from "@/i18n";
 import {
   DEFAULTS,
   TIMEZONES,
-  clearPrefs,
   loadPrefs,
   savePrefs,
   type Prefs,
@@ -34,6 +33,23 @@ const ACCENTS: Record<string, { teal: string; dark: string; ink: string }> = {
   "Teal (Default)": { teal: "#00C7B2", dark: "#08786E", ink: "#182536" },
   "Blue": { teal: "#2F6FBE", dark: "#1F4E86", ink: "#FFFFFF" },
   "Violet": { teal: "#6D5BD0", dark: "#4A3F96", ink: "#FFFFFF" },
+};
+
+/** Stored accent values stay stable English identifiers (persisted user
+ *  data); only the displayed option names go through the UI locale. */
+const ACCENT_LABEL_KEYS: Record<string, string> = {
+  "Teal (Default)": "settings.appearance.accents.tealDefault",
+  Blue: "settings.appearance.accents.blue",
+  Violet: "settings.appearance.accents.violet",
+};
+
+/** Stored retention values stay stable ("6 Months", …); display names
+ *  are localized. */
+const RETENTION_LABEL_KEYS: Record<string, string> = {
+  "6 Months": "settings.privacy.retentionOptions.r6",
+  "12 Months": "settings.privacy.retentionOptions.r12",
+  "24 Months": "settings.privacy.retentionOptions.r24",
+  Indefinite: "settings.privacy.retentionOptions.indefinite",
 };
 
 function applyAccent(accentName: string, density: string): void {
@@ -232,13 +248,15 @@ export function SettingsPage() {
   };
 
   const resetDefaults = () => {
-    // Reset commits full defaults (prior behavior): stage + save them,
-    // clear stored prefs, and apply every one live — including the
-    // locale context (§9), so the active language/time zone return to
-    // defaults instead of staying on the previous selection.
+    // Reset commits full defaults: stage them, persist them under this
+    // employee's key (never delete it — deletion lets a stale legacy
+    // global record resurface on the next load), and apply every one
+    // live — including the locale context (§9), so the active
+    // language/time zone return to defaults instead of staying on the
+    // previous selection.
     const next = { ...DEFAULTS };
     const id = employee?.id ?? me?.employee?.id ?? "";
-    clearPrefs(id);
+    savePrefs(id, next);
     setStaged(next);
     setSaved(next);
     setThemeMode(next.theme);
@@ -806,7 +824,7 @@ export function SettingsPage() {
                 onChange={(e) => set("accent", e.target.value)}
               >
                 {Object.keys(ACCENTS).map((a) => (
-                  <option key={a} value={a}>{a}</option>
+                  <option key={a} value={a}>{t(ACCENT_LABEL_KEYS[a] ?? a)}</option>
                 ))}
               </select>
             </div>
@@ -873,7 +891,7 @@ export function SettingsPage() {
               onChange={(e) => set("retention", e.target.value)}
             >
               {RETENTIONS.map((r) => (
-                <option key={r} value={r}>{r}</option>
+                <option key={r} value={r}>{t(RETENTION_LABEL_KEYS[r] ?? r)}</option>
               ))}
             </select>
             <p className="panel-sub" style={{ margin: "6px 0 0", fontSize: 12 }}>

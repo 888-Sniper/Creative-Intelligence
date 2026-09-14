@@ -17,6 +17,8 @@ import {
   compareDisplayed,
   fmtCell,
   fmtCompact,
+  fmtMult,
+  fmtPct,
   formatDuration,
   kpiDisplay,
   kpiPlaceholderNote,
@@ -169,7 +171,14 @@ function RetentionSpark({ creativeKey }: { creativeKey: string }) {
 
 export function CreativesPage() {
   const { clearFilters } = useFilters();
-  const { t, tp } = useLocale();
+  const { t, tp, locale, fmtNum } = useLocale();
+  const unavailable = t("common.unavailable");
+  const emptyNote = t("creatives.emptyKpiNote");
+  // Bare decimals for sentence templates (the % / x suffix lives in
+  // the template so ES can space it: "{ctr} %").
+  const dec1 = (v: number): string =>
+    fmtNum(v, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const dec0 = (v: number): string => fmtNum(v, { maximumFractionDigits: 0 });
   const [applied, setApplied] = useState(0);
   const [sort, setSort] = useState<SortKey>("top");
   const [view, setView] = useState<"list" | "grid">("list");
@@ -282,11 +291,11 @@ export function CreativesPage() {
         out.push(verdict === "tie" ? {
           icon: "spark",
           title: t("creatives.learn.hookTieTitle", { a: ha, b: hb }),
-          body: t("creatives.learn.hookTieBody", { a: ha, b: hb, ctr: (a.ctr ?? 0).toFixed(1) }),
+          body: t("creatives.learn.hookTieBody", { a: ha, b: hb, ctr: dec1(a.ctr ?? 0) }),
         } : {
           icon: "spark",
           title: t("creatives.learn.hookLeadTitle", { a: ha }),
-          body: t("creatives.learn.hookLeadBody", { a: ha, ctr: (a.ctr ?? 0).toFixed(1), bCtr: (b.ctr ?? 0).toFixed(1), b: hb }),
+          body: t("creatives.learn.hookLeadBody", { a: ha, ctr: dec1(a.ctr ?? 0), bCtr: dec1(b.ctr ?? 0), b: hb }),
         });
       }
     } else if (hookRows.length === 1 && hookRows[0].ctr != null) {
@@ -294,7 +303,7 @@ export function CreativesPage() {
       out.push({
         icon: "spark",
         title: t("creatives.learn.hookSnapTitle", { a: hs }),
-        body: t("creatives.learn.hookSnapBody", { a: hs, ctr: (hookRows[0].ctr ?? 0).toFixed(1) }),
+        body: t("creatives.learn.hookSnapBody", { a: hs, ctr: dec1(hookRows[0].ctr ?? 0) }),
       });
     }
     const creatorG = byMode.get("creator");
@@ -305,19 +314,19 @@ export function CreativesPage() {
       const verdict = compareDisplayed(creatorCtr, brandedCtr);
       if (verdict !== "unknown") {
         const lift = brandedCtr !== 0 ? ((creatorCtr - brandedCtr) / Math.abs(brandedCtr)) * 100 : null;
-        const liftTxt = lift != null ? t("creatives.learn.liftDiff", { sign: lift >= 0 ? "+" : "", pct: lift.toFixed(0) }) : "";
+        const liftTxt = lift != null ? t("creatives.learn.liftDiff", { sign: lift >= 0 ? "+" : "", pct: dec0(lift) }) : "";
         out.push(verdict === "tie" ? {
           icon: "users",
           title: t("creatives.learn.creatorTieTitle"),
-          body: t("creatives.learn.creatorTieBody", { ctr: creatorCtr.toFixed(1) }),
+          body: t("creatives.learn.creatorTieBody", { ctr: dec1(creatorCtr) }),
         } : verdict === "lead" ? {
           icon: "users",
           title: t("creatives.learn.creatorLeadTitle"),
-          body: t("creatives.learn.creatorLeadBody", { ctr: creatorCtr.toFixed(1), bCtr: brandedCtr.toFixed(1), diff: liftTxt }),
+          body: t("creatives.learn.creatorLeadBody", { ctr: dec1(creatorCtr), bCtr: dec1(brandedCtr), diff: liftTxt }),
         } : {
           icon: "users",
           title: t("creatives.learn.brandedLeadTitle"),
-          body: t("creatives.learn.brandedLeadBody", { ctr: brandedCtr.toFixed(1), bCtr: creatorCtr.toFixed(1), diff: liftTxt }),
+          body: t("creatives.learn.brandedLeadBody", { ctr: dec1(brandedCtr), bCtr: dec1(creatorCtr), diff: liftTxt }),
         });
       }
     }
@@ -344,24 +353,24 @@ export function CreativesPage() {
         out.push({
           icon: "bars",
           title: t("creatives.learn.lenTieTitle", { a: ranked[0].key }),
-          body: t("creatives.learn.lenTieBody", { a: ranked[0].key, ctr: (ranked[0].ctr ?? 0).toFixed(1) }),
+          body: t("creatives.learn.lenTieBody", { a: ranked[0].key, ctr: dec1(ranked[0].ctr ?? 0) }),
         });
       } else if (verdict !== "unknown") {
         out.push({
           icon: "bars",
           title: t("creatives.learn.lenLeadTitle", { a: ranked[0].key }),
-          body: t("creatives.learn.lenLeadBody", { a: ranked[0].key, ctr: (ranked[0].ctr ?? 0).toFixed(1), bCtr: (ranked[1].ctr ?? 0).toFixed(1), b: ranked[1].key }),
+          body: t("creatives.learn.lenLeadBody", { a: ranked[0].key, ctr: dec1(ranked[0].ctr ?? 0), bCtr: dec1(ranked[1].ctr ?? 0), b: ranked[1].key }),
         });
       }
     } else if (ranked.length === 1 && ranked[0].ctr != null) {
       out.push({
         icon: "bars",
         title: t("creatives.learn.lenSnapTitle", { a: ranked[0].key }),
-        body: t("creatives.learn.lenSnapBody", { a: ranked[0].key, ctr: (ranked[0].ctr ?? 0).toFixed(1) }),
+        body: t("creatives.learn.lenSnapBody", { a: ranked[0].key, ctr: dec1(ranked[0].ctr ?? 0) }),
       });
     }
     return out.slice(0, 5);
-  }, [lengthRows, t]);
+  }, [lengthRows, t, fmtNum]);
 
   const tests = useMemo(() => [
     { icon: "spark", title: t("creatives.tests.creatorTitle"), body: t("creatives.tests.creatorBody") },
@@ -479,28 +488,28 @@ export function CreativesPage() {
                   </span>
                   <div className="kpi-body">
                     <div className="kpi-label">{t("creatives.totalCreatives")}</div>
-                    <div className="kpi-value">{fmtCompact(rows.length)}</div>
+                    <div className="kpi-value">{fmtCompact(rows.length, locale)}</div>
                   </div>
                 </div>
                 {length === "all" && compare ? (
                   <>
-                    <KpiCard label={t("dashboard.totalImpressions")} display={kpiDisplay("count", compare.metrics.impressions?.current, compare.current_n_ads === 0)}
+                    <KpiCard label={t("dashboard.totalImpressions")} display={kpiDisplay("count", compare.metrics.impressions?.current, compare.current_n_ads === 0, locale, unavailable)}
                       icon="bars" tint="var(--shell-blue-soft)" metricLabel={t("filters.kpis.impressions")} compare={compare} />
-                    <KpiCard label={t("dashboard.totalClicks")} display={kpiDisplay("count", compare.metrics.clicks?.current, compare.current_n_ads === 0)}
+                    <KpiCard label={t("dashboard.totalClicks")} display={kpiDisplay("count", compare.metrics.clicks?.current, compare.current_n_ads === 0, locale, unavailable)}
                       icon="click" tint="var(--shell-blue-soft)" metricLabel={t("filters.kpis.clicks")} compare={compare} />
-                    <KpiCard label={t("dashboard.averageRoas")} display={kpiDisplay("mult", compare.metrics.roas?.current, compare.current_n_ads === 0)}
+                    <KpiCard label={t("dashboard.averageRoas")} display={kpiDisplay("mult", compare.metrics.roas?.current, compare.current_n_ads === 0, locale, unavailable)}
                       icon="users" tint="var(--shell-teal-soft)" metricLabel={t("filters.kpis.roas")} compare={compare}
-                      note={kpiPlaceholderNote("mult", compare.metrics.roas?.current, compare.current_n_ads === 0)} />
+                      note={kpiPlaceholderNote("mult", compare.metrics.roas?.current, compare.current_n_ads === 0) ? emptyNote : null} />
                   </>
                 ) : (
                   <>
-                    <KpiCard label={t("dashboard.totalImpressions")} display={fmtCompact(pooled.impr)}
+                    <KpiCard label={t("dashboard.totalImpressions")} display={fmtCompact(pooled.impr, locale)}
                       icon="bars" tint="var(--shell-blue-soft)" metricLabel={t("filters.kpis.impressions")} compare={null} />
-                    <KpiCard label={t("dashboard.totalClicks")} display={fmtCompact(pooled.clicks)}
+                    <KpiCard label={t("dashboard.totalClicks")} display={fmtCompact(pooled.clicks, locale)}
                       icon="click" tint="var(--shell-blue-soft)" metricLabel={t("filters.kpis.clicks")} compare={null} />
-                    <KpiCard label={t("dashboard.averageRoas")} display={kpiDisplay("mult", pooled.roas, lengthRows.length === 0)}
+                    <KpiCard label={t("dashboard.averageRoas")} display={kpiDisplay("mult", pooled.roas, lengthRows.length === 0, locale, unavailable)}
                       icon="users" tint="var(--shell-teal-soft)" metricLabel={t("filters.kpis.roas")} compare={null}
-                      note={kpiPlaceholderNote("mult", pooled.roas, lengthRows.length === 0)} />
+                      note={kpiPlaceholderNote("mult", pooled.roas, lengthRows.length === 0) ? emptyNote : null} />
                   </>
                 )}
               </div>
@@ -534,9 +543,9 @@ export function CreativesPage() {
                         </div>
                         <p className="creative-name">{[(c.campaigns ?? [])[0], c.format].filter(Boolean).join(" • ") || "—"}</p>
                         <div className="creative-stats">
-                          <span><Icon name="play" size={12} /> {fmtCompact(num(c.metrics.impressions))}</span>
-                          <span><Icon name="click" size={12} /> {fmtCell(c.metrics.ctr, (n) => `${(n * 100).toFixed(1)}%`)}</span>
-                          <span><Icon name="coin" size={12} /> {fmtCell(c.metrics.roas, (n) => `${n.toFixed(1)}x`)}</span>
+                          <span><Icon name="play" size={12} /> {fmtCompact(num(c.metrics.impressions), locale)}</span>
+                          <span><Icon name="click" size={12} /> {fmtCell(c.metrics.ctr, (n) => fmtPct(n * 100, 1, locale), unavailable)}</span>
+                          <span><Icon name="coin" size={12} /> {fmtCell(c.metrics.roas, (n) => fmtMult(n, locale), unavailable)}</span>
                         </div>
                       </div>
                     );
@@ -546,7 +555,7 @@ export function CreativesPage() {
             ) : <Skeleton height={190} />}
           </Panel>
           <Panel
-            title={t("creatives.allCreatives", { count: fmtCompact(rows.length) })}
+            title={t("creatives.allCreatives", { count: fmtCompact(rows.length, locale) })}
             style={{ flex: "1 0 auto" }}
             action={(
               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -624,9 +633,9 @@ export function CreativesPage() {
                               <td>{shortHook(t, c.annotation?.hook_type)}</td>
                               <td>{s ? `${s}s` : "—"}</td>
                               <td>{platformLabel(c.platform)}</td>
-                              <td className="num">{fmtCompact(num(c.metrics.impressions))}</td>
-                              <td className="num">{fmtCell(c.metrics.ctr, (n) => `${(n * 100).toFixed(1)}%`)}</td>
-                              <td className="num">{fmtCell(c.metrics.roas, (n) => `${n.toFixed(1)}x`)}</td>
+                              <td className="num">{fmtCompact(num(c.metrics.impressions), locale)}</td>
+                              <td className="num">{fmtCell(c.metrics.ctr, (n) => fmtPct(n * 100, 1, locale), unavailable)}</td>
+                              <td className="num">{fmtCell(c.metrics.roas, (n) => fmtMult(n, locale), unavailable)}</td>
                               <td><RetentionSpark creativeKey={c.creative_key} /></td>
                               <td><span className="badge-demo" style={{ color: perf.tone }}>{perf.text}</span></td>
                             </tr>
@@ -648,9 +657,9 @@ export function CreativesPage() {
                           </div>
                           <p className="creative-name">{[(c.campaigns ?? [])[0], c.format].filter(Boolean).join(" • ") || "—"}</p>
                           <div className="creative-stats">
-                            <span>{fmtCompact(num(c.metrics.impressions))}</span>
-                            <span>{fmtCell(c.metrics.ctr, (n) => `${(n * 100).toFixed(1)}%`)}</span>
-                            <span>{fmtCell(c.metrics.roas, (n) => `${n.toFixed(1)}x`)}</span>
+                            <span>{fmtCompact(num(c.metrics.impressions), locale)}</span>
+                            <span>{fmtCell(c.metrics.ctr, (n) => fmtPct(n * 100, 1, locale), unavailable)}</span>
+                            <span>{fmtCell(c.metrics.roas, (n) => fmtMult(n, locale), unavailable)}</span>
                           </div>
                         </div>
                       );

@@ -9,7 +9,8 @@ import {
   Skeleton,
   fmtCell,
   fmtCompact,
-  KPI_UNAVAILABLE,
+  fmtMult,
+  fmtPct,
   kpiDisplay,
   useCompare,
   useScopedApi,
@@ -88,7 +89,8 @@ function PreviewDoc({ name, today, modules, previewKpis, top }: {
   top: { creative_key: string; name?: string | null; metrics?: Record<string, number | null> | null;
     annotation?: { duration_s?: number | null } | null; duration_s?: number | null }[];
 }) {
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
+  const unavailable = t("workbook.unavailable");
   const kpiName = (id: string) => {
     const key = `workbook.kpis.${id.toLowerCase()}`;
     const hit = t(key);
@@ -137,9 +139,9 @@ function PreviewDoc({ name, today, modules, previewKpis, top }: {
                           <span className="cell-main" style={{ fontSize: 12.5 }}>{c.name || c.creative_key}</span>
                         </span>
                       </td>
-                      <td className="num">{fmtCompact(num(c.metrics?.impressions))}</td>
-                      <td className="num">{fmtCell(c.metrics?.ctr, (n) => `${(n * 100).toFixed(1)}%`)}</td>
-                      <td className="num">{fmtCell(c.metrics?.roas, (n) => `${n.toFixed(1)}x`)}</td>
+                      <td className="num">{fmtCompact(num(c.metrics?.impressions), locale)}</td>
+                      <td className="num">{fmtCell(c.metrics?.ctr, (n) => fmtPct(n * 100, 1, locale), unavailable)}</td>
+                      <td className="num">{fmtCell(c.metrics?.roas, (n) => fmtMult(n, locale), unavailable)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -156,7 +158,8 @@ function PreviewDoc({ name, today, modules, previewKpis, top }: {
 }
 
 export function WorkbookPage() {
-  const { t, tp, fmtDate } = useLocale();
+  const { t, tp, fmtDate, locale } = useLocale();
+  const unavailable = t("workbook.unavailable");
   const kpiName = (id: string) => {
     const key = `workbook.kpis.${id.toLowerCase()}`;
     const hit = t(key);
@@ -252,7 +255,10 @@ export function WorkbookPage() {
     }
   };
 
-  const today = fmtDate(new Date().toISOString().slice(0, 10));
+  // Current-date label: format the full instant so the selected time zone
+  // yields today, not yesterday (a date-only string parses as UTC
+  // midnight, which shifts the day for positive-offset zones).
+  const today = fmtDate(new Date().toISOString());
   /* Preview KPIs follow the SELECTED KPI list (not a fixed four), so
    * the preview always agrees with the chips above and the export. */
   const previewKpis = useMemo(() => {
@@ -260,30 +266,30 @@ export function WorkbookPage() {
     const m = compare.metrics;
     const empty = compare.current_n_ads === 0;
     const ratioPct = (v: number | null | undefined): string => {
-      if (v == null) return empty ? "0.0%" : KPI_UNAVAILABLE;
-      return `${(v * 100).toFixed(1)}%`;
+      if (v == null) return empty ? fmtPct(0, 1, locale) : unavailable;
+      return fmtPct(v * 100, 1, locale);
     };
     const get = (label: string): string => {
       switch (label) {
-        case "Impressions": return kpiDisplay("count", m.impressions?.current, empty);
-        case "Clicks": return kpiDisplay("count", m.clicks?.current, empty);
+        case "Impressions": return kpiDisplay("count", m.impressions?.current, empty, locale, unavailable);
+        case "Clicks": return kpiDisplay("count", m.clicks?.current, empty, locale, unavailable);
         case "CTR": return ratioPct(m.ctr?.current);
         case "CVR": {
           const conv = m.conversions?.current;
           const cl = m.clicks?.current;
-          if (cl == null || cl === 0) return empty ? "0.0%" : KPI_UNAVAILABLE;
-          if (conv == null) return KPI_UNAVAILABLE;
-          return `${((conv / cl) * 100).toFixed(1)}%`;
+          if (cl == null || cl === 0) return empty ? fmtPct(0, 1, locale) : unavailable;
+          if (conv == null) return unavailable;
+          return fmtPct((conv / cl) * 100, 1, locale);
         }
-        case "ROAS": return kpiDisplay("mult", m.roas?.current, empty);
-        case "CPA": return kpiDisplay("money", m.cpa?.current, empty);
-        case "Spend": return kpiDisplay("money", m.spend?.current, empty);
-        case "Conversions": return kpiDisplay("count", m.conversions?.current, empty);
-        default: return KPI_UNAVAILABLE;
+        case "ROAS": return kpiDisplay("mult", m.roas?.current, empty, locale, unavailable);
+        case "CPA": return kpiDisplay("money", m.cpa?.current, empty, locale, unavailable);
+        case "Spend": return kpiDisplay("money", m.spend?.current, empty, locale, unavailable);
+        case "Conversions": return kpiDisplay("count", m.conversions?.current, empty, locale, unavailable);
+        default: return unavailable;
       }
     };
     return kpis.map((k) => ({ label: k, value: get(k) }));
-  }, [compare, kpis]);
+  }, [compare, kpis, locale, unavailable]);
 
   return (
     <>

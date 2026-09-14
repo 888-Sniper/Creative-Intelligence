@@ -19,6 +19,8 @@ import {
   fmtCell,
   fmtCompact,
   fmtMoney,
+  fmtMult,
+  fmtPct,
   kpiDisplay,
   kpiPlaceholderNote,
   platformLabel,
@@ -82,7 +84,13 @@ function rate(cur: number, base: number): number | null {
 }
 
 export function CampaignsPage() {
-  const { t, tp } = useLocale();
+  const { t, tp, locale, fmtNum } = useLocale();
+  const unavailable = t("common.unavailable");
+  // Bare decimals for sentence templates (the % / x suffix lives in
+  // the template so ES can space it: "{ctr} %").
+  const dec1 = (v: number): string =>
+    fmtNum(v, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const dec0 = (v: number): string => fmtNum(v, { maximumFractionDigits: 0 });
   const kpiName = (id: string): string => {
     const key = `filters.kpis.${id.toLowerCase()}`;
     const hit = t(key);
@@ -215,14 +223,14 @@ export function CampaignsPage() {
         title: t("campaigns.rail.scaleTitle"),
         body: t("campaigns.rail.scaleBody", {
           platform: platformLabel(plats[0].key),
-          roas: (plats[0].roas ?? 0).toFixed(1),
-          diff: d != null ? t("campaigns.rail.aboveAvg", { sign: d >= 0 ? "+" : "", pct: d.toFixed(0) }) : "",
+          roas: dec1(plats[0].roas ?? 0),
+          diff: d != null ? t("campaigns.rail.aboveAvg", { sign: d >= 0 ? "+" : "", pct: dec0(d) }) : "",
         }),
         action: t("campaigns.rail.viewCampaigns"), href: "/campaigns",
       });
     }
     if (underperformers.length) {
-      const avg = avgCtr == null ? "" : `${avgCtr.toFixed(1)}% `;
+      const avg = avgCtr == null ? "" : dec1(avgCtr);
       items.push({
         icon: "users", tint: "var(--shell-teal-soft)",
         title: t("campaigns.rail.improveTitle"),
@@ -242,7 +250,7 @@ export function CampaignsPage() {
         title: t("campaigns.rail.optimizeTitle"),
         body: t("campaigns.rail.optimizeBody", {
           hook: hookHit === hk ? hookRows[0].key.replace(/_/g, " ") : hookHit,
-          ctr: (hookRows[0].ctr ?? 0).toFixed(1),
+          ctr: dec1(hookRows[0].ctr ?? 0),
         }),
         action: t("campaigns.rail.seeInsights"), href: "/insights",
       });
@@ -254,7 +262,7 @@ export function CampaignsPage() {
       items.push({
         icon: "target", tint: "var(--shell-teal-soft)",
         title: t("campaigns.rail.refineTitle"),
-        body: t("campaigns.rail.refineBody", { name: topRoas.name, roas: topRoas.roas.toFixed(1) }),
+        body: t("campaigns.rail.refineBody", { name: topRoas.name, roas: dec1(topRoas.roas) }),
         action: t("campaigns.rail.viewDetails"), href: "/compare",
       });
     }
@@ -376,11 +384,11 @@ export function CampaignsPage() {
   });
   const fmtBench = (v: number | null) => fmtCell(v, (n) => {
     const k = kpiKey;
-    if (k === "roas") return `${n.toFixed(1)}x`;
-    if (k === "spend" || k === "cpa" || k === "cpc") return fmtMoney(n);
-    if (k === "ctr") return `${(n * 100).toFixed(1)}%`;
-    return fmtCompact(n);
-  });
+    if (k === "roas") return fmtMult(n, locale);
+    if (k === "spend" || k === "cpa" || k === "cpc") return fmtMoney(n, locale);
+    if (k === "ctr") return fmtPct(n * 100, 1, locale);
+    return fmtCompact(n, locale);
+  }, unavailable);
 
   return (
     <div className="campaigns">
@@ -574,7 +582,7 @@ export function CampaignsPage() {
                   <GroupBars
                     height={200}
                     groups={platGroups}
-                    format={(v) => platMetric === "spend" ? fmtMoney(v) : fmtCompact(v)}
+                    format={(v) => platMetric === "spend" ? fmtMoney(v, locale) : fmtCompact(v, locale)}
                   />
                 ) : <EmptyState compact verbatim icon="bars" title={t("campaigns.noPlatformTitle")} text={t("campaigns.noPlatformBody")} />
               ) : <Skeleton height={200} />}
@@ -639,11 +647,11 @@ export function CampaignsPage() {
                               })()}
                             </span>
                           ) : "—"}</td>
-                          <td className="num">{fmtCompact(num(r.impressions))}</td>
-                          <td className="num">{fmtCompact(num(r.clicks))}</td>
-                          <td className="num">{fmtCell(r.ctr, (n) => `${(n * 100).toFixed(1)}%`)}</td>
-                          <td className="num">{fmtMoney(num(r.spend))}</td>
-                          <td className="num">{fmtCell(r.roas, (n) => `${n.toFixed(1)}x`)}</td>
+                          <td className="num">{fmtCompact(num(r.impressions), locale)}</td>
+                          <td className="num">{fmtCompact(num(r.clicks), locale)}</td>
+                          <td className="num">{fmtCell(r.ctr, (n) => fmtPct(n * 100, 1, locale))}</td>
+                          <td className="num">{fmtMoney(num(r.spend), locale)}</td>
+                          <td className="num">{fmtCell(r.roas, (n) => fmtMult(n, locale))}</td>
                           <td className="num">{fmtBench(benchVal)}</td>
                           <td>
                             <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
@@ -676,12 +684,12 @@ export function CampaignsPage() {
               {details[expanded] ? (
                 <>
                   <div className="detail-grid">
-                    <div><span>{kpiName("impressions")}</span><strong>{fmtCompact(num(details[expanded]?.totals.impressions))}</strong></div>
-                    <div><span>{kpiName("clicks")}</span><strong>{fmtCompact(num(details[expanded]?.totals.clicks))}</strong></div>
-                    <div><span>{kpiName("spend")}</span><strong>{fmtMoney(num(details[expanded]?.totals.spend))}</strong></div>
-                    <div><span>{kpiName("roas")}</span><strong>{fmtCell(details[expanded]?.totals.roas, (n) => `${n.toFixed(1)}x`)}</strong></div>
-                    <div><span>{kpiName("ctr")}</span><strong>{fmtCell(details[expanded]?.totals.ctr, (n) => `${(n * 100).toFixed(1)}%`)}</strong></div>
-                    <div><span>{kpiName("conversions")}</span><strong>{fmtCompact(num(details[expanded]?.totals.conversions))}</strong></div>
+                    <div><span>{kpiName("impressions")}</span><strong>{fmtCompact(num(details[expanded]?.totals.impressions), locale)}</strong></div>
+                    <div><span>{kpiName("clicks")}</span><strong>{fmtCompact(num(details[expanded]?.totals.clicks), locale)}</strong></div>
+                    <div><span>{kpiName("spend")}</span><strong>{fmtMoney(num(details[expanded]?.totals.spend), locale)}</strong></div>
+                    <div><span>{kpiName("roas")}</span><strong>{fmtCell(details[expanded]?.totals.roas, (n) => fmtMult(n, locale))}</strong></div>
+                    <div><span>{kpiName("ctr")}</span><strong>{fmtCell(details[expanded]?.totals.ctr, (n) => fmtPct(n * 100, 1, locale))}</strong></div>
+                    <div><span>{kpiName("conversions")}</span><strong>{fmtCompact(num(details[expanded]?.totals.conversions), locale)}</strong></div>
                   </div>
                   <h4 style={{ margin: "14px 0 8px", fontSize: 14 }}>{t("dashboard.topCreatives.title")}</h4>
                   <div className="tbl-wrap">
@@ -695,9 +703,9 @@ export function CampaignsPage() {
                             <td><span className="cell-main">{c.creative_key}</span></td>
                             <td>{platformLabel(c.platform)}</td>
                             <td>{c.format}</td>
-                            <td className="num">{fmtCompact(num(c.metrics.impressions))}</td>
-                            <td className="num">{fmtCell(c.metrics.ctr, (n) => `${(n * 100).toFixed(1)}%`)}</td>
-                            <td className="num">{fmtCell(c.metrics.roas, (n) => `${n.toFixed(1)}x`)}</td>
+                            <td className="num">{fmtCompact(num(c.metrics.impressions), locale)}</td>
+                            <td className="num">{fmtCell(c.metrics.ctr, (n) => fmtPct(n * 100, 1, locale))}</td>
+                            <td className="num">{fmtCell(c.metrics.roas, (n) => fmtMult(n, locale))}</td>
                           </tr>
                         ))}
                       </tbody>

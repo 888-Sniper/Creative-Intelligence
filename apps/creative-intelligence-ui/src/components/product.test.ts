@@ -4,6 +4,10 @@ import {
   KPI_UNAVAILABLE,
   compareDisplayed,
   fmtCell,
+  fmtCompact,
+  fmtMoney,
+  fmtMult,
+  fmtPct,
   formatDuration,
   kpiDisplay,
   kpiPlaceholderNote,
@@ -97,5 +101,39 @@ describe("fmtCell", () => {
     expect(fmtCell(Number.NaN, (n: number) => `$${n}`)).toBe(KPI_UNAVAILABLE);
     expect(fmtCell(0, (n: number) => `$${n}`)).toBe("$0");
     expect(fmtCell(5, (n: number) => `$${n}`)).toBe("$5");
+  });
+});
+
+describe("locale-aware numbers (\u00a79)", () => {
+  it("keeps English output identical to the previous literals", () => {
+    expect(fmtCompact(1500, "en")).toBe("1.5K");
+    // Regression lock: whole thousands keep their one decimal.
+    expect(fmtCompact(25000, "en")).toBe("25.0K");
+    expect(fmtCompact(2000000, "en")).toBe("2.0M");
+    expect(fmtMoney(2500, "en")).toBe("$2.5K");
+    expect(fmtMoney(999, "en")).toBe("$999");
+    expect(fmtMult(2.345, "en")).toBe("2.3x");
+    expect(fmtPct(12.345, 1, "en")).toBe("12.3%");
+    expect(kpiDisplay("money", null, true, "en")).toBe("$0.00");
+    expect(kpiDisplay("mult", null, true, "en")).toBe("0.0x");
+  });
+
+  it("renders Spanish decimal separators and compact suffixes", () => {
+    expect(fmtCompact(1500, "es")).toBe("1,5\u00a0mil");
+    expect(fmtMult(2.345, "es")).toBe("2,3x");
+    expect(fmtPct(12.345, 1, "es")).toBe("12,3%");
+  });
+
+  it("renders Polish decimal separators and compact suffixes", () => {
+    expect(fmtMult(2.345, "pl")).toBe("2,3x");
+    expect(fmtPct(12.345, 1, "pl")).toBe("12,3%");
+    expect(fmtCompact(1500, "pl")).toContain("1,5");
+  });
+
+  it("routes missing facts through the caller Unavailable string", () => {
+    expect(kpiDisplay("mult", null, false, "es", "No disponible")).toBe("No disponible");
+    expect(kpiDisplay("count", undefined, false, "pl", "Niedost\u0119pne")).toBe("Niedost\u0119pne");
+    expect(fmtCell<number>(null, (n) => `${n}`, "No disponible")).toBe("No disponible");
+    expect(fmtCell<number>(Number.NaN, (n) => `${n}`, "Niedost\u0119pne")).toBe("Niedost\u0119pne");
   });
 });

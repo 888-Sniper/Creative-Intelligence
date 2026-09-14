@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/api/client";
 import { useFilters } from "@/state/FilterContext";
+import { useLocale } from "@/i18n";
 import { Icon } from "@/components/icons";
 import { LoadingButton } from "@/components/LoadingButton";
 import {
@@ -113,19 +114,23 @@ interface CreativeRow {
 
 const OBJECTIVES = ["reach", "video_views", "traffic", "conversions", ""] as const;
 
-const TRY_ASKING = [
-  "Which hook types drive the highest CTR?",
-  "What video length performs best?",
-  "When should the brand appear for maximum impact?",
-  "Which creatives should we scale next?",
-];
+const TRY_KEYS = ["t0", "t1", "t2", "t3"] as const;
 
 const DATE_RANGES = [
-  { value: "all", label: "All Time" },
-  { value: "7", label: "Last 7 Days" },
-  { value: "30", label: "Last 30 Days" },
-  { value: "90", label: "Last 90 Days" },
-];
+  { value: "all", key: "all" },
+  { value: "7", key: "d7" },
+  { value: "30", key: "d30" },
+  { value: "90", key: "d90" },
+] as const;
+
+type TFn = (key: string, vars?: Record<string, string | number>) => string;
+
+/** Backend hook codes render through the UI locale; unknown codes
+ *  keep the honest Title Case form. */
+function hookName(t: TFn, key: string): string {
+  const hit = t(`filters.hooks.${key}`);
+  return hit === `filters.hooks.${key}` ? titleCase(key) : hit;
+}
 
 /** Filter-bar scope as a body dict (multi-values become arrays).
  *  The analyst POST routes read scope from the JSON body, not the
@@ -185,13 +190,11 @@ function brandStart(ann?: CreativeAnn | null): number | null {
   return best;
 }
 
-function stampNow(): string {
-  const d = new Date();
-  const date = d.toLocaleDateString("en-US", {
+function stampNow(fmtDate: (iso: string, opts?: Intl.DateTimeFormatOptions) => string): string {
+  return fmtDate(new Date().toISOString(), {
     weekday: "long", year: "numeric", month: "long", day: "numeric",
+    hour: "2-digit", minute: "2-digit",
   });
-  const time = d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
-  return `${date} at ${time}`;
 }
 
 /** Accessible horizontal bars (value labels, no chart lib needed for
@@ -232,6 +235,7 @@ function LabeledBars({ rows, format, color = "#0A9183" }: {
 function LengthCombo({ rows }: {
   rows: Array<{ label: string; ctr: number; roas: number | null }>;
 }) {
+  const { t } = useLocale();
   const w = 560;
   const h = 190;
   const padL = 44;
@@ -250,7 +254,7 @@ function LengthCombo({ rows }: {
   return (
     <div>
       <svg viewBox={`0 0 ${w} ${h}`} role="img"
-        aria-label={rows.map((r) => `${r.label}: ${r.ctr.toFixed(1)} percent CTR`).join("; ")}
+        aria-label={rows.map((r) => t("analyst.comboAria", { label: r.label, ctr: r.ctr.toFixed(1) })).join("; ")}
         style={{ width: "100%", height: "auto", display: "block" }}>
         {[0, 0.5, 1].map((t) => {
           const y = padT + ih * (1 - t);
@@ -297,8 +301,8 @@ function LengthCombo({ rows }: {
         ) : null}
       </svg>
       <div className="legend" aria-hidden="true">
-        <span><i style={{ background: "#0A9183" }} />CTR</span>
-        <span><i style={{ background: "#E8833A" }} />ROAS</span>
+        <span><i style={{ background: "#0A9183" }} />{t("filters.kpis.ctr")}</span>
+        <span><i style={{ background: "#E8833A" }} />{t("filters.kpis.roas")}</span>
       </div>
     </div>
   );
@@ -306,6 +310,7 @@ function LengthCombo({ rows }: {
 
 export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
   const { filters, setFilter, clearFilters, applyPresetDays, scope } = useFilters();
+  const { t, tp, fmtDate } = useLocale();
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -331,7 +336,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
   const [lastScope, setLastScope] = useState("");
   const [datasetVersion, setDatasetVersion] = useState<string | null>(null);
   const [range, setRange] = useState("all");
-  const [stamp] = useState(stampNow);
+  const [stamp] = useState(() => stampNow(fmtDate));
 
   const hooks = useScopedApi<Record<string, BenchGroup>>("/api/benchmarks?group_by=hook_type");
   const plats = useScopedApi<Record<string, BenchGroup>>("/api/benchmarks?group_by=platform");
@@ -396,7 +401,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
       await loadConversations();
     } catch (e) {
       if (key !== accountRef.current) return;
-      setError(e instanceof Error ? e.message : "Could Not Start A Conversation");
+      setError(e instanceof Error ? e.message : t("analyst.startFailed"));
     } finally {
       if (key === accountRef.current) setStarting(false);
     }
@@ -433,7 +438,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
       await loadConversations();
     } catch (e) {
       if (key !== accountRef.current) return;
-      setError(e instanceof Error ? e.message : "Analyst Request Failed");
+      setError(e instanceof Error ? e.message : t("analyst.askFailed"));
     } finally {
       if (key === accountRef.current) {
         setBusy(false);
@@ -490,7 +495,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Report Export Failed");
+      setError(e instanceof Error ? e.message : t("analyst.reportFailed"));
     } finally {
       setExporting((cur) => (cur === fmt ? null : cur));
     }
@@ -521,7 +526,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
       URL.revokeObjectURL(url);
     } catch (e) {
       if (key !== accountRef.current) return;
-      setError(e instanceof Error ? e.message : "Workbook Download Failed");
+      setError(e instanceof Error ? e.message : t("analyst.workbookFailed"));
     } finally {
       if (key === accountRef.current) setExporting((cur) => (cur === "workbook" ? null : cur));
     }
@@ -552,7 +557,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
       );
     } catch (e) {
       if (key !== accountRef.current) return;
-      setError(e instanceof Error ? e.message : "Could Not Save The Decision");
+      setError(e instanceof Error ? e.message : t("analyst.decisionFailed"));
     }
   }
 
@@ -592,9 +597,9 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
 
   const lengthRows = useMemo(() => {
     const buckets = [
-      { label: "Under 15s", test: (s: number) => s < 15 },
-      { label: "15–30s", test: (s: number) => s >= 15 && s <= 30 },
-      { label: "Over 30s", test: (s: number) => s > 30 },
+      { label: t("creatives.lengthShort"), test: (s: number) => s < 15 },
+      { label: t("creatives.lengthSweet"), test: (s: number) => s >= 15 && s <= 30 },
+      { label: t("creatives.lengthLong"), test: (s: number) => s > 30 },
     ].map((b) => ({ ...b, clicks: 0, impr: 0, spend: 0, revenue: 0 }));
     for (const c of creatives.data ?? []) {
       const seconds = num(c.annotation?.duration_s ?? c.duration_s);
@@ -612,13 +617,13 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
       roas: b.spend ? b.revenue / b.spend : null,
       impr: b.impr,
     }));
-  }, [creatives.data]);
+  }, [creatives.data, t]);
 
   const brandRows = useMemo(() => {
     const buckets = [
-      { label: "First 3s", test: (s: number) => s < 3 },
-      { label: "3–10s", test: (s: number) => s >= 3 && s <= 10 },
-      { label: "After 10s", test: (s: number) => s > 10 },
+      { label: t("analyst.brandB0"), test: (s: number) => s < 3 },
+      { label: t("analyst.brandB1"), test: (s: number) => s >= 3 && s <= 10 },
+      { label: t("analyst.brandB2"), test: (s: number) => s > 10 },
     ].map((b) => ({ ...b, clicks: 0, impr: 0 }));
     for (const c of creatives.data ?? []) {
       const t = brandStart(c.annotation);
@@ -633,7 +638,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
       ctr: b.impr ? (b.clicks / b.impr) * 100 : null,
       impr: b.impr,
     }));
-  }, [creatives.data]);
+  }, [creatives.data, t]);
 
   const engagement = useMemo(() => {
     let top = 0;
@@ -665,24 +670,26 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
 
   const summary = useMemo(() => {
     if (!scopeReady) {
-      return "No benchmark data in the current scope yet. Widen the filters or ask a question below — every answer is grounded in your uploaded data.";
+      return t("analyst.summaryEmpty");
     }
     const parts: string[] = [];
     const n = (creatives.data ?? []).length;
-    parts.push(`Analysis of ${n} creative${n === 1 ? "" : "s"} in the current scope.`);
+    parts.push(tp("analyst.analysisOf", n, { count: n }));
     if (bestHook?.ctr != null) {
-      parts.push(`${titleCase(bestHook.key)} hooks lead at ${bestHook.ctr.toFixed(1)}% CTR${
-        hookLift != null && hookLift > 0 ? `, ${hookLift.toFixed(0)}% above the scope average` : ""
-      }.`);
+      parts.push(t("analyst.hookLead", {
+        hook: hookName(t, bestHook.key),
+        ctr: bestHook.ctr.toFixed(1),
+        lift: hookLift != null && hookLift > 0 ? t("analyst.liftAbove", { pct: hookLift.toFixed(0) }) : "",
+      }));
     }
     if (bestPlat?.roas != null) {
-      parts.push(`${platformLabel(bestPlat.key)} delivers the strongest ROAS at ${bestPlat.roas.toFixed(1)}x.`);
+      parts.push(t("analyst.platLead", { plat: platformLabel(bestPlat.key), roas: bestPlat.roas.toFixed(1) }));
     }
     if (bestLength?.ctr != null) {
-      parts.push(`${bestLength.label} videos hold attention best at ${bestLength.ctr.toFixed(1)}% CTR.`);
+      parts.push(t("analyst.lenLead", { band: bestLength.label, ctr: bestLength.ctr.toFixed(1) }));
     }
     return parts.join(" ");
-  }, [scopeReady, creatives.data, bestHook, hookLift, bestPlat, bestLength]);
+  }, [scopeReady, creatives.data, bestHook, hookLift, bestPlat, bestLength, t, tp]);
 
   // Empty loaded scope shows zero placeholders; loaded errors say
   // Unavailable. Loading renders a skeleton upstream, never these.
@@ -698,29 +705,29 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
   const statCards = [
     {
       value: liftDisplay(hookLift),
-      label: "Higher CTR",
-      sub: bestHook ? `${titleCase(bestHook.key)} hooks` : "No Hook Data",
+      label: t("analyst.higherCtr"),
+      sub: bestHook ? `${hookName(t, bestHook.key)} ${t("analyst.hooksSuffix")}` : t("analyst.noHook"),
       icon: "click",
       tint: "var(--shell-blue-soft)",
     },
     {
       value: liftDisplay(roasLift),
-      label: "Higher ROAS",
-      sub: bestPlat ? `${platformLabel(bestPlat.key)} leading` : "No Platform Data",
+      label: t("analyst.higherRoas"),
+      sub: bestPlat ? `${platformLabel(bestPlat.key)} ${t("analyst.leadingSuffix")}` : t("analyst.noPlat"),
       icon: "coin",
       tint: "var(--shell-green-soft)",
     },
     {
       value: kpiDisplay("mult", engagement.ready ? engagement.mult : null, emptyScope),
-      label: "More Engagement",
-      sub: "Top Creative Vs Average",
+      label: t("analyst.moreEng"),
+      sub: t("analyst.topVsAvg"),
       icon: "users",
       tint: "var(--shell-violet-soft)",
     },
     {
       value: bestLength ? bestLength.label.replace("–", "-") : "—",
-      label: "Optimal Video Length",
-      sub: bestLength?.ctr != null ? `${bestLength.ctr.toFixed(1)}% CTR in band` : "No Duration Data",
+      label: t("analyst.optLen"),
+      sub: bestLength?.ctr != null ? t("analyst.ctrInBand", { ctr: bestLength.ctr.toFixed(1) }) : t("analyst.noDur"),
       icon: "bars",
       tint: "var(--shell-amber-soft)",
     },
@@ -738,17 +745,17 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
       .slice(0, 4);
     if (fromFindings.length) return fromFindings;
     const out: string[] = [];
-    if (bestHook) out.push(`Scale ${titleCase(bestHook.key)} openings into three new first-frame variants.`);
+    if (bestHook) out.push(t("analyst.testScale", { hook: hookName(t, bestHook.key) }));
     if (bestPlat?.roas != null) {
-      out.push(`Shift incremental budget to ${platformLabel(bestPlat.key)} while ROAS holds above ${bestPlat.roas.toFixed(1)}x.`);
+      out.push(t("analyst.testShift", { plat: platformLabel(bestPlat.key), roas: bestPlat.roas.toFixed(1) }));
     }
-    if (bestLength) out.push(`Cut the next flight to ${bestLength.label} first and re-test hold.`);
+    if (bestLength) out.push(t("analyst.testCut", { band: bestLength.label }));
     if (brandRows.some((r) => r.ctr != null)) {
       const top = brandRows.filter((r) => r.ctr != null).sort((a, b) => (b.ctr ?? 0) - (a.ctr ?? 0))[0];
-      if (top) out.push(`Move first brand appearance into the ${top.label} window.`);
+      if (top) out.push(t("analyst.testBrand", { band: top.label }));
     }
     return out.slice(0, 4);
-  }, [storedFindings, bestHook, bestPlat, bestLength, brandRows]);
+  }, [storedFindings, bestHook, bestPlat, bestLength, brandRows, t]);
 
   const relatedInsights = useMemo(() => {
     // Stat-derived only: finding signals render once, in Stored
@@ -759,12 +766,17 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
       const verdict = compareDisplayed(bestHook.ctr, runner.ctr ?? NaN);
       if (verdict !== "unknown") {
         const diff = bestHook.ctr - (runner.ctr ?? 0);
+        const ha = hookName(t, bestHook.key);
+        const hb = hookName(t, runner.key);
         out.push(verdict === "tie" ? {
-          title: `${titleCase(bestHook.key)} and ${titleCase(runner.key)} Tie on CTR`,
-          body: `${titleCase(bestHook.key)} and ${titleCase(runner.key)} openings both average ${bestHook.ctr.toFixed(1)}% CTR.`,
+          title: t("analyst.relHookTieTitle", { a: ha, b: hb }),
+          body: t("analyst.relHookTieBody", { a: ha, b: hb, ctr: bestHook.ctr.toFixed(1) }),
         } : {
-          title: `${titleCase(bestHook.key)} Hooks Drive Higher CTR`,
-          body: `${titleCase(bestHook.key)} openings average ${bestHook.ctr.toFixed(1)}% CTR, ${diff >= 0 ? "+" : ""}${diff.toFixed(1)}pts versus ${titleCase(runner.key)}.`,
+          title: t("analyst.relHookLeadTitle", { a: ha }),
+          body: t("analyst.relHookLeadBody", {
+            a: ha, ctr: bestHook.ctr.toFixed(1),
+            diff: `${diff >= 0 ? "+" : ""}${diff.toFixed(1)}`, b: hb,
+          }),
         });
       }
     }
@@ -773,21 +785,23 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
       const verdict = runner?.roas != null
         ? compareDisplayed(bestPlat.roas, runner.roas)
         : "unknown";
+      const pa = platformLabel(bestPlat.key);
       if (verdict === "tie" && runner) {
+        const pb = platformLabel(runner.key);
         out.push({
-          title: `${platformLabel(bestPlat.key)} and ${platformLabel(runner.key)} Tie on Efficiency`,
-          body: `${platformLabel(bestPlat.key)} and ${platformLabel(runner.key)} both average ${bestPlat.roas.toFixed(1)}x ROAS across the current scope.`,
+          title: t("analyst.relPlatTieTitle", { a: pa, b: pb }),
+          body: t("analyst.relPlatTieBody", { a: pa, b: pb, roas: bestPlat.roas.toFixed(1) }),
         });
       } else if (verdict === "lead") {
         out.push({
-          title: `${platformLabel(bestPlat.key)} Leads On Efficiency`,
-          body: `${platformLabel(bestPlat.key)} averages ${bestPlat.roas.toFixed(1)}x ROAS across the current scope.`,
+          title: t("analyst.relPlatLeadTitle", { a: pa }),
+          body: t("analyst.relPlatLeadBody", { a: pa, roas: bestPlat.roas.toFixed(1) }),
         });
       } else if (verdict === "unknown" && !runner) {
         // Single platform in scope: state the number without crowning it.
         out.push({
-          title: `${platformLabel(bestPlat.key)} Efficiency Snapshot`,
-          body: `${platformLabel(bestPlat.key)} averages ${bestPlat.roas.toFixed(1)}x ROAS across the current scope.`,
+          title: t("analyst.relPlatSnapTitle", { a: pa }),
+          body: t("analyst.relPlatSnapBody", { a: pa, roas: bestPlat.roas.toFixed(1) }),
         });
       }
     }
@@ -798,18 +812,18 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
       const verdict = compareDisplayed(bestLength.ctr, runnerBest);
       if (verdict === "tie") {
         out.push({
-          title: `${bestLength.label} Shares the Length Lead`,
-          body: `${bestLength.label} videos match the best band at ${bestLength.ctr.toFixed(1)}% CTR — build variants inside that band first.`,
+          title: t("analyst.relLenTieTitle", { a: bestLength.label }),
+          body: t("analyst.relLenTieBody", { a: bestLength.label, ctr: bestLength.ctr.toFixed(1) }),
         });
       } else if (verdict === "lead") {
         out.push({
-          title: `${bestLength.label} Is The Length To Beat`,
-          body: `${bestLength.label} videos average ${bestLength.ctr.toFixed(1)}% CTR — build variants inside that band first.`,
+          title: t("analyst.relLenLeadTitle", { a: bestLength.label }),
+          body: t("analyst.relLenLeadBody", { a: bestLength.label, ctr: bestLength.ctr.toFixed(1) }),
         });
       }
     }
     return out.slice(0, 3);
-  }, [bestHook, hookRows.rows, bestPlat, bestLength]);
+  }, [bestHook, hookRows.rows, bestPlat, bestLength, t]);
 
   const topCreatives = useMemo(() => {
     const rows = creatives.data ?? [];
@@ -862,30 +876,30 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
           {f.primary_signal || f.finding_id}
           <span className={`pill finding-pill${f.status === "accepted" ? " pill-ok" : f.status === "rejected" ? " pill-bad" : " pill-info"}`}
             style={{ marginLeft: 8, verticalAlign: "middle" }}>
-            {f.status === "accepted" ? "Accepted" : f.status === "rejected" ? "Rejected" : "Proposed"}
+            {f.status === "accepted" ? t("analyst.pillAccepted") : f.status === "rejected" ? t("analyst.pillRejected") : t("analyst.pillProposed")}
           </span>
         </h5>
         <p style={{ margin: "0 0 6px", fontSize: 12.5, color: "var(--shell-muted)" }}>
-          {[f.priority ? `Priority: ${f.priority}` : "",
-            f.confidence_level ? `Confidence: ${f.confidence_level}` : ""].filter(Boolean).join(" · ")}
+          {[f.priority ? t("analyst.priorityLabel", { p: f.priority }) : "",
+            f.confidence_level ? t("analyst.confidenceLabel", { c: f.confidence_level }) : ""].filter(Boolean).join(" · ")}
         </p>
-        {f.diagnosis ? <p style={{ margin: "0 0 4px", fontSize: 13 }}>Diagnosis: {f.diagnosis}</p> : null}
-        {f.creative_hypothesis ? <p style={{ margin: "0 0 4px", fontSize: 13 }}>Hypothesis: {f.creative_hypothesis}</p> : null}
-        {f.recommended_iteration ? <p style={{ margin: "0 0 4px", fontSize: 13 }}>Iteration: {f.recommended_iteration}</p> : null}
+        {f.diagnosis ? <p style={{ margin: "0 0 4px", fontSize: 13 }}>{t("analyst.diagnosisLabel", { d: f.diagnosis })}</p> : null}
+        {f.creative_hypothesis ? <p style={{ margin: "0 0 4px", fontSize: 13 }}>{t("analyst.hypothesisLabel", { h: f.creative_hypothesis })}</p> : null}
+        {f.recommended_iteration ? <p style={{ margin: "0 0 4px", fontSize: 13 }}>{t("analyst.iterationLabel", { r: f.recommended_iteration })}</p> : null}
         {f.element_to_preserve || f.element_to_change ? (
           <p style={{ margin: 0, fontSize: 13 }}>
-            Preserve: {f.element_to_preserve || "—"} · Change: {f.element_to_change || "—"}
+            {t("analyst.preserveChange", { p: f.element_to_preserve || "—", c: f.element_to_change || "—" })}
           </p>
         ) : null}
         {(!f.status || f.status === "proposed") && (
           <div className="chip-row" style={{ marginTop: 10 }}>
             <button type="button" className="btn-soft"
               onClick={() => void decideFinding(f.finding_id, "accepted")}>
-              Save To Next-Flight Plan
+              {t("analyst.savePlan")}
             </button>
             <button type="button" className="btn-outline"
               onClick={() => void decideFinding(f.finding_id, "rejected")}>
-              Dismiss
+              {t("analyst.dismiss")}
             </button>
           </div>
         )}
@@ -899,23 +913,23 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
     <>
       <div className="page-head">
         <div>
-          <p className="eyebrow">AI Analyst</p>
-          <h1 className="page-title">Your Creative Partner</h1>
-          <p className="sub">Ask questions, uncover insights, and get recommendations from your creative data.</p>
+          <p className="eyebrow">{t("analyst.eyebrow")}</p>
+          <h1 className="page-title">{t("analyst.title")}</h1>
+          <p className="sub">{t("analyst.sub")}</p>
         </div>
         <div className="head-actions">
           <button type="button" className="link-teal" onClick={clearAll}>
-            Clear
+            {t("analyst.clear")}
           </button>
-          <LoadingButton type="button" className="btn-primary" loading={op === "run"} loadingLabel="Analysing…" disabled={busy || !input.trim()}
+          <LoadingButton type="button" className="btn-primary" loading={op === "run"} loadingLabel={t("analyst.analysing")} disabled={busy || !input.trim()}
             onClick={() => void send("run")}>
-            <Icon name="spark" size={16} /> Run Analysis
+            <Icon name="spark" size={16} /> {t("analyst.run")}
           </LoadingButton>
         </div>
       </div>
 
-      <section aria-label="Foap Analyst Conversation">
-      <Panel title="Ask Anything">
+      <section aria-label={t("analyst.convoSection")}>
+      <Panel title={t("analyst.askTitle")}>
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -927,69 +941,72 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask anything about your campaigns, creatives, or performance…"
-              aria-label="Ask Foap Analyst"
+              placeholder={t("analyst.inputPlaceholder")}
+              aria-label={t("analyst.inputAria")}
             />
-            <LoadingButton type="submit" className="btn-primary" loading={op === "ask"} loadingLabel="Analysing…" disabled={busy || !input.trim()}>
-              Ask
+            <LoadingButton type="submit" className="btn-primary" loading={op === "ask"} loadingLabel={t("analyst.analysing")} disabled={busy || !input.trim()}>
+              {t("analyst.askBtn")}
             </LoadingButton>
             <LoadingButton
               type="button"
               className="btn-outline btn-compact"
               disabled={busy || !input.trim()}
               loading={op === "three-points"}
-              loadingLabel="Condensing…"
+              loadingLabel={t("analyst.condensing")}
               onClick={() => void send("three-points", 3)}
-              title="Condense The Answer To 3 Points"
+              title={t("analyst.threePointsTitle")}
             >
-              <Icon name="list" size={14} /> 3 Points
+              <Icon name="list" size={14} /> {t("analyst.threePoints")}
             </LoadingButton>
           </div>
         </form>
-        <div className="prompt-chips" aria-label="Try Asking">
+        <div className="prompt-chips" aria-label={t("analyst.tryAria")}>
           <span style={{ fontSize: 13, fontWeight: 600, color: "var(--shell-muted)", alignSelf: "center" }}>
-            Try asking:
+            {t("analyst.tryLabel")}
           </span>
-          {TRY_ASKING.map((q) => (
-            <button key={q} type="button" className="chip chip-sugg"
-              onClick={() => { setInput(q); void send('ask', undefined, q); }}>
-              {q}
-            </button>
-          ))}
+          {TRY_KEYS.map((k) => {
+            const q = t(`analyst.tryAsking.${k}`);
+            return (
+              <button key={k} type="button" className="chip chip-sugg"
+                onClick={() => { setInput(q); void send('ask', undefined, q); }}>
+                {q}
+              </button>
+            );
+          })}
         </div>
       </Panel>
       </section>
 
       <div className="section-gap" />
       <Panel
-        title="Analyst Controls"
-        sub="Every answer and chart respects this scope."
+        title={t("analyst.controlsTitle")}
+        sub={t("analyst.controlsSub")}
         action={(
           <button type="button" className="link-teal" onClick={() => { clearFilters(); setRange("all"); }}>
-            Reset
+            {t("analyst.reset")}
           </button>
         )}
       >
         <div className="filter-grid">
           <div className="field">
-            <label htmlFor="a-campaign">Campaign</label>
+            <label htmlFor="a-campaign">{t("filters.campaign")}</label>
             <select id="a-campaign" value={filters.campaign}
               onChange={(e) => setFilter("campaign", e.target.value)}>
-              <option value="">All Campaigns</option>
+              <option value="">{t("filters.allCampaigns")}</option>
               {campaignNames.map((n) => <option key={n} value={n}>{n}</option>)}
             </select>
           </div>
           <div className="field">
-            <label htmlFor="a-platform">Platform</label>
+            <label htmlFor="a-platform">{t("filters.platform")}</label>
             <select id="a-platform" value={filters.platform === "all" ? "" : filters.platform}
               onChange={(e) => setFilter("platform", e.target.value)}>
-              <option value="">All Platforms</option>
+              <option value="">{t("filters.allPlatforms")}</option>
               <option value="meta">Meta</option>
               <option value="tiktok">TikTok</option>
             </select>
           </div>
           <div className="field">
-            <label htmlFor="a-range">Date Range</label>
+            <label htmlFor="a-range">{t("filters.dateRange")}</label>
             <select id="a-range" value={range}
               onChange={(e) => {
                 const v = e.target.value;
@@ -1002,23 +1019,23 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
                   applyPresetDays(Number(v));
                 }
               }}>
-              {DATE_RANGES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+              {DATE_RANGES.map((r) => <option key={r.value} value={r.value}>{t(`analyst.ranges.${r.key}`)}</option>)}
             </select>
           </div>
           <div className="field">
-            <label htmlFor="a-objective">Objective</label>
+            <label htmlFor="a-objective">{t("analyst.objectiveLabel")}</label>
             <select id="a-objective" value={objective} onChange={(e) => setObjective(e.target.value)}
-              aria-label="Objective">
+              aria-label={t("analyst.objectiveAria")}>
               {OBJECTIVES.map((o) => (
                 <option key={o} value={o}>
-                  {(o || "auto").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
+                  {o === "" ? t("analyst.objectives.auto") : o === "reach" ? t("analyst.objectives.reach") : (() => { const k = `filters.objectives.${o}`; const h = t(k); return h === k ? titleCase(o) : h; })()}
                 </option>
               ))}
             </select>
           </div>
           <div className="field">
-            <label htmlFor="a-locale">Language</label>
-            <select id="a-locale" value={locale} onChange={(e) => setLocale(e.target.value)} aria-label="Language">
+            <label htmlFor="a-locale">{t("analyst.languageLabel")}</label>
+            <select id="a-locale" value={locale} onChange={(e) => setLocale(e.target.value)} aria-label={t("analyst.languageLabel")}>
               <option value="auto">Auto</option>
               <option value="pl">Polski</option>
               <option value="en">English</option>
@@ -1027,40 +1044,40 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
         </div>
         <details style={{ marginTop: 10 }}>
           <summary className="link-teal" style={{ cursor: "pointer", display: "inline-block" }}>
-            More Filters, Conversations &amp; Exports
+            {t("analyst.moreFilters")}
           </summary>
           <div className="cols-2-even" style={{ marginTop: 10 }}>
-            <MetaSelect id="a-client" label="Client" allLabel="All Clients"
+            <MetaSelect id="a-client" label={t("filters.client")} allLabel={t("filters.allClients")}
               values={metaClients} value={filters.client}
               onPick={(v) => setFilter("client", v)} />
-            <MetaSelect id="a-project" label="Project" allLabel="All Projects"
+            <MetaSelect id="a-project" label={t("filters.project")} allLabel={t("filters.allProjects")}
               values={metaProjects} value={filters.project}
               onPick={(v) => setFilter("project", v)} />
           </div>
           <div className="chip-row" style={{ marginTop: 10 }}>
             <LoadingButton type="button" className="btn-outline" onClick={() => void startConversation()}
-              loading={starting} loadingLabel="Starting…" spinnerClass="spinner dark"
-              disabled={busy} title="Start A New Analyst Conversation">
-              <Icon name="plus" size={14} /> New Conversation
+              loading={starting} loadingLabel={t("analyst.starting")} spinnerClass="spinner dark"
+              disabled={busy} title={t("analyst.newConvTitle")}>
+              <Icon name="plus" size={14} /> {t("analyst.newConv")}
             </LoadingButton>
             <LoadingButton type="button" className="btn-outline" onClick={() => void downloadReport("one-pager")}
-              loading={exporting === "one-pager"} loadingLabel="Preparing…" spinnerClass="spinner dark"
-              disabled={busy || exporting !== null} title="Sectioned Findings Report (Markdown)">
-              Report
+              loading={exporting === "one-pager"} loadingLabel={t("analyst.preparing")} spinnerClass="spinner dark"
+              disabled={busy || exporting !== null} title={t("analyst.reportMdTitle")}>
+              {t("analyst.reportBtn")}
             </LoadingButton>
             <LoadingButton type="button" className="btn-outline" onClick={() => void downloadReport("xlsx")}
-              loading={exporting === "xlsx"} loadingLabel="Preparing…" spinnerClass="spinner dark"
-              disabled={busy || exporting !== null} title="Sectioned Findings Report (Excel)">
-              Report XLSX
+              loading={exporting === "xlsx"} loadingLabel={t("analyst.preparing")} spinnerClass="spinner dark"
+              disabled={busy || exporting !== null} title={t("analyst.reportXlsxTitle")}>
+              {t("analyst.reportXlsx")}
             </LoadingButton>
             <LoadingButton type="button" className="btn-outline" onClick={() => void downloadWorkbook()}
-              loading={exporting === "workbook"} loadingLabel="Preparing…" spinnerClass="spinner dark"
-              disabled={busy || exporting !== null} title="Blank analyst workbook (Excel)">
-              Blank Workbook
+              loading={exporting === "workbook"} loadingLabel={t("analyst.preparing")} spinnerClass="spinner dark"
+              disabled={busy || exporting !== null} title={t("analyst.workbookTitle")}>
+              {t("analyst.blankWorkbook")}
             </LoadingButton>
           </div>
           {conversations.length > 0 && (
-            <div className="chip-row" style={{ marginTop: 10 }} aria-label="Previous Analyses">
+            <div className="chip-row" style={{ marginTop: 10 }} aria-label={t("analyst.prevAnalyses")}>
               {conversations.map((c) => (
                 <button
                   key={c.id}
@@ -1071,9 +1088,9 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
                     setActiveId(c.id);
                     setMessages([]);
                   }}
-                  title={c.objective ? `Objective: ${c.objective}` : undefined}
+                  title={c.objective ? t("pageInsights.objectiveBody", { objective: c.objective }) : undefined}
                 >
-                  {c.title || "Untitled Conversation"}
+                  {c.title || t("pageInsights.untitledConv")}
                   {typeof c.message_count === "number" ? ` (${c.message_count})` : ""}
                 </button>
               ))}
@@ -1082,7 +1099,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
           {(lastScope || datasetVersion) && (
             <p className="panel-sub" style={{ marginTop: 10 }}>
               {lastScope}
-              {datasetVersion ? ` · Data v${datasetVersion}` : ""}
+              {datasetVersion ? ` · ${t("analyst.dataVersion", { version: datasetVersion })}` : ""}
             </p>
           )}
         </details>
@@ -1096,9 +1113,9 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
 
       <div className="section-gap" />
       <Panel
-        title="Here's What I Found"
+        title={t("analyst.foundTitle")}
         sub={stamp}
-        action={<span className="badge-demo">AI Analysis</span>}
+        action={<span className="badge-demo">{t("analyst.aiBadge")}</span>}
       >
         {loadingScope && !scopeReady ? <Skeleton height={150} /> : (
           <>
@@ -1126,7 +1143,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
       {messages.length > 0 && (
         <>
           <div className="section-gap" />
-          <Panel title="Conversation" sub="Questions and grounded answers for this session.">
+          <Panel title={t("analyst.convoTitle")} sub={t("analyst.convoSub")}>
             <div style={{ display: "grid", gap: 14 }}>
               {messages.map((m, i) => (
                 <article key={i}>
@@ -1135,16 +1152,14 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
                     fontWeight: m.role === "user" ? 700 : 400,
                     color: "var(--shell-navy)", lineHeight: 1.6,
                   }}>
-                    {m.role === "user" ? `Q: ${m.text}` : m.text}
+                    {m.role === "user" ? `${t("analyst.qPrefix")}${m.text}` : m.text}
                   </p>
                   {m.role === "assistant" && m.answer ? (
                     <>
                       {(m.answer.tables ?? []).map((t, k) => renderTable(t, k))}
                       {(m.answer.findings_stored ?? []).length > 0 && (
                         <p className="panel-sub" style={{ marginTop: 8 }}>
-                          {(m.answer.findings_stored ?? []).length} finding
-                          {(m.answer.findings_stored ?? []).length === 1 ? "" : "s"} stored
-                          below — review and accept them in Stored Findings.
+                          {tp("analyst.findingsStored", (m.answer.findings_stored ?? []).length, { count: (m.answer.findings_stored ?? []).length })}
                         </p>
                       )}
                       {(m.answer.follow_ups ?? []).length > 0 && (
@@ -1175,42 +1190,42 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
 
       <div className="section-gap" />
       <div className="cols-3">
-        <Panel title="Hook Types" sub="CTR by opening hook across the scope.">
+        <Panel title={t("analyst.hookPanel")} sub={t("analyst.hookSub")}>
           {hooks.data === null ? <Skeleton height={200} /> : hookRows.rows.length ? (
             <LabeledBars
-              rows={hookRows.rows.slice(0, 5).map((r) => ({ label: titleCase(r.key), value: r.ctr ?? 0 }))}
+              rows={hookRows.rows.slice(0, 5).map((r) => ({ label: hookName(t, r.key), value: r.ctr ?? 0 }))}
               format={(v) => `${v.toFixed(1)}%`}
             />
-          ) : <EmptyState lift text="No hook benchmarks in scope." />}
+          ) : <EmptyState lift text={t("analyst.noHooks")} />}
         </Panel>
-        <Panel title="Video Length" sub="CTR bars with ROAS trend by duration band.">
+        <Panel title={t("analyst.lenPanel")} sub={t("analyst.lenSub")}>
           {creatives.data === null ? <Skeleton height={200} /> : lengthRows.some((r) => r.ctr != null) ? (
             <LengthCombo rows={lengthRows.map((r) => ({
               label: r.label, ctr: r.ctr ?? 0, roas: r.roas,
             }))} />
-          ) : <EmptyState lift text="No duration data in scope." />}
+          ) : <EmptyState lift text={t("analyst.noDuration")} />}
         </Panel>
-        <Panel title="Brand Timing" sub="CTR by first brand appearance.">
+        <Panel title={t("analyst.brandPanel")} sub={t("analyst.brandSub")}>
           {creatives.data === null ? <Skeleton height={200} /> : brandRows.some((r) => r.ctr != null) ? (
             <LabeledBars
               rows={brandRows.filter((r) => r.ctr != null).map((r) => ({ label: r.label, value: r.ctr ?? 0 }))}
               format={(v) => `${v.toFixed(1)}%`}
               color="#3B82C4"
             />
-          ) : <EmptyState lift text="No brand-timing annotations in scope." />}
+          ) : <EmptyState lift text={t("analyst.noBrand")} />}
         </Panel>
       </div>
 
       <div className="section-gap" />
       <div className="cols-3">
-        <Panel title="What To Test Next" sub="Numbered next-flight plan from the latest findings.">
+        <Panel title={t("analyst.testNextTitle")} sub={t("analyst.testNextSub")}>
           {testNext.length ? (
             <ol style={{ margin: 0, paddingLeft: 20, display: "grid", gap: 8, fontSize: 13, color: "var(--shell-navy)" }}>
-              {testNext.map((t) => <li key={t}>{t}</li>)}
+              {testNext.map((item) => <li key={item}>{item}</li>)}
             </ol>
-          ) : <EmptyState lift text="Ask a question to generate test ideas." />}
+          ) : <EmptyState lift text={t("analyst.noTests")} />}
         </Panel>
-        <Panel title="Related Insights" sub="Signals behind the current analysis.">
+        <Panel title={t("analyst.relatedTitle")} sub={t("analyst.relatedSub")}>
           {relatedInsights.length ? (
             <div>
               {relatedInsights.map((r) => (
@@ -1225,17 +1240,17 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
                 </div>
               ))}
             </div>
-          ) : <EmptyState lift text="No related insights in scope." />}
+          ) : <EmptyState lift text={t("analyst.noRelated")} />}
         </Panel>
-        <Panel title="Stored Findings" sub="Saved findings with accept / dismiss decisions.">
+        <Panel title={t("analyst.storedTitle")} sub={t("analyst.storedSub")}>
           {storedFindings.length ? (
             <div>{storedFindings.map((f) => findingCard(f))}</div>
-          ) : <EmptyState lift compact icon="bookmark" title="No stored findings" text="Ask a question, then save useful findings." />}
+          ) : <EmptyState lift compact icon="bookmark" title={t("analyst.noStoredTitle")} text={t("analyst.noStoredBody")} />}
         </Panel>
       </div>
 
       <div className="section-gap" />
-      <Panel title="Top Creatives" sub="Top creatives from this analysis ranked by ROAS, then CTR.">
+      <Panel title={t("analyst.topTitle")} sub={t("analyst.topSub")}>
         {creatives.data === null ? <Skeleton height={180} /> : topCreatives.length ? (
           <div className="creative-cards-4">
             {topCreatives.map((c) => (
@@ -1253,14 +1268,14 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
                     (c.campaigns ?? [])[0] || ""].filter(Boolean).join(" · ")}
                 </p>
                 <div className="creative-stats">
-                  <span>CTR {fmtCell(c.metrics?.ctr, (n) => `${(n * 100).toFixed(1)}%`)}</span>
-                  <span>ROAS {fmtCell(c.metrics?.roas, (n) => `${n.toFixed(1)}x`)}</span>
-                  <span>{fmtCompact(num(c.metrics?.impressions))} impr</span>
+                  <span>{t("analyst.statCtr", { v: fmtCell(c.metrics?.ctr, (n) => `${(n * 100).toFixed(1)}%`) })}</span>
+                  <span>{t("analyst.statRoas", { v: fmtCell(c.metrics?.roas, (n) => `${n.toFixed(1)}x`) })}</span>
+                  <span>{t("analyst.statImpr", { n: fmtCompact(num(c.metrics?.impressions)) })}</span>
                 </div>
               </div>
             ))}
           </div>
-        ) : <EmptyState lift compact icon="creatives" title="No creatives in scope" text="The creative strip populates once creatives are in scope." />}
+        ) : <EmptyState lift compact icon="creatives" title={t("analyst.noTopTitle")} text={t("analyst.noTopBody")} />}
       </Panel>
     </>
   );

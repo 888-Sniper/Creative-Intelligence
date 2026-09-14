@@ -5,6 +5,7 @@ import { Icon } from "@/components/icons";
 import { LoadingButton } from "@/components/LoadingButton";
 import { DemoDataBadge, EmptyState, Panel, refreshCampaignMeta } from "@/components/product";
 import { SAMPLE_SCOPE_KEY } from "@/components/SampleScopeBanner";
+import { useLocale } from "@/i18n";
 import { EMPTY_FILTERS, useFiltersOptional } from "@/state/FilterContext";
 
 interface PackCampaign { campaign_id: string; campaign: string; }
@@ -50,12 +51,18 @@ interface PackImpact {
   batch_views: { id: number; name: string }[];
 }
 
-function msg(e: unknown): string {
+function msg(fallback: string, e: unknown): string {
   if (e instanceof Error) return e.message;
-  return "Request Failed.";
+  return fallback;
 }
 
 export function DemoPackPanel() {
+  const { t } = useLocale();
+  const statusName = (code: string): string => {
+    const key = `demoPack.status.${code}`;
+    const hit = t(key);
+    return hit === key ? code : hit;
+  };
   const [status, setStatus] = useState<PackStatus | null>(null);
   const [preview, setPreview] = useState<PackPreview | null>(null);
   const [files, setFiles] = useState<PackFile[] | null>(null);
@@ -89,7 +96,7 @@ export function DemoPackPanel() {
     setLoadError("");
     void refresh().then(
       () => undefined,
-      (e: unknown) => setLoadError(msg(e)),
+      (e: unknown) => setLoadError(msg(t("demoPack.requestFailed"), e)),
     );
   }, [refresh]);
 
@@ -103,7 +110,7 @@ export function DemoPackPanel() {
       await fn();
       await refresh();
     } catch (e) {
-      setNotice(msg(e));
+      setNotice(msg(t("demoPack.requestFailed"), e));
     } finally {
       setBusy((cur) => (cur === key ? null : cur));
     }
@@ -113,9 +120,9 @@ export function DemoPackPanel() {
     const r = await api<{ created: boolean; migration_required?: boolean }>(
       "POST", "/api/admin/demo/pack/import", {});
     if (r.migration_required) {
-      setNotice("An Earlier Sample Pack Is Active — Review The Migration Preview Below Before Adding.");
+      setNotice(t("demoPack.migrationActive"));
     } else {
-      setNotice(r.created ? "Sample Data Added." : "Pack Already Imported — Nothing Duplicated.");
+      setNotice(r.created ? t("demoPack.addedMsg") : t("demoPack.alreadyImported"));
       // Campaign lists, charts and selectors everywhere reload: normal
       // navigation afterwards shows the new campaigns with no hard reload.
       refreshCampaignMeta();
@@ -127,11 +134,12 @@ export function DemoPackPanel() {
     const r = await api<{ authorized: boolean; deleted?: string[]; kept_deleted?: string[]; verified?: boolean }>(
       "POST", "/api/admin/demo/pack/migration/apply", { authorize: true });
     if (r.authorized) {
-      const base = `Migration Complete. Removed ${(r.deleted ?? []).length} Surplus Campaign(s); ` +
-        `Kept ${(r.kept_deleted ?? []).length} Earlier Deletion(s).`;
+      const base = t("demoPack.migrationDone", {
+        removed: (r.deleted ?? []).length, kept: (r.kept_deleted ?? []).length,
+      });
       setNotice(r.verified === false
-        ? `${base} Verification Did Not Pass — The Pack Is Marked Failed With Detail; Safe To Retry.`
-        : `${base} Verification Passed.`);
+        ? `${base} ${t("demoPack.verifyFailed")}`
+        : `${base} ${t("demoPack.verifyPassed")}`);
       refreshCampaignMeta();
     }
     setConfirmMigrate(false);
@@ -181,7 +189,7 @@ export function DemoPackPanel() {
     if (!status?.receipt) return;
     await api("POST", "/api/admin/demo/pack/remove",
       { confirm: true, batch_id: status.receipt.batch_id });
-    setNotice("Sample Data Removed. The Import Receipt Is Kept.");
+    setNotice(t("demoPack.removedMsg"));
     refreshCampaignMeta();
     setConfirmRemove(false);
     setImpact(null);
@@ -196,7 +204,7 @@ export function DemoPackPanel() {
 
   const deleteCampaign = (campaignId: string) => run(`del:${campaignId}`, async () => {
     await api("DELETE", `/api/admin/demo/pack/campaigns/${encodeURIComponent(campaignId)}`);
-    setNotice("Sample Campaign Deleted. It Will Not Return.");
+    setNotice(t("demoPack.deletedCamp"));
     setImpact(null);
   });
 
@@ -204,7 +212,7 @@ export function DemoPackPanel() {
     if (!renameId || !renameName.trim()) return;
     await api("POST", "/api/admin/demo/pack/rename",
       { kind: "campaign", id: renameId, name: renameName.trim() });
-    setNotice("Sample Campaign Renamed. Cleanup Provenance Kept.");
+    setNotice(t("demoPack.renamedMsg"));
     refreshCampaignMeta();
     setRenameId("");
     setRenameName("");
@@ -212,22 +220,22 @@ export function DemoPackPanel() {
 
   const deleteFile = (fileKey: string) => run(`file:${fileKey}`, async () => {
     await api("DELETE", `/api/admin/demo/pack/files/${encodeURIComponent(fileKey)}`);
-    setNotice("Sample File Deleted.");
+    setNotice(t("demoPack.deletedFile"));
   });
 
   if (loadError && !status) {
     return (
-      <Panel title="Demo Data">
-        <EmptyState icon="compare" title="Could Not Load Sample Status"
-          text={`Sample pack status unavailable: ${loadError}`}
-          action={<button type="button" className="btn-outline" onClick={reload}>Retry</button>} />
+      <Panel title={t("demoPack.title")}>
+        <EmptyState icon="compare" title={t("demoPack.loadFailedTitle")}
+          text={t("demoPack.loadFailedBody", { error: loadError })}
+          action={<button type="button" className="btn-outline" onClick={reload}>{t("demoPack.retry")}</button>} />
       </Panel>
     );
   }
   if (!status) {
     return (
-      <Panel title="Demo Data">
-        <EmptyState icon="clock" title="Loading Sample Status" text="Fetching the import receipt…" />
+      <Panel title={t("demoPack.title")}>
+        <EmptyState icon="clock" title={t("demoPack.loadingTitle")} text={t("demoPack.loadingBody")} />
       </Panel>
     );
   }
@@ -239,33 +247,39 @@ export function DemoPackPanel() {
 
   return (
     <Panel
-      title="Demo Data"
-      sub="One-time presentation pack of 5 campaigns by 3 creatives with synthetic figures that never represent real client performance, and deleted samples stay deleted."
+      title={t("demoPack.title")}
+      sub={t("demoPack.sub")}
       action={<DemoDataBadge />}
     >
       {notice ? <p className="panel-sub" role="status" style={{ margin: "0 0 8px" }}>{notice}</p> : null}
-      {loadError ? <p className="panel-sub" role="alert" style={{ margin: "0 0 8px" }}>Sample pack status unavailable: {loadError}</p> : null}
+      {loadError ? <p className="panel-sub" role="alert" style={{ margin: "0 0 8px" }}>{t("demoPack.loadFailedBody", { error: loadError })}</p> : null}
 
       {receipt ? (
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
-          <span className="badge-demo">Sample Data</span>
+          <span className="badge-demo">{t("demoPack.sampleBadge")}</span>
           <span className="panel-sub" style={{ margin: 0 }}>
-            Imported {receipt.imported_at || "—"} by {receipt.imported_by || "—"} ·
-            Data {receipt.data_start || "—"} → {receipt.data_end || "—"} ·
-            Status: {status.status}
+            {t("demoPack.importedLine", {
+              at: receipt.imported_at || t("demoPack.unknownDate"),
+              by: receipt.imported_by || t("demoPack.unknownDate"),
+              from: receipt.data_start || t("demoPack.unknownDate"),
+              to: receipt.data_end || t("demoPack.unknownDate"),
+              status: statusName(status.status),
+            })}
           </span>
         </div>
       ) : null}
 
       {(status.status === "added" || status.status === "partially_removed") && receipt ? (
         <p className="panel-sub" style={{ margin: "0 0 8px" }}>
-          Remaining: {remaining.campaigns ?? 0}/{imported.campaigns ?? 5} Campaign(s),{" "}
-          {remaining.creatives ?? 0}/{imported.creatives ?? 15} Creative(s),{" "}
-          {remaining.ads_rows ?? 0} Performance Row(s).{" "}
+          {t("demoPack.remainingLine", {
+            camps: `${remaining.campaigns ?? 0}/${imported.campaigns ?? 5}`,
+            creatives: `${remaining.creatives ?? 0}/${imported.creatives ?? 15}`,
+            rows: remaining.ads_rows ?? 0,
+          })}{" "}
           <button type="button" className="link-btn" onClick={openDemoDashboard}>
-            Open Demo Dashboard
+            {t("demoPack.openDemo")}
           </button>
-          {receipt ? ` (Suggested Range: ${receipt.data_start} → ${receipt.data_end}.)` : ""}
+          {receipt ? ` ${t("demoPack.suggestedRange", { from: receipt.data_start, to: receipt.data_end })}` : ""}
         </p>
       ) : null}
 
@@ -273,72 +287,77 @@ export function DemoPackPanel() {
         <>
           {status.status === "failed" ? (
             <p className="panel-sub" role="alert" style={{ margin: "0 0 8px" }}>
-              The Last Import Did Not Finish. Nothing Was Left Half-Visible: Fix The Cause,
-              Then Retry — Completed Work Is Kept And Missing Work Resumes.
+              {t("demoPack.importFailedNote")}
             </p>
           ) : null}
           {preview ? (
             <div style={{ marginBottom: 8 }}>
               <p className="panel-sub" style={{ margin: "0 0 4px" }}>
-                Target: {preview.workspace} · Synthetic: {preview.synthetic ? "Yes" : "No"} ·
-                Replenishes Itself: {preview.replenish ? "Yes" : "No — Deleted Samples Stay Deleted."}
+                {t("demoPack.targetLine", {
+                  workspace: preview.workspace,
+                  synthetic: preview.synthetic ? t("demoPack.yes") : t("demoPack.no"),
+                  replenish: preview.replenish ? t("demoPack.yes") : t("demoPack.noReplenish"),
+                })}
               </p>
               <p className="panel-sub" style={{ margin: "0 0 4px" }}>
-                Will Create: 5 Campaign(s), 15 Creative(s), {preview.totals.days} Day(s) Of
-                Performance Rows, {preview.totals.saved_views} Saved View(s),{" "}
-                {preview.totals.conversations} Conversation(s), {preview.totals.reports} Report(s),{" "}
-                {preview.totals.workbooks} Workbook(s).
+                {t("demoPack.willCreate", {
+                  days: preview.totals.days, views: preview.totals.saved_views,
+                  convs: preview.totals.conversations, reports: preview.totals.reports,
+                  books: preview.totals.workbooks,
+                })}
               </p>
             </div>
           ) : null}
           {migration?.eligible ? (
             <div style={{ marginBottom: 8 }}>
               <p className="panel-sub" style={{ margin: "0 0 4px" }}>
-                An Earlier 10-Campaign Pack Is Active ({migration.v1_status}). A Fresh Import
-                Will Not Install Beside It. Migration Keeps The Five Matching Campaigns And
-                Removes Only Sample-Owned Surplus Records.
+                {t("demoPack.migrationNote", { status: migration.v1_status ?? "" })}
               </p>
               <ul className="plain" style={{ margin: "0 0 4px", padding: 0, listStyle: "none" }}>
                 {(migration.surplus ?? []).map((s) => (
                   <li key={s.campaign_id} className="panel-sub" style={{ margin: 0 }}>
                     {s.already_deleted
-                      ? `Already Deleted By You (Stays Deleted): ${s.campaign_id}`
-                      : `Remove: ${s.campaign || s.campaign_id} — ${s.ads_rows} Row(s), ` +
-                        `${s.creatives.length} Creative(s), ${s.media_rows} Media File(s)`}
+                      ? t("demoPack.surplusDeleted", { id: s.campaign_id })
+                      : t("demoPack.surplusRemove", {
+                          name: s.campaign || s.campaign_id, rows: s.ads_rows,
+                          creatives: s.creatives.length, media: s.media_rows,
+                        })}
                   </li>
                 ))}
               </ul>
               <p className="panel-sub" style={{ margin: "0 0 4px" }}>
-                Saved Views ({migration.review_only?.saved_views.length ?? 0}) And Conversations
-                ({migration.review_only?.analyst_conversations.length ?? 0}) Are Never Auto-Deleted.
+                {t("demoPack.reviewOnlyNote", {
+                  views: migration.review_only?.saved_views.length ?? 0,
+                  convs: migration.review_only?.analyst_conversations.length ?? 0,
+                })}
               </p>
               {!confirmMigrate ? (
                 <button type="button" className="btn-outline" disabled={busy !== null}
                   onClick={() => setConfirmMigrate(true)}>
-                  Review Migration…
+                  {t("demoPack.reviewMigration")}
                 </button>
               ) : (
                 <>
                   <span className="panel-sub" style={{ margin: 0 }}>
-                    Apply The Migration Described Above? Your Earlier Deletions Stay Deleted.
+                    {t("demoPack.applyMigration")}
                   </span>{" "}
                   <LoadingButton type="button" className="btn-outline" loading={busy === "migrate"}
-                    loadingLabel="Migrating…" spinnerClass="spinner dark" disabled={busy !== null}
+                    loadingLabel={t("demoPack.migrating")} spinnerClass="spinner dark" disabled={busy !== null}
                     onClick={() => void migrate()}>
-                    Confirm Migration
+                    {t("demoPack.confirmMigration")}
                   </LoadingButton>{" "}
                   <button type="button" className="btn-outline" disabled={busy !== null}
                     onClick={() => setConfirmMigrate(false)}>
-                    Cancel
+                    {t("demoPack.cancel")}
                   </button>
                 </>
               )}
             </div>
           ) : null}
           <LoadingButton type="button" className="btn-outline" loading={busy === "import"}
-            loadingLabel="Adding Demo Data…" spinnerClass="spinner dark" disabled={busy !== null}
+            loadingLabel={t("demoPack.addBusy")} spinnerClass="spinner dark" disabled={busy !== null}
             onClick={() => void importOnce()}>
-            <Icon name="download" size={15} /> Add Demo Data Once
+            <Icon name="download" size={15} /> {t("demoPack.addOnce")}
           </LoadingButton>
         </>
       ) : null}
@@ -348,26 +367,26 @@ export function DemoPackPanel() {
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
             {!confirmRemove ? (
               <LoadingButton type="button" className="btn-outline" loading={false}
-                loadingLabel="Removing Demo Data…" spinnerClass="spinner dark" disabled={busy !== null}
+                loadingLabel={t("demoPack.removeBusy")} spinnerClass="spinner dark" disabled={busy !== null}
                 onClick={() => setConfirmRemove(true)}>
-                <Icon name="x" size={15} /> Remove All Demo Data
+                <Icon name="x" size={15} /> {t("demoPack.removeAll")}
               </LoadingButton>
             ) : (
               <>
                 <span className="panel-sub" style={{ margin: 0 }}>
-                  This removes the remaining {remaining.campaigns ?? 0} campaign(s),{" "}
-                  {remaining.creatives ?? 0} creative(s), {remaining.ads_rows ?? 0} performance row(s)
-                  and {remaining.sample_files ?? 0} file(s) from this pack only.
-                  Employee accounts, connected accounts and real imported data will not be removed.
+                  {t("demoPack.removeConfirm", {
+                    camps: remaining.campaigns ?? 0, creatives: remaining.creatives ?? 0,
+                    rows: remaining.ads_rows ?? 0, files: remaining.sample_files ?? 0,
+                  })}
                 </span>
                 <LoadingButton type="button" className="btn-outline" loading={busy === "remove"}
-                  loadingLabel="Removing Demo Data…" spinnerClass="spinner dark" disabled={busy !== null}
+                  loadingLabel={t("demoPack.removeBusy")} spinnerClass="spinner dark" disabled={busy !== null}
                   onClick={() => void removeAll()}>
-                  Confirm Removal
+                  {t("demoPack.confirmRemoval")}
                 </LoadingButton>
                 <button type="button" className="btn-outline" disabled={busy !== null}
                   onClick={() => setConfirmRemove(false)}>
-                  Cancel
+                  {t("demoPack.cancel")}
                 </button>
               </>
             )}
@@ -375,7 +394,7 @@ export function DemoPackPanel() {
 
           {status.campaigns.length > 0 ? (
             <div style={{ marginTop: 10 }}>
-              <h4 style={{ margin: "0 0 6px", fontSize: 13 }}>Sample Campaigns</h4>
+              <h4 style={{ margin: "0 0 6px", fontSize: 13 }}>{t("demoPack.sampleCamps")}</h4>
               <ul className="plain" style={{ margin: 0, padding: 0, listStyle: "none" }}>
                 {status.campaigns.map((c) => (
                   <li key={c.campaign_id}
@@ -384,21 +403,23 @@ export function DemoPackPanel() {
                     <span className="panel-sub" style={{ margin: 0 }}>{c.campaign_id}</span>
                     <button type="button" className="link-btn" disabled={busy !== null}
                       onClick={() => void askImpact(c.campaign_id)}>
-                      Delete…
+                      {t("demoPack.deleteDot")}
                     </button>
                     {impact && impactFor === c.campaign_id ? (
                       <span className="panel-sub" style={{ margin: 0 }}>
-                        Removes “{impact.campaign}”: {impact.ads_rows} row(s),{" "}
-                        {impact.creatives} creative(s)
-                        {impact.batch_views.length > 0
-                          ? `, ${impact.batch_views.length} saved view(s)` : ""}.{" "}
+                        {t("demoPack.impactLine", {
+                          name: impact.campaign, rows: impact.ads_rows,
+                          creatives: impact.creatives,
+                          views: impact.batch_views.length > 0
+                            ? t("demoPack.impactViews", { count: impact.batch_views.length }) : "",
+                        })}{" "}
                         <button type="button" className="link-btn" disabled={busy !== null}
                           onClick={() => void deleteCampaign(c.campaign_id)}>
-                          Confirm Delete
+                          {t("demoPack.confirmDelete")}
                         </button>{" "}
                         <button type="button" className="link-btn" disabled={busy !== null}
                           onClick={() => setImpact(null)}>
-                          Cancel
+                          {t("demoPack.cancel")}
                         </button>
                       </span>
                     ) : null}
@@ -406,21 +427,21 @@ export function DemoPackPanel() {
                 ))}
               </ul>
               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
-                <select aria-label="Sample Campaign To Rename" value={renameId}
+                <select aria-label={t("demoPack.renameAria")} value={renameId}
                   onChange={(e) => setRenameId(e.target.value)} disabled={busy !== null}>
-                  <option value="">Rename Campaign…</option>
+                  <option value="">{t("demoPack.renameOption")}</option>
                   {status.campaigns.map((c) => (
                     <option key={c.campaign_id} value={c.campaign_id}>{c.campaign}</option>
                   ))}
                 </select>
-                <input aria-label="New Campaign Name" placeholder="New Name" value={renameName}
+                <input aria-label={t("demoPack.newNameAria")} placeholder={t("demoPack.newNamePh")} value={renameName}
                   onChange={(e) => setRenameName(e.target.value)} disabled={busy !== null}
                   style={{ width: 180 }} />
                 <LoadingButton type="button" className="btn-outline" loading={busy === "rename"}
-                  loadingLabel="Renaming…" spinnerClass="spinner dark"
+                  loadingLabel={t("demoPack.renaming")} spinnerClass="spinner dark"
                   disabled={busy !== null || !renameId || !renameName.trim()}
                   onClick={() => void renameCampaign()}>
-                  Rename
+                  {t("demoPack.renameBtn")}
                 </LoadingButton>
               </div>
             </div>
@@ -428,7 +449,7 @@ export function DemoPackPanel() {
 
           {files && files.length > 0 ? (
             <div style={{ marginTop: 10 }}>
-              <h4 style={{ margin: "0 0 6px", fontSize: 13 }}>Sample Files</h4>
+              <h4 style={{ margin: "0 0 6px", fontSize: 13 }}>{t("demoPack.sampleFiles")}</h4>
               <ul className="plain" style={{ margin: 0, padding: 0, listStyle: "none" }}>
                 {files.map((f) => (
                   <li key={f.file_key} style={{ display: "flex", gap: 8, alignItems: "center", padding: "4px 0" }}>
@@ -438,7 +459,7 @@ export function DemoPackPanel() {
                     <span className="panel-sub" style={{ margin: 0 }}>{f.format} · {f.bytes} B</span>
                     <button type="button" className="link-btn" disabled={busy !== null}
                       onClick={() => void deleteFile(f.file_key)}>
-                      Delete
+                      {t("demoPack.deleteFileBtn")}
                     </button>
                   </li>
                 ))}
@@ -449,7 +470,7 @@ export function DemoPackPanel() {
       ) : null}
 
       {status.status === "removed" ? (
-        <EmptyState text="Sample Data Removed. The Import Receipt Is Kept — This Pack Will Not Return On Its Own." />
+        <EmptyState verbatim text={t("demoPack.removedEmpty")} />
       ) : null}
     </Panel>
   );

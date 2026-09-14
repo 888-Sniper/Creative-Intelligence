@@ -1,13 +1,9 @@
 import { useState } from "react";
 import { useAuth } from "@/auth/AuthProvider";
 import { LoadingButton } from "@/components/LoadingButton";
+import { useLocale } from "@/i18n";
 
-const PROVIDERS = [
-  { id: "google", label: "Continue With Google" },
-  { id: "microsoft", label: "Continue With Microsoft" },
-  { id: "apple", label: "Continue With Apple" },
-  { id: "github", label: "Continue With GitHub" },
-] as const;
+const PROVIDERS = ["google", "microsoft", "apple", "github"] as const;
 
 function ProviderMark({ provider }: { provider: string }) {
   if (provider === "google") {
@@ -51,11 +47,13 @@ const CONNECTING_NAMES: Record<string, string> = {
  *  sibling button but must never light up its spinner. */
 export function OAuthButton({ provider, label }: { provider: string; label?: string }) {
   const { authenticating, oauthStart } = useAuth();
+  const { t } = useLocale();
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState("");
   const busy = starting || authenticating;
-  const idleLabel = label ?? `Continue With ${provider}`;
-  const busyLabel = `Connecting To ${CONNECTING_NAMES[provider] ?? provider}…`;
+  const display = CONNECTING_NAMES[provider] ?? provider;
+  const idleLabel = label ?? t("auth.login.continueWith", { provider: display });
+  const busyLabel = t("auth.login.connectingTo", { provider: display });
   return (
     <>
       <LoadingButton
@@ -74,7 +72,7 @@ export function OAuthButton({ provider, label }: { provider: string; label?: str
           // restores the idle state and shows a retryable error.
           void oauthStart(provider).catch(() => {
             setStarting(false);
-            setError(`Could Not Reach ${CONNECTING_NAMES[provider] ?? provider} — Try Again.`);
+            setError(t("auth.login.couldNotReach", { provider: display }));
           });
         }}
       >
@@ -90,7 +88,7 @@ export function OAuthButtons() {
   return (
     <>
       {PROVIDERS.map((p) => (
-        <OAuthButton key={p.id} provider={p.id} label={p.label} />
+        <OAuthButton key={p} provider={p} />
       ))}
     </>
   );
@@ -100,9 +98,9 @@ export function EmployeeOAuthButtons() {
   return (
     <>
       {PROVIDERS.filter((p) =>
-        (EMPLOYEE_PROVIDERS as readonly string[]).includes(p.id),
+        (EMPLOYEE_PROVIDERS as readonly string[]).includes(p),
       ).map((p) => (
-        <OAuthButton key={p.id} provider={p.id} label={p.label} />
+        <OAuthButton key={p} provider={p} />
       ))}
     </>
   );

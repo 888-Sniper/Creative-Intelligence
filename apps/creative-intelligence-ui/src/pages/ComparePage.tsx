@@ -3,6 +3,7 @@ import { api, scopedPath } from "@/api/client";
 import { useFilters } from "@/state/FilterContext";
 import { Icon } from "@/components/icons";
 import { LoadingButton } from "@/components/LoadingButton";
+import { useLocale } from "@/i18n";
 import { TrendChart } from "@/components/charts";
 import {
   CreativeThumb,
@@ -171,6 +172,15 @@ export function GroupedBars({ series, metric }: {
   series: Array<{ label: string; color: string; values: Record<string, number | null> }>;
   metric: string;
 }) {
+  const { t } = useLocale();
+  const kpiName = (k: string): string => {
+    if (k === "vtr") return t("compare.vtrCompleted");
+    if (k === "view_rate") return t("compare.playRate");
+    if (k === "video_views") return t("compare.videoViews");
+    const key = `filters.kpis.${k}`;
+    const hit = t(key);
+    return hit === key ? kpiLabel(k) : hit;
+  };
   // One metric, one scale: every bar shows the SELECTED metric for one
   // campaign. The previous renderer drew all five KPIs — currency,
   // percent and ratio values — against the selected metric's scale,
@@ -189,7 +199,7 @@ export function GroupedBars({ series, metric }: {
     return label.length > room ? `${label.slice(0, room - 1)}…` : label;
   };
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }} role="img" aria-label={`${kpiLabel(kpi)} Comparison Chart`}>
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }} role="img" aria-label={`${kpiName(kpi)} ${t("charts.comparison")}`}>
       {[0, 0.25, 0.5, 0.75, 1].map((f) => (
         <g key={f}>
           <line x1={PL} x2={W - 8} y1={y(max * f)} y2={y(max * f)} stroke="#E3EAF3" strokeWidth={1} />
@@ -243,6 +253,15 @@ const TEST_IDEAS: Record<string, (name: string) => { title: string; body: string
 };
 
 export function ComparePage() {
+  const { t } = useLocale();
+  const kpiName = (k: string): string => {
+    if (k === "vtr") return t("compare.vtrCompleted");
+    if (k === "view_rate") return t("compare.playRate");
+    if (k === "video_views") return t("compare.videoViews");
+    const key = `filters.kpis.${k}`;
+    const hit = t(key);
+    return hit === key ? kpiLabel(k) : hit;
+  };
   const { scope } = useFilters();
   const [mode, setMode] = useState<"campaigns" | "creatives">("campaigns");
   const [picked, setPicked] = useState<string[]>([]);
@@ -576,11 +595,11 @@ export function ComparePage() {
       return creativeData.attributes;
     }
     const rows: AttributeRow[] = [
-      { attribute: "Hook Type", values: {} },
-      { attribute: "Duration", values: {} },
-      { attribute: "Creator vs Branded", values: {} },
-      { attribute: "Format", values: {} },
-      { attribute: "Platform", values: {} },
+      { attribute: t("filters.hook"), values: {} },
+      { attribute: t("compare.duration"), values: {} },
+      { attribute: t("filters.creator"), values: {} },
+      { attribute: t("filters.format"), values: {} },
+      { attribute: t("filters.platform"), values: {} },
     ];
     for (const item of items) {
       const rep = mode === "campaigns" ? firstCreativeByCampaign[item.key] : metaByKey[item.key];
@@ -594,7 +613,7 @@ export function ComparePage() {
       });
     }
     return rows;
-  }, [mode, creativeData, items, firstCreativeByCampaign, metaByKey]);
+  }, [mode, creativeData, items, firstCreativeByCampaign, metaByKey, t]);
 
   const addOption = (v: string) => {
     if (!v || picked.includes(v) || picked.length >= 4) return;
@@ -641,26 +660,26 @@ export function ComparePage() {
   return (
     <>
       <PageHeader
-        title="Compare"
-        sub="Compare campaigns or creatives side by side to find what drives the best performance."
+        title={t("compare.title")}
+        sub={t("compare.sub")}
       />
-      <div className="cmp-setup-bar" role="group" aria-label="Comparison Setup">
+      <div className="cmp-setup-bar" role="group" aria-label={t("compare.setupAria")}>
         <div className="cmp-setup">
           <div className="field">
-            <label htmlFor="cmp-mode">Compare By</label>
+            <label htmlFor="cmp-mode">{t("compare.compareBy")}</label>
             <select id="cmp-mode" value={mode} onChange={(e) => switchMode(e.target.value as typeof mode)}>
-              <option value="campaigns">Campaigns</option>
-              <option value="creatives">Creatives</option>
+              <option value="campaigns">{t("nav.campaigns")}</option>
+              <option value="creatives">{t("nav.creatives")}</option>
             </select>
           </div>
           <div className="field">
-            <label htmlFor="cmp-add">{mode === "campaigns" ? "Select Campaigns" : "Select Creatives"}</label>
+            <label htmlFor="cmp-add">{mode === "campaigns" ? t("compare.selectCampaigns") : t("compare.selectCreatives")}</label>
             <div className="chip-row" style={{ marginBottom: picked.length ? 8 : 0 }}>
               {picked.map((p, i) => (
                 <span key={p} className="chip" style={{ cursor: "default" }}>
                   <i style={{ width: 8, height: 8, borderRadius: "50%", background: COLORS[i % COLORS.length] }} />
                   {optionLabel(p)}
-                  <button type="button" aria-label={`Remove ${optionLabel(p)}`} onClick={() => removeOption(p)}
+                  <button type="button" aria-label={t("compare.removeItem", { name: optionLabel(p) })} onClick={() => removeOption(p)}
                     style={{ background: "none", border: 0, cursor: "pointer", display: "inline-flex", color: "inherit" }}>
                     <Icon name="x" size={12} />
                   </button>
@@ -668,26 +687,26 @@ export function ComparePage() {
               ))}
             </div>
             <select id="cmp-add" value="" onChange={(e) => { addOption(e.target.value); e.target.value = ""; }}>
-              <option value="">{mode === "campaigns" ? "Add Campaign…" : "Add Creative…"}</option>
+              <option value="">{mode === "campaigns" ? t("compare.addCampaign") : t("compare.addCreative")}</option>
               {options.filter((o) => !picked.includes(o)).map((o) => (
                 <option key={o} value={o}>{optionLabel(o)}</option>
               ))}
             </select>
           </div>
           <div className="field">
-            <label htmlFor="cmp-rank">Rank By KPI</label>
+            <label htmlFor="cmp-rank">{t("compare.rankBy")}</label>
             <select
               id="cmp-rank"
               value={rank}
               onChange={(e) => (mode === "campaigns" ? setCampaignRank(e.target.value) : setCreativeRank(e.target.value))}
             >
               {(mode === "campaigns" ? CAMPAIGN_RANKS : CREATIVE_RANKS).map((r) => (
-                <option key={r} value={r}>{kpiLabel(r)}</option>
+                <option key={r} value={r}>{kpiName(r)}</option>
               ))}
             </select>
           </div>
-          <LoadingButton type="button" className="btn-primary" loading={loading} loadingLabel="Comparing…" disabled={loading || picked.length < 2} onClick={apply} title={picked.length < 2 ? "Select at least two items to compare" : undefined}>
-            Apply Comparison
+          <LoadingButton type="button" className="btn-primary" loading={loading} loadingLabel={t("compare.comparing")} disabled={loading || picked.length < 2} onClick={apply} title={picked.length < 2 ? t("compare.needTwo") : undefined}>
+            {t("compare.apply")}
           </LoadingButton>
         </div>
       </div>
@@ -714,7 +733,7 @@ export function ComparePage() {
                   <tbody>
                     {CARD_KPIS.map((k) => (
                       <tr key={k}>
-                        <th scope="row" style={{ border: 0, padding: "3px 0", textTransform: "none", letterSpacing: 0 }}>{kpiLabel(k)}</th>
+                        <th scope="row" style={{ border: 0, padding: "3px 0", textTransform: "none", letterSpacing: 0 }}>{kpiName(k)}</th>
                         <td className="num" style={{ border: 0, padding: "3px 0", fontWeight: 700 }}>{fmtCard(k, item.values[k])}</td>
                       </tr>
                     ))}
@@ -725,10 +744,10 @@ export function ComparePage() {
           </div>
           <div className="cmp-trio">
             <Panel
-              title={mode === "campaigns" ? "Performance Over Time" : "Retention Curves"}
+              title={mode === "campaigns" ? t("compare.perfOverTime") : t("compare.retentionCurves")}
               action={mode === "campaigns" ? (
-                <select aria-label="Trend Metric" value={perfMetric} onChange={(e) => setPerfMetric(e.target.value)}>
-                  {["roas", "ctr", "cpa", "cpm", "spend"].map((m) => <option key={m} value={m}>{kpiLabel(m)}</option>)}
+                <select aria-label={t("compare.trendMetric")} value={perfMetric} onChange={(e) => setPerfMetric(e.target.value)}>
+                  {["roas", "ctr", "cpa", "cpm", "spend"].map((m) => <option key={m} value={m}>{kpiName(m)}</option>)}
                 </select>
               ) : undefined}
             >
@@ -742,7 +761,7 @@ export function ComparePage() {
                       ))}
                     </div>
                   </>
-                ) : <EmptyState text="No daily data for the selected campaigns." />
+                ) : <EmptyState text={t("compare.noDaily")} verbatim />
               ) : (
                 <TrendChart
                   series={activeKeys.map((k, i) => ({
@@ -756,10 +775,10 @@ export function ComparePage() {
               )}
             </Panel>
             <Panel
-              title="KPI Comparison"
+              title={t("compare.kpiComparison")}
               action={(
-                <select aria-label="Comparison Metric" value={barMetric} onChange={(e) => setBarMetric(e.target.value)}>
-                  {DIFF_KPIS.map((m) => <option key={m} value={m}>{kpiLabel(m)}</option>)}
+                <select aria-label={t("compare.comparisonMetric")} value={barMetric} onChange={(e) => setBarMetric(e.target.value)}>
+                  {DIFF_KPIS.map((m) => <option key={m} value={m}>{kpiName(m)}</option>)}
                 </select>
               )}
             >
@@ -771,10 +790,10 @@ export function ComparePage() {
               </div>
             </Panel>
             <Panel
-              title="Difference Summary"
+              title={t("compare.diffSummary")}
               action={(
-                <select aria-label="Comparison Baseline" value={baseName} onChange={(e) => setBaseName(e.target.value)}>
-                  {items.map((i) => <option key={i.key} value={i.key}>vs. {i.title}</option>)}
+                <select aria-label={t("compare.comparisonBaseline")} value={baseName} onChange={(e) => setBaseName(e.target.value)}>
+                  {items.map((i) => <option key={i.key} value={i.key}>{t("compare.vsItem", { title: i.title })}</option>)}
                 </select>
               )}
             >
@@ -787,7 +806,7 @@ export function ComparePage() {
                         if (!r) return null;
                         return (
                           <div key={k} style={{ display: "flex", gap: 8, alignItems: "baseline", padding: "4px 0" }}>
-                            <span className="panel-sub" style={{ width: 44 }}>{kpiLabel(k)}</span>
+                            <span className="panel-sub" style={{ width: 44 }}>{kpiName(k)}</span>
                             <strong style={{ color: r.good ? "#0E7C5B" : "#C2410C", minWidth: 52 }}>
                               {r.dir} {Math.abs(r.pct).toFixed(0)}%
                             </strong>
@@ -798,16 +817,16 @@ export function ComparePage() {
                     </div>
                   ))}
                 </div>
-              ) : <EmptyState text="Select a baseline to compare differences." />}
+              ) : <EmptyState text={t("compare.selectBaseline")} verbatim />}
             </Panel>
           </div>
           <div className="cmp-trio">
-            <Panel title="Creative Attributes">
+            <Panel title={t("compare.attributes")}>
               <div className="tbl-wrap">
                 <table className="tbl">
                   <thead>
                     <tr>
-                      <th scope="col">Attribute</th>
+                      <th scope="col">{t("compare.attribute")}</th>
                       {items.map((i) => <th scope="col" key={i.key}>{i.title}</th>)}
                     </tr>
                   </thead>
@@ -824,7 +843,7 @@ export function ComparePage() {
                 </table>
               </div>
             </Panel>
-            <Panel title="Key Takeaways">
+            <Panel title={t("compare.takeaways")}>
               {takeaways.length ? (
                 <div>
                   {takeaways.map((t) => (
@@ -836,9 +855,9 @@ export function ComparePage() {
                     </div>
                   ))}
                 </div>
-              ) : <EmptyState text="Run a comparison to generate takeaways." />}
+              ) : <EmptyState text={t("compare.needRunTakeaways")} verbatim />}
             </Panel>
-            <Panel title="Next Tests">
+            <Panel title={t("compare.nextTests")}>
               {tests.length ? (
                 <div>
                   {tests.map((t) => (
@@ -853,56 +872,53 @@ export function ComparePage() {
                     </div>
                   ))}
                 </div>
-              ) : <EmptyState text="Run a comparison to generate test ideas." />}
+              ) : <EmptyState text={t("compare.needRunTests")} verbatim />}
             </Panel>
           </div>
         </>
       ) : !loading ? (
-        <Panel title={mode === "creatives" ? "Creative Comparison" : "Campaign Comparison"} style={{ marginTop: 12 }}>
+        <Panel title={mode === "creatives" ? t("compare.emptyCreativeTitle") : t("compare.emptyCampaignTitle")} style={{ marginTop: 12 }}>
           <EmptyState
             compact
+            verbatim
             icon="compare"
             title={modeEmpty
-              ? (mode === "creatives" ? "No Creatives Yet" : "No Campaigns Yet")
-              : "No Comparison Yet"}
+              ? (mode === "creatives" ? t("compare.noCreativesYet") : t("compare.noCampaignsYet"))
+              : t("compare.noComparisonYet")}
             text={modeEmpty
-              ? (mode === "creatives"
-                ? "Add creatives to start comparing."
-                : "Add campaigns to start comparing.")
-              : (mode === "creatives"
-                ? "Select two to four creatives to compare."
-                : "Select two to four campaigns to compare.")}
+              ? (mode === "creatives" ? t("compare.addCreativesHint") : t("compare.addCampaignsHint"))
+              : (mode === "creatives" ? t("compare.select24creatives") : t("compare.select24campaigns"))}
           />
         </Panel>
       ) : null}
       <details className="panel" style={{ marginTop: 12 }}>
         <summary style={{ cursor: "pointer", fontSize: 16.5, fontWeight: 700, color: "var(--shell-navy)" }}>
-          Advanced: Period Comparison
+          {t("compare.periodTitle")}
           <span className="panel-sub" style={{ display: "block", fontWeight: 400 }}>
-            Period A vs Period B over the identical scoped population.
+            {t("compare.periodSub")}
           </span>
         </summary>
         <div className="filter-grid fg-4" style={{ marginTop: 12 }}>
           <div className="field">
-            <label htmlFor="cp-afrom">A From</label>
+            <label htmlFor="cp-afrom">{t("compare.aFrom")}</label>
             <input id="cp-afrom" type="date" value={aFrom} onChange={(e) => setAFrom(e.target.value)} />
           </div>
           <div className="field">
-            <label htmlFor="cp-ato">A To</label>
+            <label htmlFor="cp-ato">{t("compare.aTo")}</label>
             <input id="cp-ato" type="date" value={aTo} onChange={(e) => setATo(e.target.value)} />
           </div>
           <div className="field">
-            <label htmlFor="cp-bfrom">B From</label>
+            <label htmlFor="cp-bfrom">{t("compare.bFrom")}</label>
             <input id="cp-bfrom" type="date" value={bFrom} onChange={(e) => setBFrom(e.target.value)} />
           </div>
           <div className="field">
-            <label htmlFor="cp-bto">B To</label>
+            <label htmlFor="cp-bto">{t("compare.bTo")}</label>
             <input id="cp-bto" type="date" value={bTo} onChange={(e) => setBTo(e.target.value)} />
           </div>
         </div>
         <div className="filter-actions">
-          <LoadingButton type="button" className="btn-primary" loading={periodLoading} loadingLabel="Comparing Periods…" disabled={periodLoading} onClick={() => void comparePeriods()}>
-            Compare Periods
+          <LoadingButton type="button" className="btn-primary" loading={periodLoading} loadingLabel={t("compare.comparingPeriods")} disabled={periodLoading} onClick={() => void comparePeriods()}>
+            {t("compare.comparePeriods")}
           </LoadingButton>
         </div>
         <div style={{ marginTop: 8 }}>
@@ -913,16 +929,16 @@ export function ComparePage() {
               <table className="tbl">
                 <thead>
                   <tr>
-                    <th scope="col">KPI</th>
+                    <th scope="col">{t("compare.kpiCol")}</th>
                     <th scope="col">{periodData.a.label} ({periodData.a.from}…{periodData.a.to}, n={periodData.a.n_ads})</th>
                     <th scope="col">{periodData.b.label} ({periodData.b.from}…{periodData.b.to}, n={periodData.b.n_ads})</th>
-                    <th scope="col" className="num">B−A</th>
+                    <th scope="col" className="num">{t("compare.deltaCol")}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {PERIOD_KPIS.map((m) => (
                     <tr key={m}>
-                      <th scope="row">{kpiLabel(m)}</th>
+                      <th scope="row">{kpiName(m)}</th>
                       <td>{fmtPeriod(m, periodData.a.kpis[m])}</td>
                       <td>{fmtPeriod(m, periodData.b.kpis[m])}</td>
                       <td className="num">{fmtDelta(m, periodData.delta[m])}</td>
@@ -932,7 +948,7 @@ export function ComparePage() {
               </table>
             </div>
           ) : !periodLoading && !periodError ? (
-            <EmptyState text="Fill all four period dates, then Compare Periods." />
+            <EmptyState text={t("compare.fillPeriods")} verbatim />
           ) : null}
         </div>
       </details>

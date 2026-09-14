@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, ApiError } from "@/api/client";
 import { useFilters } from "@/state/FilterContext";
+import { useLocale } from "@/i18n";
 import { Icon } from "@/components/icons";
 import { LoadingButton } from "@/components/LoadingButton";
 import { TrendChart } from "@/components/charts";
@@ -44,43 +45,18 @@ interface Conversation {
   updated_at?: string | null;
 }
 
-const PROMPTS = [
-  "What drove our CTR increase?",
-  "Which creatives perform best?",
-  "Compare Performance By Platform",
-  "Summarise Last Month",
-];
-
-const SUGGESTED = [
-  "What were the top performing creatives for these campaigns?",
-  "Compare ROI by platform",
-  "Which audience segments performed best?",
-  "Why did our CTR increase?",
-  "Show Me Underperforming Creatives",
-  "Summarise last month's performance",
-];
-
-const FOLLOW_UPS = [
-  "Which hook type should we test next?",
-  "How does video length affect CTR?",
-  "Which campaign should we scale first?",
-];
-
-/** Representative first question: the demo opens with this already
- *  answered (user message, narrative, KPI cards, trend, context,
- *  takeaways, follow-ups) instead of an empty composer. */
-const DEFAULT_QUESTION = "Which campaigns had the highest ROI last month and what drove the results?";
+const PROMPT_KEYS = ["p0", "p1", "p2", "p3"] as const;
+const SUGGESTED_KEYS = ["s0", "s1", "s2", "s3", "s4", "s5"] as const;
+const FOLLOW_UP_KEYS = ["f0", "f1", "f2"] as const;
 
 function num(v: unknown): number {
   const n = Number(v ?? 0);
   return Number.isFinite(n) ? n : 0;
 }
 
-function friendlyDate(raw?: string | null): string {
+function friendlyDate(fmtDate: (iso: string, opts?: Intl.DateTimeFormatOptions) => string, raw?: string | null): string {
   if (!raw) return "";
-  const d = new Date(raw.length <= 10 ? `${raw}T00:00:00` : raw);
-  if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return fmtDate(raw, { month: "short", day: "numeric", year: "numeric" });
 }
 
 /** Bucket daily revenue into at most 12 EQUAL-TIME spans. Fixed-count
@@ -110,7 +86,9 @@ export function bucket(points: Array<{ date: string; revenue: number }>): { labe
 
 export function AskPage() {
   const { scope } = useFilters();
-  const [question, setQuestion] = useState(DEFAULT_QUESTION);
+  const { t, fmtDate } = useLocale();
+  const defaultQuestion = t("ask.defaultQuestion");
+  const [question, setQuestion] = useState(defaultQuestion);
   const [asked, setAsked] = useState("");
   const [answer, setAnswer] = useState<AskAnswer | null>(null);
   const [busy, setBusy] = useState(false);
@@ -151,7 +129,7 @@ export function AskPage() {
       });
       setAnswer(res);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Ask Failed.");
+      setError(e instanceof ApiError ? e.message : t("ask.failedMsg"));
     } finally {
       setBusy(false);
     }
@@ -166,7 +144,7 @@ export function AskPage() {
   useEffect(() => {
     if (autoRan.current || !demoMode) return;
     autoRan.current = true;
-    void askRef.current(DEFAULT_QUESTION);
+    void askRef.current();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [demoMode]);
 
@@ -185,29 +163,32 @@ export function AskPage() {
       const tied = rows.filter((r) => (r.roas ?? -1).toFixed(1) === top.toFixed(1));
       const name = (k: string) => (k === "meta" ? "Meta" : k === "tiktok" ? "TikTok" : k);
       out.push(tied.length > 1
-        ? `${tied.map((r) => name(r.key)).join(" and ")} tie at ${top.toFixed(1)}x ROAS.`
-        : `${name(rows[0].key)} leads the current scope at ${top.toFixed(1)}x ROAS.`);
+        ? t("ask.takeTie", { a: name(tied[0].key), b: tied.slice(1).map((r) => name(r.key)).join(", "), roas: top.toFixed(1) })
+        : t("ask.takeLead", { a: name(rows[0].key), roas: top.toFixed(1) }));
     }
     const hookRows = Object.entries(hooks.data ?? {})
       .map(([key, g]) => ({ key, ctr: g.ctr == null ? null : g.ctr * 100 }))
       .filter((r) => r.ctr != null)
       .sort((a, b) => (b.ctr ?? 0) - (a.ctr ?? 0));
     if (hookRows[0]?.ctr != null) {
-      const hook = hookRows[0].key.replace(/_/g, " ");
-      out.push(`${hook.charAt(0).toUpperCase()}${hook.slice(1)} hooks average ${(hookRows[0].ctr ?? 0).toFixed(1)}% CTR across the current scope.`);
+      const raw = hookRows[0].key;
+      const hit = t(`filters.hooks.${raw}`);
+      const hook = hit === `filters.hooks.${raw}` ? raw.replace(/_/g, " ") : hit;
+      const cap = hook.charAt(0).toUpperCase() + hook.slice(1);
+      out.push(t("ask.takeHook", { hook: cap, ctr: (hookRows[0].ctr ?? 0).toFixed(1) }));
     }
     if (answer?.sources?.length) {
-      out.push(`Grounded in ${answer.sources.join(", ")} for the scope “${answer.scope || "All data"}”.`);
+      out.push(t("ask.takeGrounded", { sources: answer.sources.join(", "), scope: answer.scope || t("ask.allData") }));
     }
     return out.slice(0, 3);
-  }, [platforms.data, hooks.data, answer]);
+  }, [platforms.data, hooks.data, answer, t]);
 
   const emptyScope = compare ? compare.current_n_ads === 0 : false;
   const kpiDefs: Array<{ label: string; metric: string; kind: KpiKind; value: number | null | undefined }> = compare ? [
-    { label: "Total Spend", metric: "spend", kind: "money", value: compare.metrics.spend?.current },
-    { label: "Conversions", metric: "conversions", kind: "count", value: compare.metrics.conversions?.current },
-    { label: "Average CPA", metric: "cpa", kind: "money", value: compare.metrics.cpa?.current },
-    { label: "Average ROAS", metric: "roas", kind: "mult", value: compare.metrics.roas?.current },
+    { label: t("dashboard.totalSpend"), metric: "spend", kind: "money", value: compare.metrics.spend?.current },
+    { label: t("filters.kpis.conversions"), metric: "conversions", kind: "count", value: compare.metrics.conversions?.current },
+    { label: t("ask.avgCpa"), metric: "cpa", kind: "money", value: compare.metrics.cpa?.current },
+    { label: t("dashboard.averageRoas"), metric: "roas", kind: "mult", value: compare.metrics.roas?.current },
   ] : [];
   const kpis = kpiDefs.map((k) => ({
     ...k,
@@ -218,12 +199,12 @@ export function AskPage() {
   return (
     <>
       <PageHeader
-        title="Ask The Data"
-        sub="Get instant, data-backed answers about your marketing performance."
+        title={t("ask.title")}
+        sub={t("ask.sub")}
       />
       <div className="main-rail">
         <div className="rail-stack">
-          <section className="panel" aria-label="Question Composer">
+          <section className="panel" aria-label={t("ask.composerLabel")}>
             <form
               onSubmit={(e) => {
                 e.preventDefault();
@@ -235,24 +216,27 @@ export function AskPage() {
                 <input
                   value={question}
                   onChange={(e) => setQuestion(e.target.value)}
-                  placeholder="Ask a question about your marketing data…"
-                  aria-label="Ask a question about your marketing data"
+                  placeholder={t("ask.inputPlaceholder")}
+                  aria-label={t("ask.inputPlaceholder")}
                 />
-                <LoadingButton type="submit" className="btn-send" loading={busy} loadingLabel="Sending…" spinnerClass="spinner" disabled={busy || !question.trim()} aria-label="Ask">
+                <LoadingButton type="submit" className="btn-send" loading={busy} loadingLabel={t("common.sending")} spinnerClass="spinner" disabled={busy || !question.trim()} aria-label={t("ask.askBtn")}>
                   <Icon name="send" size={17} />
                 </LoadingButton>
               </div>
             </form>
             <div className="prompt-chips" style={{ marginTop: 10 }}>
-              {PROMPTS.map((p) => (
-                <button key={p} type="button" className="chip" onClick={() => { setQuestion(p); void ask(p); }}>
-                  {p}
-                </button>
-              ))}
+              {PROMPT_KEYS.map((k) => {
+                const p = t(`ask.prompts.${k}`);
+                return (
+                  <button key={k} type="button" className="chip" onClick={() => { setQuestion(p); void ask(p); }}>
+                    {p}
+                  </button>
+                );
+              })}
             </div>
           </section>
           {asked ? (
-            <Panel title={asked} sub="Today" style={{ flex: "1 0 auto" }}>
+            <Panel title={asked} sub={t("ask.todaySub")} style={{ flex: "1 0 auto" }}>
               {busy ? <Skeleton height={120} /> : error ? (
                 <EmptyState text={error} />
               ) : answer ? (
@@ -268,7 +252,7 @@ export function AskPage() {
                           note={k.note}
                           icon={k.metric === "spend" ? "coin" : k.metric === "conversions" ? "click" : k.metric === "cpa" ? "users" : "bars"}
                           tint="var(--shell-blue-soft)"
-                          metricLabel={k.metric === "roas" ? "ROAS" : k.metric === "cpa" ? "CPA" : k.label.replace("Average ", "").replace("Total ", "")}
+                          metricLabel={t(`filters.kpis.${k.metric}`)}
                           compare={compare}
                         />
                       ))}
@@ -276,75 +260,81 @@ export function AskPage() {
                   ) : compareError ? (
                     <EmptyState text={compareError} />
                   ) : <Skeleton height={118} />}
-                  <Panel title="Revenue Trend">
+                  <Panel title={t("ask.trendTitle")}>
                     {daily ? (
                       <TrendChart
-                        series={[{ label: "Revenue", color: "var(--glyph-teal)", soft: "#E5F5F2", points: roi.values }]}
+                        series={[{ label: t("filters.kpis.revenue"), color: "var(--glyph-teal)", soft: "#E5F5F2", points: roi.values }]}
                         labels={roi.labels}
                       />
                     ) : <Skeleton height={200} />}
                   </Panel>
                   <div className="cols-2">
-                    <Panel title="Data Context">
-                      <p className="panel-sub">Sources: {(answer.sources ?? []).join(", ") || "—"}</p>
-                      <p className="panel-sub">Scope: {answer.scope || "All data"}</p>
-                      {answer.review_id ? <p className="panel-sub">Saved for review (#{answer.review_id}).</p> : null}
+                    <Panel title={t("ask.contextTitle")}>
+                      <p className="panel-sub">{t("ask.sourcesLabel", { sources: (answer.sources ?? []).join(", ") || "—" })}</p>
+                      <p className="panel-sub">{t("ask.scopeLabel", { scope: answer.scope || t("ask.allData") })}</p>
+                      {answer.review_id ? <p className="panel-sub">{t("ask.reviewSaved", { id: answer.review_id })}</p> : null}
                     </Panel>
-                    <Panel title="Context">
+                    <Panel title={t("ask.extraContextTitle")}>
                       {platforms.data ? (
                         <p className="panel-sub">
                           {Object.entries(platforms.data).map(([k, g]) =>
                             `${k === "meta" ? "Meta" : k === "tiktok" ? "TikTok" : k}: ${g.roas == null ? "—" : `${g.roas.toFixed(1)}x`} ROAS`,
-                          ).join(" · ") || "No platform benchmarks in scope."}
+                          ).join(" · ") || t("ask.noPlatforms")}
                         </p>
                       ) : <Skeleton height={60} />}
                     </Panel>
                   </div>
                   {takeaways.length ? (
                     <div className="takeaways">
-                      <h5>Key Takeaways</h5>
+                      <h5>{t("ask.takeawaysTitle")}</h5>
                       <ul>
-                        {takeaways.map((t) => (
-                          <li key={t}><Icon name="check" size={13} /><span>{t}</span></li>
+                        {takeaways.map((item) => (
+                          <li key={item}><Icon name="check" size={13} /><span>{item}</span></li>
                         ))}
                       </ul>
                     </div>
                   ) : null}
-                  <Panel title="Suggested Follow-Ups">
+                  <Panel title={t("ask.followUpsTitle")}>
                     <div className="prompt-chips" style={{ marginTop: 0 }}>
-                      {FOLLOW_UPS.map((f) => (
-                        <button key={f} type="button" className="chip chip-sugg" onClick={() => { setQuestion(f); void ask(f); }}>
-                          {f}
-                        </button>
-                      ))}
+                      {FOLLOW_UP_KEYS.map((k) => {
+                        const f = t(`ask.followups.${k}`);
+                        return (
+                          <button key={k} type="button" className="chip chip-sugg" onClick={() => { setQuestion(f); void ask(f); }}>
+                            {f}
+                          </button>
+                        );
+                      })}
                     </div>
                   </Panel>
                 </>
               ) : null}
             </Panel>
           ) : (
-            <Panel title="Ask a Question to Begin" style={{ flex: "1 0 auto" }}>
+            <Panel title={t("ask.beginTitle")} style={{ flex: "1 0 auto" }}>
               <EmptyState
                 icon="chat"
-                title="Ask Your First Question"
-                text="Answers cite your uploaded data first and always show their scope. Try a suggestion on the right."
+                title={t("ask.firstTitle")}
+                text={t("ask.firstBody")}
               />
             </Panel>
           )}
         </div>
         <div className="rail-stack">
-          <Panel title="Suggested Questions">
+          <Panel title={t("ask.suggestedTitle")}>
             <div className="rail-stack" style={{ gap: 6 }}>
-              {SUGGESTED.map((s) => (
-                <button key={s} type="button" className="btn-outline chip-sugg" style={{ justifyContent: "space-between", textAlign: "left", minHeight: 30, padding: "6px 12px", fontSize: 12.5 }}
+              {SUGGESTED_KEYS.map((k) => {
+                const s = t(`ask.suggested.${k}`);
+                return (
+                <button key={k} type="button" className="btn-outline chip-sugg" style={{ justifyContent: "space-between", textAlign: "left", minHeight: 30, padding: "6px 12px", fontSize: 12.5 }}
                   onClick={() => { setQuestion(s); void ask(s); }}>
                   <span style={{ minWidth: 0, whiteSpace: "normal" }}>{s}</span>
                   <span style={{ flex: "none" }} aria-hidden="true"><Icon name="chev" size={14} /></span>
                 </button>
-              ))}
+                );
+              })}
             </div>
           </Panel>
-          <Panel title="Recent Chats" action={<Link className="link-teal" to="/analyst">View All</Link>} style={{ flex: "1 0 auto" }}>
+          <Panel title={t("ask.recentTitle")} action={<Link className="link-teal" to="/analyst">{t("common.viewAll")}</Link>} style={{ flex: "1 0 auto" }}>
             {chats === null ? <Skeleton height={120} /> : (
               chats.length ? (
                 <div>
@@ -356,14 +346,14 @@ export function AskPage() {
                       </span>
                       <div style={{ minWidth: 0 }}>
                         <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: "var(--shell-navy)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                          {c.title || "Untitled Conversation"}
+                          {c.title || t("pageInsights.untitledConv")}
                         </p>
-                        <p className="panel-sub" style={{ margin: 0, fontSize: 11.5 }}>{friendlyDate(c.updated_at)}</p>
+                        <p className="panel-sub" style={{ margin: 0, fontSize: 11.5 }}>{friendlyDate(fmtDate, c.updated_at)}</p>
                       </div>
                     </Link>
                   ))}
                 </div>
-              ) : <EmptyState compact icon="chat" title="No recent chats" text="Your conversations will appear here." />
+              ) : <EmptyState compact icon="chat" title={t("ask.noChatsTitle")} text={t("ask.noChatsBody")} />
             )}
           </Panel>
         </div>

@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
+import { useLocale } from "@/i18n";
 
 export type TrendDirection = "up" | "down" | "flat";
 export type TrendSentiment = "good" | "bad" | "neutral";
@@ -19,24 +20,40 @@ export interface KpiPeriod {
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-/** "2023-12-25" -> "Dec 25, 2023" (display only; ISO stays on the wire). */
-export function formatDay(iso: string): string {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
-  if (!m) return iso;
-  const month = MONTHS[Number(m[2]) - 1] ?? m[2];
-  return `${month} ${Number(m[3])}, ${m[1]}`;
+/** Short month name in the UI locale (§9); falls back to the
+ *  built-in English abbreviations outside a browser Intl. */
+export function monthName(month: number, locale = "en-US"): string {
+  if (typeof Intl !== "undefined" && typeof Intl.DateTimeFormat === "function") {
+    try {
+      const d = new Date(Date.UTC(2024, month - 1, 1));
+      const hit = new Intl.DateTimeFormat(locale, { month: "short", timeZone: "UTC" }).format(d);
+      if (hit) return hit.replace(/\.$/, "");
+    } catch {
+      /* fall through to English abbreviations */
+    }
+  }
+  return MONTHS[month - 1] ?? String(month);
 }
 
-/** "Dec 25 – Dec 31, 2023" (year once when shared). */
-export function formatRange(period: KpiPeriod): string {
+/** "2023-12-25" -> "Dec 25, 2023" (display only; ISO stays on the wire). */
+export function formatDay(iso: string, locale = "en-US"): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  if (!m) return iso;
+  return `${monthName(Number(m[2]), locale)} ${Number(m[3])}, ${m[1]}`;
+}
+
+/** "Dec 25 – Dec 31, 2023" (year once when shared). Month names
+ *  follow the passed UI locale; the default keeps the historic
+ *  English output. */
+export function formatRange(period: KpiPeriod, locale = "en-US"): string {
   const [sy, sm, sd] = period.start.split("-");
   const [ey, em, ed] = period.end.split("-");
-  const startMonth = MONTHS[Number(sm) - 1] ?? sm;
-  const endMonth = MONTHS[Number(em) - 1] ?? em;
+  const startMonth = monthName(Number(sm), locale);
+  const endMonth = monthName(Number(em), locale);
   if (sy === ey) {
     return `${startMonth} ${Number(sd)} – ${endMonth} ${Number(ed)}, ${sy}`;
   }
-  return `${formatDay(period.start)} – ${formatDay(period.end)}`;
+  return `${formatDay(period.start, locale)} – ${formatDay(period.end, locale)}`;
 }
 
 const ARROWS: Record<TrendDirection, string> = { up: "↑", down: "↓", flat: "→" };
@@ -60,6 +77,8 @@ export interface KpiTrendProps {
  *  so no arrow ever appears without real comparison data behind it.
  */
 export function KpiTrend({ metricLabel, comparison, previous }: KpiTrendProps) {
+  // Locale first: hooks never run conditionally below the early returns.
+  const { t, lang } = useLocale();
   // Transient hover/focus state.
   const [open, setOpen] = useState(false);
   // Touch/click-pinned state, independent of focus: a tap pins the
@@ -159,25 +178,26 @@ export function KpiTrend({ metricLabel, comparison, previous }: KpiTrendProps) {
   // the DOM even if a payload is ever malformed.
   if (state === "compared" && (pct === null || !Number.isFinite(pct))) return null;
 
-  const range = previous ? formatRange(previous) : null;
+  const locale = lang === "pl" ? "pl-PL" : lang === "es" ? "es-ES" : "en-US";
+  const range = previous ? formatRange(previous, locale) : null;
   let tip: string;
   if (state === "new") {
     // The previous window had rows but the metric itself was zero
     // there, so no honest percentage exists.
     tip = range
-      ? `No Percentage Comparison Available Because The Previous-Period Value In ${range} Was Zero.`
-      : "No Percentage Comparison Available Because The Previous-Period Value Was Zero.";
+      ? t("trend.zeroPrevWithRange", { range })
+      : t("trend.zeroPrev");
   } else if (direction === "flat") {
-    tip = range ? `No Change Compared With ${range}.`
-      : "No Change Compared With The Previous Equivalent Date Range.";
+    tip = range ? t("trend.flatWithRange", { range })
+      : t("trend.flat");
   } else {
     const abs = pct === null ? "" : `${Math.abs(Math.round(pct * 10) / 10)}%`;
-    const word = direction === "up" ? "Higher" : "Lower";
-    tip = range ? `${metricLabel} ${abs} ${word} Than ${range}.`
-      : `${metricLabel} ${abs} ${word} Than The Previous Equivalent Date Range.`;
+    const word = direction === "up" ? t("trend.higher") : t("trend.lower");
+    tip = range ? t("trend.deltaWithRange", { metric: metricLabel, abs, word, range })
+      : t("trend.delta", { metric: metricLabel, abs, word });
   }
 
-  const shown = state === "new" ? "New" : pct === null ? null : signed(pct);
+  const shown = state === "new" ? t("trend.isNew") : pct === null ? null : signed(pct);
   if (shown === null) return null;
 
   return (
@@ -197,7 +217,7 @@ export function KpiTrend({ metricLabel, comparison, previous }: KpiTrendProps) {
           type="button"
           ref={buttonRef}
           className="trend-info"
-          aria-label="Explain Comparison Period"
+          aria-label={t("trend.explain")}
           aria-expanded={visible}
           aria-describedby={visible ? tipId : undefined}
           onClick={(e) => {

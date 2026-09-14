@@ -189,7 +189,15 @@ describe("AdminEmployeesPage", () => {
       () => new Promise<Response>(() => {}),
     ) as unknown as typeof fetch;
     render(<AdminEmployeesPage />);
-    expect(screen.getByText("Loading Employees…")).toBeDefined();
+    // Loading states announce through sr-only live regions (§10):
+    // no visible loading text, with skeleton blocks in its place.
+    const announcements = screen.getAllByText("Loading employees…");
+    expect(announcements.length).toBeGreaterThan(0);
+    for (const el of announcements) {
+      expect((el as HTMLElement).classList.contains("sr-only")).toBe(true);
+    }
+    expect(document.querySelector(".skel")).not.toBeNull();
+    expect(screen.queryByText("Loading Employees…")).toBeNull();
   });
 
   it("renders list errors", async () => {
@@ -358,7 +366,7 @@ describe("AdminEmployeesPage", () => {
       ).toBe(true);
     });
     await waitFor(() => {
-      expect(screen.getByText("2 Session(s) Revoked.")).toBeDefined();
+      expect(screen.getByText("2 Sessions Revoked.")).toBeDefined();
     });
   });
 

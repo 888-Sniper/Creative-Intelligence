@@ -347,7 +347,7 @@ body[data-density="compact"] .kpi-grid{grid-gap:8px;gap:8px}
  * logo teal would be 2.1:1. Outline buttons keep .spinner.dark. */
 .btn-primary .spinner,.btn-send .spinner,.login-primary .spinner{border-color:rgba(24,37,54,.32);border-top-color:var(--brand-teal-ink)}
 .btn-outline{display:inline-flex;align-items:center;gap:8px;background:var(--shell-card);color:var(--shell-navy);border:1px solid var(--shell-line);border-radius:9px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;white-space:nowrap;min-height:34px}
-.btn-outline:hover{border-color:var(--shell-teal);color:var(--shell-teal-dark)}
+.btn-outline:hover{border-color:var(--shell-teal);color:var(--shell-teal)}
 .btn-soft{display:inline-flex;align-items:center;justify-content:center;background:var(--shell-teal-soft);color:var(--shell-teal-dark);border:0;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;text-decoration:none;white-space:nowrap;min-height:34px}
 .btn-soft:hover{filter:brightness(.96)}
 .filter-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px 12px}
@@ -408,6 +408,9 @@ select:not([multiple]):not([size]){appearance:none;background-image:url("data:im
 /* Shared overflow menu (§8): theme-aware dropdown off a ⋯ toggle. */
 .ov-menu{position:relative;flex:0 0 auto}
 .ov-menu-list{position:absolute;right:0;top:calc(100% + 6px);z-index:70;min-width:200px;max-width:min(260px,70vw);background:var(--shell-card);border:1px solid var(--shell-line);border-radius:10px;box-shadow:var(--shell-shadow);padding:6px}
+/* Portaled menu (§12): rendered under document.body with an explicit
+ * fixed position, so no scrolling table ancestor can clip it. */
+.ov-menu-list.ov-menu-portal{position:fixed;right:auto;top:auto;z-index:200;max-height:min(60vh,420px);overflow-y:auto}
 .ov-menu-item{display:flex;align-items:center;gap:9px;width:100%;text-align:left;background:transparent;border:0;border-radius:7px;padding:10px 12px;min-height:42px;font-size:13.5px;font-weight:500;color:var(--shell-navy);cursor:pointer;font-family:inherit}
 .ov-menu-item:hover:not(:disabled){background:var(--shell-teal-soft)}
 .ov-menu-item:disabled{opacity:.6;cursor:default}
@@ -761,6 +764,14 @@ button.cell-main{background:none;border:0;padding:0;cursor:pointer;text-align:le
 .rep-filters{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .rep-search{display:inline-flex;align-items:center;gap:7px;background:var(--shell-card);border:1px solid var(--shell-line);border-radius:8px;padding:7px 11px;color:var(--shell-faint)}
 .rep-search input{border:0;outline:0;background:transparent;font-size:12.5px;color:var(--shell-navy);font-family:inherit;width:130px}
+/* Inner search field normalization (§12): the input inside the padded,
+ * bordered .rep-search wrapper must not carry its own height, padding
+ * or border — those stacked rules made the outer control ~50px next
+ * to 34px selects. This beats .rep-filters input[type="text"] on
+ * specificity so the wrapper alone sets the 34px outer height. */
+.rep-filters .rep-search input[type="text"]{min-height:0;height:auto;padding:0;border:0;border-radius:0}
+.rep-filters .rep-search input[type="text"]:focus{outline:none;border:0}
+.rep-filters .rep-search:focus-within{outline:2px solid var(--shell-teal);outline-offset:-1px;border-color:var(--shell-teal)}
 /* Admin employee search needs its full placeholder visible (220–240px). */
 .admin-search{flex:1 1 230px;max-width:320px;min-height:34px;box-sizing:border-box}
 .admin-search input{width:100%;min-width:180px}
@@ -817,6 +828,7 @@ button.cell-main{background:none;border:0;padding:0;cursor:pointer;text-align:le
 [data-theme="dark"] .side-nav a.active:hover{background:color-mix(in srgb,var(--brand-teal) 86%,white)}
 #account-menu .menu-toggle:hover,.user-chip:hover{background:var(--shell-teal-soft)}
 [data-theme="dark"] .link-teal{color:var(--brand-teal)}
+[data-theme="dark"] .btn-outline:hover{border-color:var(--brand-teal);color:var(--brand-teal)}
 .btn-outline{transition:background .15s ease,color .15s ease,border-color .15s ease}
 .btn-outline:hover{background:var(--shell-teal-soft)}
 .pill{min-height:30px;box-sizing:border-box;padding:6px 14px;font-size:12.5px}

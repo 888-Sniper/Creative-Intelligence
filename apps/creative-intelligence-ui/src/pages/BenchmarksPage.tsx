@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { api, scopedPath } from "@/api/client";
 import { applySavedView, VIEW_ROUTES, type SavedView } from "@/components/savedViews";
 import { useFilters } from "@/state/FilterContext";
+import { useLocale } from "@/i18n";
 import { Icon } from "@/components/icons";
 import { LoadingButton } from "@/components/LoadingButton";
 import {
@@ -26,12 +27,9 @@ import {
 
 type Axis = "platform" | "hook_type" | "format" | "creator_vs_branded";
 
-const AXES: Array<{ value: Axis; label: string }> = [
-  { value: "platform", label: "Platform" },
-  { value: "hook_type", label: "Hook Type" },
-  { value: "format", label: "Format" },
-  { value: "creator_vs_branded", label: "Creator vs Branded" },
-];
+const AXES: Array<Axis> = ["platform", "hook_type", "format", "creator_vs_branded"];
+
+type TFn = (key: string, vars?: Record<string, string | number>) => string;
 
 interface BenchRow {
   spend: number; impressions: number; clicks: number; conversions: number;
@@ -47,9 +45,16 @@ function num(v: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function axisLabel(axis: Axis, key: string): string {
+function axisLabel(t: TFn, axis: Axis, key: string): string {
   if (axis === "platform") return platformLabel(key);
-  if (axis === "creator_vs_branded") return key === "creator" ? "Creator" : key === "branded" ? "Branded" : key;
+  if (axis === "creator_vs_branded") {
+    const hit = t(`filters.creators.${key.toLowerCase()}`);
+    return hit === `filters.creators.${key.toLowerCase()}` ? key : hit;
+  }
+  if (axis === "hook_type") {
+    const hit = t(`filters.hooks.${key}`);
+    return hit === `filters.hooks.${key}` ? key : hit;
+  }
   return key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
@@ -69,18 +74,20 @@ function MiniBars({ values, format }: { values: number[]; format: (v: number) =>
 }
 
 function BenchmarkViewSub({ view }: { view: SavedView }) {
+  const { t, tp } = useLocale();
   const axes = Object.keys(view.state?.filters ?? {}).length;
   const dest = view.state?.view ? (VIEW_ROUTES[view.state.view] ?? view.state.view) : "";
   return (
     <span className="panel-sub">
-      {axes ? `${axes} filter ${axes === 1 ? "axis" : "axes"}` : "Saved Setup"}
-      {dest ? ` · Opens ${dest}` : ""}
+      {axes ? tp("benchmarks.viewFilters", axes, { count: axes }) : t("benchmarks.savedSetup")}
+      {dest ? ` · ${t("benchmarks.opensDest", { dest })}` : ""}
     </span>
   );
 }
 
 export function BenchmarksPage() {
   const { filters, setFilter, clearFilters } = useFilters();
+  const { t, tp, fmtDate, fmtNum } = useLocale();
   const [axis, setAxis] = useState<Axis>("platform");
   const [applied, setApplied] = useState(0);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -109,9 +116,9 @@ export function BenchmarksPage() {
   const rows = useMemo(() => {
     const list = Object.entries(benchmarks.data ?? {}).map(([key, m]) => ({ key, ...m }));
     return axis === "platform"
-      ? list.sort((a, b) => axisLabel(axis, a.key).localeCompare(axisLabel(axis, b.key)))
+      ? list.sort((a, b) => axisLabel(t, axis, a.key).localeCompare(axisLabel(t, axis, b.key)))
       : list.sort((a, b) => num(b.spend) - num(a.spend));
-  }, [benchmarks.data, axis]);
+  }, [benchmarks.data, axis, t]);
 
   const compared = useMemo(
     () => rows.filter((r) => selected.has(r.key)).slice(0, 3),
@@ -143,7 +150,7 @@ export function BenchmarksPage() {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else if (next.size < 3) next.add(key);
-      else setStatus("Compare up to 3 benchmarks at a time.");
+      else setStatus(t("benchmarks.maxCompare"));
       return next;
     });
 
@@ -170,14 +177,17 @@ export function BenchmarksPage() {
       const data = await api<Record<string, BenchRow>>(
         "GET", scopedPath(`/api/benchmarks?${params.toString()}`, new URLSearchParams()),
       );
-      const name = `Benchmark — ${AXES.find((a) => a.value === axis)?.label} ${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
+      const name = t("benchmarks.savedName", {
+        axis: t(`benchmarks.axes.${axis}`),
+        date: fmtDate(new Date().toISOString(), { month: "short", day: "numeric", year: "numeric" }),
+      });
       await api("POST", "/api/views", { name, state: { filters: {}, kpi: filters.kpi, view: "benchmark" } });
       void data;
       const list = await api<SavedView[]>("GET", "/api/views");
       setViews(Array.isArray(list) ? list : []);
-      setStatus(`Saved ${name}.`);
+      setStatus(t("benchmarks.savedMsg", { name }));
     } catch (e) {
-      setStatus(e instanceof Error ? e.message : "Could not save benchmark.");
+      setStatus(e instanceof Error ? e.message : t("benchmarks.saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -193,7 +203,7 @@ export function BenchmarksPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
       });
-      if (!res.ok) throw new Error("Export Failed");
+      if (!res.ok) throw new Error(t("benchmarks.exportFailed"));
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -201,9 +211,9 @@ export function BenchmarksPage() {
       a.download = "benchmarks.csv";
       a.click();
       URL.revokeObjectURL(url);
-      setStatus(`Exported ${rows.length} benchmark group${rows.length === 1 ? "" : "s"}.`);
+      setStatus(tp("benchmarks.exported", rows.length, { count: rows.length }));
     } catch (e) {
-      setStatus(e instanceof Error ? e.message : "Export Failed");
+      setStatus(e instanceof Error ? e.message : t("benchmarks.exportFailed"));
     } finally {
       setExportBusy(false);
     }
@@ -220,53 +230,53 @@ export function BenchmarksPage() {
   return (
     <>
       <PageHeader
-        title="Benchmarks"
-        sub="Discover, save, and manage benchmarks to guide stronger creative decisions."
+        title={t("benchmarks.title")}
+        sub={t("benchmarks.sub")}
         actions={(
-          <LoadingButton type="button" className="btn-primary" loading={saving} loadingLabel="Saving…" disabled={saving} onClick={() => void createBenchmark()}>
-            <Icon name="plus" size={16} /> Create Benchmark
+          <LoadingButton type="button" className="btn-primary" loading={saving} loadingLabel={t("common.saving")} disabled={saving} onClick={() => void createBenchmark()}>
+            <Icon name="plus" size={16} /> {t("benchmarks.create")}
           </LoadingButton>
         )}
       />
-      <section className="panel" aria-label="Benchmark Filters">
+      <section className="panel" aria-label={t("benchmarks.filtersLabel")}>
         <div className="filter-grid fg-6">
-          <MetaSelect id="b-client" label="Client" allLabel="All Clients"
+          <MetaSelect id="b-client" label={t("filters.client")} allLabel={t("filters.allClients")}
             values={metaClients} value={filters.client}
             onPick={(v) => setFilter("client", v)} />
-          <MetaSelect id="b-vertical" label="Vertical" allLabel="All Verticals"
+          <MetaSelect id="b-vertical" label={t("filters.vertical")} allLabel={t("filters.allVerticals")}
             values={metaVerticals} value={filters.vertical}
             onPick={(v) => setFilter("vertical", v)} />
           <div className="field">
-            <label htmlFor="b-platform">Platform</label>
-            <select id="b-platform" aria-label="Platform" value={filters.platform === "all" ? "" : filters.platform} onChange={(e) => setFilter("platform", e.target.value)}>
-              <option value="">All Platforms</option>
+            <label htmlFor="b-platform">{t("filters.platform")}</label>
+            <select id="b-platform" aria-label={t("filters.platform")} value={filters.platform === "all" ? "" : filters.platform} onChange={(e) => setFilter("platform", e.target.value)}>
+              <option value="">{t("filters.allPlatforms")}</option>
               <option value="meta">Meta</option>
               <option value="tiktok">TikTok</option>
             </select>
           </div>
-          <MetaSelect id="b-market" label="Market" allLabel="All Markets"
+          <MetaSelect id="b-market" label={t("filters.market")} allLabel={t("filters.allMarkets")}
             values={metaMarkets} value={filters.market}
             onPick={(v) => setFilter("market", v)} />
-          <MetaSelect id="b-objective" label="Campaign Objective" allLabel="All Objectives"
+          <MetaSelect id="b-objective" label={t("filters.objective")} allLabel={t("filters.allObjectives")}
             values={metaObjectives} value={filters.objective}
             onPick={(v) => setFilter("objective", v)} />
           <div className="field">
-            <label htmlFor="b-funnel">Funnel Stage</label>
-            <select id="b-funnel" aria-label="Funnel Stage" value={filters.funnel === "all" ? "" : filters.funnel} onChange={(e) => setFilter("funnel", e.target.value)}>
-              <option value="">All Stages</option>
-              <option value="upper">Upper</option>
-              <option value="mid">Mid</option>
-              <option value="lower">Lower</option>
+            <label htmlFor="b-funnel">{t("filters.funnel")}</label>
+            <select id="b-funnel" aria-label={t("filters.funnel")} value={filters.funnel === "all" ? "" : filters.funnel} onChange={(e) => setFilter("funnel", e.target.value)}>
+              <option value="">{t("filters.allStages")}</option>
+              <option value="upper">{t("filters.funnels.upper")}</option>
+              <option value="mid">{t("filters.funnels.mid")}</option>
+              <option value="lower">{t("filters.funnels.lower")}</option>
             </select>
           </div>
           <div className="field" style={{ gridColumn: "1 / -1" }}>
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
               <button type="button" className="btn-primary" onClick={() => setApplied((n) => n + 1)}>
-                Apply Filters
+                {t("filters.apply")}
               </button>
               <button type="button" className="link-teal" onClick={clearFilters}
                 style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                <Icon name="reset" size={15} /> Reset Filters
+                <Icon name="reset" size={15} /> {t("filters.reset")}
               </button>
             </div>
           </div>
@@ -275,8 +285,8 @@ export function BenchmarksPage() {
       {status ? <p className="panel-sub" role="status" style={{ margin: "8px 0 0" }}>{status}</p> : null}
       <div className="main-rail">
         <div className="rail-stack">
-          <Panel title="Saved Benchmarks" sub="Quick access to your saved benchmark sets."
-            action={<Link className="link-teal" to="/insights">View All</Link>}>
+          <Panel title={t("benchmarks.savedTitle")} sub={t("benchmarks.savedSub")}
+            action={<Link className="link-teal" to="/insights">{t("common.viewAll")}</Link>}>
             {views === null ? <Skeleton height={90} /> : (
               views.length ? (
                 <div className="cards-4">
@@ -291,33 +301,33 @@ export function BenchmarksPage() {
                     </button>
                   ))}
                 </div>
-              ) : <EmptyState compact icon="bookmark" title="No saved benchmarks" text="Use Create Benchmark to save the current setup." />
+              ) : <EmptyState compact icon="bookmark" title={t("benchmarks.noSavedTitle")} text={t("benchmarks.noSavedBody")} />
             )}
           </Panel>
           {/* Both left panels share leftover column height so the
             column bottom edge meets Learn More (right rail-stack is
             grid-stretched to the same height; no fixed heights). */}
           <Panel
-            title="Benchmark Results"
-            sub="Benchmarks From Current Campaign Data"
+            title={t("benchmarks.resultsTitle")}
+            sub={t("benchmarks.resultsSub")}
             style={{ flex: "1 0 auto" }}
             headClassName="bench-head"
             action={(
               <>
                 <OverflowMenu
                   className="hide-desktop"
-                  label="Benchmark Results actions"
-                  items={[{ label: exportBusy ? "Exporting…" : "Export", icon: "download", disabled: exportBusy, onSelect: () => void onExport() }]}
+                  label={t("benchmarks.resultsActions")}
+                  items={[{ label: exportBusy ? t("campaigns.exporting") : t("common.export"), icon: "download", disabled: exportBusy, onSelect: () => void onExport() }]}
                 />
                 <div className="panel-controls bench-controls">
-                  <label htmlFor="b-axis" className="panel-sub" style={{ margin: 0 }}>Group By</label>
-                  <select id="b-axis" aria-label="Group By" value={axis}
+                  <label htmlFor="b-axis" className="panel-sub" style={{ margin: 0 }}>{t("benchmarks.groupBy")}</label>
+                  <select id="b-axis" aria-label={t("benchmarks.groupBy")} value={axis}
                     onChange={(e) => { setAxis(e.target.value as Axis); setSelected(new Set()); }}
                     style={{ background: "var(--shell-card)", border: "1px solid var(--shell-line)", borderRadius: 8, padding: "7px 26px 7px 10px", fontSize: 12.5, color: "var(--shell-navy)", fontFamily: "inherit" }}>
-                    {AXES.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
+                    {AXES.map((a) => <option key={a} value={a}>{t(`benchmarks.axes.${a}`)}</option>)}
                   </select>
-                  <LoadingButton type="button" className="btn-outline hide-mobile" loading={exportBusy} loadingLabel="Exporting…" spinnerClass="spinner dark" disabled={exportBusy} onClick={() => void onExport()}>
-                    <Icon name="download" size={15} /> Export
+                  <LoadingButton type="button" className="btn-outline hide-mobile" loading={exportBusy} loadingLabel={t("campaigns.exporting")} spinnerClass="spinner dark" disabled={exportBusy} onClick={() => void onExport()}>
+                    <Icon name="download" size={15} /> {t("common.export")}
                   </LoadingButton>
                 </div>
               </>
@@ -329,48 +339,48 @@ export function BenchmarksPage() {
                   <table className="tbl">
                     <thead>
                       <tr>
-                        <th scope="col"><input type="checkbox" aria-label="Select All Benchmarks"
+                        <th scope="col"><input type="checkbox" aria-label={t("benchmarks.selectAll")}
                           checked={rows.length > 0 && rows.every((r) => selected.has(r.key))}
                           onChange={() => setSelected(rows.every((r) => selected.has(r.key)) ? new Set() : new Set(rows.map((r) => r.key)))} /></th>
-                        <th scope="col">Benchmark Name</th>
-                        <th scope="col">Coverage</th>
-                        <th scope="col">Platform</th>
-                        <th scope="col" className="num">CPM</th>
-                        <th scope="col" className="num">CTR</th>
-                        <th scope="col" className="num">CPA</th>
-                        <th scope="col" className="num">ROAS</th>
-                        <th scope="col" className="num">Records</th>
+                        <th scope="col">{t("benchmarks.headers.name")}</th>
+                        <th scope="col">{t("benchmarks.headers.coverage")}</th>
+                        <th scope="col">{t("benchmarks.headers.platform")}</th>
+                        <th scope="col" className="num">{t("filters.kpis.cpm")}</th>
+                        <th scope="col" className="num">{t("filters.kpis.ctr")}</th>
+                        <th scope="col" className="num">{t("filters.kpis.cpa")}</th>
+                        <th scope="col" className="num">{t("filters.kpis.roas")}</th>
+                        <th scope="col" className="num">{t("benchmarks.headers.records")}</th>
                       </tr>
                     </thead>
                     <tbody>
                       {rows.map((r) => (
                         <tr key={r.key}>
                           <td>
-                            <input type="checkbox" aria-label={`Select ${axisLabel(axis, r.key)}`}
+                            <input type="checkbox" aria-label={t("benchmarks.selectOne", { name: axisLabel(t, axis, r.key) })}
                               checked={selected.has(r.key)} onChange={() => toggle(r.key)} />
                           </td>
-                          <td><span className="cell-main">{axisLabel(axis, r.key)}</span></td>
-                          <td>All {axis === "platform" ? "Verticals" : "Platforms"}</td>
-                          <td>{axis === "platform" ? axisLabel(axis, r.key) : "All Platforms"}</td>
+                          <td><span className="cell-main">{axisLabel(t, axis, r.key)}</span></td>
+                          <td>{axis === "platform" ? t("filters.allVerticals") : t("filters.allPlatforms")}</td>
+                          <td>{axis === "platform" ? axisLabel(t, axis, r.key) : t("filters.allPlatforms")}</td>
                           <td className="num">{fmtCell(metricVal(r, "cpm"), (n) => fmtMoney(n as number))}</td>
                           <td className="num">{fmtCell(metricVal(r, "ctr"), (n) => `${(n as number).toFixed(1)}%`)}</td>
                           <td className="num">{fmtCell(metricVal(r, "cpa"), (n) => fmtMoney(n as number))}</td>
                           <td className="num">{fmtCell(r.roas, (n) => `${n.toFixed(1)}x`)}</td>
-                          <td className="num">{num(r.n_ads).toLocaleString()}</td>
+                          <td className="num">{fmtNum(num(r.n_ads))}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
-              ) : <EmptyState compact icon="bars" title="No benchmarks in scope" text="Upload campaign data or loosen the filters." />
+              ) : <EmptyState compact icon="bars" title={t("benchmarks.noScopeTitle")} text={t("benchmarks.noScopeBody")} />
             ) : benchmarks.error ? (
               <EmptyState text={benchmarks.error} />
             ) : <Skeleton height={200} />}
           </Panel>
-          <Panel title="Compare Benchmarks" sub="Select up to 3 benchmarks to compare key metrics."
+          <Panel title={t("benchmarks.compareTitle")} sub={t("benchmarks.compareSub")}
             style={{ flex: "1 0 auto" }}
             action={selected.size ? (
-              <button type="button" className="link-teal" onClick={() => setSelected(new Set())}>Clear All</button>
+              <button type="button" className="link-teal" onClick={() => setSelected(new Set())}>{t("benchmarks.clearAll")}</button>
             ) : undefined}>
             {compared.length >= 2 ? (
               <div className="cards-4">
@@ -382,62 +392,61 @@ export function BenchmarksPage() {
                       format={(v) => (m === "ctr" ? `${v.toFixed(1)}%` : m === "roas" ? `${v.toFixed(1)}x` : fmtMoney(v))}
                     />
                     <div className="legend" style={{ justifyContent: "flex-start" }}>
-                      {compared.map((r) => <span key={r.key}>{axisLabel(axis, r.key)}</span>)}
+                      {compared.map((r) => <span key={r.key}>{axisLabel(t, axis, r.key)}</span>)}
                     </div>
                   </div>
                 ))}
               </div>
-            ) : <EmptyState compact icon="compare" title="Nothing selected" text="Tick at least two benchmark rows above to compare them here." />}
+            ) : <EmptyState compact icon="compare" title={t("benchmarks.nothingTitle")} text={t("benchmarks.nothingBody")} />}
           </Panel>
         </div>
         <div className="rail-stack">
-          <Panel title="Benchmark Insights" sub="Understand the data behind these benchmarks.">
+          <Panel title={t("benchmarks.insightsTitle")} sub={t("benchmarks.insightsSub")}>
             <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 10 }}>
               <span className="insight-ico" style={{ background: "var(--shell-teal-soft)" }}>
                 <Icon name="bars" size={22} />
               </span>
               <div>
-                <p className="panel-sub" style={{ margin: 0 }}>Benchmark Coverage</p>
-                <strong style={{ fontSize: 26 }}>{coverage.total.toLocaleString()}</strong>
-                <p className="panel-sub" style={{ margin: 0 }}>Total Records</p>
+                <p className="panel-sub" style={{ margin: 0 }}>{t("benchmarks.coverageLabel")}</p>
+                <strong style={{ fontSize: 26 }}>{fmtNum(coverage.total)}</strong>
+                <p className="panel-sub" style={{ margin: 0 }}>{t("benchmarks.totalRecords")}</p>
               </div>
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               <div className="cmp-card" style={{ flex: 1, textAlign: "center" }}>
                 <strong>{coverage.platforms}</strong>
-                <p className="panel-sub" style={{ margin: 0 }}>{coverage.platforms === 1 ? "Platform" : "Platforms"}</p>
+                <p className="panel-sub" style={{ margin: 0 }}>{tp("benchmarks.platform", coverage.platforms)}</p>
               </div>
               <div className="cmp-card" style={{ flex: 1, textAlign: "center" }}>
                 <strong>{metaRows.length}</strong>
-                <p className="panel-sub" style={{ margin: 0 }}>{metaRows.length === 1 ? "Campaign" : "Campaigns"}</p>
+                <p className="panel-sub" style={{ margin: 0 }}>{tp("benchmarks.campaign", metaRows.length)}</p>
               </div>
               <div className="cmp-card" style={{ flex: 1, textAlign: "center" }}>
                 <strong>{coverage.verticals}</strong>
-                <p className="panel-sub" style={{ margin: 0 }}>{coverage.verticals === 1 ? "Vertical" : "Verticals"}</p>
+                <p className="panel-sub" style={{ margin: 0 }}>{tp("benchmarks.vertical", coverage.verticals)}</p>
               </div>
             </div>
           </Panel>
-          <Panel title="Context">
+          <Panel title={t("benchmarks.contextTitle")}>
             <p className="panel-sub">
-              These benchmarks are computed from the campaigns in your current scope — use them as a
-              starting point and consider your unique goals, audience, and creative strategy.
+              {t("benchmarks.contextBody")}
             </p>
           </Panel>
-          <Panel title="Benchmark Tips">
+          <Panel title={t("benchmarks.tipsTitle")}>
             <ul className="rec-list" style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 4, fontSize: 13 }}>
-              <li>Use relevant filters to narrow the dataset</li>
-              <li>Include multiple platforms for broader insights</li>
-              <li>Compare against similar verticals and objectives</li>
-              <li>Save custom benchmarks for future use</li>
+              <li>{t("benchmarks.tips.filters")}</li>
+              <li>{t("benchmarks.tips.platforms")}</li>
+              <li>{t("benchmarks.tips.verticals")}</li>
+              <li>{t("benchmarks.tips.save")}</li>
             </ul>
           </Panel>
-          <Panel title="Learn More">
+          <Panel title={t("benchmarks.learnTitle")}>
             <p className="panel-sub" style={{ margin: "0 0 8px" }}>
-              Drill into a result with the AI Analyst or export it into a shareable report.
+              {t("benchmarks.learnBody")}
             </p>
             <div style={{ display: "flex", gap: 8 }}>
-              <Link className="btn-soft" to="/analyst">Open Analyst →</Link>
-              <Link className="btn-soft" to="/reports">Open Reports →</Link>
+              <Link className="btn-soft" to="/analyst">{t("benchmarks.openAnalyst")}</Link>
+              <Link className="btn-soft" to="/reports">{t("benchmarks.openReports")}</Link>
             </div>
           </Panel>
         </div>

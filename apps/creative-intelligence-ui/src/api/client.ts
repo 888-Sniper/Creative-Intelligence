@@ -41,15 +41,50 @@ async function parse<T>(res: Response): Promise<T> {
   return body as T;
 }
 
+export interface ApiOptions {
+  /** Bound the request: abort it after this many milliseconds so a
+   *  stalled call surfaces as a failure (retryable) instead of
+   *  hanging its loading state forever (§11). */
+  timeoutMs?: number;
+  /** Caller cancellation (unmount, superseded request). */
+  signal?: AbortSignal;
+}
+
 /** Same-origin JSON API client. Auth rides the HttpOnly session cookie;
  *  the raw token is never exposed to JavaScript (item 9). */
-export async function api<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const res = await fetch(path, {
-    method,
-    headers: { "Content-Type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
+export async function api<T>(method: string, path: string, body?: unknown, opts?: ApiOptions): Promise<T> {
+  const ctrl = new AbortController();
+  const forward = () => ctrl.abort();
+  opts?.signal?.addEventListener("abort", forward);
+  // A timeout rejects the race even when the underlying fetch never
+  // settles or ignores the abort signal (unit-test doubles); the
+  // abort still releases a real in-flight request, and the extra
+  // catch keeps its late rejection handled.
+  let timer: ReturnType<typeof window.setTimeout> | null = null;
+  let onTimeout = () => {};
+  const timeout = new Promise<never>((_, reject) => {
+    onTimeout = () => {
+      ctrl.abort();
+      reject(new Error(`Request timed out (${path})`));
+    };
   });
-  return parse<T>(res);
+  try {
+    if (opts?.timeoutMs && opts.timeoutMs > 0) {
+      timer = window.setTimeout(onTimeout, opts.timeoutMs);
+    }
+    const req = fetch(path, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+    void req.catch(() => {});
+    const res = timer ? await Promise.race([req, timeout]) : await req;
+    return parse<T>(res);
+  } finally {
+    if (timer !== null) window.clearTimeout(timer);
+    opts?.signal?.removeEventListener("abort", forward);
+  }
 }
 
 /** Append the shared top-filter-bar scope to scoped analytics endpoints,

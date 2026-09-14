@@ -8,9 +8,10 @@
  *  the selected IANA zone.
  */
 
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { isLang, translate, translatePlural, type Lang } from "./core";
+import { useAuth } from "@/auth/AuthProvider";
 import { loadPrefs } from "@/state/prefs";
 
 const LOCALES: Record<Lang, string> = {
@@ -133,6 +134,34 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
   }, [lang, timezone, setLang, setTimezone]);
 
   return <LocaleContext.Provider value={value}>{children}</LocaleContext.Provider>;
+}
+
+/** Central preference restoration (§9): applies the SIGNED-IN
+ *  employee's saved language and time zone to the locale context on
+ *  startup and whenever the account changes. Settings stages edits
+ *  separately and commits them here on Save; this sync owns the
+ *  applied state everywhere else, so a reload restores exactly what
+ *  that employee saved under `ci-settings-prefs:<employeeId>`.
+ *  Mount once inside both providers (see main.tsx). */
+export function LocalePrefsSync() {
+  const { me } = useAuth();
+  const { setLang, setTimezone } = useLocale();
+  const appliedFor = useRef<string | null>(null);
+  const id = me?.employee?.id ?? "";
+  useEffect(() => {
+    // Signed out (or identity not yet known): arm for the next
+    // sign-in without changing the currently applied locale.
+    if (!id) {
+      appliedFor.current = "";
+      return;
+    }
+    if (appliedFor.current === id) return;
+    appliedFor.current = id;
+    const prefs = loadPrefs(id);
+    setLang(languageOf(prefs.language));
+    setTimezone(prefs.timezone);
+  }, [id, setLang, setTimezone]);
+  return null;
 }
 
 const FALLBACK: Locale = {

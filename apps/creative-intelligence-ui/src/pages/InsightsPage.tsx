@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { api } from "@/api/client";
 import { applySavedView, VIEW_ROUTES, type SavedView } from "@/components/savedViews";
 import { useFilters } from "@/state/FilterContext";
+import { useLocale } from "@/i18n";
 import { Icon } from "@/components/icons";
 import { LoadingButton } from "@/components/LoadingButton";
 import {
@@ -39,18 +40,16 @@ interface AnalystCard {
 
 
 
-function dayLabel(iso: string | null | undefined): string {
+function dayLabel(fmtDate: (iso: string, opts?: Intl.DateTimeFormatOptions) => string, iso: string | null | undefined): string {
   if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso.slice(0, 10);
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return fmtDate(iso, { month: "short", day: "numeric", year: "numeric" });
 }
 
 /** Finding titles come from backend signal copy (lowercase by
  *  convention): display them sentence-cased so cards read like titles
  *  without altering the underlying data. */
-export function signalTitle(s: string | null | undefined): string {
-  if (!s) return "Untitled Finding";
+export function signalTitle(t: (key: string) => string, s: string | null | undefined): string {
+  if (!s) return t("pageInsights.untitledFinding");
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
@@ -63,6 +62,7 @@ function withinDays(iso: string | null | undefined, days: number): boolean {
 
 export function InsightsPage() {
   const { filters, setFilter, scope } = useFilters();
+  const { t, tp, fmtDate } = useLocale();
   const navigate = useNavigate();
   const location = useLocation();
   /* Global header search deep-links here: ?find= pre-fills the search
@@ -72,8 +72,8 @@ export function InsightsPage() {
   const [client, setClient] = useState("");
   const [platform, setPlatform] = useState("");
   const [market, setMarket] = useState("");
-  const [itype, setItype] = useState("All Types");
-  const [dateSaved, setDateSaved] = useState("All Time");
+  const [itype, setItype] = useState("all");
+  const [dateSaved, setDateSaved] = useState("all");
   const [conversations, setConversations] = useState<Conversation[] | null>(null);
   const [views, setViews] = useState<SavedView[] | null>(null);
   const [saving, setSaving] = useState(false);
@@ -112,8 +112,8 @@ export function InsightsPage() {
 
   const needle = search.trim().toLowerCase();
   const matchDate = (iso: string | null | undefined) => {
-    if (dateSaved === "All Time") return true;
-    return withinDays(iso, dateSaved === "Last 7 Days" ? 7 : 30);
+    if (dateSaved === "all") return true;
+    return withinDays(iso, dateSaved === "d7" ? 7 : 30);
   };
   /* Every visible axis filter affects content. Creative findings
    *  carry platform + campaign, so client/market resolve through the
@@ -143,22 +143,22 @@ export function InsightsPage() {
 
   const savedCards = useMemo(() => {
     const out: Array<{ key: string; badge: string; title: string; body: string; meta: string; to: string; apply?: SavedView }> = [];
-    if (itype === "All Types" || itype === "Conversations") {
+    if (itype === "all" || itype === "conversations") {
       for (const c of conversations ?? []) {
         if (!matchDate(c.updated_at)) continue;
-        const title = c.title || "Untitled Conversation";
+        const title = c.title || t("pageInsights.untitledConv");
         if (needle && !`${title} ${c.objective ?? ""}`.toLowerCase().includes(needle)) continue;
         out.push({
           key: `c-${c.id}`,
-          badge: "Conversation",
+          badge: t("pageInsights.badgeConversation"),
           title,
-          body: c.objective ? `Objective: ${c.objective}` : "Analyst conversation.",
-          meta: c.updated_at ? `Updated ${dayLabel(c.updated_at)}` : "",
+          body: c.objective ? t("pageInsights.objectiveBody", { objective: c.objective }) : t("pageInsights.analystConvBody"),
+          meta: c.updated_at ? t("pageInsights.updatedLabel", { date: dayLabel(fmtDate, c.updated_at) }) : "",
           to: "/analyst",
         });
       }
     }
-    if (itype === "All Types" || itype === "Saved Views") {
+    if (itype === "all" || itype === "views") {
       for (const v of views ?? []) {
         if (!matchViewAxes(v)) continue;
         if (needle && !v.name.toLowerCase().includes(needle)) continue;
@@ -166,10 +166,10 @@ export function InsightsPage() {
         const route = v.state?.view ? (VIEW_ROUTES[v.state.view] ?? v.state.view) : "";
         out.push({
           key: `v-${v.id}`,
-          badge: "Saved View",
+          badge: t("pageInsights.badgeSavedView"),
           title: v.name,
-          body: `Saved analysis setup${axes ? ` across ${axes} filter ${axes === 1 ? "axis" : "axes"}` : ""}.`,
-          meta: route ? `Opens ${route}` : "",
+          body: t("pageInsights.setupBody", { across: axes ? tp("pageInsights.across", axes, { count: axes }) : "" }),
+          meta: route ? t("pageInsights.opensLabel", { route }) : "",
           to: route || "/",
           apply: v,
         });
@@ -177,7 +177,7 @@ export function InsightsPage() {
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conversations, views, itype, needle, dateSaved, client, platform, market]);
+  }, [conversations, views, itype, needle, dateSaved, client, platform, market, t, tp, fmtDate]);
 
   /* Shared restore: comparison deep link (full selection) when one
    * applies, otherwise the saved route — every stored scope axis and
@@ -188,16 +188,18 @@ export function InsightsPage() {
     setSaving(true);
     setSaveStatus("");
     try {
-      const name = `Insight — ${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
+      const name = t("pageInsights.saveName", {
+        date: fmtDate(new Date().toISOString(), { month: "short", day: "numeric", year: "numeric" }),
+      });
       await api("POST", "/api/views", {
         name,
         state: { filters: scopeBody(scope), kpi: filters.kpi, view: "main" },
       });
       const list = await api<SavedView[]>("GET", "/api/views");
       setViews(Array.isArray(list) ? list : []);
-      setSaveStatus(`Saved ${name}.`);
+      setSaveStatus(t("pageInsights.savedMsg", { name }));
     } catch (e) {
-      setSaveStatus(e instanceof Error ? e.message : "Could Not Save Insight.");
+      setSaveStatus(e instanceof Error ? e.message : t("pageInsights.saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -208,58 +210,58 @@ export function InsightsPage() {
   return (
     <>
       <PageHeader
-        title="Saved Insights"
-        sub="Your saved insights, key learnings, and creative findings all in one place."
+        title={t("pageInsights.title")}
+        sub={t("pageInsights.sub")}
         actions={(
-          <LoadingButton type="button" className="btn-primary" loading={saving} loadingLabel="Saving…" disabled={saving} onClick={() => void saveInsight()}>
-            <Icon name="plus" size={16} /> Save Insight
+          <LoadingButton type="button" className="btn-primary" loading={saving} loadingLabel={t("common.saving")} disabled={saving} onClick={() => void saveInsight()}>
+            <Icon name="plus" size={16} /> {t("pageInsights.save")}
           </LoadingButton>
         )}
       />
       {saveStatus ? <p className="panel-sub" role="status" style={{ margin: "0 0 12px" }}>{saveStatus}</p> : null}
-      <section className="panel" aria-label="Find Insights">
+      <section className="panel" aria-label={t("pageInsights.filtersLabel")}>
         <div className="filter-grid fg-6">
           <div className="field">
-            <label htmlFor="in-search">Search</label>
-            <input id="in-search" placeholder="Search saved insights…" value={search}
+            <label htmlFor="in-search">{t("pageInsights.search")}</label>
+            <input id="in-search" placeholder={t("pageInsights.searchPlaceholder")} value={search}
               onChange={(e) => setSearch(e.target.value)} />
           </div>
-          <MetaSelect id="in-client" label="Client" allLabel="All Clients"
+          <MetaSelect id="in-client" label={t("filters.client")} allLabel={t("filters.allClients")}
             values={metaClients} value={client} onPick={setClient} />
           <div className="field">
-            <label htmlFor="in-platform">Platform</label>
-            <select id="in-platform" aria-label="Platform" value={platform} onChange={(e) => setPlatform(e.target.value)}>
-              <option value="">All Platforms</option>
+            <label htmlFor="in-platform">{t("filters.platform")}</label>
+            <select id="in-platform" aria-label={t("filters.platform")} value={platform} onChange={(e) => setPlatform(e.target.value)}>
+              <option value="">{t("filters.allPlatforms")}</option>
               <option value="meta">Meta</option>
               <option value="tiktok">TikTok</option>
             </select>
           </div>
-          <MetaSelect id="in-market" label="Market" allLabel="All Markets"
+          <MetaSelect id="in-market" label={t("filters.market")} allLabel={t("filters.allMarkets")}
             values={metaMarkets} value={market} onPick={setMarket} />
           <div className="field">
-            <label htmlFor="in-type">Insight Type</label>
-            <select id="in-type" value={itype} onChange={(e) => setItype(e.target.value)}>
-              {["All Types", "Conversations", "Saved Views", "Creative Findings"].map((o) => <option key={o}>{o}</option>)}
+            <label htmlFor="in-type">{t("pageInsights.typeLabel")}</label>
+            <select id="in-type" aria-label={t("pageInsights.typeLabel")} value={itype} onChange={(e) => setItype(e.target.value)}>
+              {(["all", "conversations", "views", "findings"] as const).map((o) => <option key={o} value={o}>{t(`pageInsights.types.${o}`)}</option>)}
             </select>
           </div>
           <div className="field">
-            <label htmlFor="in-date">Date Saved</label>
-            <select id="in-date" value={dateSaved} onChange={(e) => setDateSaved(e.target.value)}>
-              {["All Time", "Last 7 Days", "Last 30 Days"].map((o) => <option key={o}>{o}</option>)}
+            <label htmlFor="in-date">{t("pageInsights.dateLabel")}</label>
+            <select id="in-date" aria-label={t("pageInsights.dateLabel")} value={dateSaved} onChange={(e) => setDateSaved(e.target.value)}>
+              {(["all", "d7", "d30"] as const).map((o) => <option key={o} value={o}>{t(`pageInsights.dates.${o}`)}</option>)}
             </select>
           </div>
         </div>
       </section>
       <div className="main-rail">
         <div className="rail-stack">
-          <Panel title="Pinned Learnings" sub="Your most important insights, always within reach.">
+          <Panel title={t("pageInsights.pinnedTitle")} sub={t("pageInsights.pinnedSub")}>
             {cards.data ? (
               findings.pinned.filter(matchAxes).length ? (
                 <div style={{ background: "var(--shell-teal-soft)", borderRadius: 10, padding: 10 }}>
                   <div className="cards-3" style={{ gap: 10 }}>
                     {findings.pinned.filter(matchAxes).map((c) => (
                       <div className="cmp-card" key={c.creative_key} style={{ padding: 12 }}>
-                        <h4 style={{ margin: "0 0 6px", fontSize: 13.5 }}>{signalTitle(c.finding?.primary_signal)}</h4>
+                        <h4 style={{ margin: "0 0 6px", fontSize: 13.5 }}>{signalTitle(t, c.finding?.primary_signal)}</h4>
                         <p className="panel-sub" style={{ margin: 0 }}>{c.finding?.diagnosis}</p>
                         <p className="panel-sub" style={{ margin: "4px 0 0" }}>{[c.platform, c.campaign].filter(Boolean).join(" · ")}</p>
                       </div>
@@ -269,14 +271,14 @@ export function InsightsPage() {
               ) : (
                 <EmptyState
                   icon="spark"
-                  title="No saved insights yet"
-                  text="Run AI Analyst or save a finding."
-                  action={<Link className="btn-soft" to="/analyst">Open AI Analyst</Link>}
+                  title={t("pageInsights.noPinnedTitle")}
+                  text={t("pageInsights.noPinnedBody")}
+                  action={<Link className="btn-soft" to="/analyst">{t("pageInsights.openAnalyst")}</Link>}
                 />
               )
             ) : <Skeleton height={120} />}
           </Panel>
-          <Panel title={`Your Saved Insights (${savedCards.length})`} style={{ flex: "1 0 auto" }}>
+          <Panel title={t("pageInsights.savedTitle", { count: savedCards.length })} style={{ flex: "1 0 auto" }}>
             {conversations === null || views === null ? <Skeleton height={160} /> : (
               savedCards.length ? (
                 <div className="cards-3">
@@ -288,10 +290,10 @@ export function InsightsPage() {
                       <p className="panel-sub" style={{ margin: "4px 0 8px" }}>{s.meta}</p>
                       {s.apply ? (
                         <button type="button" className="btn-soft" onClick={() => applyView(s.apply as SavedView)}>
-                          Open Insight →
+                          {t("pageInsights.openInsight")}
                         </button>
                       ) : (
-                        <Link className="btn-soft" to={s.to}>Open Insight →</Link>
+                        <Link className="btn-soft" to={s.to}>{t("pageInsights.openInsight")}</Link>
                       )}
                     </div>
                   ))}
@@ -300,22 +302,22 @@ export function InsightsPage() {
                 <EmptyState
                   compact
                   icon="bookmark"
-                  title="No saved insights yet"
-                  text="Run AI Analyst or save a finding."
-                  action={<Link className="btn-soft" to="/analyst">Open AI Analyst</Link>}
+                  title={t("pageInsights.noPinnedTitle")}
+                  text={t("pageInsights.noPinnedBody")}
+                  action={<Link className="btn-soft" to="/analyst">{t("pageInsights.openAnalyst")}</Link>}
                 />
               )
             )}
           </Panel>
-          {(itype === "All Types" || itype === "Creative Findings") && findings.rest.filter(matchAxes).length ? (
-            <Panel title="Creative Findings">
+          {(itype === "all" || itype === "findings") && findings.rest.filter(matchAxes).length ? (
+            <Panel title={t("pageInsights.findingsTitle")}>
               <div className="cards-3">
                 {findings.rest.filter(matchAxes).slice(0, 6).map((c) => (
                   <div className="cmp-card" key={c.creative_key} style={{ padding: 14 }}>
-                    <span className="badge-demo">Creative Finding</span>
-                    <h4 style={{ margin: "8px 0 6px", fontSize: 13.5 }}>{signalTitle(c.finding?.primary_signal)}</h4>
+                    <span className="badge-demo">{t("pageInsights.findingBadge")}</span>
+                    <h4 style={{ margin: "8px 0 6px", fontSize: 13.5 }}>{signalTitle(t, c.finding?.primary_signal)}</h4>
                     <p className="panel-sub" style={{ margin: "0 0 8px" }}>{c.finding?.diagnosis}</p>
-                    <Link className="btn-soft" to="/analyst">Open in Analyst →</Link>
+                    <Link className="btn-soft" to="/analyst">{t("pageInsights.openInAnalyst")}</Link>
                   </div>
                 ))}
               </div>
@@ -323,7 +325,7 @@ export function InsightsPage() {
           ) : null}
         </div>
         <div className="rail-stack">
-          <Panel title="Activity">
+          <Panel title={t("pageInsights.activityTitle")}>
             {conversations === null ? <Skeleton height={160} /> : (
               recent.length ? (
                 <div>
@@ -333,16 +335,16 @@ export function InsightsPage() {
                         <Icon name="chat" size={20} />
                       </span>
                       <div>
-                        <h4>{c.title || "Untitled Conversation"}</h4>
-                        <p>{c.updated_at ? dayLabel(c.updated_at) : ""}</p>
+                        <h4>{c.title || t("pageInsights.untitledConv")}</h4>
+                        <p>{c.updated_at ? dayLabel(fmtDate, c.updated_at) : ""}</p>
                       </div>
                     </div>
                   ))}
                 </div>
-              ) : <EmptyState compact icon="clock" title="No recent activity" text="Analyst conversations will appear here." />
+              ) : <EmptyState compact icon="clock" title={t("pageInsights.noActivityTitle")} text={t("pageInsights.noActivityBody")} />
             )}
           </Panel>
-          <Panel title="Related Insights" style={{ flex: "1 0 auto" }}>
+          <Panel title={t("pageInsights.relatedTitle")} style={{ flex: "1 0 auto" }}>
             {cards.data ? (
               findings.rest.filter(matchAxes).length ? (
               <div>
@@ -352,13 +354,13 @@ export function InsightsPage() {
                       <Icon name="spark" size={20} />
                     </span>
                     <div>
-                      <h4>{signalTitle(c.finding?.primary_signal)}</h4>
+                      <h4>{signalTitle(t, c.finding?.primary_signal)}</h4>
                       <p>{c.finding?.recommended_iteration ?? c.finding?.diagnosis}</p>
                     </div>
                   </div>
                 ))}
               </div>
-              ) : <EmptyState text="No recommendations match the current filters." />
+              ) : <EmptyState verbatim text={t("pageInsights.noRelatedBody")} />
             ) : <Skeleton height={160} />}
           </Panel>
         </div>

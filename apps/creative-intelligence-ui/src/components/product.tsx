@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, scopedPath } from "@/api/client";
 import { scopeParams, useFilters } from "@/state/FilterContext";
-import { KpiTrend } from "@/components/KpiTrend";
+import { KpiTrend, monthName } from "@/components/KpiTrend";
 import type { KpiComparison, KpiPeriod } from "@/components/KpiTrend";
 import { Icon } from "@/components/icons";
+import { useLocale } from "@/i18n";
 
 /* ---------- formatting (display only; calculations stay backend-side) --- */
 export function fmtCompact(n: number): string {
@@ -241,65 +242,31 @@ export function PageHeader({ title, sub, actions }: {
  * Meta/meta class of mismatch where the controlled select held a value
  * no <option> carried). An empty value always means "All". */
 export interface AxisOption { value: string; label: string; }
-const PLATFORMS: AxisOption[] = [
-  { value: "", label: "All Platforms" },
-  { value: "meta", label: "Meta" },
-  { value: "tiktok", label: "TikTok" },
-];
-const FUNNELS: AxisOption[] = [
-  { value: "", label: "All Stages" },
-  { value: "upper", label: "Upper" },
-  { value: "mid", label: "Mid" },
-  { value: "lower", label: "Lower" },
-];
-const OBJECTIVES: AxisOption[] = [
-  { value: "", label: "All Objectives" },
-  { value: "conversions", label: "Conversions" },
-  { value: "traffic", label: "Traffic" },
-  { value: "leads", label: "Leads" },
-  { value: "awareness", label: "Awareness" },
-  { value: "video_views", label: "Video Views" },
-  { value: "app_installs", label: "App Installs" },
-];
-const HOOK_TYPES: AxisOption[] = [
-  { value: "", label: "All Hook Types" },
-  { value: "question", label: "Question" },
-  { value: "bold_claim", label: "Bold Claim" },
-  { value: "demo_open", label: "Demo Open" },
-  { value: "social_proof", label: "Social Proof" },
-  { value: "offer", label: "Offer" },
-  { value: "story", label: "Story" },
-  { value: "pattern_interrupt", label: "Pattern Interrupt" },
-  { value: "testimonial", label: "Testimonial" },
-  { value: "other", label: "Other" },
-];
-const CREATOR_MODES: AxisOption[] = [
-  { value: "", label: "All Creatives" },
-  { value: "creator", label: "Creator" },
-  { value: "branded", label: "Branded" },
-  { value: "hybrid", label: "Hybrid" },
-];
-const FORMATS: AxisOption[] = [
-  { value: "", label: "All Formats" },
-  { value: "9:16 Video", label: "9:16 Video" },
-  { value: "4:5 Video", label: "4:5 Video" },
-  { value: "1:1 Video", label: "1:1 Video" },
-  { value: "16:9 Video", label: "16:9 Video" },
-];
-const KPI_OPTIONS: AxisOption[] = [
-  { value: "", label: "All KPIs" },
-  { value: "impressions", label: "Impressions" },
-  { value: "clicks", label: "Clicks" },
-  { value: "spend", label: "Spend" },
-  { value: "conversions", label: "Conversions" },
-  { value: "revenue", label: "Revenue" },
-  { value: "ctr", label: "CTR" },
-  { value: "cpc", label: "CPC" },
-  { value: "cpa", label: "CPA" },
-  { value: "cpm", label: "CPM" },
-  { value: "roas", label: "ROAS" },
-  { value: "vtr", label: "VTR" },
-];
+/* Axis values are backend scope tokens; every display label resolves
+ * through filters.* (§9) so the selects translate with the UI. */
+const PLATFORM_VALUES = ["", "meta", "tiktok"];
+const FUNNEL_VALUES = ["", "upper", "mid", "lower"];
+const OBJECTIVE_VALUES = ["", "conversions", "traffic", "leads", "awareness", "video_views", "app_installs"];
+const HOOK_VALUES = ["", "question", "bold_claim", "demo_open", "social_proof", "offer", "story", "pattern_interrupt", "testimonial", "other"];
+const CREATOR_VALUES = ["", "creator", "branded", "hybrid"];
+const FORMAT_VALUES = ["", "9:16 Video", "4:5 Video", "1:1 Video", "16:9 Video"];
+const KPI_VALUES = ["", "impressions", "clicks", "spend", "conversions", "revenue", "ctr", "cpc", "cpa", "cpm", "roas", "vtr"];
+
+type TFn = (key: string, vars?: Record<string, string | number>) => string;
+
+function axisLabel(t: TFn, group: string, allKey: string, value: string, proper?: Record<string, string>): string {
+  if (!value) return t(allKey);
+  if (proper && proper[value]) return proper[value];
+  const key = `filters.${group}.${value}`;
+  const hit = t(key);
+  return hit === key ? titleCase(value) : hit;
+}
+
+function axisOptions(t: TFn, group: string, allKey: string, values: string[], proper?: Record<string, string>): AxisOption[] {
+  return values.map((value) => ({ value, label: axisLabel(t, group, allKey, value, proper) }));
+}
+
+const PROPER_NOUNS: Record<string, string> = { meta: "Meta", tiktok: "TikTok" };
 
 /** Legacy "all" sentinel normalises to "" (no constraint) so the
  *  controlled select always holds a value an <option> carries. */
@@ -430,11 +397,10 @@ export function titleAxis(v: string, all: string): string {
   return v.split("_").map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w)).join(" ");
 }
 
-function fmtShortDate(iso: string): string {
+function fmtShortDate(iso: string, locale = "en-US"): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
   if (!m) return "";
-  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  return `${months[Number(m[2]) - 1] ?? m[2]} ${Number(m[3])}, ${m[1]}`;
+  return `${monthName(Number(m[2]), locale)} ${Number(m[3])}, ${m[1]}`;
 }
 
 /** ONE compact Date Range field: a single button shows the active range
@@ -442,7 +408,9 @@ function fmtShortDate(iso: string): string {
  *  From/To inputs. Same setFilter writes as the old joined control —
  *  only the presentation collapses to one grid cell. */
 export function DateRangeField({ id }: { id: string }) {
+  const { t, lang } = useLocale();
   const { filters, setFilter } = useFilters();
+  const loc = lang === "pl" ? "pl-PL" : lang === "es" ? "es-ES" : "en-US";
   const [open, setOpen] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
 
@@ -462,17 +430,17 @@ export function DateRangeField({ id }: { id: string }) {
     };
   }, [open ]);
 
-  const from = fmtShortDate(filters.date_from);
-  const to = fmtShortDate(filters.date_to);
+  const from = fmtShortDate(filters.date_from, loc);
+  const to = fmtShortDate(filters.date_to, loc);
   /* Same-year ranges drop the first year ("Aug 13 – Sep 11, 2026") so
    * the single field fits its grid cell without truncating. */
   const yearOf = (s: string) => /,\s*(\d{4})$/.exec(s)?.[1] ?? "";
   const sameYear = from !== "" && yearOf(from) !== "" && yearOf(from) === yearOf(to);
   const shortFrom = sameYear ? from.replace(/,\s*\d{4}$/, "") : from;
-  const label = from || to ? `${shortFrom || "…"} – ${to || "…"}` : "All Time";
+  const label = from || to ? `${shortFrom || "…"} – ${to || "…"}` : t("filters.allTime");
   return (
     <div className="field">
-      <label id={`${id}-label`}>Date Range</label>
+      <label id={`${id}-label`}>{t("filters.dateRange")}</label>
       <div className="daterange" ref={boxRef}>
         <button type="button" className="daterange-btn" aria-labelledby={`${id}-label daterange-val-${id}`}
           aria-expanded={open} onClick={() => setOpen((o) => !o)}>
@@ -482,22 +450,22 @@ export function DateRangeField({ id }: { id: string }) {
         {open ? (
           <div className="daterange-pop" role="group" aria-labelledby={`${id}-label`}>
             <div className="field">
-              <label htmlFor={`${id}-from`}>From</label>
-              <input id={`${id}-from`} type="date" aria-label="From Date" value={filters.date_from}
+              <label htmlFor={`${id}-from`}>{t("filters.from")}</label>
+              <input id={`${id}-from`} type="date" aria-label={t("filters.fromDate")} value={filters.date_from}
                 onChange={(e) => setFilter("date_from", e.target.value)} />
             </div>
             <div className="field">
-              <label htmlFor={`${id}-to`}>To</label>
-              <input id={`${id}-to`} type="date" aria-label="To Date" value={filters.date_to}
+              <label htmlFor={`${id}-to`}>{t("filters.to")}</label>
+              <input id={`${id}-to`} type="date" aria-label={t("filters.toDate")} value={filters.date_to}
                 onChange={(e) => setFilter("date_to", e.target.value)} />
             </div>
             <div className="daterange-actions">
               <button type="button" className="link-teal"
                 onClick={() => { setFilter("date_from", ""); setFilter("date_to", ""); }}>
-                Clear
+                {t("filters.clear")}
               </button>
               <button type="button" className="btn-primary" onClick={() => setOpen(false)}>
-                Done
+                {t("filters.done")}
               </button>
             </div>
           </div>
@@ -514,35 +482,43 @@ export function FilterPanel({ onApply, kpi = true, creative = false, trailing, a
    *  and keeps filtering through the shared global scope when set. */
   showTeam?: boolean;
 }) {
+  const { t } = useLocale();
   const { filters, setFilter, clearFilters } = useFilters();
   const meta = useCampaignMeta();
   const rows = meta.data?.campaigns ?? [];
   const clients = distinct(rows, (r) => [r.client]);
   const campaigns = distinct(rows, (r) => [r.name]);
+  const platforms = axisOptions(t, "", "filters.allPlatforms", PLATFORM_VALUES, PROPER_NOUNS);
+  const funnels = axisOptions(t, "funnels", "filters.allStages", FUNNEL_VALUES);
+  const objectives = axisOptions(t, "objectives", "filters.allObjectives", OBJECTIVE_VALUES);
+  const hooks = axisOptions(t, "hooks", "filters.allHooks", HOOK_VALUES);
+  const creators = axisOptions(t, "creators", "filters.allCreatives", CREATOR_VALUES);
+  const formats = axisOptions(t, "", "filters.allFormats", FORMAT_VALUES);
+  const kpis = axisOptions(t, "kpis", "filters.allKpis", KPI_VALUES);
   if (creative) {
     return (
-      <section className="panel" aria-label="Filters">
+      <section className="panel" aria-label={t("filters.section")}>
         <div className="filter-grid">
-          <MetaSelect id="f-client" label="Client" allLabel="All Clients"
+          <MetaSelect id="f-client" label={t("filters.client")} allLabel={t("filters.allClients")}
             values={clients} value={filters.client}
             onPick={(v) => setFilter("client", v)} />
-          <MetaSelect id="f-campaign" label="Campaign" allLabel="All Campaigns"
+          <MetaSelect id="f-campaign" label={t("filters.campaign")} allLabel={t("filters.allCampaigns")}
             values={campaigns} value={filters.campaign}
             onPick={(v) => setFilter("campaign", v)} />
-          <LiveSelect id="f-hook" label="Hook Type" aria="Hook Type"
-            value={filters.hook_type} options={HOOK_TYPES}
+          <LiveSelect id="f-hook" label={t("filters.hook")} aria={t("filters.hook")}
+            value={filters.hook_type} options={hooks}
             onPick={(v) => setFilter("hook_type", v)} />
-          <LiveSelect id="f-format" label="Format" aria="Format"
-            value={filters.format} options={FORMATS}
+          <LiveSelect id="f-format" label={t("filters.format")} aria={t("filters.format")}
+            value={filters.format} options={formats}
             onPick={(v) => setFilter("format", v)} />
-          <LiveSelect id="f-creator" label="Creator vs Branded" aria="Creator vs Branded"
-            value={filters.creator_vs_branded} options={CREATOR_MODES}
+          <LiveSelect id="f-creator" label={t("filters.creator")} aria={t("filters.creator")}
+            value={filters.creator_vs_branded} options={creators}
             onPick={(v) => setFilter("creator_vs_branded", v)} />
-          <LiveSelect id="f-platform" label="Platform" aria="Platform"
-            value={filters.platform} options={PLATFORMS}
+          <LiveSelect id="f-platform" label={t("filters.platform")} aria={t("filters.platform")}
+            value={filters.platform} options={platforms}
             onPick={(v) => setFilter("platform", v)} />
-          <LiveSelect id="f-funnel" label="Funnel Stage" aria="Funnel Stage"
-            value={filters.funnel} options={FUNNELS}
+          <LiveSelect id="f-funnel" label={t("filters.funnel")} aria={t("filters.funnel")}
+            value={filters.funnel} options={funnels}
             onPick={(v) => setFilter("funnel", v)} />
           {trailing}
           <DateRangeField id="f-date" />
@@ -551,11 +527,11 @@ export function FilterPanel({ onApply, kpi = true, creative = false, trailing, a
           <div className="filter-actions">
             <button type="button" className="btn-primary"
               onClick={() => (onApply ? onApply() : undefined)}>
-              Apply Filters
+              {t("filters.apply")}
             </button>
             <button type="button" className="link-teal" onClick={clearFilters}
               style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <Icon name="reset" size={15} /> Reset Filters
+              <Icon name="reset" size={15} /> {t("filters.reset")}
             </button>
           </div>
         ) : null}
@@ -567,40 +543,40 @@ export function FilterPanel({ onApply, kpi = true, creative = false, trailing, a
   const verticals = distinct(rows, (r) => r.verticals ?? []);
   const markets = distinct(rows, (r) => r.markets ?? []);
   return (
-    <section className="panel" aria-label="Filters">
+    <section className="panel" aria-label={t("filters.section")}>
       <div className="filter-grid">
-        <MetaSelect id="f-client" label="Client" allLabel="All Clients"
+        <MetaSelect id="f-client" label={t("filters.client")} allLabel={t("filters.allClients")}
           values={clients} value={filters.client}
           onPick={(v) => setFilter("client", v)} />
-        <MetaSelect id="f-project" label="Project" allLabel="All Projects"
+        <MetaSelect id="f-project" label={t("filters.project")} allLabel={t("filters.allProjects")}
           values={projects} value={filters.project}
           onPick={(v) => setFilter("project", v)} />
         {showTeam ? (
-          <MetaSelect id="f-team" label="Team" allLabel="All Teams"
+          <MetaSelect id="f-team" label={t("filters.team")} allLabel={t("filters.allTeams")}
             values={teams} value={filters.team}
             onPick={(v) => setFilter("team", v)} />
         ) : null}
-        <MetaSelect id="f-campaign" label="Campaign" allLabel="All Campaigns"
+        <MetaSelect id="f-campaign" label={t("filters.campaign")} allLabel={t("filters.allCampaigns")}
           values={campaigns} value={filters.campaign}
           onPick={(v) => setFilter("campaign", v)} />
-        <LiveSelect id="f-platform" label="Platform" aria="Platform"
-          value={filters.platform} options={PLATFORMS}
+        <LiveSelect id="f-platform" label={t("filters.platform")} aria={t("filters.platform")}
+          value={filters.platform} options={platforms}
           onPick={(v) => setFilter("platform", v)} />
-        <MetaSelect id="f-vertical" label="Vertical" allLabel="All Verticals"
+        <MetaSelect id="f-vertical" label={t("filters.vertical")} allLabel={t("filters.allVerticals")}
           values={verticals} value={filters.vertical}
           onPick={(v) => setFilter("vertical", v)} />
-        <MetaSelect id="f-market" label="Market" allLabel="All Markets"
+        <MetaSelect id="f-market" label={t("filters.market")} allLabel={t("filters.allMarkets")}
           values={markets} value={filters.market}
           onPick={(v) => setFilter("market", v)} />
-        <LiveSelect id="f-funnel" label="Funnel Stage" aria="Funnel Stage"
-          value={filters.funnel} options={FUNNELS}
+        <LiveSelect id="f-funnel" label={t("filters.funnel")} aria={t("filters.funnel")}
+          value={filters.funnel} options={funnels}
           onPick={(v) => setFilter("funnel", v)} />
-        <LiveSelect id="f-objective" label="Campaign Objective" aria="Campaign Objective"
-          value={filters.objective} options={OBJECTIVES}
+        <LiveSelect id="f-objective" label={t("filters.objective")} aria={t("filters.objective")}
+          value={filters.objective} options={objectives}
           onPick={(v) => setFilter("objective", v)} />
         {kpi ? (
-          <LiveSelect id="f-kpi" label="KPI" aria="KPI"
-            value={filters.kpi} options={KPI_OPTIONS}
+          <LiveSelect id="f-kpi" label={t("filters.kpi")} aria={t("filters.kpi")}
+            value={filters.kpi} options={kpis}
             onPick={(v) => setFilter("kpi", v)} />
         ) : <div />}
         <DateRangeField id="f-date" />
@@ -609,11 +585,11 @@ export function FilterPanel({ onApply, kpi = true, creative = false, trailing, a
         <div className="filter-actions">
           <button type="button" className="btn-primary"
             onClick={() => (onApply ? onApply() : undefined)}>
-            Apply Filters
+            {t("filters.apply")}
           </button>
           <button type="button" className="link-teal" onClick={clearFilters}
             style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-            <Icon name="reset" size={15} /> Reset Filters
+            <Icon name="reset" size={15} /> {t("filters.reset")}
           </button>
         </div>
       ) : null}
@@ -779,13 +755,34 @@ export function OverflowMenu({ label, items, className }: {
   label: string; items: OverflowItem[]; className?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   const root = useRef<HTMLDivElement | null>(null);
   const toggle = useRef<HTMLButtonElement | null>(null);
   const list = useRef<HTMLDivElement | null>(null);
+  /* Position the menu against its trigger (§12). The menu renders in
+   * a document.body portal (position:fixed, .ov-menu-portal) so no
+   * scrolling table ancestor can clip it; it flips above the trigger
+   * when there is no room below and clamps to the viewport width. */
+  const place = useCallback(() => {
+    const el = toggle.current;
+    if (!el || typeof window === "undefined") return;
+    const r = el.getBoundingClientRect();
+    const width = Math.min(260, window.innerWidth - 16);
+    const estH = Math.min(items.length * 46 + 12, window.innerHeight * 0.6);
+    const roomBelow = window.innerHeight - r.bottom - 8;
+    const top = roomBelow < Math.min(estH, 220) && r.top > estH
+      ? Math.max(8, r.top - 8 - estH)
+      : r.bottom + 6;
+    const left = Math.max(8, Math.min(r.right - width, window.innerWidth - width - 8));
+    setPos({ top, left });
+  }, [items.length]);
   useEffect(() => {
     if (!open) return;
+    place();
     const onDown = (e: PointerEvent) => {
-      if (root.current && !root.current.contains(e.target as Node)) setOpen(false);
+      if (root.current?.contains(e.target as Node)) return;
+      if (list.current?.contains(e.target as Node)) return;
+      setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -793,15 +790,23 @@ export function OverflowMenu({ label, items, className }: {
         toggle.current?.focus();
       }
     };
+    // A scroll or resize would strand a fixed menu away from its
+    // trigger: dismiss instead of drifting.
+    const onScroll = () => setOpen(false);
+    const onResize = () => setOpen(false);
     document.addEventListener("pointerdown", onDown);
     document.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onResize);
     const first = list.current?.querySelector("button:not(:disabled)");
     if (first instanceof HTMLElement) first.focus();
     return () => {
       document.removeEventListener("pointerdown", onDown);
       document.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onResize);
     };
-  }, [open ]);
+  }, [open, place]);
   const move = (e: React.KeyboardEvent) => {
     const btns = list.current ? [...list.current.querySelectorAll("button:not(:disabled)")].filter((b): b is HTMLElement => b instanceof HTMLElement) : [];
     if (!btns.length) return;
@@ -810,6 +815,10 @@ export function OverflowMenu({ label, items, className }: {
     else if (e.key === "ArrowUp") { e.preventDefault(); btns[(i - 1 + btns.length) % btns.length].focus(); }
     else if (e.key === "Home") { e.preventDefault(); btns[0].focus(); }
     else if (e.key === "End") { e.preventDefault(); btns[btns.length - 1].focus(); }
+  };
+  const toggleMenu = () => {
+    if (!open) place();
+    setOpen((o) => !o);
   };
   return (
     <div className={className ? `ov-menu ${className}` : "ov-menu"} ref={root}>
@@ -820,12 +829,14 @@ export function OverflowMenu({ label, items, className }: {
         aria-label={label}
         aria-haspopup="menu"
         aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
+        onClick={toggleMenu}
       >
         <Icon name="dots" size={18} />
       </button>
-      {open ? (
-        <div className="ov-menu-list" role="menu" aria-label={label} ref={list} onKeyDown={move}>
+      {open && pos ? (
+        <div className="ov-menu-list ov-menu-portal" role="menu" aria-label={label}
+          ref={list} onKeyDown={move}
+          style={{ top: pos.top, left: pos.left }}>
           {items.map((it) => (
             <button
               key={it.label}
@@ -917,7 +928,8 @@ export function Toast({ message, onClose, durationMs = 3200 }: {
 }
 
 export function Skeleton({ height = 120 }: { height?: number }) {
-  return <div className="skel" style={{ height }} aria-label="Loading" />;
+  const { t } = useLocale();
+  return <div className="skel" style={{ height }} aria-label={t("common.skeletonLoading")} />;
 }
 
 /** Structured empty state: small icon, bold title, one-line explanation,
@@ -925,6 +937,19 @@ export function Skeleton({ height = 120 }: { height?: number }) {
  *  The legacy `text` form keeps rendering for inline error slots. */
 export function titleCase(value: string): string {
   return value.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/** Backend role/status codes render through the UI locale (never raw
+ *  English Title Case). Unknown codes keep the honest as-is form. */
+export function codeLabel(
+  t: (key: string, vars?: Record<string, string | number>) => string,
+  group: "roles" | "statuses",
+  code: string,
+): string {
+  if (!code) return "—";
+  const key = `common.${group}.${code}`;
+  const hit = t(key);
+  return hit === key ? titleCase(code) : hit;
 }
 
 /* ---------------- shared employee avatar (§1 avatar consistency) ------
@@ -980,15 +1005,18 @@ export function EmployeeAvatar({ url, name, email, size }: {
   );
 }
 
-export function EmptyState({ text, title, icon, action, compact, lift }: {
+export function EmptyState({ text, title, icon, action, compact, lift, verbatim }: {
   text?: string; title?: string; icon?: string; action?: React.ReactNode; compact?: boolean;
   /** Small optical lift (§13): shifts the text/icon group ~8px upward
    *  without touching panel borders, dimensions or grid positions. */
   lift?: boolean;
+  /** Render the copy exactly as passed (e.g. brief-fixed wording or a
+   *  translated string whose casing must not be Title Cased). */
+  verbatim?: boolean;
 }) {
   const liftClass = lift ? " empty-lift" : "";
   if (!title && !icon && !action) {
-    const body = text && /^\s*No\b/.test(text) ? titleCase(text) : text;
+    const body = !verbatim && text && /^\s*No\b/.test(text) ? titleCase(text) : text;
     return <div className={`empty${liftClass}`}>{body}</div>;
   }
   return (
@@ -998,7 +1026,7 @@ export function EmptyState({ text, title, icon, action, compact, lift }: {
           <Icon name={icon} size={20} />
         </span>
       ) : null}
-      <p className="empty-title">{title ? titleCase(title) : text}</p>
+      <p className="empty-title">{title && !verbatim ? titleCase(title) : (title ?? text)}</p>
       {text && title ? <p className="empty-body">{text}</p> : null}
       {action ? <div className="empty-action">{action}</div> : null}
     </div>
@@ -1006,5 +1034,6 @@ export function EmptyState({ text, title, icon, action, compact, lift }: {
 }
 
 export function DemoDataBadge() {
-  return <span className="badge-demo">Demo Data</span>;
+  const { t } = useLocale();
+  return <span className="badge-demo">{t("common.demoData")}</span>;
 }

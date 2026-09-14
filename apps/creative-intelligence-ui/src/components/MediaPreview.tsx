@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { RefObject } from "react";
 import { api } from "@/api/client";
+import { useLocale } from "@/i18n";
 
 export type MediaKind = "video" | "audio" | "image";
 
@@ -64,6 +65,7 @@ export interface MediaPreviewProps {
 
 /** Preview tag matched to the real media kind: video/audio/image. */
 export function MediaPreview({ src, creativeKey, videoRef, testId, mutedPreview }: MediaPreviewProps) {
+  const { t } = useLocale();
   const mime = useMediaMime(src, creativeKey);
   const kind = kindForUrl(src, mime ?? "");
   if (kind === "audio") {
@@ -79,7 +81,7 @@ export function MediaPreview({ src, creativeKey, videoRef, testId, mutedPreview 
         playsInline
         preload="metadata"
         src={src}
-        title="Preview — Click To Play/Pause"
+        title={t("creatives.previewTitle")}
         data-testid={testId}
         onClick={(e) => {
           const v = e.currentTarget;

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Icon } from "@/components/icons";
+import { useLocale } from "@/i18n";
 import { LoadingButton } from "@/components/LoadingButton";
 import {
   CreativeThumb,
@@ -31,29 +32,50 @@ interface CreativeRow {
   annotation?: { duration_s?: number | null } | null;
 }
 
+/* Module/template titles and bodies render through the UI locale
+ *  (§9): ids stay stable (selection state, export params) while the
+ *  display copy follows workbook.modules.* / workbook.templates.*. */
 const MODULES = [
-  { id: "summary", title: "Campaign Summary", body: "Performance overview across selected campaigns.", icon: "bars", tint: "#E3F2EF" },
-  { id: "breakdown", title: "Creative Breakdown", body: "Per-creative metrics with thumbnails.", icon: "play", tint: "#ECEAF6" },
-  { id: "benchmarks", title: "Benchmarks", body: "Compare against industry or custom benchmarks.", icon: "bars", tint: "#E6EFF7" },
-  { id: "compare", title: "Compare", body: "Side-by-side campaigns or creatives.", icon: "compare", tint: "#F6F1E4" },
-  { id: "insights", title: "Insights", body: "Key trends, patterns, and takeaways.", icon: "trend", tint: "#F7ECEA" },
-  { id: "recommendations", title: "Recommendations", body: "AI-powered suggestions to improve performance.", icon: "spark", tint: "#E6F2EA" },
-  { id: "export", title: "Data Export", body: "Raw data tables and export options.", icon: "report", tint: "#ECE8F4" },
+  { id: "summary", icon: "bars", tint: "#E3F2EF" },
+  { id: "breakdown", icon: "play", tint: "#ECEAF6" },
+  { id: "benchmarks", icon: "bars", tint: "#E6EFF7" },
+  { id: "compare", icon: "compare", tint: "#F6F1E4" },
+  { id: "insights", icon: "trend", tint: "#F7ECEA" },
+  { id: "recommendations", icon: "spark", tint: "#E6F2EA" },
+  { id: "export", icon: "report", tint: "#ECE8F4" },
 ];
 
 const KPI_CHOICES = ["Impressions", "Clicks", "CTR", "CVR", "ROAS", "CPA", "Spend", "Conversions"];
 
 const TEMPLATES = [
-  { id: "executive", title: "Executive Summary", body: "High-level overview with key insights and recommendations.", icon: "bars", tint: "#E3F2EF", modules: ["summary", "insights", "recommendations"], kpis: ["Impressions", "Clicks", "ROAS"] },
-  { id: "deepdive", title: "Creative Performance Deep Dive", body: "Detailed creative analysis with benchmarks and comparisons.", icon: "play", tint: "#ECEAF6", modules: ["breakdown", "benchmarks", "compare", "insights"], kpis: ["Impressions", "CTR", "CVR", "ROAS"] },
-  { id: "platform", title: "Platform Comparison", body: "Compare performance across platforms and channels.", icon: "compare", tint: "#E6EFF7", modules: ["summary", "benchmarks", "compare"], kpis: ["Impressions", "Clicks", "Spend", "ROAS"] },
-  { id: "monthly", title: "Monthly Performance Report", body: "Track trends and performance over time.", icon: "trend", tint: "#E6F2EA", modules: ["summary", "breakdown", "insights", "export"], kpis: ["Impressions", "Clicks", "CTR", "Conversions", "Spend"] },
-  { id: "custom", title: "Custom Template", body: "Start with a clean workbook and build your own.", icon: "report", tint: "#ECE8F4", modules: [], kpis: ["Impressions"] },
+  { id: "executive", icon: "bars", tint: "#E3F2EF", modules: ["summary", "insights", "recommendations"], kpis: ["Impressions", "Clicks", "ROAS"] },
+  { id: "deepdive", icon: "play", tint: "#ECEAF6", modules: ["breakdown", "benchmarks", "compare", "insights"], kpis: ["Impressions", "CTR", "CVR", "ROAS"] },
+  { id: "platform", icon: "compare", tint: "#E6EFF7", modules: ["summary", "benchmarks", "compare"], kpis: ["Impressions", "Clicks", "Spend", "ROAS"] },
+  { id: "monthly", icon: "trend", tint: "#E6F2EA", modules: ["summary", "breakdown", "insights", "export"], kpis: ["Impressions", "Clicks", "CTR", "Conversions", "Spend"] },
+  { id: "custom", icon: "report", tint: "#ECE8F4", modules: [], kpis: ["Impressions"] },
 ];
 
 function num(v: unknown): number {
   const n = Number(v ?? 0);
   return Number.isFinite(n) ? n : 0;
+}
+
+/** Explicit keyboard-focus (and hover) tooltip (§15): the explanation
+ *  bubble opens on focus as well as hover — never on the browser
+ *  `title` attribute alone. Escape and outside dismissal come from
+ *  the owning control where a dialog is involved. */
+function FocusTip({ label, children }: { label: string; children: React.ReactNode }) {
+  const [show, setShow] = useState(false);
+  return (
+    <span className="trend-tooltip-anchor"
+      onMouseEnter={() => setShow(true)}
+      onMouseLeave={() => setShow(false)}
+      onFocus={() => setShow(true)}
+      onBlur={() => setShow(false)}>
+      {children}
+      {show ? <span className="kpi-tip" role="status">{label}</span> : null}
+    </span>
+  );
 }
 
 /* Finished-report miniature shared by the inline preview and the
@@ -66,6 +88,12 @@ function PreviewDoc({ name, today, modules, previewKpis, top }: {
   top: { creative_key: string; name?: string | null; metrics?: Record<string, number | null> | null;
     annotation?: { duration_s?: number | null } | null; duration_s?: number | null }[];
 }) {
+  const { t } = useLocale();
+  const kpiName = (id: string) => {
+    const key = `workbook.kpis.${id.toLowerCase()}`;
+    const hit = t(key);
+    return hit === key ? id : hit;
+  };
   const showSummary = modules.includes("summary");
   const showBreakdown = modules.includes("breakdown");
   return (
@@ -74,9 +102,9 @@ function PreviewDoc({ name, today, modules, previewKpis, top }: {
         <img src={FOAP_LOGO} alt="Foap" style={{ height: 22, width: "auto" }} />
         <div style={{ minWidth: 0, marginLeft: 7 }}>
           <strong style={{ display: "block", fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-            {name || "Untitled Workbook"}
+            {name || t("workbook.untitled")}
           </strong>
-          <span className="panel-sub" style={{ fontSize: 11.5 }}>{today} · Finished-report preview from live workspace data</span>
+          <span className="panel-sub" style={{ fontSize: 11.5 }}>{today} · {t("workbook.previewCaption")}</span>
         </div>
       </div>
       <div className="wb-doc-body">
@@ -86,18 +114,18 @@ function PreviewDoc({ name, today, modules, previewKpis, top }: {
               {previewKpis.map((k) => (
                 <div key={k.label} style={{ background: "var(--shell-bg)", border: "1px solid var(--shell-line)", borderRadius: 8, padding: "8px 10px" }}>
                   <strong style={{ display: "block", fontSize: 15, fontVariantNumeric: "tabular-nums" }}>{k.value}</strong>
-                  <span className="panel-sub" style={{ fontSize: 11 }}>{k.label}</span>
+                  <span className="panel-sub" style={{ fontSize: 11 }}>{kpiName(k.label)}</span>
                 </div>
               ))}
             </div>
-          ) : <EmptyState text="Select KPIs to preview the summary block." />
+          ) : <EmptyState text={t("workbook.selectKpisHint")} />
         ) : null}
         {showBreakdown ? (
           top.length ? (
             <div className="tbl-wrap" style={{ marginTop: 8 }}>
               <table className="tbl" style={{ fontSize: 12.5 }}>
                 <thead>
-                  <tr><th>#</th><th>Creative</th><th className="num">Impr.</th><th className="num">CTR</th><th className="num">ROAS</th></tr>
+                  <tr><th>#</th><th>{t("workbook.previewTable.creative")}</th><th className="num">{t("workbook.previewTable.impressions")}</th><th className="num">{t("workbook.previewTable.ctr")}</th><th className="num">{t("workbook.previewTable.roas")}</th></tr>
                 </thead>
                 <tbody>
                   {top.map((c, i) => (
@@ -117,10 +145,10 @@ function PreviewDoc({ name, today, modules, previewKpis, top }: {
                 </tbody>
               </table>
             </div>
-          ) : null
+          ) : <EmptyState text={t("workbook.noCreativesInScope")} verbatim />
         ) : null}
         {!showSummary && !showBreakdown ? (
-          <EmptyState text="Enable Campaign Summary or Creative Breakdown to preview workbook content." />
+          <EmptyState text={t("workbook.enableBlocksHint")} />
         ) : null}
       </div>
     </div>
@@ -128,6 +156,12 @@ function PreviewDoc({ name, today, modules, previewKpis, top }: {
 }
 
 export function WorkbookPage() {
+  const { t, tp, fmtDate } = useLocale();
+  const kpiName = (id: string) => {
+    const key = `workbook.kpis.${id.toLowerCase()}`;
+    const hit = t(key);
+    return hit === key ? id : hit;
+  };
   const [modules, setModules] = useState<string[]>(MODULES.map((m) => m.id));
   const [name, setName] = useState("Q1 2024 Creative Performance Report");
   const [description, setDescription] = useState("");
@@ -136,19 +170,23 @@ export function WorkbookPage() {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [learnOpen, setLearnOpen] = useState(false);
+  const [helpHover, setHelpHover] = useState(false);
   const [fullScreen, setFullScreen] = useState(false);
 
   const compare = useCompare();
   const creatives = useScopedApi<CreativeRow[]>("/api/creatives");
 
   useEffect(() => {
-    if (!fullScreen) return;
+    if (!fullScreen && !learnOpen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setFullScreen(false);
+      if (e.key === "Escape") {
+        setFullScreen(false);
+        setLearnOpen(false);
+      }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [fullScreen]);
+  }, [fullScreen, learnOpen]);
 
   const top = useMemo(() => {
     const rows = creatives.data ?? [];
@@ -193,7 +231,7 @@ export function WorkbookPage() {
       const res = await fetch(`/api/analyst/workbook?${params.toString()}`, {
         credentials: "same-origin",
       });
-      if (!res.ok) throw new Error(`Workbook export failed (${res.status})`);
+      if (!res.ok) throw new Error(`${t("workbook.exportFailed")} (${res.status})`);
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -201,17 +239,20 @@ export function WorkbookPage() {
       a.download = "foap-analyst-workbook.xlsx";
       a.click();
       URL.revokeObjectURL(url);
-      setStatus(`Workbook downloaded: ${modules.length} module${modules.length === 1 ? "" : "s"} and ${kpis.length} KPI${kpis.length === 1 ? "" : "s"} recorded on the cover sheet.`);
+      setStatus(t("workbook.downloaded", {
+        modules: modules.length,
+        modulesLabel: tp("workbook.module", modules.length),
+        kpis: kpis.length,
+        kpisLabel: tp("workbook.kpi", kpis.length),
+      }));
     } catch (e) {
-      setStatus(e instanceof Error ? e.message : "Workbook export failed.");
+      setStatus(e instanceof Error ? e.message : t("workbook.exportFailed"));
     } finally {
       setBusy(false);
     }
   };
 
-  const today = new Date().toLocaleDateString("en-US", {
-    month: "short", day: "numeric", year: "numeric",
-  });
+  const today = fmtDate(new Date().toISOString().slice(0, 10));
   /* Preview KPIs follow the SELECTED KPI list (not a fixed four), so
    * the preview always agrees with the chips above and the export. */
   const previewKpis = useMemo(() => {
@@ -249,33 +290,33 @@ export function WorkbookPage() {
       <div className="page-head">
         <div style={{ minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <h1 style={{ margin: 0 }}>Blank Workbook</h1>
+            <h1 style={{ margin: 0 }}>{t("workbook.title")}</h1>
             <button
               type="button"
               className="icon-btn"
               style={{ width: 26, height: 26 }}
-              aria-label="About workbooks"
-              title="About workbooks"
-              aria-expanded={learnOpen}
+              aria-label={t("workbook.about")}
+              aria-expanded={learnOpen || helpHover}
               onClick={() => setLearnOpen((v) => !v)}
+              onMouseEnter={() => setHelpHover(true)}
+              onMouseLeave={() => setHelpHover(false)}
+              onFocus={() => setHelpHover(true)}
+              onBlur={() => setHelpHover(false)}
             >
               <Icon name="info" size={15} />
             </button>
           </div>
-          <p className="sub">Create a custom report workbook to analyze, compare, and share your creative performance insights.</p>
+          <p className="sub">{t("workbook.sub")}</p>
         </div>
       </div>
-      {learnOpen ? (
+      {learnOpen || helpHover ? (
         <div className="panel" style={{ marginBottom: 12 }}>
           <p className="panel-sub" style={{ margin: 0 }}>
-            A workbook bundles the modules and KPIs you pick into a reusable XLSX file:
-            seven blank analysis sheets plus a cover sheet recording this workbook&apos;s
-            name and selections. Fill the Input sheet with creative data and the
-            formulas recalculate offline.
+            {t("workbook.aboutBody")}
           </p>
         </div>
       ) : null}
-      <Panel title="1. Configure Your Workbook" sub="Select the modules and options you want to include in your workbook.">
+      <Panel title={t("workbook.configure")} sub={t("workbook.configureSub")}>
         <div className="cards-4" style={{ gap: 10 }}>
           {MODULES.map((m) => {
             const on = modules.includes(m.id);
@@ -294,8 +335,8 @@ export function WorkbookPage() {
                     <Icon name={m.icon} size={22} />
                   </span>
                   <span style={{ minWidth: 0 }}>
-                    <strong className="mod-title">{m.title}</strong>
-                    <span className="panel-sub" style={{ fontSize: 12 }}>{m.body}</span>
+                    <strong className="mod-title">{t(`workbook.modules.${m.id}Title`)}</strong>
+                    <span className="panel-sub" style={{ fontSize: 12 }}>{t(`workbook.modules.${m.id}Body`)}</span>
                   </span>
                 </span>
               </button>
@@ -304,49 +345,50 @@ export function WorkbookPage() {
         </div>
       </Panel>
       <div className="wb-rail">
-        <Panel title="2. Workbook Details">
+        <Panel title={t("workbook.details")}>
           <div className="field">
-            <label htmlFor="wb-name">Workbook Name</label>
+            <label htmlFor="wb-name">{t("workbook.nameLabel")}</label>
             <input id="wb-name" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
           <div className="field" style={{ marginTop: 10 }}>
-            <label htmlFor="wb-desc">Description (Optional)</label>
+            <label htmlFor="wb-desc">{t("workbook.descLabel")}</label>
             <textarea
               id="wb-desc"
               rows={2}
               maxLength={200}
-              placeholder="Add a brief description for your workbook…"
+              placeholder={t("workbook.descPlaceholder")}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               style={{ width: "100%", boxSizing: "border-box", border: "1px solid var(--shell-line)", borderRadius: 8, padding: "9px 11px", fontFamily: "inherit", fontSize: 13.5 }}
             />
             <p className="panel-sub" style={{ textAlign: "right" }}>{description.length}/200</p>
           </div>
-          <p style={{ fontSize: 13, fontWeight: 700, margin: "6px 0" }}>Select KPIs to Include</p>
+          <p style={{ fontSize: 13, fontWeight: 700, margin: "6px 0" }}>{t("workbook.selectKpis")}</p>
           <div className="chip-row">
             {kpis.map((k) => (
-              <button key={k} type="button" className="chip" aria-label={`Remove ${k} from workbook`} onClick={() => toggleKpi(k)}>
-                {k} <Icon name="x" size={12} />
+              <button key={k} type="button" className="chip" aria-label={t("workbook.removeKpi", { kpi: kpiName(k) })} onClick={() => toggleKpi(k)}>
+                {kpiName(k)} <Icon name="x" size={12} />
               </button>
             ))}
-            <select aria-label="Add KPI" value="" onChange={(e) => { if (e.target.value) toggleKpi(e.target.value); }}>
-              <option value="">+ Add KPI</option>
-              {KPI_CHOICES.filter((c) => !kpis.includes(c)).map((c) => <option key={c} value={c}>{c}</option>)}
+            <select aria-label={t("workbook.addKpi")} value="" onChange={(e) => { if (e.target.value) toggleKpi(e.target.value); }}>
+              <option value="">+ {t("workbook.addKpi")}</option>
+              {KPI_CHOICES.filter((c) => !kpis.includes(c)).map((c) => <option key={c} value={c}>{kpiName(c)}</option>)}
             </select>
           </div>
         </Panel>
         <Panel
-          title="3. Workbook Preview"
+          title={t("workbook.preview")}
           action={(
-            <button
-              type="button"
-              className="icon-btn"
-              aria-label="Full screen"
-              title="Full screen"
-              onClick={() => setFullScreen(true)}
-            >
-              <Icon name="expand" size={18} />
-            </button>
+            <FocusTip label={t("workbook.fullScreen")}>
+              <button
+                type="button"
+                className="icon-btn"
+                aria-label={t("workbook.fullScreen")}
+                onClick={() => setFullScreen(true)}
+              >
+                <Icon name="expand" size={18} />
+              </button>
+            </FocusTip>
           )}
         >
           {compare && creatives.data ? (
@@ -354,24 +396,24 @@ export function WorkbookPage() {
               previewKpis={previewKpis} top={top} />
           ) : <Skeleton height={280} />}
         </Panel>
-        <Panel title="4. Quick-Start Templates" sub="Start with a pre-built template and customize it.">
+        <Panel title={t("workbook.templatesTitle")} sub={t("workbook.templatesSub")}>
           <div className="rail-stack" style={{ gap: 8 }}>
-            {TEMPLATES.map((t) => (
+            {TEMPLATES.map((tpl) => (
               <button
-                key={t.id}
+                key={tpl.id}
                 type="button"
                 className="cmp-card mod-card"
-                aria-pressed={template === t.id}
-                onClick={() => applyTemplate(t.id)}
-                style={{ textAlign: "left", cursor: "pointer", padding: "10px 12px", borderColor: template === t.id ? "var(--shell-teal)" : undefined, "--tile-tint": t.tint } as CSSProperties}
+                aria-pressed={template === tpl.id}
+                onClick={() => applyTemplate(tpl.id)}
+                style={{ textAlign: "left", cursor: "pointer", padding: "10px 12px", borderColor: template === tpl.id ? "var(--shell-teal)" : undefined, "--tile-tint": tpl.tint } as CSSProperties}
               >
                 <span style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
                   <span className="mod-ico" aria-hidden="true">
-                    <Icon name={t.icon} size={18} />
+                    <Icon name={tpl.icon} size={18} />
                   </span>
                   <span>
-                    <strong className="mod-title">{t.title}</strong>
-                    <span className="panel-sub" style={{ fontSize: 12 }}>{t.body}</span>
+                    <strong className="mod-title">{t(`workbook.templates.${tpl.id}Title`)}</strong>
+                    <span className="panel-sub" style={{ fontSize: 12 }}>{t(`workbook.templates.${tpl.id}Body`)}</span>
                   </span>
                 </span>
               </button>
@@ -382,29 +424,30 @@ export function WorkbookPage() {
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 14, padding: "10px 4px", borderTop: "1px solid var(--shell-line)", position: "sticky", bottom: 0, background: "var(--shell-bg)", zIndex: 5 }}>
         {status ? <span className="panel-sub" role="status" style={{ margin: 0, flex: "1 1 auto", minWidth: 200 }}>{status}</span> : <span style={{ flex: "1 1 auto" }} />}
         <button type="button" className="btn-outline" onClick={() => applyTemplate(template)}>
-          <Icon name="report" size={16} /> Duplicate from Template
+          <Icon name="report" size={16} /> {t("workbook.duplicate")}
         </button>
-        <button type="button" className="btn-outline" onClick={resetAll}>Cancel</button>
-        <LoadingButton type="button" className="btn-primary" loading={busy} loadingLabel="Creating…" disabled={busy} onClick={() => void createWorkbook()}>
-          Create Workbook
+        <button type="button" className="btn-outline" onClick={resetAll}>{t("workbook.cancel")}</button>
+        <LoadingButton type="button" className="btn-primary" loading={busy} loadingLabel={t("workbook.creating")} disabled={busy} onClick={() => void createWorkbook()}>
+          {t("workbook.create")}
         </LoadingButton>
       </div>
       {fullScreen ? (
         <div className="modal-overlay" onClick={() => setFullScreen(false)}>
-          <div className="modal-card" role="dialog" aria-modal="true" aria-label="Workbook Preview"
+          <div className="modal-card" role="dialog" aria-modal="true" aria-label={t("workbook.previewTitle")}
             onClick={(e) => e.stopPropagation()}>
             <div className="modal-head">
-              <strong style={{ fontSize: 14 }}>{name || "Untitled Workbook"}</strong>
+              <strong style={{ fontSize: 14 }}>{name || t("workbook.untitled")}</strong>
               <span style={{ flex: "1 1 auto" }} />
-              <button
-                type="button"
-                className="icon-btn"
-                aria-label="Exit full screen"
-                title="Exit full screen"
-                onClick={() => setFullScreen(false)}
-              >
-                <Icon name="compress" size={18} />
-              </button>
+              <FocusTip label={t("workbook.exitFullScreen")}>
+                <button
+                  type="button"
+                  className="icon-btn"
+                  aria-label={t("workbook.exitFullScreen")}
+                  onClick={() => setFullScreen(false)}
+                >
+                  <Icon name="compress" size={18} />
+                </button>
+              </FocusTip>
             </div>
             {compare && creatives.data ? (
               <PreviewDoc name={name} today={today} modules={modules}

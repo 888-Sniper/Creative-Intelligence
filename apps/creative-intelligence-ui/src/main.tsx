@@ -4,7 +4,7 @@ import { RouterProvider } from "react-router-dom";
 import "@fontsource-variable/inter";
 import "@/theme.css";
 import { AuthProvider } from "@/auth/AuthProvider";
-import { LocaleProvider } from "@/i18n";
+import { LocalePrefsSync, LocaleProvider } from "@/i18n";
 import { router } from "@/app/router";
 
 const root = document.getElementById("root");
@@ -13,6 +13,7 @@ createRoot(root).render(
   <StrictMode>
     <AuthProvider>
       <LocaleProvider>
+        <LocalePrefsSync />
         <RouterProvider router={router} />
       </LocaleProvider>
     </AuthProvider>

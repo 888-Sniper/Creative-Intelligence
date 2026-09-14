@@ -1,4 +1,5 @@
 /** Hand-rolled SVG charts (no new dependencies). Responsive via viewBox. */
+import { useLocale } from "@/i18n";
 
 function niceMax(v: number): number {
   if (v <= 0) return 1;
@@ -22,6 +23,7 @@ export interface TrendSeries {
 export function TrendChart({ series, labels, height = 240, ticks = 5 }: {
   series: TrendSeries[]; labels: string[]; height?: number; ticks?: number;
 }) {
+  const { t } = useLocale();
   const W = 640, H = 240, PL = 40, PB = 24, PT = 8, PR = 40;
   const leftMax = Math.max(1, ...series.filter((s) => (s.axis ?? "left") === "left").flatMap((s) => s.points));
   const rightValues = series.filter((s) => s.axis === "right").flatMap((s) => s.points);
@@ -43,7 +45,7 @@ export function TrendChart({ series, labels, height = 240, ticks = 5 }: {
   const labelEvery = Math.max(1, Math.ceil(n / 7));
   return (
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height, display: "block" }}
-      role="img" aria-label="Trend Chart">
+      role="img" aria-label={t("charts.trend")}>
       {grid.map((g) => (
         <g key={g}>
           <line x1={PL} x2={W - PR} y1={y(g)} y2={y(g)} stroke="#E5EAF1" strokeWidth={1} />
@@ -92,6 +94,7 @@ export function GroupBars({ groups, height = 230, format }: {
   groups: BarGroup[]; height?: number;
   format?: (v: number) => string;
 }) {
+  const { t } = useLocale();
   const W = 560, H = 230, PL = 36, PB = 24, PT = 8, PR = 8;
   const max = Math.max(1, ...groups.flatMap((g) => [g.yours, g.bench]));
   const top = niceMax(max);
@@ -102,7 +105,7 @@ export function GroupBars({ groups, height = 230, format }: {
   const fmt = format ?? fmtAxis;
   return (
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height, display: "block" }}
-      role="img" aria-label="Comparison Bar Chart">
+      role="img" aria-label={t("charts.bars")}>
       {grid.map((g) => (
         <g key={g}>
           <line x1={PL} x2={W - PR} y1={y(g)} y2={y(g)} stroke="#E5EAF1" strokeWidth={1} />
@@ -141,6 +144,7 @@ export function BarLegend({ yours, bench }: { yours: string; bench: string }) {
 export function RetentionCurve({ points, callout, height = 190 }: {
   points: Array<[number, number]>; callout?: string; height?: number;
 }) {
+  const { t } = useLocale();
   const W = 300, H = 190, PL = 34, PB = 22, PT = 10, PR = 8;
   const maxX = Math.max(1, ...points.map((p) => p[0]));
   const x = (v: number) => PL + (v / maxX) * (W - PL - PR);
@@ -151,7 +155,7 @@ export function RetentionCurve({ points, callout, height = 190 }: {
   const grid = [0, 25, 50, 75, 100];
   return (
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height, display: "block" }}
-      role="img" aria-label="Retention Curve">
+      role="img" aria-label={t("charts.retention")}>
       {grid.map((g) => (
         <g key={g}>
           <line x1={PL} x2={W - PR} y1={y(g)} y2={y(g)} stroke="#E5EAF1" strokeWidth={1} />

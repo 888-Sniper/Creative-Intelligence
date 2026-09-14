@@ -3,6 +3,7 @@ import { api } from "@/api/client";
 import { useAuth } from "@/auth/AuthProvider";
 import { LoadingButton } from "@/components/LoadingButton";
 import { refreshCampaignMeta } from "@/components/product";
+import { useLocale } from "@/i18n";
 
 /** Null outside AuthProvider (tests, signed-out trees): the control
  *  is admin-gated anyway, so no provider means no button. */
@@ -41,6 +42,7 @@ export function refreshPackStatus(): void {
 export function SampleCampaignDelete({ campaignName, onDeleted }: {
   campaignName: string; onDeleted: () => void;
 }) {
+  const { t } = useLocale();
   const isAdmin = useAdminFlag();
   const [pack, setPack] = useState<PackStatusLite | null>(null);
   const [showImpact, setShowImpact] = useState(false);
@@ -72,7 +74,7 @@ export function SampleCampaignDelete({ campaignName, onDeleted }: {
       setImpact(r);
       setShowImpact(true);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Request Failed.");
+      setError(e instanceof Error ? e.message : t("sampleDelete.requestFailed"));
     } finally {
       setBusy(null);
     }
@@ -91,7 +93,7 @@ export function SampleCampaignDelete({ campaignName, onDeleted }: {
       setImpact(null);
       onDeleted();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Request Failed.");
+      setError(e instanceof Error ? e.message : t("sampleDelete.requestFailed"));
     } finally {
       setBusy(null);
     }
@@ -101,19 +103,25 @@ export function SampleCampaignDelete({ campaignName, onDeleted }: {
     <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
       {!showImpact ? (
         <button type="button" className="link-btn" disabled={busy !== null} onClick={() => void ask()}>
-          Delete Sample…
+          {t("sampleDelete.deleteSample")}
         </button>
       ) : (
         <span className="panel-sub" style={{ margin: 0 }}>
-          Removes “{impact?.campaign}”: {impact?.ads_rows} row(s), {impact?.creatives} creative(s)
-          {(impact?.batch_views.length ?? 0) > 0 ? `, ${impact?.batch_views.length} saved view(s)` : ""}.{" "}
+          {t("sampleDelete.removes", {
+            campaign: impact?.campaign ?? "",
+            ads: impact?.ads_rows ?? 0,
+            creatives: impact?.creatives ?? 0,
+            views: (impact?.batch_views.length ?? 0) > 0
+              ? t("sampleDelete.viewsSuffix", { count: impact?.batch_views.length ?? 0 })
+              : "",
+          })}{" "}
           <LoadingButton type="button" className="link-btn" loading={busy === "del"}
-            loadingLabel="Deleting…" disabled={busy !== null} onClick={() => void del()}>
-            Confirm Delete
+            loadingLabel={t("sampleDelete.deleting")} disabled={busy !== null} onClick={() => void del()}>
+            {t("sampleDelete.confirmDelete")}
           </LoadingButton>{" "}
           <button type="button" className="link-btn" disabled={busy !== null}
             onClick={() => { setShowImpact(false); setImpact(null); }}>
-            Cancel
+            {t("sampleDelete.cancel")}
           </button>
         </span>
       )}

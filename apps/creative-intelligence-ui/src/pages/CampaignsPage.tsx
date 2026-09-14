@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { api, ApiError } from "@/api/client";
 import { useFilters } from "@/state/FilterContext";
+import { useLocale } from "@/i18n";
 import { Icon } from "@/components/icons";
 import { LoadingButton } from "@/components/LoadingButton";
 import { SampleCampaignDelete } from "@/components/SampleDelete";
@@ -81,6 +82,12 @@ function rate(cur: number, base: number): number | null {
 }
 
 export function CampaignsPage() {
+  const { t, tp } = useLocale();
+  const kpiName = (id: string): string => {
+    const key = `filters.kpis.${id.toLowerCase()}`;
+    const hit = t(key);
+    return hit === key ? id.toUpperCase() : hit;
+  };
   const location = useLocation();
   const navigate = useNavigate();
   const { filters, setFilter, clearFilters } = useFilters();
@@ -205,17 +212,22 @@ export function CampaignsPage() {
       const d = rate(plats[0].roas ?? 0, avg);
       items.push({
         icon: "trend", tint: "var(--shell-teal-soft)",
-        title: "Scale High-Performing Campaigns",
-        body: `${platformLabel(plats[0].key)} campaigns average ${(plats[0].roas ?? 0).toFixed(1)}x ROAS${d != null ? `, ${d >= 0 ? "+" : ""}${d.toFixed(0)}% above the platform average` : ""}. Consider increasing budget allocation.`,
-        action: "View Campaigns", href: "/campaigns",
+        title: t("campaigns.rail.scaleTitle"),
+        body: t("campaigns.rail.scaleBody", {
+          platform: platformLabel(plats[0].key),
+          roas: (plats[0].roas ?? 0).toFixed(1),
+          diff: d != null ? t("campaigns.rail.aboveAvg", { sign: d >= 0 ? "+" : "", pct: d.toFixed(0) }) : "",
+        }),
+        action: t("campaigns.rail.viewCampaigns"), href: "/campaigns",
       });
     }
     if (underperformers.length) {
+      const avg = avgCtr == null ? "" : `${avgCtr.toFixed(1)}% `;
       items.push({
         icon: "users", tint: "var(--shell-teal-soft)",
-        title: "Improve Underperforming Creatives",
-        body: `${underperformers.length} campaign${underperformers.length === 1 ? " is" : "s are"} underperforming on CTR versus the ${avgCtr == null ? "" : `${avgCtr.toFixed(1)}% `}scope average. Refresh creative assets to improve engagement.`,
-        action: "View Recommendations", href: "/creatives",
+        title: t("campaigns.rail.improveTitle"),
+        body: tp("campaigns.rail.improveBody", underperformers.length, { count: underperformers.length, avg }),
+        action: t("campaigns.rail.viewRecommendations"), href: "/creatives",
       });
     }
     const hookRows = Object.entries(benchHook.data ?? {})
@@ -223,11 +235,16 @@ export function CampaignsPage() {
       .filter((r) => r.ctr != null)
       .sort((a, b) => (b.ctr ?? 0) - (a.ctr ?? 0));
     if (hookRows[0]?.ctr != null) {
+      const hk = `filters.hooks.${hookRows[0].key}`;
+      const hookHit = t(hk);
       items.push({
         icon: "spark", tint: "var(--shell-blue-soft)",
-        title: "Optimize for Video Content",
-        body: `${hookRows[0].key.replace(/_/g, " ")} openings lead the current scope at ${(hookRows[0].ctr ?? 0).toFixed(1)}% CTR. Lead with the strongest hook in the first 3 seconds.`,
-        action: "See Insights", href: "/insights",
+        title: t("campaigns.rail.optimizeTitle"),
+        body: t("campaigns.rail.optimizeBody", {
+          hook: hookHit === hk ? hookRows[0].key.replace(/_/g, " ") : hookHit,
+          ctr: (hookRows[0].ctr ?? 0).toFixed(1),
+        }),
+        action: t("campaigns.rail.seeInsights"), href: "/insights",
       });
     }
     const topRoas = rows
@@ -236,13 +253,13 @@ export function CampaignsPage() {
     if (topRoas?.roas != null) {
       items.push({
         icon: "target", tint: "var(--shell-teal-soft)",
-        title: "Refine Audience Targeting",
-        body: `${topRoas.name} leads the current scope at ${topRoas.roas.toFixed(1)}x ROAS. Mirror its audience and hook formula in the next flight.`,
-        action: "View Details", href: "/compare",
+        title: t("campaigns.rail.refineTitle"),
+        body: t("campaigns.rail.refineBody", { name: topRoas.name, roas: topRoas.roas.toFixed(1) }),
+        action: t("campaigns.rail.viewDetails"), href: "/compare",
       });
     }
     return items.slice(0, 4);
-  }, [benchPlatform.data, benchHook.data, underperformers, avgCtr, rows]);
+  }, [benchPlatform.data, benchHook.data, underperformers, avgCtr, rows, t, tp]);
 
   /* Reset clears every active filter: shared scope plus the local
    * name search (status/spend live in shared state since the
@@ -283,7 +300,7 @@ export function CampaignsPage() {
   const onCompare = () => {
     const names = [...selected];
     if (!names.length) {
-      setBanner("Select At Least One Campaign To Compare.");
+      setBanner(t("campaigns.banner.selectToCompare"));
       return;
     }
     setBanner("");
@@ -301,7 +318,7 @@ export function CampaignsPage() {
   const onExport = async () => {
     const names = rows.map((r) => r.name);
     if (!names.length) {
-      setBanner("Nothing To Export For The Current Filters.");
+      setBanner(t("campaigns.banner.nothingToExport"));
       return;
     }
     setExportBusy(true);
@@ -321,9 +338,9 @@ export function CampaignsPage() {
       a.download = "campaigns.csv";
       a.click();
       URL.revokeObjectURL(url);
-      setBanner(`Exported ${names.length} Campaign${names.length === 1 ? "" : "s"}.`);
+      setBanner(tp("campaigns.banner.exported", names.length, { count: names.length }));
     } catch (e) {
-      setBanner(e instanceof Error ? e.message : "Export Failed");
+      setBanner(e instanceof Error ? e.message : t("campaigns.banner.exportFailed"));
     } finally {
       setExportBusy(false);
     }
@@ -368,28 +385,28 @@ export function CampaignsPage() {
   return (
     <div className="campaigns">
       <PageHeader
-        title="Campaigns"
-        sub="Plan, monitor, and optimize your creative campaigns with real-time insights."
+        title={t("campaigns.title")}
+        sub={t("campaigns.sub")}
         actions={(
           <>
             <button type="button" className="btn-primary" onClick={() => setApplied((n) => n + 1)}>
-              Apply Filters
+              {t("filters.apply")}
             </button>
             <button type="button" className="link-teal" onClick={resetAll}
               style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <Icon name="reset" size={15} /> Reset Filters
+              <Icon name="reset" size={15} /> {t("filters.reset")}
             </button>
           </>
         )}
       />
       {/* Approved composition goes straight into the controls:
         no extra "Campaign Filters" heading. */}
-      <section className="panel" aria-label="Campaign Filters">
+      <section className="panel" aria-label={t("campaigns.filtersAria")}>
         <div className="filter-grid">
           <div className="field">
-            <label htmlFor="c-client">Client</label>
+            <label htmlFor="c-client">{t("filters.client")}</label>
             <select id="c-client" {...selectProps("client")}>
-              <option value="">All Clients</option>
+              <option value="">{t("filters.allClients")}</option>
               {metaClients.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
           </div>
@@ -400,101 +417,101 @@ export function CampaignsPage() {
               outside the label element to keep its accessible name
               exactly "Campaign Status". */}
             <span style={{ display: "flex", alignItems: "center", gap: 6, margin: "0 0 6px" }}>
-              <label htmlFor="c-status" style={{ margin: 0 }}>Campaign Status</label>
-              <InfoTip label="How Campaign Status Is Determined"
-                text="Activity-derived status from recent ad activity — not the ad platform's own campaign status." />
+              <label htmlFor="c-status" style={{ margin: 0 }}>{t("campaigns.statusLabel")}</label>
+              <InfoTip label={t("campaigns.statusInfoLabel")}
+                text={t("campaigns.statusInfoBody")} />
             </span>
             <select id="c-status" value={filters.status || "all"}
-              title="Activity-derived status from recent ad activity — not the ad platform's own campaign status."
+              title={t("campaigns.statusInfoBody")}
               onChange={(e) => setFilter("status", e.target.value === "all" ? "" : e.target.value)}>
-              <option value="all">All Statuses</option>
-              <option value="Active">Active</option>
-              <option value="Completed">Completed</option>
+              <option value="all">{t("campaigns.statusAll")}</option>
+              <option value="Active">{t("campaigns.statusNames.Active")}</option>
+              <option value="Completed">{t("campaigns.statusNames.Completed")}</option>
             </select>
           </div>
           <div className="field">
-            <label htmlFor="c-platform">Platform</label>
+            <label htmlFor="c-platform">{t("filters.platform")}</label>
             <select id="c-platform" {...selectProps("platform")}>
-              <option value="">All Platforms</option>
+              <option value="">{t("filters.allPlatforms")}</option>
               <option value="meta">Meta</option>
               <option value="tiktok">TikTok</option>
             </select>
           </div>
           <div className="field">
-            <label htmlFor="c-objective">Campaign Objective</label>
+            <label htmlFor="c-objective">{t("filters.objective")}</label>
             <select id="c-objective" {...selectProps("objective")}>
-              <option value="">All Objectives</option>
+              <option value="">{t("filters.allObjectives")}</option>
               {metaObjectives.map((o) => <option key={o} value={o}>{o}</option>)}
             </select>
           </div>
           <div className="field">
-            <label htmlFor="c-team">Team</label>
+            <label htmlFor="c-team">{t("filters.team")}</label>
             <select id="c-team" {...selectProps("team")}>
-              <option value="">All Teams</option>
+              <option value="">{t("filters.allTeams")}</option>
               {metaTeams.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
           </div>
           <div className="field">
-            <label htmlFor="c-market">Market</label>
+            <label htmlFor="c-market">{t("filters.market")}</label>
             <select id="c-market" {...selectProps("market")}>
-              <option value="">All Markets</option>
+              <option value="">{t("filters.allMarkets")}</option>
               {metaMarkets.map((m) => <option key={m} value={m}>{m}</option>)}
             </select>
           </div>
           <DateRangeField id="c-date" />
           <div className="field">
-            <label htmlFor="c-spend">Spend Range</label>
+            <label htmlFor="c-spend">{t("campaigns.spendLabel")}</label>
             <select id="c-spend" value={spendBand} onChange={(e) => setSpendBand(e.target.value)}>
-              <option value="all">All Spend Ranges</option>
-              <option value="under">Under $25K</option>
-              <option value="mid">$25K – $50K</option>
-              <option value="over">Over $50K</option>
+              <option value="all">{t("campaigns.spendAll")}</option>
+              <option value="under">{t("campaigns.spendUnder")}</option>
+              <option value="mid">{t("campaigns.spendMid")}</option>
+              <option value="over">{t("campaigns.spendOver")}</option>
             </select>
           </div>
           <div className="field">
-            <label htmlFor="c-kpi">KPI Focus</label>
+            <label htmlFor="c-kpi">{t("campaigns.kpiFocus")}</label>
             <select id="c-kpi" {...selectProps("kpi")} value={filters.kpi === "all" ? "" : filters.kpi}>
-              <option value="">All KPIs</option>
-              <option value="impressions">Impressions</option>
-              <option value="clicks">Clicks</option>
-              <option value="spend">Spend</option>
-              <option value="conversions">Conversions</option>
-              <option value="ctr">CTR</option>
-              <option value="cpa">CPA</option>
-              <option value="roas">ROAS</option>
+              <option value="">{t("filters.allKpis")}</option>
+              <option value="impressions">{kpiName("impressions")}</option>
+              <option value="clicks">{kpiName("clicks")}</option>
+              <option value="spend">{kpiName("spend")}</option>
+              <option value="conversions">{kpiName("conversions")}</option>
+              <option value="ctr">{kpiName("ctr")}</option>
+              <option value="cpa">{kpiName("cpa")}</option>
+              <option value="roas">{kpiName("roas")}</option>
             </select>
           </div>
           <div className="field">
             <span className="field-label" aria-hidden="true">&nbsp;</span>
             <button type="button" className="filter-toggle" onClick={() => setMoreFilters((v) => !v)}
               aria-expanded={moreFilters}>
-              {moreFilters ? "Fewer Filters" : "More Filters"}
+              {moreFilters ? t("campaigns.fewerFilters") : t("campaigns.moreFilters")}
               <Icon name="chev" size={13} />
             </button>
           </div>
           {moreFilters ? (
             <>
               <div className="field">
-                <label htmlFor="c-project">Project</label>
+                <label htmlFor="c-project">{t("filters.project")}</label>
                 <select id="c-project" value={filters.project === "all" ? "" : filters.project} onChange={(e) => setFilter("project", e.target.value)}>
-                  <option value="">All Projects</option>
+                  <option value="">{t("filters.allProjects")}</option>
                   {metaProjects.map((p) => <option key={p} value={p}>{p}</option>)}
                 </select>
               </div>
               <div className="field">
-                <label htmlFor="c-vertical">Vertical</label>
+                <label htmlFor="c-vertical">{t("filters.vertical")}</label>
                 <select id="c-vertical" value={filters.vertical === "all" ? "" : filters.vertical} onChange={(e) => setFilter("vertical", e.target.value)}>
-                  <option value="">All Verticals</option>
+                  <option value="">{t("filters.allVerticals")}</option>
                   {metaVerticals.map((v) => <option key={v} value={v}>{v}</option>)}
                 </select>
               </div>
               <div className="field">
-                <label htmlFor="c-funnel">Funnel Stage</label>
+                <label htmlFor="c-funnel">{t("filters.funnel")}</label>
                 <select id="c-funnel" value={filters.funnel === "all" ? "" : filters.funnel} onChange={(e) => setFilter("funnel", e.target.value)}>
-                  <option value="">All Stages</option>
-                  <option value="upper">Upper</option>
-                  <option value="mid">Mid</option>
-                  <option value="lower">Lower</option>
+                  <option value="">{t("filters.allStages")}</option>
+                  <option value="upper">{t("filters.funnels.upper")}</option>
+                  <option value="mid">{t("filters.funnels.mid")}</option>
+                  <option value="lower">{t("filters.funnels.lower")}</option>
                 </select>
               </div>
             </>
@@ -511,15 +528,15 @@ export function CampaignsPage() {
                   <Icon name="users" size={20} />
                 </span>
                 <div className="kpi-body">
-                  <div className="kpi-label">Total Campaigns</div>
+                  <div className="kpi-label">{t("campaigns.totalCampaigns")}</div>
                   <div className="kpi-value">{rows.length}</div>
                 </div>
               </div>
-              <KpiCard label="Total Impressions" display={kpiDisplay("count", compare.metrics.impressions?.current, compare.current_n_ads === 0)}
-                icon="megaphone" tint="var(--shell-teal-soft)" metricLabel="Impressions" compare={compare} />
-              <KpiCard label="Total Clicks" display={kpiDisplay("count", compare.metrics.clicks?.current, compare.current_n_ads === 0)}
-                icon="click" tint="var(--shell-blue-soft)" metricLabel="Clicks" compare={compare} />
-              <KpiCard label="Average ROAS" display={kpiDisplay("mult", compare.metrics.roas?.current, compare.current_n_ads === 0)}
+              <KpiCard label={t("dashboard.totalImpressions")} display={kpiDisplay("count", compare.metrics.impressions?.current, compare.current_n_ads === 0)}
+                icon="megaphone" tint="var(--shell-teal-soft)" metricLabel={kpiName("impressions")} compare={compare} />
+              <KpiCard label={t("dashboard.totalClicks")} display={kpiDisplay("count", compare.metrics.clicks?.current, compare.current_n_ads === 0)}
+                icon="click" tint="var(--shell-blue-soft)" metricLabel={kpiName("clicks")} compare={compare} />
+              <KpiCard label={t("dashboard.averageRoas")} display={kpiDisplay("mult", compare.metrics.roas?.current, compare.current_n_ads === 0)}
                 icon="coin" tint="var(--shell-green-soft)" metricLabel="ROAS" compare={compare}
                 note={kpiPlaceholderNote("mult", compare.metrics.roas?.current, compare.current_n_ads === 0)} />
             </div>
@@ -531,24 +548,24 @@ export function CampaignsPage() {
             </div>
           )}
           <div className="cols-2">
-            <Panel title="Performance Trends">
+            <Panel title={t("campaigns.trendsTitle")}>
               {daily ? (
                 <TrendChart
                   height={200}
                   series={[
-                    { label: "Impressions", color: "var(--glyph-teal)", soft: "#E5F5F2", points: daily.map((p) => num(p.impressions)) },
-                    { label: "Clicks", color: "var(--glyph-navy)", soft: "#E4EAF7", points: daily.map((p) => num(p.clicks)), axis: "right" },
+                    { label: kpiName("impressions"), color: "var(--glyph-teal)", soft: "#E5F5F2", points: daily.map((p) => num(p.impressions)) },
+                    { label: kpiName("clicks"), color: "var(--glyph-navy)", soft: "#E4EAF7", points: daily.map((p) => num(p.clicks)), axis: "right" },
                   ]}
                   labels={daily.map((p) => p.date.slice(5))}
                 />
               ) : <Skeleton height={200} />}
             </Panel>
             <Panel
-              title="Platform Performance"
+              title={t("campaigns.platformTitle")}
               action={(
-                <select aria-label="Platform Metric" value={platMetric}
+                <select aria-label={t("campaigns.platformMetricAria")} value={platMetric}
                   onChange={(e) => setPlatMetric(e.target.value as typeof platMetric)}>
-                  {PLATFORM_METRICS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+                  {PLATFORM_METRICS.map((m) => <option key={m.value} value={m.value}>{kpiName(m.value)}</option>)}
                 </select>
               )}
             >
@@ -559,26 +576,26 @@ export function CampaignsPage() {
                     groups={platGroups}
                     format={(v) => platMetric === "spend" ? fmtMoney(v) : fmtCompact(v)}
                   />
-                ) : <EmptyState compact icon="bars" title="No platform data" text="Platform breakdown appears once campaign data is in scope." />
+                ) : <EmptyState compact verbatim icon="bars" title={t("campaigns.noPlatformTitle")} text={t("campaigns.noPlatformBody")} />
               ) : <Skeleton height={200} />}
             </Panel>
           </div>
           <Panel
-            title={`All Campaigns (${rows.length})`}
+            title={t("campaigns.allCampaigns", { count: rows.length })}
             action={(
               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                 <input
-                  aria-label="Search Campaigns"
-                  placeholder="Search Campaigns…"
+                  aria-label={t("campaigns.searchAria")}
+                  placeholder={t("campaigns.searchPlaceholder")}
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   style={{ width: 200 }}
                 />
                 <button type="button" className="btn-outline" onClick={onCompare}>
-                  Compare Selected ({selected.size})
+                  {t("campaigns.compareSelected", { count: selected.size })}
                 </button>
-                <LoadingButton type="button" className="btn-outline" loading={exportBusy} loadingLabel="Exporting…" spinnerClass="spinner dark" disabled={exportBusy} onClick={() => void onExport()}>
-                  <Icon name="download" size={15} /> Export
+                <LoadingButton type="button" className="btn-outline" loading={exportBusy} loadingLabel={t("campaigns.exporting")} spinnerClass="spinner dark" disabled={exportBusy} onClick={() => void onExport()}>
+                  <Icon name="download" size={15} /> {t("campaigns.exportBtn")}
                 </LoadingButton>
               </div>
             )}
@@ -589,25 +606,25 @@ export function CampaignsPage() {
                   <table className="tbl">
                     <thead>
                       <tr>
-                        <th scope="col"><input type="checkbox" aria-label="Select All Campaigns" checked={allChecked} onChange={toggleAll} /></th>
-                        <th scope="col">Campaign</th>
-                        <th scope="col">Client</th>
-                        <th scope="col">Platform</th>
-                        <th scope="col">Status</th>
-                        <th scope="col" className="num">Impressions</th>
-                        <th scope="col" className="num">Clicks</th>
-                        <th scope="col" className="num">CTR</th>
-                        <th scope="col" className="num">Spend</th>
-                        <th scope="col" className="num">ROAS</th>
-                        <th scope="col" className="num">vs. Benchmark</th>
-                        <th scope="col"><span className="sr-only">Actions</span></th>
+                        <th scope="col"><input type="checkbox" aria-label={t("campaigns.selectAll")} checked={allChecked} onChange={toggleAll} /></th>
+                        <th scope="col">{t("campaigns.headers.campaign")}</th>
+                        <th scope="col">{t("campaigns.headers.client")}</th>
+                        <th scope="col">{t("campaigns.headers.platform")}</th>
+                        <th scope="col">{t("campaigns.headers.status")}</th>
+                        <th scope="col" className="num">{kpiName("impressions")}</th>
+                        <th scope="col" className="num">{kpiName("clicks")}</th>
+                        <th scope="col" className="num">{kpiName("ctr")}</th>
+                        <th scope="col" className="num">{kpiName("spend")}</th>
+                        <th scope="col" className="num">{kpiName("roas")}</th>
+                        <th scope="col" className="num">{t("campaigns.headers.vsBench")}</th>
+                        <th scope="col"><span className="sr-only">{t("campaigns.headers.actions")}</span></th>
                       </tr>
                     </thead>
                     <tbody>
                       {rows.map((r) => (
                         <tr key={r.name}>
                           <td>
-                            <input type="checkbox" aria-label={`Select ${r.name}`}
+                            <input type="checkbox" aria-label={t("campaigns.selectOne", { name: r.name })}
                               checked={selected.has(r.name)} onChange={() => toggle(r.name)} />
                           </td>
                           <td><span className="cell-main">{r.name}</span></td>
@@ -615,7 +632,11 @@ export function CampaignsPage() {
                           <td>{(metaMap.get(r.name)?.platforms ?? []).map(platformLabel).join(", ") || "—"}</td>
                           <td>{metaMap.get(r.name)?.status ? (
                             <span className={`badge ${metaMap.get(r.name)?.status === "Active" ? "good" : "bad"}`}>
-                              {metaMap.get(r.name)?.status}
+                              {(() => {
+                                const sk = `campaigns.statusNames.${metaMap.get(r.name)?.status}`;
+                                const hit = t(sk);
+                                return hit === sk ? metaMap.get(r.name)?.status : hit;
+                              })()}
                             </span>
                           ) : "—"}</td>
                           <td className="num">{fmtCompact(num(r.impressions))}</td>
@@ -627,7 +648,7 @@ export function CampaignsPage() {
                           <td>
                             <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
                               <button type="button" className="icon-btn" aria-expanded={expanded === r.name}
-                                aria-label={`Details for ${r.name}`}
+                                aria-label={t("campaigns.detailsFor", { name: r.name })}
                                 onClick={() => setExpanded((cur) => (cur === r.name ? null : r.name))}>
                                 <Icon name="dots" size={18} />
                               </button>
@@ -640,12 +661,12 @@ export function CampaignsPage() {
                     </tbody>
                   </table>
                 </div>
-              ) : <EmptyState compact icon="campaign" title="No campaigns match" text="Try loosening the current filters." />
+              ) : <EmptyState compact verbatim icon="campaign" title={t("campaigns.noMatchTitle")} text={t("campaigns.noMatchBody")} />
             ) : campaigns.error ? (
               <EmptyState text={campaigns.error} action={(
                 <button type="button" className="btn-outline"
                   onClick={() => setApplied((a) => a + 1)}>
-                  Retry
+                  {t("common.retry")}
                 </button>
               )} />
             ) : <Skeleton height={220} />}
@@ -655,18 +676,18 @@ export function CampaignsPage() {
               {details[expanded] ? (
                 <>
                   <div className="detail-grid">
-                    <div><span>Impressions</span><strong>{fmtCompact(num(details[expanded]?.totals.impressions))}</strong></div>
-                    <div><span>Clicks</span><strong>{fmtCompact(num(details[expanded]?.totals.clicks))}</strong></div>
-                    <div><span>Spend</span><strong>{fmtMoney(num(details[expanded]?.totals.spend))}</strong></div>
-                    <div><span>ROAS</span><strong>{fmtCell(details[expanded]?.totals.roas, (n) => `${n.toFixed(1)}x`)}</strong></div>
-                    <div><span>CTR</span><strong>{fmtCell(details[expanded]?.totals.ctr, (n) => `${(n * 100).toFixed(1)}%`)}</strong></div>
-                    <div><span>Conversions</span><strong>{fmtCompact(num(details[expanded]?.totals.conversions))}</strong></div>
+                    <div><span>{kpiName("impressions")}</span><strong>{fmtCompact(num(details[expanded]?.totals.impressions))}</strong></div>
+                    <div><span>{kpiName("clicks")}</span><strong>{fmtCompact(num(details[expanded]?.totals.clicks))}</strong></div>
+                    <div><span>{kpiName("spend")}</span><strong>{fmtMoney(num(details[expanded]?.totals.spend))}</strong></div>
+                    <div><span>{kpiName("roas")}</span><strong>{fmtCell(details[expanded]?.totals.roas, (n) => `${n.toFixed(1)}x`)}</strong></div>
+                    <div><span>{kpiName("ctr")}</span><strong>{fmtCell(details[expanded]?.totals.ctr, (n) => `${(n * 100).toFixed(1)}%`)}</strong></div>
+                    <div><span>{kpiName("conversions")}</span><strong>{fmtCompact(num(details[expanded]?.totals.conversions))}</strong></div>
                   </div>
-                  <h4 style={{ margin: "14px 0 8px", fontSize: 14 }}>Top Creatives</h4>
+                  <h4 style={{ margin: "14px 0 8px", fontSize: 14 }}>{t("dashboard.topCreatives.title")}</h4>
                   <div className="tbl-wrap">
                     <table className="tbl">
                       <thead>
-                        <tr><th scope="col">Creative</th><th scope="col">Platform</th><th scope="col">Format</th><th scope="col" className="num">Impr.</th><th scope="col" className="num">CTR</th><th scope="col" className="num">ROAS</th></tr>
+                        <tr><th scope="col">{t("dashboard.topCreatives.creativeCol")}</th><th scope="col">{t("campaigns.headers.platform")}</th><th scope="col">{t("filters.format")}</th><th scope="col" className="num">{t("workbook.previewTable.impressions")}</th><th scope="col" className="num">{kpiName("ctr")}</th><th scope="col" className="num">{kpiName("roas")}</th></tr>
                       </thead>
                       <tbody>
                         {(details[expanded]?.top_creatives ?? []).map((c) => (
@@ -684,7 +705,7 @@ export function CampaignsPage() {
                   </div>
                   {(details[expanded]?.recommendations ?? []).length ? (
                     <>
-                      <h4 style={{ margin: "14px 0 8px", fontSize: 14 }}>Recommendations</h4>
+                      <h4 style={{ margin: "14px 0 8px", fontSize: 14 }}>{t("campaigns.recommendations")}</h4>
                       <ul className="rec-list">
                         {(details[expanded]?.recommendations ?? []).map((r) => <li key={r}>{r}</li>)}
                       </ul>
@@ -698,13 +719,13 @@ export function CampaignsPage() {
           ) : null}
         </div>
         <Panel
-          title="Recommendations"
-          action={<Link className="link-teal" to="/insights">See All</Link>}
+          title={t("campaigns.recommendations")}
+          action={<Link className="link-teal" to="/insights">{t("campaigns.seeAll")}</Link>}
         >
           {campaigns.data && benchPlatform.data ? (
             rail.length ? (
               <InsightList items={rail.map((r) => ({ icon: r.icon, tint: r.tint, title: r.title, body: r.body, action: r.action, href: r.href }))} />
-            ) : <EmptyState compact icon="spark" title="No recommendations yet" text="Recommendations appear once campaign data is in scope." />
+            ) : <EmptyState compact verbatim icon="spark" title={t("campaigns.noRecsTitle")} text={t("campaigns.noRecsBody")} />
           ) : <Skeleton height={320} />}
         </Panel>
       </div>

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { EMPTY_FILTERS, useFilters, type FilterValues } from "@/state/FilterContext";
+import { useLocale } from "@/i18n";
 
 export const SAMPLE_SCOPE_KEY = "ci-sample-scope";
 
@@ -29,6 +30,7 @@ function readScope(): SampleScope | null {
  *  restores the pre-demo filters saved by the admin panel on
  *  return — user preferences are never silently wiped. */
 export function SampleScopeBanner() {
+  const { t } = useLocale();
   const { filters, setFilter, clearFilters } = useFilters();
   const [scope, setScope] = useState<SampleScope | null>(null);
 
@@ -80,16 +82,16 @@ export function SampleScopeBanner() {
     setScope(null);
   };
   return (
-    <div role="status" aria-label="Sample Data Scope"
+    <div role="status" aria-label={t("sample.scopeLabel")}
       style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap",
         background: "var(--shell-green-soft)", border: "1px solid var(--shell-line)",
         borderRadius: 10, padding: "8px 12px", marginBottom: 12 }}>
-      <span className="badge-demo">Sample Data</span>
+      <span className="badge-demo">{t("sample.badge")}</span>
       <span className="panel-sub" style={{ margin: 0 }}>
-        Presentation Pack · {scope.from} → {scope.to}
+        {t("sample.pack")} · {scope.from} → {scope.to}
       </span>
       <button type="button" className="link-btn" onClick={ret}>
-        Return To My Scope
+        {t("sample.ret")}
       </button>
     </div>
   );

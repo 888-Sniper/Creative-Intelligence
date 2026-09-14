@@ -14,9 +14,11 @@ import {
   Panel,
   Toast,
   Toggle,
+  codeLabel,
 } from "@/components/product";
+import { useGoogleStatus } from "@/auth/useGoogleStatus";
 import { useSessionCount } from "@/auth/useSessionCount";
-import { useTheme } from "@/app/useTheme";
+import { useTheme, type Theme } from "@/app/useTheme";
 import { useLocale } from "@/i18n";
 import {
   DEFAULTS,
@@ -78,9 +80,56 @@ function adoptPrefs(employeeId: string, liveTheme: Prefs["theme"]): Prefs {
 const AVATAR_MIME = ["image/jpeg", "image/png", "image/webp"];
 const AVATAR_MAX = 2 * 1024 * 1024;
 
+/** Resolve a staged theme choice for the appearance preview: an
+ *  explicit staged mode wins, while staged "system" follows the OS
+ *  (falling back to the live resolved theme where matchMedia is
+ *  unavailable, e.g. unit tests). */
+function resolvePreviewTheme(staged: Prefs["theme"], live: Theme): Theme {
+  if (staged !== "system") return staged;
+  if (typeof window !== "undefined" && typeof window.matchMedia === "function") {
+    try {
+      return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    } catch {
+      /* fall through to the live theme */
+    }
+  }
+  return live;
+}
+
+/** Appearance preview driven by the STAGED theme, accent and density
+ *  (§8): choosing in the selects above visibly changes this mockup
+ *  before Save is clicked. */
+function AppearancePreview({ accent, density, mode }: { accent: string; density: string; mode: Theme }) {
+  const color = ACCENTS[accent]?.teal ?? ACCENTS["Teal (Default)"].teal;
+  const dark = mode === "dark";
+  const pad = density === "Compact" ? 4 : 8;
+  return (
+    <div aria-hidden="true" style={{
+      display: "flex", gap: 6, marginTop: 12, border: "1px solid var(--shell-line)",
+      borderRadius: 10, overflow: "hidden", background: dark ? "#1F2A37" : "#F4F7FA",
+    }}>
+      <div style={{ width: 44, background: dark ? "#2B3448" : "#fff", padding: pad, display: "grid", gap: 4, alignContent: "start" }}>
+        {[0, 1, 2].map((i) => (
+          <div key={i} style={{ height: 8, borderRadius: 4, background: i === 0 ? color : dark ? "#3A465E" : "#E3E9F0" }} />
+        ))}
+      </div>
+      <div style={{ flex: 1, padding: pad, display: "grid", gap: 4, alignContent: "start" }}>
+        <div style={{ height: 10, borderRadius: 4, background: color, width: "55%" }} />
+        <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 34, padding: "4px 6px",
+          background: dark ? "#2B3448" : "#fff", border: `1px solid ${dark ? "#3A465E" : "#E3E9F0"}`, borderRadius: 6 }}>
+          {[10, 18, 14, 24, 20, 30].map((h, i) => (
+            <div key={i} style={{ flex: 1, height: h, borderRadius: 2, background: i === 5 ? color : dark ? "#3A465E" : "#C9D6E2" }} />
+          ))}
+        </div>
+        <div style={{ height: 8, borderRadius: 4, background: dark ? "#3A465E" : "#fff", border: `1px solid ${dark ? "#3A465E" : "#E3E9F0"}` }} />
+      </div>
+    </div>
+  );
+}
+
 export function SettingsPage() {
   const { me, logout: authLogout } = useAuth();
-  const { mode: liveThemeMode, set: setThemeMode } = useTheme();
+  const { mode: liveThemeMode, theme: liveTheme, set: setThemeMode } = useTheme();
   const { t, tp, fmtDate, setLang, setTimezone } = useLocale();
 
   const [employee, setEmployee] = useState<PublicEmployee | null>(null);
@@ -114,21 +163,11 @@ export function SettingsPage() {
   const [sessionOp, setSessionOp] = useState<string | null>(null);
 
   // Provider connection badge: Google sign-in alone never marks the
-  // provider row connected — only a live Google check does.
-  const [googleConnected, setGoogleConnected] = useState<boolean | null>(null);
-  useEffect(() => {
-    let live = true;
-    void api<{ connected: boolean }>("GET", "/api/auth/google/status")
-      .then((r) => {
-        if (live) setGoogleConnected(r.connected === true);
-      })
-      .catch(() => {
-        if (live) setGoogleConnected(false);
-      });
-    return () => {
-      live = false;
-    };
-  }, []);
+  // provider row connected — only a live Google check does. Bounded
+  // like the Drive card (§11): a stalled lookup fails instead of
+  // leaving the badge on an assumed state forever.
+  const google = useGoogleStatus();
+  const googleConnected = google.connected;
 
   const loadEmployee = useCallback(async () => {
     setLoading(true);
@@ -141,10 +180,10 @@ export function SettingsPage() {
         setLast(r.employee.last_name || "");
         setAvatarUrl(r.employee.avatar_url || "");
       } else {
-        setLoadError("Account unavailable.");
+        setLoadError(t("settings.footer.accountUnavailable"));
       }
     } catch {
-      setLoadError("Could not load settings.");
+      setLoadError(t("settings.footer.couldNotLoad"));
     } finally {
       setLoading(false);
     }
@@ -194,7 +233,9 @@ export function SettingsPage() {
 
   const resetDefaults = () => {
     // Reset commits full defaults (prior behavior): stage + save them,
-    // clear stored prefs, apply the dark default live.
+    // clear stored prefs, and apply every one live — including the
+    // locale context (§9), so the active language/time zone return to
+    // defaults instead of staying on the previous selection.
     const next = { ...DEFAULTS };
     const id = employee?.id ?? me?.employee?.id ?? "";
     clearPrefs(id);
@@ -202,6 +243,8 @@ export function SettingsPage() {
     setSaved(next);
     setThemeMode(next.theme);
     applyAccent(next.accent, next.density);
+    setLang(next.language);
+    setTimezone(next.timezone);
     notifyOk(t("toast.defaultsRestored"));
   };
 
@@ -224,7 +267,7 @@ export function SettingsPage() {
       setAvatarUrl(r.employee.avatar_url || "");
       notifyOk(t("toast.profileSaved"));
     } catch (err) {
-      setStatus(err instanceof ApiError ? err.message : "Could not save profile.");
+      setStatus(err instanceof ApiError ? err.message : t("settings.footer.couldNotSaveProfile"));
     } finally {
       setOp(null);
     }
@@ -271,7 +314,7 @@ export function SettingsPage() {
       }
       notifyOk(t("toast.profileSaved"));
     } catch (err) {
-      setStatus(err instanceof ApiError ? err.message : "Could not upload that photo.");
+      setStatus(err instanceof ApiError ? err.message : t("settings.footer.couldNotUploadPhoto"));
     } finally {
       setOp(null);
     }
@@ -336,10 +379,10 @@ export function SettingsPage() {
     setStatus("");
     try {
       const r = await api<{ exported?: boolean }>("POST", "/api/auth/export", {});
-      if (r && r.exported === false) setStatus("Workspace export is unavailable.");
+      if (r && r.exported === false) setStatus(t("settings.privacy.exportUnavailable"));
       else notifyOk(t("settings.privacy.exported"));
     } catch (err) {
-      setStatus(err instanceof ApiError ? err.message : "Workspace export is unavailable.");
+      setStatus(err instanceof ApiError ? err.message : t("settings.privacy.exportUnavailable"));
     } finally {
       setOp(null);
     }
@@ -364,7 +407,7 @@ export function SettingsPage() {
     : t("settings.workspace.neverSignedIn");
   const heroName = `${employee.first_name} ${employee.last_name}`.trim() || employee.email;
   const heroStats = [
-    { label: t("settings.accountStatus"), value: employee.status ? cap(employee.status) : t("settings.workspace.unavailable") },
+    { label: t("settings.accountStatus"), value: employee.status ? codeLabel(t, "statuses", employee.status) : t("settings.workspace.unavailable") },
     { label: t("settings.signInMethod"), value: employee.provider ? `${cap(employee.provider)} SSO` : t("settings.workEmail") },
     { label: t("settings.lastSignIn"), value: lastSignIn },
   ];
@@ -391,7 +434,7 @@ export function SettingsPage() {
                 {heroName}
               </p>
               <p className="panel-sub" style={{ marginTop: 4 }}>
-                {`${cap(employee.role)} · ${cap(employee.status)}`}
+                {`${codeLabel(t, "roles", employee.role)} · ${codeLabel(t, "statuses", employee.status)}`}
               </p>
               <p className="panel-sub" style={{ marginTop: 2 }}>{employee.email}</p>
               <div className="chip-row" style={{ marginTop: 12 }}>
@@ -510,11 +553,11 @@ export function SettingsPage() {
             </div>
             <div>
               <dt>{t("settings.workspace.role")}</dt>
-              <dd style={{ textTransform: "capitalize" }}>{employee.role || "—"}</dd>
+              <dd>{codeLabel(t, "roles", employee.role)}</dd>
             </div>
             <div>
               <dt>{t("settings.workspace.status")}</dt>
-              <dd style={{ textTransform: "capitalize" }}>{employee.status || "—"}</dd>
+              <dd>{codeLabel(t, "statuses", employee.status)}</dd>
             </div>
             <div>
               <dt>{t("settings.workspace.workEmail")}</dt>
@@ -551,7 +594,9 @@ export function SettingsPage() {
                 <h4 style={{ textTransform: "capitalize" }}>{providerName} SSO</h4>
                 <p>{ssoBody}</p>
               </div>
-              {googleConnected === false && employee.provider === "google" ? (
+              {google.loading && googleConnected === null ? (
+                <span className="panel-sub">{t("drive.checking")}</span>
+              ) : googleConnected === false && employee.provider === "google" ? (
                 <span className="pill pill-ok">{t("settings.connections.notConnected")}</span>
               ) : (
                 <span className="pill pill-ok">{t("settings.connections.connected")}</span>
@@ -609,7 +654,7 @@ export function SettingsPage() {
             title={t("settings.security.twoFactor")}
             body={t("settings.security.twoFactorBody")}
             action={(
-              <span className="badge-demo" title={t("settings.security.twoFactorBody")}>
+              <span className="pill pill-info" title={t("settings.security.twoFactorBody")}>
                 {t("settings.connections.unavailable")}
               </span>
             )}
@@ -720,7 +765,7 @@ export function SettingsPage() {
                 value={staged.language}
                 onChange={(e) => set("language", e.target.value as Prefs["language"])}
               >
-                <option value="en">English — default</option>
+                <option value="en">{t("settings.languageNames.englishDefault")}</option>
                 <option value="es">Español</option>
                 <option value="pl">Polski</option>
               </select>
@@ -747,17 +792,11 @@ export function SettingsPage() {
           <p className="panel-sub" style={{ fontSize: 12 }}>
             {t("settings.appearance.previewIntro")}
           </p>
-          <div className="appearance-preview" aria-hidden="true">
-            <div className="appearance-side">
-              <span className="appearance-dot" />
-              <span className="appearance-line" />
-              <span className="appearance-line short" />
-            </div>
-            <div className="appearance-main">
-              <span className="appearance-bar" />
-              <span className="appearance-card" />
-            </div>
-          </div>
+          <AppearancePreview
+            accent={staged.accent}
+            density={staged.density}
+            mode={resolvePreviewTheme(staged.theme, liveTheme)}
+          />
           <div className="filter-grid" style={{ marginTop: 10 }}>
             <div className="field">
               <label htmlFor="s-accent">{t("settings.appearance.accent")}</label>

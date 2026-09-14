@@ -3,6 +3,8 @@ import { Link } from "react-router-dom";
 import { api } from "@/api/client";
 import { useAuth } from "@/auth/AuthProvider";
 import { useFilters } from "@/state/FilterContext";
+import { useLocale } from "@/i18n";
+import { monthName } from "@/components/KpiTrend";
 import { GroupBars, RetentionCurve, TrendChart } from "@/components/charts";
 import { Icon } from "@/components/icons";
 import {
@@ -77,17 +79,15 @@ interface CurveResponse {
   points: Array<{ t: number; p: number }>;
 }
 
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
 function num(value: unknown): number {
   const n = Number(value ?? 0);
   return Number.isFinite(n) ? n : 0;
 }
 
-function shortDay(iso: string): string {
+function shortDay(iso: string, locale: string): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
   if (!m) return iso;
-  return `${MONTHS[Number(m[2]) - 1]} ${Number(m[3])}`;
+  return `${monthName(Number(m[2]), locale)} ${Number(m[3])}`;
 }
 
 function downsample(points: DayPoint[], max = 16): DayPoint[] {
@@ -163,6 +163,18 @@ function formatBench(metric: BenchMetric, value: number | null): string {
 
 export function DashboardPage() {
   const { me } = useAuth();
+  const { t, locale } = useLocale();
+  const kpiName = (id: string): string => {
+    const key = `filters.kpis.${id.toLowerCase()}`;
+    const hit = t(key);
+    return hit === key ? titleCase(id) : hit;
+  };
+  const bucketName = (key: string): string => {
+    if (key === "Under 15s") return t("dashboard.buckets.under");
+    if (key === "Over 30s") return t("dashboard.buckets.over");
+    if (key === "15–30s") return t("dashboard.buckets.mid");
+    return key;
+  };
   const { clearFilters, filters, setFilter } = useFilters();
   const [applied, setApplied] = useState(0);
   const [leftMetric, setLeftMetric] = useState<TrendMetric>("impressions");
@@ -202,12 +214,15 @@ export function DashboardPage() {
   }, [daily, filters.date, filters.date_from, filters.date_to, rangeBooted, setFilter]);
 
   const hour = new Date().getHours();
-  const daypart = hour < 12 ? "Morning" : hour < 18 ? "Afternoon" : "Evening";
-  const firstName = me?.employee?.first_name?.trim() || "there";
+  const part = hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening";
+  const firstName = me?.employee?.first_name?.trim() || "";
+  const greeting = firstName
+    ? t(`dashboard.greeting.${part}`, { name: firstName })
+    : t(`dashboard.greeting.${part}Anon`);
 
   const trend = useMemo(() => downsample(daily ?? []), [daily]);
-  const leftLabel = TREND_METRICS.find((m) => m.value === leftMetric)?.label ?? "Impressions";
-  const rightLabel = TREND_METRICS.find((m) => m.value === rightMetric)?.label ?? "Clicks";
+  const leftLabel = kpiName(leftMetric);
+  const rightLabel = kpiName(rightMetric);
   const trendSeries = [
     { label: leftLabel, color: "var(--glyph-teal)", soft: "#E5F5F2", points: trend.map((p) => num(p[leftMetric])) },
     { label: rightLabel, color: "var(--glyph-navy)", soft: "#E4EAF7", points: trend.map((p) => num(p[rightMetric])), axis: "right" as const },
@@ -249,7 +264,7 @@ export function DashboardPage() {
         if (!live) return;
         const pts = r.points.map((p) => [num(p.t), num(p.p)] as [number, number]);
         setCurve(pts.length ? pts : null);
-        if (!pts.length) setCurveError("No retention curve for the top creative yet.");
+        if (!pts.length) setCurveError(t("dashboard.retention.noCurve"));
         setCurveLoading(false);
       })
       .catch((e) => {
@@ -299,18 +314,23 @@ export function DashboardPage() {
     () => baselineValue(Object.values(hooks.data ?? {}), "ctr"),
     [hooks.data],
   );
+  const hookName = (key: string) => {
+    const hk = `filters.hooks.${key}`;
+    const hit = t(hk);
+    return hit === hk ? titleCase(key) : hit;
+  };
   const hookCompare = useMemo(
-    () => hookRows.slice(0, 5).map((r) => ({ label: titleCase(r.key), yours: r.ctr ?? 0, bench: hookBaseline ?? 0 })),
-    [hookRows, hookBaseline],
+    () => hookRows.slice(0, 5).map((r) => ({ label: hookName(r.key), yours: r.ctr ?? 0, bench: hookBaseline ?? 0 })),
+    [hookRows, hookBaseline, t],
   );
   const lengthCompare = useMemo(
-    () => durationRows.filter((r) => r.ctr != null).map((r) => ({ label: r.key, yours: r.ctr ?? 0, bench: r.ctr ?? 0 })),
-    [durationRows],
+    () => durationRows.filter((r) => r.ctr != null).map((r) => ({ label: bucketName(r.key), yours: r.ctr ?? 0, bench: r.ctr ?? 0 })),
+    [durationRows, t],
   );
   const formatCompare = useMemo(() => {
     const agg = new Map<string, { clicks: number; impr: number }>();
     for (const c of creatives.data ?? []) {
-      const key = (c.format || c.annotation?.hook_type ? (c.format || "Unformatted") : "Unformatted").trim() || "Unformatted";
+      const key = (c.format || c.annotation?.hook_type ? (c.format || t("dashboard.unformatted")) : t("dashboard.unformatted")).trim() || t("dashboard.unformatted");
       const entry = agg.get(key) ?? { clicks: 0, impr: 0 };
       entry.clicks += num(c.metrics?.clicks);
       entry.impr += num(c.metrics?.impressions);
@@ -344,12 +364,18 @@ export function DashboardPage() {
           icon: "trend",
           tint: "var(--shell-teal-soft)",
           title: tied
-            ? `${titleCase(a.key)} and ${titleCase(b.key)} Tie on CTR`
-            : `${titleCase(a.key)} Hooks Drive Higher CTR`,
+            ? t("dashboard.insights.hookTieTitle", { a: hookName(a.key), b: hookName(b.key) })
+            : t("dashboard.insights.hookLeadTitle", { a: hookName(a.key) }),
           body: tied
-            ? `${titleCase(a.key)} and ${titleCase(b.key)} openings both average ${(a.ctr ?? 0).toFixed(1)}% CTR across the current scope.`
-            : `${titleCase(a.key)} openings average ${(a.ctr ?? 0).toFixed(1)}% CTR${diff != null ? `, ${diff >= 0 ? "+" : ""}${diff.toFixed(0)}% versus ${titleCase(b.key)}` : ""} across the current scope.`,
-          action: "View Creatives",
+            ? t("dashboard.insights.hookTieBody", { a: hookName(a.key), b: hookName(b.key), ctr: (a.ctr ?? 0).toFixed(1) })
+            : t("dashboard.insights.hookLeadBody", {
+                a: hookName(a.key),
+                ctr: (a.ctr ?? 0).toFixed(1),
+                diff: diff != null
+                  ? t("dashboard.insights.vsDiff", { sign: diff >= 0 ? "+" : "", pct: diff.toFixed(0), b: hookName(b.key) })
+                  : "",
+              }),
+          action: t("dashboard.insights.viewCreatives"),
           href: "/creatives",
         });
       }
@@ -361,8 +387,9 @@ export function DashboardPage() {
       if (verdict !== "unknown") {
         const top = verdict === "trail" ? branded : creator;
         const bottom = top === creator ? branded : creator;
-        const topName = top === creator ? "Creator" : "Branded";
-        const bottomName = bottom === creator ? "creator" : "branded";
+        const topIsCreator = top === creator;
+        const topName = topIsCreator ? t("filters.creators.creator") : t("filters.creators.branded");
+        const bottomName = (topIsCreator ? t("filters.creators.branded") : t("filters.creators.creator")).toLowerCase();
         const topCtr = top.ctr ?? 0;
         const bottomCtr = bottom.ctr ?? 0;
         const diff = percentDiff(topCtr, bottomCtr);
@@ -370,12 +397,18 @@ export function DashboardPage() {
           icon: "users",
           tint: "var(--shell-teal-soft)",
           title: verdict === "tie"
-            ? "Creator and Branded Content Tie on CTR"
-            : `${topName} Content Outperforms ${topName === "Creator" ? "Branded" : "Creator"} Content`,
+            ? t("dashboard.insights.creatorTieTitle")
+            : t("dashboard.insights.creatorLeadTitle", { top: topName, bottom: bottomName }),
           body: verdict === "tie"
-            ? `Creator and branded creatives both average ${topCtr.toFixed(1)}% CTR across the current scope.`
-            : `${topName} creatives average ${topCtr.toFixed(1)}% CTR versus ${bottomCtr.toFixed(1)}% for ${bottomName} creatives${diff != null ? ` (${diff >= 0 ? "+" : ""}${diff.toFixed(0)}%)` : ""} across the current scope.`,
-          action: "Explore Creatives",
+            ? t("dashboard.insights.creatorTieBody", { ctr: topCtr.toFixed(1) })
+            : t("dashboard.insights.creatorLeadBody", {
+                top: topName,
+                topCtr: topCtr.toFixed(1),
+                bottomCtr: bottomCtr.toFixed(1),
+                bottom: bottomName,
+                diff: diff != null ? t("dashboard.insights.pctDiff", { sign: diff >= 0 ? "+" : "", pct: diff.toFixed(0) }) : "",
+              }),
+          action: t("dashboard.insights.exploreCreatives"),
           href: "/creatives",
         });
       }
@@ -390,9 +423,9 @@ export function DashboardPage() {
           items.push({
             icon: "tiktok",
             tint: "var(--shell-blue-soft)",
-            title: "TikTok and Meta Tie on ROAS",
-            body: `TikTok and Meta both average ${tiktok.roas.toFixed(1)}x ROAS across the current scope.`,
-            action: "View Campaigns",
+            title: t("dashboard.insights.platformTieTitle"),
+            body: t("dashboard.insights.platformTieBody", { roas: tiktok.roas.toFixed(1) }),
+            action: t("dashboard.insights.viewCampaigns"),
             href: "/campaigns",
           });
         } else {
@@ -402,9 +435,15 @@ export function DashboardPage() {
           items.push({
             icon: "tiktok",
             tint: "var(--shell-blue-soft)",
-            title: `${platformLabel(leader.key)} Leads On ROAS`,
-            body: `${platformLabel(leader.key)} averages ${(leader.roas ?? 0).toFixed(1)}x ROAS versus ${(trailer.roas ?? 0).toFixed(1)}x on ${platformLabel(trailer.key)}${diff != null ? ` (${diff >= 0 ? "+" : ""}${diff.toFixed(0)}%)` : ""} across the current scope.`,
-            action: "View Campaigns",
+            title: t("dashboard.insights.platformLeadTitle", { leader: platformLabel(leader.key) }),
+            body: t("dashboard.insights.platformLeadBody", {
+              leader: platformLabel(leader.key),
+              leaderRoas: (leader.roas ?? 0).toFixed(1),
+              trailerRoas: (trailer.roas ?? 0).toFixed(1),
+              trailer: platformLabel(trailer.key),
+              diff: diff != null ? t("dashboard.insights.pctDiff", { sign: diff >= 0 ? "+" : "", pct: diff.toFixed(0) }) : "",
+            }),
+            action: t("dashboard.insights.viewCampaigns"),
             href: "/campaigns",
           });
         }
@@ -422,24 +461,27 @@ export function DashboardPage() {
         items.push({
           icon: "play",
           tint: "var(--shell-blue-soft)",
-          title: "15–30 Second Videos Hold Attention Best",
-          body: `Videos between 15–30 seconds average ${sweet.ctr.toFixed(1)}% CTR${diff != null ? `, ${diff >= 0 ? "+" : ""}${diff.toFixed(0)}% above the next length bucket` : ""} across the current scope.`,
-          action: "See Recommendations",
+          title: t("dashboard.insights.durationLeadTitle"),
+          body: t("dashboard.insights.durationLeadBody", {
+            ctr: sweet.ctr.toFixed(1),
+            diff: diff != null ? t("dashboard.insights.aboveNext", { sign: diff >= 0 ? "+" : "", pct: diff.toFixed(0) }) : "",
+          }),
+          action: t("dashboard.insights.seeRecommendations"),
           href: "/insights",
         });
       } else if (verdict === "tie") {
         items.push({
           icon: "play",
           tint: "var(--shell-blue-soft)",
-          title: "15–30 Second Videos Share the Lead on Attention",
-          body: `Videos between 15–30 seconds match the best length bucket at ${sweet.ctr.toFixed(1)}% CTR across the current scope.`,
-          action: "See Recommendations",
+          title: t("dashboard.insights.durationTieTitle"),
+          body: t("dashboard.insights.durationTieBody", { ctr: sweet.ctr.toFixed(1) }),
+          action: t("dashboard.insights.seeRecommendations"),
           href: "/insights",
         });
       }
     }
     return items.slice(0, 4);
-  }, [hookRows, modeRows, platforms.data, durationRows]);
+  }, [hookRows, modeRows, platforms.data, durationRows, t]);
 
   const nearThree = useMemo(() => {
     if (!curve?.length) return null;
@@ -454,25 +496,25 @@ export function DashboardPage() {
     note: compare ? kpiPlaceholderNote(kind, value, emptyScope) : null,
   });
   const kpiConfigs = [
-    { label: "Total Impressions", metric: "impressions", ...kpi("count", compare?.metrics.impressions?.current), icon: "users", tint: "var(--shell-teal-soft)", color: "var(--glyph-teal)" },
-    { label: "Total Clicks", metric: "clicks", ...kpi("count", compare?.metrics.clicks?.current), icon: "click", tint: "var(--shell-blue-soft)", color: "var(--glyph-blue)" },
-    { label: "Total Spend", metric: "spend", ...kpi("money", compare?.metrics.spend?.current), icon: "coin", tint: "var(--shell-green-soft)", color: "var(--glyph-green)" },
-    { label: "Average ROAS", metric: "roas", ...kpi("mult", compare?.metrics.roas?.current), icon: "bars", tint: "var(--shell-blue-soft)", color: "var(--glyph-blue)" },
+    { label: t("dashboard.totalImpressions"), metric: "impressions", ...kpi("count", compare?.metrics.impressions?.current), icon: "users", tint: "var(--shell-teal-soft)", color: "var(--glyph-teal)" },
+    { label: t("dashboard.totalClicks"), metric: "clicks", ...kpi("count", compare?.metrics.clicks?.current), icon: "click", tint: "var(--shell-blue-soft)", color: "var(--glyph-blue)" },
+    { label: t("dashboard.totalSpend"), metric: "spend", ...kpi("money", compare?.metrics.spend?.current), icon: "coin", tint: "var(--shell-green-soft)", color: "var(--glyph-green)" },
+    { label: t("dashboard.averageRoas"), metric: "roas", ...kpi("mult", compare?.metrics.roas?.current), icon: "bars", tint: "var(--shell-blue-soft)", color: "var(--glyph-blue)" },
   ];
 
   return (
     <div className="dashboard">
       <PageHeader
-        title={`Good ${daypart}, ${firstName}`}
-        sub="Your creative performance at a glance."
+        title={greeting}
+        sub={t("dashboard.sub")}
         actions={(
           <>
             <button type="button" className="btn-primary" onClick={() => setApplied((n) => n + 1)}>
-              Apply Filters
+              {t("filters.apply")}
             </button>
             <button type="button" className="link-teal" onClick={clearFilters}
               style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <Icon name="reset" size={15} /> Reset Filters
+              <Icon name="reset" size={15} /> {t("filters.reset")}
             </button>
           </>
         )}
@@ -483,9 +525,9 @@ export function DashboardPage() {
       <FilterPanel actions="none" showTeam={false} />
       {filters.team ? (
         <div className="chip-row" style={{ margin: "10px 0 0" }}>
-          <span className="chip-static">Team scope active: {filters.team}</span>
+          <span className="chip-static">{t("dashboard.teamScope", { team: filters.team })}</span>
           <button type="button" className="link-teal" onClick={() => setFilter("team", "")}>
-            Clear team filter
+            {t("dashboard.clearTeam")}
           </button>
         </div>
       ) : null}
@@ -503,7 +545,7 @@ export function DashboardPage() {
                 display={k.display}
                 icon={k.icon}
                 tint={k.tint}
-                metricLabel={k.metric === "roas" ? "ROAS" : titleCase(k.metric)}
+                metricLabel={kpiName(k.metric)}
                 compare={compare}
                 note={k.note}
               />
@@ -519,15 +561,15 @@ export function DashboardPage() {
       )}
       <div className="cols-2 dash-charts">
         <Panel
-          title="Performance Trends"
+          title={t("dashboard.trends.title")}
           action={(
             <div className="mini-selects">
-              <select aria-label="Left Trend Metric" value={leftMetric} onChange={(e) => setLeftMetric(e.target.value as TrendMetric)}>
-                {TREND_METRICS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+              <select aria-label={t("dashboard.trends.leftAria")} value={leftMetric} onChange={(e) => setLeftMetric(e.target.value as TrendMetric)}>
+                {TREND_METRICS.map((m) => <option key={m.value} value={m.value}>{kpiName(m.value)}</option>)}
               </select>
               <span className="mini-vs">vs.</span>
-              <select aria-label="Right Trend Metric" value={rightMetric} onChange={(e) => setRightMetric(e.target.value as TrendMetric)}>
-                {TREND_METRICS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+              <select aria-label={t("dashboard.trends.rightAria")} value={rightMetric} onChange={(e) => setRightMetric(e.target.value as TrendMetric)}>
+                {TREND_METRICS.map((m) => <option key={m.value} value={m.value}>{kpiName(m.value)}</option>)}
               </select>
             </div>
           )}
@@ -535,27 +577,27 @@ export function DashboardPage() {
           {daily ? (
             trend.length ? (
               <>
-                <TrendChart series={trendSeries} labels={trend.map((p) => shortDay(p.date))} height={205} />
+                <TrendChart series={trendSeries} labels={trend.map((p) => shortDay(p.date, locale))} height={205} />
                 <div className="legend">
                   {trendSeries.map((s) => (
                     <span key={s.label}><i style={{ background: s.color }} />{s.label}</span>
                   ))}
                 </div>
               </>
-            ) : <EmptyState compact icon="trend" title="No trend data" text="Performance trends appear once campaign data is in scope." />
+            ) : <EmptyState compact verbatim icon="trend" title={t("dashboard.trends.emptyTitle")} text={t("dashboard.trends.emptyBody")} />
           ) : <Skeleton height={205} />}
         </Panel>
         <Panel
-          title="Benchmarks"
+          title={t("dashboard.bench.title")}
           action={(
             <div className="mini-selects">
-              <select aria-label="Benchmark Metric" value={benchMetric} onChange={(e) => setBenchMetric(e.target.value as BenchMetric)}>
-                {BENCH_METRICS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+              <select aria-label={t("dashboard.bench.metricAria")} value={benchMetric} onChange={(e) => setBenchMetric(e.target.value as BenchMetric)}>
+                {BENCH_METRICS.map((m) => <option key={m.value} value={m.value}>{kpiName(m.value)}</option>)}
               </select>
               <span className="mini-vs">vs.</span>
-              <select aria-label="Benchmark Baseline" value={baseline} onChange={(e) => setBaseline(e.target.value)}>
-                <option value="Scope Average">Scope Average</option>
-                <option value="Top Performer">Top Performer</option>
+              <select aria-label={t("dashboard.bench.baselineAria")} value={baseline} onChange={(e) => setBaseline(e.target.value)}>
+                <option value="Scope Average">{t("dashboard.bench.scopeAverage")}</option>
+                <option value="Top Performer">{t("dashboard.bench.topPerformer")}</option>
               </select>
             </div>
           )}
@@ -575,11 +617,11 @@ export function DashboardPage() {
                   format={(v) => formatBench(benchMetric, v)}
                 />
                 <div className="legend">
-                  <span><i style={{ background: "#0A9183", borderRadius: 2 }} />Your Campaigns</span>
-                  <span><i style={{ background: "#CBD8E6", borderRadius: 2 }} />{baseline === "Top Performer" ? "Top Performer" : "Scope Average"}</span>
+                  <span><i style={{ background: "#0A9183", borderRadius: 2 }} />{t("dashboard.bench.yours")}</span>
+                  <span><i style={{ background: "#CBD8E6", borderRadius: 2 }} />{baseline === "Top Performer" ? t("dashboard.bench.topPerformer") : t("dashboard.bench.scopeAverage")}</span>
                 </div>
               </>
-            ) : <EmptyState compact icon="bars" title="No benchmarks in scope" text="Upload campaign data or loosen the filters." />
+            ) : <EmptyState compact verbatim icon="bars" title={t("dashboard.bench.emptyTitle")} text={t("dashboard.bench.emptyBody")} />
           ) : <Skeleton height={205} />}
         </Panel>
       </div>
@@ -587,8 +629,8 @@ export function DashboardPage() {
         side beneath the charts (collapses to stacked under 1180px). */}
       <div className="cols-2 dash-lower">
           <Panel
-            title="Top Creatives"
-            action={<Link className="link-teal" to="/creatives">See All</Link>}
+            title={t("dashboard.topCreatives.title")}
+            action={<Link className="link-teal" to="/creatives">{t("dashboard.topCreatives.seeAll")}</Link>}
           >
             {creatives.data ? (
               topCreatives.length ? (
@@ -597,13 +639,13 @@ export function DashboardPage() {
                     <thead>
                       <tr>
                         <th scope="col">#</th>
-                        <th scope="col">Creative</th>
-                        <th scope="col">Campaign</th>
-                        <th scope="col" className="num">Impressions</th>
-                        <th scope="col" className="num">CTR</th>
-                        <th scope="col" className="num">CVR</th>
-                        <th scope="col" className="num">ROAS</th>
-                        <th scope="col"><span className="sr-only">Actions</span></th>
+                        <th scope="col">{t("dashboard.topCreatives.creativeCol")}</th>
+                        <th scope="col">{t("dashboard.topCreatives.campaignCol")}</th>
+                        <th scope="col" className="num">{kpiName("impressions")}</th>
+                        <th scope="col" className="num">{kpiName("ctr")}</th>
+                        <th scope="col" className="num">{kpiName("cvr")}</th>
+                        <th scope="col" className="num">{kpiName("roas")}</th>
+                        <th scope="col"><span className="sr-only">{t("dashboard.topCreatives.actionsCol")}</span></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -632,7 +674,7 @@ export function DashboardPage() {
                             <td className="num">{cvr == null ? "—" : `${cvr.toFixed(1)}%`}</td>
                             <td className="num">{roas == null ? "—" : `${roas.toFixed(1)}x`}</td>
                             <td>
-                              <Link className="icon-btn" to="/creatives" aria-label={`Open ${c.name || c.creative_key} in Creatives`}>
+                              <Link className="icon-btn" to="/creatives" aria-label={t("dashboard.topCreatives.openIn", { name: c.name || c.creative_key })}>
                                 <Icon name="dots" size={18} />
                               </Link>
                             </td>
@@ -642,22 +684,22 @@ export function DashboardPage() {
                     </tbody>
                   </table>
                 </div>
-              ) : <EmptyState compact icon="creatives" title="No creatives yet" text="Upload creative data or loosen the filters." />
+              ) : <EmptyState compact verbatim icon="creatives" title={t("dashboard.topCreatives.emptyTitle")} text={t("dashboard.topCreatives.emptyBody")} />
             ) : <Skeleton height={220} />}
           </Panel>
-          <Panel title="Retention Insights">
+          <Panel title={t("dashboard.retention.title")}>
             <div className="field" style={{ margin: "0 0 12px" }}>
-              <label htmlFor="dash-insight-type">Insight Type</label>
+              <label htmlFor="dash-insight-type">{t("dashboard.retention.insightType")}</label>
               <select
                 id="dash-insight-type"
                 value={tab}
                 onChange={(e) => setTab(e.target.value)}
                 style={{ width: "100%" }}
               >
-                <option value="retention">Audience Retention</option>
-                <option value="hooks">Hook Analysis</option>
-                <option value="length">Video Length</option>
-                <option value="format">Format Comparison</option>
+                <option value="retention">{t("dashboard.retention.tabRetention")}</option>
+                <option value="hooks">{t("dashboard.retention.tabHooks")}</option>
+                <option value="length">{t("dashboard.retention.tabLength")}</option>
+                <option value="format">{t("dashboard.retention.tabFormat")}</option>
               </select>
             </div>
             {tab === "retention" ? (
@@ -666,7 +708,7 @@ export function DashboardPage() {
                   {curve ? (
                     <RetentionCurve
                       points={curve}
-                      callout={nearThree ? `${Math.round(nearThree[1])}% at 3s` : undefined}
+                      callout={nearThree ? t("dashboard.retention.callout3s", { pct: Math.round(nearThree[1]) }) : undefined}
                       height={170}
                     />
                   ) : curveError ? (
@@ -674,23 +716,23 @@ export function DashboardPage() {
                   ) : curveLoading || creatives.loading ? (
                     <Skeleton height={170} />
                   ) : (
-                    <EmptyState compact icon="play" title="No retention data" text="Retention curves appear once creative data is in scope." />
+                    <EmptyState compact verbatim icon="play" title={t("dashboard.retention.emptyTitle")} text={t("dashboard.retention.emptyBody")} />
                   )}
                 </div>
                 <div className="takeaways">
-                  <h5><Icon name="check" size={15} /> Key Takeaways</h5>
+                  <h5><Icon name="check" size={15} /> {t("dashboard.retention.takeaways")}</h5>
                   <ul>
                     {nearThree ? (
-                      <li><Icon name="check" size={13} /><span>{Math.round(nearThree[1])}% of viewers are still watching at 3 seconds for {topCreatives[0]?.name || "the top creative"}.</span></li>
+                      <li><Icon name="check" size={13} /><span>{t("dashboard.retention.watchingAt3", { pct: Math.round(nearThree[1]), name: topCreatives[0]?.name || t("dashboard.retention.topCreative") })}</span></li>
                     ) : null}
                     {hookRows[0]?.ctr != null ? (
-                      <li><Icon name="check" size={13} /><span>{titleCase(hookRows[0].key)} hooks lead the current scope at {(hookRows[0].ctr ?? 0).toFixed(1)}% CTR.</span></li>
+                      <li><Icon name="check" size={13} /><span>{t("dashboard.retention.hooksLead", { hook: hookName(hookRows[0].key), ctr: (hookRows[0].ctr ?? 0).toFixed(1) })}</span></li>
                     ) : null}
                     {durationRows.find((r) => r.key === "15–30s")?.ctr != null ? (
-                      <li><Icon name="check" size={13} /><span>15–30 second creatives average {(durationRows.find((r) => r.key === "15–30s")?.ctr ?? 0).toFixed(1)}% CTR in the current scope.</span></li>
+                      <li><Icon name="check" size={13} /><span>{t("dashboard.retention.sweetLength", { ctr: (durationRows.find((r) => r.key === "15–30s")?.ctr ?? 0).toFixed(1) })}</span></li>
                     ) : null}
                     {!nearThree && hookRows[0]?.ctr == null && durationRows.find((r) => r.key === "15–30s")?.ctr == null ? (
-                      <li className="muted">No takeaways in the current scope yet.</li>
+                      <li className="muted">{t("dashboard.retention.noTakeaways")}</li>
                     ) : null}
                   </ul>
                 </div>
@@ -701,33 +743,33 @@ export function DashboardPage() {
                 <Skeleton height={190} />
               ) : hookCompare.length ? (
                 <GroupBars height={190} groups={hookCompare} format={(v) => `${v.toFixed(1)}%`} />
-              ) : <EmptyState compact icon="spark" title="No hook data" text="Hook analysis appears once annotated creatives are in scope." />
+              ) : <EmptyState compact verbatim icon="spark" title={t("dashboard.retention.hookEmptyTitle")} text={t("dashboard.retention.hookEmptyBody")} />
             ) : null}
             {tab === "length" ? (
               creatives.loading ? (
                 <Skeleton height={190} />
               ) : lengthCompare.length ? (
                 <GroupBars height={190} groups={lengthCompare} format={(v) => `${v.toFixed(1)}%`} />
-              ) : <EmptyState compact icon="play" title="No duration data" text="Length analysis appears once annotated creatives are in scope." />
+              ) : <EmptyState compact verbatim icon="play" title={t("dashboard.retention.durationEmptyTitle")} text={t("dashboard.retention.durationEmptyBody")} />
             ) : null}
             {tab === "format" ? (
               creatives.loading ? (
                 <Skeleton height={190} />
               ) : formatCompare.length ? (
                 <GroupBars height={190} groups={formatCompare} format={(v) => `${v.toFixed(1)}%`} />
-              ) : <EmptyState compact icon="grid" title="No format data" text="Format comparison appears once annotated creatives are in scope." />
+              ) : <EmptyState compact verbatim icon="grid" title={t("dashboard.retention.formatEmptyTitle")} text={t("dashboard.retention.formatEmptyBody")} />
             ) : null}
           </Panel>
       </div>
         </div>
         <Panel
-          title="Recommendations"
-          action={<Link className="link-teal" to="/insights">See All</Link>}
+          title={t("dashboard.recommendations.title")}
+          action={<Link className="link-teal" to="/insights">{t("dashboard.recommendations.seeAll")}</Link>}
         >
           {campaigns.data && creatives.data && platforms.data ? (
             rail.length ? (
               <InsightList items={rail.map((r) => ({ icon: r.icon, tint: r.tint, title: r.title, body: r.body, action: r.action, href: r.href }))} />
-            ) : <EmptyState text="Not enough scoped data for recommendations yet." />
+            ) : <EmptyState verbatim text={t("dashboard.recommendations.emptyBody")} />
           ) : <Skeleton height={320} />}
         </Panel>
       </div>

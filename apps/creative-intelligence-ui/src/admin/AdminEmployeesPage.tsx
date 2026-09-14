@@ -3,7 +3,8 @@ import { api } from "@/api/client";
 import { Icon } from "@/components/icons";
 import { LoadingButton } from "@/components/LoadingButton";
 import { DemoPackPanel } from "./DemoPackPanel";
-import { EmployeeAvatar, EmptyState, OverflowMenu, PageHeader, Panel, Skeleton, plural, titleCase } from "@/components/product";
+import { EmployeeAvatar, EmptyState, OverflowMenu, PageHeader, Panel, Skeleton, codeLabel, titleCase } from "@/components/product";
+import { useLocale } from "@/i18n";
 
 /** Admin employee management (port of legacy Web/Index.html v-admin).
  *
@@ -48,14 +49,8 @@ interface CampaignMeta {
   team: string;
 }
 
-const REVOKE_CONFIRM =
-  "Revoke This Employee's Access? Their Sessions Stop Working Immediately.";
-const SUSPEND_ADMIN_CONFIRM =
-  "Suspend This Admin? Their Sessions Stop Working Immediately. The Server Refuses When They Are The Last Active Admin.";
-const DEMOTE_ADMIN_CONFIRM =
-  "Demote This Admin To Employee? They Lose Admin Access Immediately.";
-const INVALIDATE_CONFIRM =
-  "Invalidate All Sessions For This Employee? They Are Signed Out Everywhere Immediately.";
+/** Translated confirm copy lives on the locale (see useLocale below):
+  *  window.confirm strings are interface chrome, not data. */
 
 const LOCAL_TEAMS_KEY = "ci-local-teams";
 
@@ -77,18 +72,26 @@ export function auditAction(code: string): string {
   return code.split("_").map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
 }
 
-export function friendlyDate(raw: string): string {
+export function friendlyDate(
+  raw: string,
+  fmt?: (iso: string, opts?: Intl.DateTimeFormatOptions) => string,
+  today = "Today",
+  yesterday = "Yesterday",
+  daysAgo: (n: number) => string = (n) => `${n}d ago`,
+): string {
   if (!raw) return "—";
   const d = new Date(raw.length <= 10 ? `${raw}T00:00:00` : raw);
   if (Number.isNaN(d.getTime())) return "—";
-  const date = d.toLocaleDateString("en-US", {
-    month: "short", day: "numeric", year: "numeric",
-  });
+  // Saved preferences drive the rendering (§9): the UI locale and the
+  // selected IANA zone when a formatter is passed, en-US otherwise.
+  const date = fmt
+    ? fmt(raw)
+    : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
   const diffDays = Math.floor((Date.now() - d.getTime()) / 86400000);
   if (diffDays < 0) return date;
-  if (diffDays === 0) return `Today · ${date}`;
-  if (diffDays === 1) return `Yesterday · ${date}`;
-  if (diffDays < 30) return `${diffDays}d ago · ${date}`;
+  if (diffDays === 0) return `${today} · ${date}`;
+  if (diffDays === 1) return `${yesterday} · ${date}`;
+  if (diffDays < 30) return `${daysAgo(diffDays)} · ${date}`;
   return date;
 }
 
@@ -144,6 +147,7 @@ function toCsv(rows: Array<Record<string, string>>): string {
 }
 
 export function AdminEmployeesPage() {
+  const { t, tp, fmtDate } = useLocale();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [roleFilter, setRoleFilter] = useState("");
@@ -245,14 +249,14 @@ export function AdminEmployeesPage() {
     targetRole: string,
     newRole: string,
   ): Promise<void> {
-    if (act === "revoke" && !window.confirm(REVOKE_CONFIRM)) return;
-    if (act === "suspend" && targetRole === "admin" && !window.confirm(SUSPEND_ADMIN_CONFIRM))
+    if (act === "revoke" && !window.confirm(t("admin.confirms.revoke"))) return;
+    if (act === "suspend" && targetRole === "admin" && !window.confirm(t("admin.confirms.suspendAdmin")))
       return;
     if (
       act === "role" &&
       newRole === "employee" &&
       targetRole === "admin" &&
-      !window.confirm(DEMOTE_ADMIN_CONFIRM)
+      !window.confirm(t("admin.confirms.demoteAdmin"))
     )
       return;
     const key = `${act}:${id}`;
@@ -282,7 +286,7 @@ export function AdminEmployeesPage() {
   }
 
   async function invalidateSessions(id: string): Promise<void> {
-    if (!window.confirm(INVALIDATE_CONFIRM)) return;
+    if (!window.confirm(t("admin.confirms.invalidate"))) return;
     const key = `invalidate:${id}`;
     if (busyKey) return;
     setBusyKey(key);
@@ -293,7 +297,7 @@ export function AdminEmployeesPage() {
         {},
       );
       await reloadLists();
-      setNotice(`${Number(r.revoked) || 0} Session(s) Revoked.`);
+      setNotice(tp("admin.notices.sessionsRevoked", Number(r.revoked) || 0, { count: Number(r.revoked) || 0 }));
     } catch (e) {
       setNotice(msg(e));
     } finally {
@@ -319,7 +323,7 @@ export function AdminEmployeesPage() {
       setAddLast("");
       setInviteOpen(false);
       await reloadLists();
-      setNotice("Employee Added As Active.");
+      setNotice(t("admin.notices.employeeAdded"));
     } catch (e) {
       setNotice(msg(e));
     } finally {
@@ -360,7 +364,7 @@ export function AdminEmployeesPage() {
     a.download = `access-report-${stamp}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-    setNotice("Access Report Exported.");
+    setNotice(t("admin.notices.reportExported"));
   }
 
   function createTeam(): void {
@@ -375,27 +379,34 @@ export function AdminEmployeesPage() {
     }
     setTeamName("");
     setTeamOpen(false);
-    setNotice(`Team “${name}” Saved In This Browser.`);
+    setNotice(t("admin.notices.teamSaved", { name }));
   }
 
   const stats = useMemo(() => {
     const rows = employees ?? [];
     const total = rows.length;
-    const pct = (n: number) => (total ? `${Math.round((n / total) * 100)}% of Employees` : "No Employees Yet");
+    const pct = (n: number) => (total ? t("admin.stats.pctOf", { pct: Math.round((n / total) * 100) }) : t("admin.stats.noEmployees"));
     const active = rows.filter((e) => e.status === "active").length;
     const pending = rows.filter((e) => e.status === "pending").length;
     const admins = rows.filter((e) => e.role === "admin").length;
+    const staff = rows.filter((e) => e.role !== "admin").length;
     return [
-      { label: "Total Employees", value: String(total), icon: "users", tint: "var(--shell-blue-soft)", trend: total ? `${plural(rows.filter((e) => e.role !== "admin").length, "Employee")} · ${plural(admins, "Admin")}` : "No Employees Yet" },
-      { label: "Active Users", value: String(active), icon: "check", tint: "var(--shell-green-soft)", trend: pct(active) },
+      { label: t("admin.stats.total"), value: String(total), icon: "users", tint: "var(--shell-blue-soft)", trend: total ? tp("admin.stats.staffMix", staff, { employees: staff, admins }) : t("admin.stats.noEmployees") },
+      { label: t("admin.stats.active"), value: String(active), icon: "check", tint: "var(--shell-green-soft)", trend: pct(active) },
       /* "Pending Approvals", not "Pending Invites": no invitation
        *  email exists — pending rows await an approval decision. */
-      { label: "Pending Approvals", value: String(pending), icon: "clock", tint: "var(--shell-amber-soft)", trend: pending ? "Awaiting Approval" : "Inbox Zero" },
-      { label: "Admins", value: String(admins), icon: "lock", tint: "var(--shell-violet-soft)", trend: pct(admins) },
+      { label: t("admin.stats.pending"), value: String(pending), icon: "clock", tint: "var(--shell-amber-soft)", trend: pending ? t("admin.stats.awaitingApproval") : t("admin.stats.inboxZero") },
+      { label: t("admin.stats.admins"), value: String(admins), icon: "lock", tint: "var(--shell-violet-soft)", trend: pct(admins) },
     ];
-  }, [employees]);
+  }, [employees, t, tp]);
 
   const adminCount = stats[3].value;
+  const relDay = {
+    today: t("admin.dates.today"),
+    yesterday: t("admin.dates.yesterday"),
+    daysAgo: (n: number) => t("admin.dates.daysAgo", { count: n }),
+  };
+  const adminDate = (raw: string) => friendlyDate(raw, fmtDate, relDay.today, relDay.yesterday, relDay.daysAgo);
   const employeeCount = String((employees ?? []).filter((e) => e.role !== "admin").length);
   /* Audit-trail identity cells: a target/admin id that matches a loaded
    * employee renders THAT employee's avatar + name (authorised data
@@ -431,22 +442,23 @@ export function AdminEmployeesPage() {
   return (
     <>
       <PageHeader
-        title="Admin"
-        sub="Access is decided on the server and changes take effect immediately, including on live sessions."
+        title={t("admin.title")}
+        sub={t("admin.sub")}
         actions={(
           <span className="actions-2-1">
             <button type="button" className="btn-outline" onClick={exportAccessReport}>
-              <Icon name="download" size={14} /> Export Access Report
+              <Icon name="download" size={14} /> {t("admin.exportReport")}
             </button>
             <button type="button" className="btn-outline" onClick={() => setTeamOpen(true)}>
-              <Icon name="plus" size={14} /> Create Team
+              <Icon name="plus" size={14} /> {t("admin.createTeam")}
             </button>
             <button type="button" className="btn-primary" onClick={() => setInviteOpen(true)}>
-              <Icon name="plus" size={14} /> Add Employee
+              <Icon name="plus" size={14} /> {t("admin.addEmployee")}
             </button>
           </span>
         )}
       />
+      {employees === null ? <span className="sr-only" role="status">{t("admin.loadingEmployees")}</span> : null}
       <div className="kpi-grid" style={{ marginTop: 0 }}>
         {stats.map((s) => (
           <div className="kpi-card" key={s.label}>
@@ -457,50 +469,50 @@ export function AdminEmployeesPage() {
               <div className="kpi-label">{s.label}</div>
               <div className="kpi-value">{employees === null ? "—" : s.value}</div>
               <div className="kpi-label" style={{ textTransform: "none", letterSpacing: 0 }}>
-                {employees === null ? "Loading…" : s.trend}
+                {employees === null ? <Skeleton height={14} /> : s.trend}
               </div>
             </div>
           </div>
         ))}
       </div>
 
-      <Panel title="Employee Access" sub="Search, approve, suspend, revoke, and change roles.">
+      <Panel title={t("admin.access.title")} sub={t("admin.access.sub")}>
         <div className="rep-filters" style={{ marginBottom: 12 }}>
           <span className="rep-search admin-search">
             <Icon name="search" size={15} />
             <input
               type="text"
               id="admin-search"
-              placeholder="Search name or email"
-              aria-label="Search Name Or Email"
+              placeholder={t("admin.access.searchPlaceholder")}
+              aria-label={t("admin.access.searchAria")}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
           </span>
           <select
             id="admin-status-filter"
-            aria-label="Filter By Status"
+            aria-label={t("admin.access.statusAria")}
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
           >
-            <option value="">All Statuses</option>
-            <option value="pending">Pending</option>
-            <option value="active">Active</option>
-            <option value="suspended">Suspended</option>
-            <option value="revoked">Revoked</option>
+            <option value="">{t("admin.access.allStatuses")}</option>
+            <option value="pending">{codeLabel(t, "statuses", "pending")}</option>
+            <option value="active">{codeLabel(t, "statuses", "active")}</option>
+            <option value="suspended">{codeLabel(t, "statuses", "suspended")}</option>
+            <option value="revoked">{codeLabel(t, "statuses", "revoked")}</option>
           </select>
           <select
             id="admin-role-filter"
-            aria-label="Filter By Role"
+            aria-label={t("admin.access.roleAria")}
             value={roleFilter}
             onChange={(e) => setRoleFilter(e.target.value)}
           >
-            <option value="">All Roles</option>
-            <option value="admin">Admin</option>
-            <option value="employee">Employee</option>
+            <option value="">{t("admin.access.allRoles")}</option>
+            <option value="admin">{codeLabel(t, "roles", "admin")}</option>
+            <option value="employee">{codeLabel(t, "roles", "employee")}</option>
           </select>
           <button type="button" className="btn-outline" disabled={busyKey !== null} onClick={() => void refreshAll()}>
-            <Icon name="reset" size={14} /> Refresh
+            <Icon name="reset" size={14} /> {t("admin.access.refresh")}
           </button>
           {notice !== "" && (
             <span className="panel-sub" role="status" style={{ margin: 0 }}>
@@ -510,7 +522,7 @@ export function AdminEmployeesPage() {
         </div>
         {loading && employees === null && notice === "" ? (
           <>
-            <p className="muted">Loading Employees…</p>
+            <span className="sr-only" role="status">{t("admin.loadingEmployees")}</span>
             <Skeleton height={180} />
           </>
         ) : employees !== null && (
@@ -518,19 +530,19 @@ export function AdminEmployeesPage() {
             <table className="tbl">
               <thead>
                 <tr>
-                  <th scope="col">Name</th>
-                  <th scope="col">Email</th>
-                  <th scope="col">Role</th>
-                  <th scope="col">Team</th>
-                  <th scope="col">Status</th>
-                  <th scope="col">Last Active</th>
-                  <th scope="col">Actions</th>
+                  <th scope="col">{t("admin.access.headers.name")}</th>
+                  <th scope="col">{t("admin.access.headers.email")}</th>
+                  <th scope="col">{t("admin.access.headers.role")}</th>
+                  <th scope="col">{t("admin.access.headers.team")}</th>
+                  <th scope="col">{t("admin.access.headers.status")}</th>
+                  <th scope="col">{t("admin.access.headers.lastActive")}</th>
+                  <th scope="col">{t("admin.access.headers.actions")}</th>
                 </tr>
               </thead>
               <tbody>
                 {employees.length === 0 ? (
                   <tr>
-                    <td colSpan={7}>No Employees Match.</td>
+                    <td colSpan={7}>{t("admin.access.noMatch")}</td>
                   </tr>
                 ) : (
                   employees.map((e) => {
@@ -551,20 +563,20 @@ export function AdminEmployeesPage() {
                         <td>{e.email}</td>
                         <td>
                           <span className={e.role === "admin" ? "pill pill-info" : "chip-static"}>
-                            {titleCase(e.role)}
+                            {codeLabel(t, "roles", e.role)}
                           </span>
                         </td>
-                        <td title="The backend stores no per-employee team">—</td>
+                        <td title={t("admin.access.teamUnknown")}>—</td>
                         <td>
                           <span className={
                             e.status === "active" ? "pill pill-ok"
                             : e.status === "pending" ? "pill pill-info"
                             : e.status === "revoked" ? "pill pill-bad" : "chip-static"
                           }>
-                            {titleCase(e.status)}
+                            {codeLabel(t, "statuses", e.status)}
                           </span>
                         </td>
-                        <td>{e.last_login_at ? friendlyDate(e.last_login_at) : "Never Signed In"}</td>
+                        <td>{e.last_login_at ? adminDate(e.last_login_at) : t("admin.access.neverSignedIn")}</td>
                         <td>
                           <span className="row-actions">
                             {e.status === "pending" && (
@@ -576,7 +588,7 @@ export function AdminEmployeesPage() {
                                   void runAction("approve", e.id, e.role, "")
                                 }
                               >
-                                Approve
+                                {t("admin.access.approve")}
                               </button>
                             )}
                             {e.status === "active" && (
@@ -588,7 +600,7 @@ export function AdminEmployeesPage() {
                                   void runAction("suspend", e.id, e.role, "")
                                 }
                               >
-                                Suspend
+                                {t("admin.access.suspend")}
                               </button>
                             )}
                             {e.status === "suspended" && (
@@ -605,22 +617,22 @@ export function AdminEmployeesPage() {
                                   )
                                 }
                               >
-                                Reactivate
+                                {t("admin.access.reactivate")}
                               </button>
                             )}
                             <OverflowMenu
-                              label={`More Actions For ${e.email}`}
+                              label={t("admin.access.moreActions", { email: e.email })}
                               items={[
                                 ...(e.status !== "revoked" ? [{
-                                  label: "Revoke",
+                                  label: t("admin.access.revoke"),
                                   onSelect: () => { void runAction("revoke", e.id, e.role, ""); },
                                 }] : []),
                                 {
-                                  label: `Make ${nextRole === "admin" ? "Admin" : "Employee"}`,
+                                  label: nextRole === "admin" ? t("admin.access.makeAdmin") : t("admin.access.makeEmployee"),
                                   onSelect: () => { void runAction("role", e.id, e.role, nextRole); },
                                 },
                                 {
-                                  label: "Invalidate Sessions",
+                                  label: t("admin.access.invalidateSessions"),
                                   onSelect: () => { void invalidateSessions(e.id); },
                                 },
                               ]}
@@ -639,15 +651,15 @@ export function AdminEmployeesPage() {
 
       <div className="section-gap" />
       <div className="cols-2">
-        <Panel title="Teams & Permissions" sub="Who can do what in this workspace.">
+        <Panel title={t("admin.teams.title")} sub={t("admin.teams.sub")}>
           <div>
             <div className="insight">
               <span className="insight-ico" style={{ background: "var(--shell-blue-soft)" }}>
                 <Icon name="lock" size={18} />
               </span>
               <div>
-                <h4>Admins{employees !== null ? ` (${adminCount})` : ""}</h4>
-                <p>Approve, suspend, revoke and reactivate employees, change roles, invalidate sessions and review the audit trail.</p>
+                <h4>{t("admin.stats.admins")}{employees !== null ? ` (${adminCount})` : ""}</h4>
+                <p>{t("admin.teams.adminsBody")}</p>
               </div>
             </div>
             {/* Teams count row (§8): server-authoritative team names
@@ -659,12 +671,12 @@ export function AdminEmployeesPage() {
                 <Icon name="users" size={18} />
               </span>
               <div>
-                <h4>Teams{teams !== null ? ` (${teams.length})` : ""}</h4>
+                <h4>{t("admin.teams.teamsTitle")}{teams !== null ? ` (${teams.length})` : ""}</h4>
                 <p>{teams === null
-                  ? "Loading teams…"
+                  ? <span className="sr-only" role="status">{t("admin.loadingTeams")}</span>
                   : teams.length === 0
-                    ? "Teams appear when campaigns include a team name."
-                    : `${plural(teams.length, "Team")} named in the current dataset.`}</p>
+                    ? t("admin.teams.teamsEmpty")
+                    : tp("admin.teams.teamsNamed", teams.length, { count: teams.length })}</p>
               </div>
             </div>
             <div className="insight">
@@ -672,34 +684,34 @@ export function AdminEmployeesPage() {
                 <Icon name="user" size={18} />
               </span>
               <div>
-                <h4>Employees{employees !== null ? ` (${employeeCount})` : ""}</h4>
-                <p>Access dashboards, campaigns, creatives, reports, Ask The Data and AI Analyst without admin controls.</p>
+                <h4>{t("admin.teams.employeesTitle")}{employees !== null ? ` (${employeeCount})` : ""}</h4>
+                <p>{t("admin.teams.employeesBody")}</p>
               </div>
             </div>
-            {allTeams.map((t) => (
-              <div className="insight" key={t.name}>
+            {allTeams.map((team) => (
+              <div className="insight" key={team.name}>
                 <span className="insight-ico" style={{ background: "var(--shell-green-soft)" }}>
                   <Icon name="users" size={18} />
                 </span>
                 <div style={{ flex: 1 }}>
-                  <h4>{t.name}</h4>
-                  <p>{t.campaigns === 1 ? "1 campaign" : `${t.campaigns} campaigns`} in the current dataset{t.local ? " · saved in this browser only" : ""}.</p>
+                  <h4>{team.name}</h4>
+                  <p>{team.campaigns === 1 ? t("admin.teams.campaignOne") : t("admin.teams.campaignsOther", { count: team.campaigns })} {t("admin.teams.datasetSuffix")}{team.local ? ` · ${t("admin.teams.localSuffix")}` : ""}.</p>
                 </div>
-                {t.local ? <span className="badge-demo">Local</span> : null}
+                {team.local ? <span className="badge-demo">{t("admin.teams.local")}</span> : null}
               </div>
             ))}
             {teams === null ? <Skeleton height={60} /> : null}
           </div>
         </Panel>
-        <Panel title="Access Rules" sub="Rules the server enforces on every change.">
+        <Panel title={t("admin.rules.title")} sub={t("admin.rules.sub")}>
           <ul className="tips-list">
             <li>
               <span className="insight-ico" style={{ background: "var(--shell-green-soft)" }}>
                 <Icon name="check" size={18} />
               </span>
               <div>
-                <h4>Admin Gate</h4>
-                <p>Only admins can open this page, and every admin API call is re-authorized on the server.</p>
+                <h4>{t("admin.rules.gateTitle")}</h4>
+                <p>{t("admin.rules.gateBody")}</p>
               </div>
             </li>
             <li>
@@ -707,8 +719,8 @@ export function AdminEmployeesPage() {
                 <Icon name="clock" size={18} />
               </span>
               <div>
-                <h4>Immediate Effect</h4>
-                <p>Approve, suspend, revoke, and session invalidation apply instantly — including on live sessions.</p>
+                <h4>{t("admin.rules.effectTitle")}</h4>
+                <p>{t("admin.rules.effectBody")}</p>
               </div>
             </li>
             <li>
@@ -716,8 +728,8 @@ export function AdminEmployeesPage() {
                 <Icon name="lock" size={18} />
               </span>
               <div>
-                <h4>Last-Admin Protection</h4>
-                <p>Suspending the last active admin is refused by the server, so the workspace can never lock itself out.</p>
+                <h4>{t("admin.rules.lastAdminTitle")}</h4>
+                <p>{t("admin.rules.lastAdminBody")}</p>
               </div>
             </li>
           </ul>
@@ -726,27 +738,27 @@ export function AdminEmployeesPage() {
 
       <div className="section-gap" />
       <Panel
-        title="Workspace Activity"
-        sub="Every access decision, newest first."
+        title={t("admin.activity.title")}
+        sub={t("admin.activity.sub")}
       >
         {events.length === 0 ? (
-          <EmptyState text="No Events Yet." />
+          <EmptyState text={t("admin.activity.empty")} />
         ) : (
           <div className="tbl-wrap">
-            <table className="tbl" aria-label="Workspace Activity">
+            <table className="tbl" aria-label={t("admin.activity.title")}>
               <thead>
                 <tr>
-                  <th scope="col">When</th>
-                  <th scope="col">Action</th>
-                  <th scope="col">Target</th>
-                  <th scope="col">Admin</th>
-                  <th scope="col">Change</th>
+                  <th scope="col">{t("admin.activity.when")}</th>
+                  <th scope="col">{t("admin.activity.action")}</th>
+                  <th scope="col">{t("admin.activity.target")}</th>
+                  <th scope="col">{t("admin.activity.admin")}</th>
+                  <th scope="col">{t("admin.activity.change")}</th>
                 </tr>
               </thead>
               <tbody>
                 {events.map((v) => (
                   <tr key={v.id}>
-                    <td>{friendlyDate(v.created_at)}</td>
+                    <td>{adminDate(v.created_at)}</td>
                     <td className="cell-main">{auditAction(v.action)}</td>
                     <td>{identityCell(v.target_id)}</td>
                     <td>{identityCell(v.admin_id)}</td>
@@ -766,8 +778,8 @@ export function AdminEmployeesPage() {
       <div className="section-gap" />
       <details className="adv-disclosure">
         <summary>
-          <span className="adv-title">Advanced · Demo Tools</span>
-          <span className="panel-sub">Synthetic dataset controls for demo environments — not production access management.</span>
+          <span className="adv-title">{t("admin.demoTools")}</span>
+          <span className="panel-sub">{t("admin.demoToolsSub")}</span>
         </summary>
         <div style={{ marginTop: 10 }}>
           <DemoPackPanel />
@@ -778,7 +790,7 @@ export function AdminEmployeesPage() {
         <div
           role="dialog"
           aria-modal="true"
-          aria-label="Add Employee"
+          aria-label={t("admin.addDialog.title")}
           onClick={() => setInviteOpen(false)}
           style={{ position: "fixed", inset: 0, zIndex: 80, background: "rgba(15,23,42,.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
         >
@@ -788,55 +800,55 @@ export function AdminEmployeesPage() {
             style={{ width: "100%", maxWidth: 460, margin: 0 }}
           >
             <div className="panel-head dialog-head">
-              <h2 className="panel-title">Add Employee</h2>
+              <h2 className="panel-title">{t("admin.addDialog.title")}</h2>
               <button
                 type="button"
                 className="icon-btn"
-                aria-label="Close Add Employee dialog"
+                aria-label={t("admin.addDialog.close")}
                 onClick={() => setInviteOpen(false)}
               >
                 <Icon name="x" size={16} />
               </button>
             </div>
-            <p className="panel-sub" style={{ marginTop: -8, marginBottom: 12 }}>New employees join as Active immediately — no invitation email is sent.</p>
+            <p className="panel-sub" style={{ marginTop: -8, marginBottom: 12 }}>{t("admin.addDialog.sub")}</p>
             <div className="rep-filters" style={{ flexDirection: "column", alignItems: "stretch" }}>
               <input
                 ref={inviteFirstField}
                 type="text"
-                placeholder="First Name"
-                aria-label="New Employee First Name"
+                placeholder={t("admin.addDialog.firstNamePh")}
+                aria-label={t("admin.addDialog.firstName")}
                 autoComplete="given-name"
                 value={addFirst}
                 onChange={(e) => setAddFirst(e.target.value)}
               />
               <input
                 type="text"
-                placeholder="Last Name"
-                aria-label="New Employee Last Name"
+                placeholder={t("admin.addDialog.lastNamePh")}
+                aria-label={t("admin.addDialog.lastName")}
                 autoComplete="family-name"
                 value={addLast}
                 onChange={(e) => setAddLast(e.target.value)}
               />
               <input
                 type="email"
-                placeholder="Email Address"
-                aria-label="New Employee Email"
+                placeholder={t("admin.addDialog.emailPh")}
+                aria-label={t("admin.addDialog.email")}
                 autoComplete="email"
                 value={addEmail}
                 onChange={(e) => setAddEmail(e.target.value)}
               />
               <select
-                aria-label="New Employee Role"
+                aria-label={t("admin.addDialog.role")}
                 value={addRole}
                 onChange={(e) => setAddRole(e.target.value)}
               >
-                <option value="employee">Employee</option>
-                <option value="admin">Admin</option>
+                <option value="employee">{t("admin.addDialog.roleEmployee")}</option>
+                <option value="admin">{t("admin.addDialog.roleAdmin")}</option>
               </select>
               <LoadingButton type="button" className="btn-primary"
                 loading={busyKey === "add"} loadingLabel="Adding…"
                 disabled={busyKey !== null} onClick={() => void addEmployee()}>
-                <Icon name="plus" size={14} /> Add Employee
+                <Icon name="plus" size={14} /> {t("admin.addDialog.add")}
               </LoadingButton>
             </div>
           </div>
@@ -847,7 +859,7 @@ export function AdminEmployeesPage() {
         <div
           role="dialog"
           aria-modal="true"
-          aria-label="Create Team"
+          aria-label={t("admin.teamDialog.title")}
           onClick={() => setTeamOpen(false)}
           style={{ position: "fixed", inset: 0, zIndex: 80, background: "rgba(15,23,42,.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
         >
@@ -858,19 +870,19 @@ export function AdminEmployeesPage() {
           >
             <div className="panel-head">
               <div>
-                <h2 className="panel-title">Create Team</h2>
-                <p className="panel-sub">Saved in this browser only — workspace teams come from campaign data.</p>
+                <h2 className="panel-title">{t("admin.teamDialog.title")}</h2>
+                <p className="panel-sub">{t("admin.teamDialog.sub")}</p>
               </div>
               <button type="button" className="link-teal" onClick={() => setTeamOpen(false)}>
-                Close
+                {t("admin.teamDialog.close")}
               </button>
             </div>
             <div className="field">
-              <label htmlFor="new-team-name">Team Name</label>
+              <label htmlFor="new-team-name">{t("admin.teamDialog.nameLabel")}</label>
               <input
                 id="new-team-name"
                 type="text"
-                placeholder="e.g. Growth"
+                placeholder={t("admin.teamDialog.namePlaceholder")}
                 value={teamName}
                 onChange={(e) => setTeamName(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") createTeam(); }}
@@ -878,10 +890,10 @@ export function AdminEmployeesPage() {
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
               <button type="button" className="btn-outline" onClick={() => setTeamOpen(false)}>
-                Cancel
+                {t("admin.teamDialog.cancel")}
               </button>
               <button type="button" className="btn-primary" disabled={!teamName.trim()} onClick={createTeam}>
-                Create Team
+                {t("admin.teamDialog.create")}
               </button>
             </div>
           </div>

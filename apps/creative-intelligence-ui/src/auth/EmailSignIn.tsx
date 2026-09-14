@@ -3,6 +3,7 @@ import { useAuth } from "@/auth/AuthProvider";
 import { ApiError } from "@/api/client";
 import { Icon } from "@/components/icons";
 import { LoadingButton } from "@/components/LoadingButton";
+import { useLocale } from "@/i18n";
 
 // localStorage holds the work email ONLY (never the password) when the
 // employee ticks "Remember Me". Session lifetime stays server-controlled
@@ -25,6 +26,7 @@ function loadRememberedEmail(): { email: string; remember: boolean } {
  *  presentation changed. */
 export function EmailSignIn() {
   const { authenticating, emailSignIn, emailCodeSend, emailCodeSignIn, emailReset } = useAuth();
+  const { t } = useLocale();
   const [initial] = useState(loadRememberedEmail);
   const [mode, setMode] = useState<"password" | "code">("password");
   const [email, setEmail] = useState(initial.email);
@@ -54,7 +56,7 @@ export function EmailSignIn() {
       setMessage(typeof msg === "string" ? msg : "");
       if (!stayOnSuccess) setOp(null);
     } catch (err) {
-      setMessage(err instanceof ApiError ? err.message : "Sign-In Failed.");
+      setMessage(err instanceof ApiError ? err.message : t("auth.login.failedGeneric"));
       setOp(null);
     }
   };
@@ -88,7 +90,7 @@ export function EmailSignIn() {
     return (
       <div className="login-form">
         <label className="login-label" htmlFor="login-email">
-          Work Email
+          {t("auth.login.workEmail")}
         </label>
         <div className="login-input">
           <span className="login-icon" aria-hidden="true"><Icon name="mail" size={18} /></span>
@@ -103,35 +105,35 @@ export function EmailSignIn() {
           />
         </div>
         {!codeSent ? (
-          <LoadingButton type="button" className="login-primary" loading={op === "send"} loadingLabel="Sending Code…" disabled={busy} onClick={() => void run("send", async () => {
+          <LoadingButton type="button" className="login-primary" loading={op === "send"} loadingLabel={t("auth.login.sendingCode")} disabled={busy} onClick={() => void run("send", async () => {
             const msg = await emailCodeSend(email);
             setCodeSent(true);
             return msg;
           })}>
-            Send Sign-In Code
+            {t("auth.login.sendCode")}
           </LoadingButton>
         ) : (
           <>
             <label className="login-label" htmlFor="login-code">
-              Verification Code
+              {t("auth.login.codeLabel")}
             </label>
             <input
               id="login-code"
               type="text"
               inputMode="numeric"
-              placeholder="6-digit code"
+              placeholder={t("auth.login.codePlaceholder")}
               autoComplete="one-time-code"
               value={code}
               onChange={(e) => setCode(e.target.value)}
               style={{ minHeight: 44 }}
             />
-            <LoadingButton type="button" className="login-primary" loading={op === "verify"} loadingLabel="Verifying…" disabled={busy} onClick={() => void run("verify", () => emailCodeSignIn(email, code), true)}>
-              <>Verify &amp; Sign In</>
+            <LoadingButton type="button" className="login-primary" loading={op === "verify"} loadingLabel={t("auth.login.verifying")} disabled={busy} onClick={() => void run("verify", () => emailCodeSignIn(email, code), true)}>
+              <>{t("auth.login.verify")}</>
             </LoadingButton>
           </>
         )}
         <button type="button" className="login-link" onClick={() => switchMode("password")}>
-          Back To Password Sign In
+          {t("auth.login.backToPassword")}
         </button>
         <p className="muted login-status" role="status">{message}</p>
       </div>
@@ -156,14 +158,14 @@ export function EmailSignIn() {
         />
       </div>
       <label className="login-label" htmlFor="login-password">
-        Password
+        {t("auth.login.password")}
       </label>
       <div className="login-password-wrap">
         <span className="login-icon" aria-hidden="true"><Icon name="lock" size={18} /></span>
         <input
           id="login-password"
           type={showPassword ? "text" : "password"}
-          placeholder="Enter Your Password"
+          placeholder={t("auth.login.passwordPlaceholder")}
           autoComplete="current-password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
@@ -172,7 +174,7 @@ export function EmailSignIn() {
         <button
           type="button"
           className="login-link login-show login-icon-btn"
-          aria-label={showPassword ? "Hide Password" : "Show Password"}
+          aria-label={showPassword ? t("auth.login.hidePassword") : t("auth.login.showPassword")}
           aria-pressed={showPassword}
           onClick={() => setShowPassword((v) => !v)}
         >
@@ -190,17 +192,17 @@ export function EmailSignIn() {
               persistRememberedEmail(email, want);
             }}
           />
-          Remember Me
+          {t("auth.login.remember")}
         </label>
-        <LoadingButton type="button" className="login-link" loading={op === "reset"} loadingLabel="Sending…" disabled={busy} onClick={() => void run("reset", () => emailReset(email))}>
-          Forgot Password?
+        <LoadingButton type="button" className="login-link" loading={op === "reset"} loadingLabel={t("common.sending")} disabled={busy} onClick={() => void run("reset", () => emailReset(email))}>
+          {t("auth.login.forgot")}
         </LoadingButton>
       </div>
-      <LoadingButton type="button" className="login-primary" loading={op === "password"} loadingLabel="Signing In…" disabled={busy} onClick={() => void signInPassword()}>
-        Sign In
+      <LoadingButton type="button" className="login-primary" loading={op === "password"} loadingLabel={t("auth.login.signingIn")} disabled={busy} onClick={() => void signInPassword()}>
+        {t("auth.login.signIn")}
       </LoadingButton>
       <button type="button" className="login-link login-mode" onClick={() => switchMode("code")}>
-        Use A Sign-In Code Instead
+        {t("auth.login.useCode")}
       </button>
       <p className="muted login-status" role="status">{message}</p>
     </div>

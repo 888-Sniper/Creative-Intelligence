@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "@/api/client";
 import { Icon } from "@/components/icons";
+import { useLocale } from "@/i18n";
 
 /* Global header search. Searches live backend data across campaigns,
  * creatives, and saved-insight findings and deep-links each hit to its
@@ -33,11 +34,8 @@ interface Hit {
   to: string;
 }
 
-const KIND_LABEL: Record<Hit["kind"], string> = {
-  campaign: "Campaigns",
-  creative: "Creatives",
-  insight: "Insights",
-};
+/** Result-group labels follow the nav locale (§9); hit text itself is
+ *  backend data and is never translated. */
 
 const LIMITS: Record<Hit["kind"], number> = {
   campaign: 4,
@@ -46,6 +44,8 @@ const LIMITS: Record<Hit["kind"], number> = {
 };
 
 export function GlobalSearch() {
+  const { t } = useLocale();
+  const kindLabel = (kind: Hit["kind"]) => t(`search.groups.${kind}`);
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -154,8 +154,8 @@ export function GlobalSearch() {
               setActive((a) => (a - 1 + hits.length) % hits.length);
             }
           }}
-          placeholder="Search for campaigns, creatives, or insights…"
-          aria-label="Search campaigns, creatives, or insights"
+          placeholder={t("nav.searchPlaceholder")}
+          aria-label={t("search.ariaLabel")}
           aria-expanded={showDrop}
           aria-controls="global-search-results"
           role="combobox"
@@ -164,19 +164,19 @@ export function GlobalSearch() {
       </form>
       {showDrop ? (
         <div className="gs-drop" role="listbox" id="global-search-results"
-          aria-label="Search Suggestions">
+          aria-label={t("search.suggestions")}>
           {!loaded ? (
-            <p className="gs-empty">Searching…</p>
+            <p className="gs-empty">{t("search.searching")}</p>
           ) : hits.length === 0 ? (
-            <p className="gs-empty">No Matches for “{query.trim()}”.</p>
+            <p className="gs-empty">{t("search.noMatches", { q: query.trim() })}</p>
           ) : (
             <>
-              {(Object.keys(KIND_LABEL) as Array<Hit["kind"]>).map((kind) => {
+              {(["campaign", "creative", "insight"] as Array<Hit["kind"]>).map((kind) => {
                 const group = hits.filter((h) => h.kind === kind);
                 if (!group.length) return null;
                 return (
                   <div key={kind}>
-                    <p className="gs-group">{KIND_LABEL[kind]}</p>
+                    <p className="gs-group">{kindLabel(kind)}</p>
                     {group.map((h) => {
                       const idx = hits.indexOf(h);
                       return (
@@ -197,7 +197,7 @@ export function GlobalSearch() {
                 );
               })}
               <button type="button" className="gs-all" onClick={submitAll}>
-                See all campaign results for “{query.trim()}” →
+                {t("search.seeAll", { q: query.trim() })}
               </button>
             </>
           )}

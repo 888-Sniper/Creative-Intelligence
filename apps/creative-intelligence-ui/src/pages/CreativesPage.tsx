@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { api } from "@/api/client";
 import { useFilters } from "@/state/FilterContext";
+import { useLocale } from "@/i18n";
 import { Icon } from "@/components/icons";
 import { LoadingButton } from "@/components/LoadingButton";
 import { RetentionCurve } from "@/components/charts";
@@ -20,6 +21,7 @@ import {
   kpiDisplay,
   kpiPlaceholderNote,
   platformLabel,
+  titleCase,
   useCompareState,
   useScopedApi,
 } from "@/components/product";
@@ -55,12 +57,9 @@ export interface CreativeRowDatum {
 type SortKey = "top" | "ctr" | "roas" | "impressions";
 type LengthKey = "all" | "short" | "sweet" | "long";
 
-const SORTS: Array<{ value: SortKey; label: string }> = [
-  { value: "top", label: "Top Performing" },
-  { value: "ctr", label: "Highest CTR" },
-  { value: "roas", label: "Highest ROAS" },
-  { value: "impressions", label: "Most Impressions" },
-];
+const SORTS: Array<SortKey> = ["top", "ctr", "roas", "impressions"];
+
+type TFn = (key: string, vars?: Record<string, string | number>) => string;
 
 function num(v: unknown): number {
   const n = Number(v ?? 0);
@@ -71,27 +70,37 @@ function secondsOf(c: CreativeRowDatum): number {
   return num(c.annotation?.duration_s ?? c.duration_s);
 }
 
-function shortHook(hook: string | null | undefined): string {
+function shortHook(t: TFn, hook: string | null | undefined): string {
   const h = (hook ?? "").trim();
   if (!h) return "—";
-  const map: Record<string, string> = {
-    problem_solution: "Problem/Solution",
-    hook_statement: "Hook Statement",
-    product_demo: "Product Demo",
-  };
-  return map[h] ?? h.split("_").map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w)).join(" ");
+  const direct = t(`filters.hooks.${h}`);
+  if (direct !== `filters.hooks.${h}`) return direct;
+  const extra = t(`creatives.shortHooks.${h}`);
+  if (extra !== `creatives.shortHooks.${h}`) return extra;
+  return titleCase(h);
 }
 
-function perfLabel(roas: number | null, base: number | null): { text: string; tone: string } {
-  if (roas == null || base == null || !base) return { text: "Unranked", tone: "#64748B" };
+/** Backend annotation codes render through the UI locale; unknown
+ *  codes keep the honest Title Case form. */
+function codeVia(t: TFn, group: string, code: string | null | undefined): string {
+  const v = (code ?? "").trim();
+  if (!v) return "—";
+  const key = `${group}.${v.toLowerCase()}`;
+  const hit = t(key);
+  return hit === key ? titleCase(v) : hit;
+}
+
+function perfLabel(t: TFn, roas: number | null, base: number | null): { text: string; tone: string } {
+  if (roas == null || base == null || !base) return { text: t("creatives.ranks.unranked"), tone: "#64748B" };
   const r = roas / base;
-  if (r >= 1.2) return { text: "Top Performer", tone: "#0E7C5B" };
-  if (r >= 0.9) return { text: "High Performer", tone: "#2F6FBE" };
-  if (r >= 0.65) return { text: "Good Performer", tone: "#7C6BD6" };
-  return { text: "Needs Work", tone: "#C2410C" };
+  if (r >= 1.2) return { text: t("creatives.ranks.top"), tone: "#0E7C5B" };
+  if (r >= 0.9) return { text: t("creatives.ranks.high"), tone: "#2F6FBE" };
+  if (r >= 0.65) return { text: t("creatives.ranks.good"), tone: "#7C6BD6" };
+  return { text: t("creatives.ranks.needsWork"), tone: "#C2410C" };
 }
 
 function CreativeDetail({ datum }: { datum: CreativeRowDatum }) {
+  const { t } = useLocale();
   const [curve, setCurve] = useState<Array<[number, number]> | null>(null);
   useEffect(() => {
     let live = true;
@@ -104,14 +113,14 @@ function CreativeDetail({ datum }: { datum: CreativeRowDatum }) {
   }, [datum.creative_key]);
   const a = datum.annotation ?? {};
   const facts: Array<[string, string]> = [
-    ["Hook Type", shortHook(a.hook_type)],
-    ["Duration", secondsOf(datum) ? `${secondsOf(datum)}s` : "—"],
-    ["Creator vs Branded", a.creator_vs_branded ?? "—"],
-    ["Format", datum.format ?? "—"],
-    ["Platform", platformLabel(datum.platform)],
-    ["Funnel Stage", a.funnel_stage ?? "—"],
-    ["Objective", a.objective ?? "—"],
-    ["Campaigns", (datum.campaigns ?? []).join(", ") || "—"],
+    [t("filters.hook"), shortHook(t, a.hook_type)],
+    [t("creatives.detail.duration"), secondsOf(datum) ? `${secondsOf(datum)}s` : "—"],
+    [t("filters.creator"), codeVia(t, "filters.creators", a.creator_vs_branded)],
+    [t("filters.format"), datum.format ?? "—"],
+    [t("filters.platform"), platformLabel(datum.platform)],
+    [t("filters.funnel"), codeVia(t, "filters.funnels", a.funnel_stage)],
+    [t("creatives.detail.objective"), codeVia(t, "filters.objectives", a.objective)],
+    [t("creatives.detail.campaigns"), (datum.campaigns ?? []).join(", ") || "—"],
   ];
   return (
     <div className="detail-cols-2">
@@ -124,9 +133,9 @@ function CreativeDetail({ datum }: { datum: CreativeRowDatum }) {
         ))}
       </dl>
       <div>
-        <h4 style={{ margin: "0 0 8px", fontSize: 14 }}>Audience Retention</h4>
+        <h4 style={{ margin: "0 0 8px", fontSize: 14 }}>{t("creatives.detail.retention")}</h4>
         {curve ? (
-          curve.length ? <RetentionCurve points={curve} /> : <EmptyState text="No retention curve for this creative." />
+          curve.length ? <RetentionCurve points={curve} /> : <EmptyState verbatim text={t("creatives.noCurveFor")} />
         ) : <Skeleton height={190} />}
       </div>
     </div>
@@ -134,6 +143,7 @@ function CreativeDetail({ datum }: { datum: CreativeRowDatum }) {
 }
 
 function RetentionSpark({ creativeKey }: { creativeKey: string }) {
+  const { t } = useLocale();
   const [points, setPoints] = useState<Array<[number, number]> | null>(null);
   useEffect(() => {
     let live = true;
@@ -144,14 +154,14 @@ function RetentionSpark({ creativeKey }: { creativeKey: string }) {
       .catch(() => live && setPoints([]));
     return () => { live = false; };
   }, [creativeKey]);
-  if (!points) return <span className="spark" aria-label="Loading Retention Curve" />;
-  if (!points.length) return <span className="muted">No Curve</span>;
+  if (!points) return <span className="spark" aria-label={t("creatives.loadingCurve")} />;
+  if (!points.length) return <span className="muted">{t("creatives.noCurve")}</span>;
   const W = 110, H = 34;
   const d = points.map(([t, p], i) =>
     `${i ? "L" : "M"}${((t / Math.max(30, points[points.length - 1][0])) * W).toFixed(1)},${(H - (p / 100) * H).toFixed(1)}`,
   ).join(" ");
   return (
-    <svg className="spark" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Retention Curve">
+    <svg className="spark" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={t("creatives.curveLabel")}>
       <path d={d} fill="none" stroke="#0A9183" strokeWidth={1.8} strokeLinejoin="round" />
     </svg>
   );
@@ -159,11 +169,12 @@ function RetentionSpark({ creativeKey }: { creativeKey: string }) {
 
 export function CreativesPage() {
   const { clearFilters } = useFilters();
+  const { t, tp } = useLocale();
   const [applied, setApplied] = useState(0);
   const [sort, setSort] = useState<SortKey>("top");
   const [view, setView] = useState<"list" | "grid">("list");
   const [length, setLength] = useState<LengthKey>("all");
-  const [benchmark, setBenchmark] = useState("Scope Average");
+  const [benchmark, setBenchmark] = useState("average");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const [exportBusy, setExportBusy] = useState(false);
@@ -232,7 +243,7 @@ export function CreativesPage() {
   const roasBase = useMemo(() => {
     const list = lengthRows.map((c) => c.metrics.roas).filter((r): r is number => r != null);
     if (!list.length) return null;
-    return benchmark === "Top Performer" ? Math.max(...list) : list.reduce((t, r) => t + r, 0) / list.length;
+    return benchmark === "top" ? Math.max(...list) : list.reduce((t, r) => t + r, 0) / list.length;
   }, [lengthRows, benchmark]);
 
   // Learnings aggregate the LENGTH-FILTERED rows client-side, so they
@@ -266,21 +277,24 @@ export function CreativesPage() {
       const b = hookRows[1];
       const verdict = compareDisplayed(a.ctr ?? NaN, b.ctr ?? NaN);
       if (verdict !== "unknown") {
+        const ha = shortHook(t, a.key);
+        const hb = shortHook(t, b.key);
         out.push(verdict === "tie" ? {
           icon: "spark",
-          title: `${shortHook(a.key)} and ${shortHook(b.key)} Tie on CTR`,
-          body: `${shortHook(a.key)} and ${shortHook(b.key)} openings both average ${(a.ctr ?? 0).toFixed(1)}% CTR across the current scope.`,
+          title: t("creatives.learn.hookTieTitle", { a: ha, b: hb }),
+          body: t("creatives.learn.hookTieBody", { a: ha, b: hb, ctr: (a.ctr ?? 0).toFixed(1) }),
         } : {
           icon: "spark",
-          title: `${shortHook(a.key)} Hooks Lead CTR`,
-          body: `${shortHook(a.key)} openings average ${(a.ctr ?? 0).toFixed(1)}% CTR versus ${(b.ctr ?? 0).toFixed(1)}% for ${shortHook(b.key)} across the current scope.`,
+          title: t("creatives.learn.hookLeadTitle", { a: ha }),
+          body: t("creatives.learn.hookLeadBody", { a: ha, ctr: (a.ctr ?? 0).toFixed(1), bCtr: (b.ctr ?? 0).toFixed(1), b: hb }),
         });
       }
     } else if (hookRows.length === 1 && hookRows[0].ctr != null) {
+      const hs = shortHook(t, hookRows[0].key);
       out.push({
         icon: "spark",
-        title: `${shortHook(hookRows[0].key)} Openings Snapshot`,
-        body: `${shortHook(hookRows[0].key)} openings average ${(hookRows[0].ctr ?? 0).toFixed(1)}% CTR across the current scope.`,
+        title: t("creatives.learn.hookSnapTitle", { a: hs }),
+        body: t("creatives.learn.hookSnapBody", { a: hs, ctr: (hookRows[0].ctr ?? 0).toFixed(1) }),
       });
     }
     const creatorG = byMode.get("creator");
@@ -291,26 +305,26 @@ export function CreativesPage() {
       const verdict = compareDisplayed(creatorCtr, brandedCtr);
       if (verdict !== "unknown") {
         const lift = brandedCtr !== 0 ? ((creatorCtr - brandedCtr) / Math.abs(brandedCtr)) * 100 : null;
-        const liftTxt = lift != null ? ` (${lift >= 0 ? "+" : ""}${lift.toFixed(0)}%)` : "";
+        const liftTxt = lift != null ? t("creatives.learn.liftDiff", { sign: lift >= 0 ? "+" : "", pct: lift.toFixed(0) }) : "";
         out.push(verdict === "tie" ? {
           icon: "users",
-          title: "Creator and Branded Hooks Tie on CTR",
-          body: `Creatives with creator intros and branded openings both average ${creatorCtr.toFixed(1)}% CTR across the current scope.`,
+          title: t("creatives.learn.creatorTieTitle"),
+          body: t("creatives.learn.creatorTieBody", { ctr: creatorCtr.toFixed(1) }),
         } : verdict === "lead" ? {
           icon: "users",
-          title: "Creator-Led Hooks Perform Best",
-          body: `Creatives with creator intros see ${creatorCtr.toFixed(1)}% CTR versus ${brandedCtr.toFixed(1)}% for branded content${liftTxt}.`,
+          title: t("creatives.learn.creatorLeadTitle"),
+          body: t("creatives.learn.creatorLeadBody", { ctr: creatorCtr.toFixed(1), bCtr: brandedCtr.toFixed(1), diff: liftTxt }),
         } : {
           icon: "users",
-          title: "Branded Hooks Perform Best",
-          body: `Creatives with branded openings see ${brandedCtr.toFixed(1)}% CTR versus ${creatorCtr.toFixed(1)}% for creator intros${liftTxt}.`,
+          title: t("creatives.learn.brandedLeadTitle"),
+          body: t("creatives.learn.brandedLeadBody", { ctr: brandedCtr.toFixed(1), bCtr: creatorCtr.toFixed(1), diff: liftTxt }),
         });
       }
     }
     const buckets = [
-      { key: "Under 15s", test: (s: number) => s > 0 && s < 15 },
-      { key: "15–30s", test: (s: number) => s >= 15 && s <= 30 },
-      { key: "Over 30s", test: (s: number) => s > 30 },
+      { key: t("creatives.lengthShort"), test: (s: number) => s > 0 && s < 15 },
+      { key: t("creatives.lengthSweet"), test: (s: number) => s >= 15 && s <= 30 },
+      { key: t("creatives.lengthLong"), test: (s: number) => s > 30 },
     ].map((b) => ({ ...b, clicks: 0, impr: 0 }));
     for (const c of lengthRows) {
       const s = secondsOf(c);
@@ -329,31 +343,31 @@ export function CreativesPage() {
       if (verdict === "tie") {
         out.push({
           icon: "bars",
-          title: `${ranked[0].key} Shares the Length Lead`,
-          body: `Videos in the ${ranked[0].key} bucket match the best band at ${(ranked[0].ctr ?? 0).toFixed(1)}% CTR in the current scope.`,
+          title: t("creatives.learn.lenTieTitle", { a: ranked[0].key }),
+          body: t("creatives.learn.lenTieBody", { a: ranked[0].key, ctr: (ranked[0].ctr ?? 0).toFixed(1) }),
         });
       } else if (verdict !== "unknown") {
         out.push({
           icon: "bars",
-          title: `${ranked[0].key} Videos Lead on CTR`,
-          body: `Videos in the ${ranked[0].key} bucket average ${(ranked[0].ctr ?? 0).toFixed(1)}% CTR versus ${(ranked[1].ctr ?? 0).toFixed(1)}% for ${ranked[1].key} in the current scope.`,
+          title: t("creatives.learn.lenLeadTitle", { a: ranked[0].key }),
+          body: t("creatives.learn.lenLeadBody", { a: ranked[0].key, ctr: (ranked[0].ctr ?? 0).toFixed(1), bCtr: (ranked[1].ctr ?? 0).toFixed(1), b: ranked[1].key }),
         });
       }
     } else if (ranked.length === 1 && ranked[0].ctr != null) {
       out.push({
         icon: "bars",
-        title: `${ranked[0].key} Videos Snapshot`,
-        body: `Videos in the ${ranked[0].key} bucket average ${(ranked[0].ctr ?? 0).toFixed(1)}% CTR in the current scope.`,
+        title: t("creatives.learn.lenSnapTitle", { a: ranked[0].key }),
+        body: t("creatives.learn.lenSnapBody", { a: ranked[0].key, ctr: (ranked[0].ctr ?? 0).toFixed(1) }),
       });
     }
     return out.slice(0, 5);
-  }, [lengthRows]);
+  }, [lengthRows, t]);
 
   const tests = useMemo(() => [
-    { icon: "spark", title: "Test Creator vs. Branded Intros", body: "Compare performance of creator-led vs. branded openings." },
-    { icon: "play", title: "Try Shorter Video Lengths", body: "Test 15s vs. 30s videos to validate impact on CTR and ROAS." },
-    { icon: "users", title: "Experiment With New Hook Types", body: "Test problem/solution vs. testimonial hooks for top campaigns." },
-  ], []);
+    { icon: "spark", title: t("creatives.tests.creatorTitle"), body: t("creatives.tests.creatorBody") },
+    { icon: "play", title: t("creatives.tests.shorterTitle"), body: t("creatives.tests.shorterBody") },
+    { icon: "users", title: t("creatives.tests.hooksTitle"), body: t("creatives.tests.hooksBody") },
+  ], [t]);
 
   const toggle = (key: string) =>
     setSelected((prev) => {
@@ -367,7 +381,7 @@ export function CreativesPage() {
   const onExport = async () => {
     const keys = rows.map((r) => r.creative_key);
     if (!keys.length) {
-      setBanner("Nothing To Export For The Current Filters.");
+      setBanner(t("creatives.banner.nothingToExport"));
       return;
     }
     setExportBusy(true);
@@ -379,7 +393,7 @@ export function CreativesPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ creative_keys: keys }),
       });
-      if (!res.ok) throw new Error("Export Failed");
+      if (!res.ok) throw new Error(t("creatives.banner.exportFailed"));
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -387,9 +401,9 @@ export function CreativesPage() {
       a.download = "creatives.csv";
       a.click();
       URL.revokeObjectURL(url);
-      setBanner(`Exported ${keys.length} Creative${keys.length === 1 ? "" : "s"}.`);
+      setBanner(tp("creatives.banner.exported", keys.length, { count: keys.length }));
     } catch (e) {
-      setBanner(e instanceof Error ? e.message : "Export Failed");
+      setBanner(e instanceof Error ? e.message : t("creatives.banner.exportFailed"));
     } finally {
       setExportBusy(false);
     }
@@ -398,14 +412,14 @@ export function CreativesPage() {
   return (
     <div className="creatives">
       <PageHeader
-        title="Creatives"
-        sub="Explore top performing creatives, analyze what works, and get AI-powered recommendations."
+        title={t("creatives.title")}
+        sub={t("creatives.sub")}
         actions={(
           <>
             {/* Reset restores local view state too: a stale length/sort
               selection after reset would keep sections disagreeing. */}
             <button type="button" className="btn-primary" onClick={() => setApplied((n) => n + 1)}>
-              Apply Filters
+              {t("filters.apply")}
             </button>
             <button type="button" className="link-teal" onClick={() => {
               clearFilters();
@@ -413,13 +427,13 @@ export function CreativesPage() {
               setSort("top");
               setView("list");
               setLength("all");
-              setBenchmark("Scope Average");
+              setBenchmark("average");
               setSelected(new Set());
               setExpandedKey(null);
               setBanner("");
             }}
               style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <Icon name="reset" size={15} /> Reset Filters
+              <Icon name="reset" size={15} /> {t("filters.reset")}
             </button>
           </>
         )}
@@ -430,19 +444,19 @@ export function CreativesPage() {
         trailing={(
           <>
             <div className="field">
-              <label htmlFor="cr-length">Video Length</label>
+              <label htmlFor="cr-length">{t("creatives.videoLength")}</label>
               <select id="cr-length" value={length} onChange={(e) => setLength(e.target.value as LengthKey)}>
-                <option value="all">All Lengths</option>
-                <option value="short">Under 15s</option>
-                <option value="sweet">15–30s</option>
-                <option value="long">Over 30s</option>
+                <option value="all">{t("creatives.lengthAll")}</option>
+                <option value="short">{t("creatives.lengthShort")}</option>
+                <option value="sweet">{t("creatives.lengthSweet")}</option>
+                <option value="long">{t("creatives.lengthLong")}</option>
               </select>
             </div>
             <div className="field">
-              <label htmlFor="cr-bench">Benchmark</label>
+              <label htmlFor="cr-bench">{t("creatives.benchmarkLabel")}</label>
               <select id="cr-bench" value={benchmark} onChange={(e) => setBenchmark(e.target.value)}>
-                <option>Scope Average</option>
-                <option>Top Performer</option>
+                <option value="average">{t("creatives.scopeAverage")}</option>
+                <option value="top">{t("creatives.ranks.top")}</option>
               </select>
             </div>
           </>
@@ -455,7 +469,7 @@ export function CreativesPage() {
             <>
               {length !== "all" ? (
                 <p className="panel-sub" style={{ margin: "0 0 8px" }}>
-                  {`Showing ${length === "short" ? "under-15s" : length === "sweet" ? "15–30s" : "over-30s"} creatives only.`}
+                  {t("creatives.showingOnly", { range: t(length === "short" ? "creatives.rangeShort" : length === "sweet" ? "creatives.rangeSweet" : "creatives.rangeLong") })}
                 </p>
               ) : null}
               <div className="kpi-grid">
@@ -464,28 +478,28 @@ export function CreativesPage() {
                     <Icon name="play" size={20} />
                   </span>
                   <div className="kpi-body">
-                    <div className="kpi-label">Total Creatives</div>
+                    <div className="kpi-label">{t("creatives.totalCreatives")}</div>
                     <div className="kpi-value">{fmtCompact(rows.length)}</div>
                   </div>
                 </div>
                 {length === "all" && compare ? (
                   <>
-                    <KpiCard label="Total Impressions" display={kpiDisplay("count", compare.metrics.impressions?.current, compare.current_n_ads === 0)}
-                      icon="bars" tint="var(--shell-blue-soft)" metricLabel="Impressions" compare={compare} />
-                    <KpiCard label="Total Clicks" display={kpiDisplay("count", compare.metrics.clicks?.current, compare.current_n_ads === 0)}
-                      icon="click" tint="var(--shell-blue-soft)" metricLabel="Clicks" compare={compare} />
-                    <KpiCard label="Average ROAS" display={kpiDisplay("mult", compare.metrics.roas?.current, compare.current_n_ads === 0)}
-                      icon="users" tint="var(--shell-teal-soft)" metricLabel="ROAS" compare={compare}
+                    <KpiCard label={t("dashboard.totalImpressions")} display={kpiDisplay("count", compare.metrics.impressions?.current, compare.current_n_ads === 0)}
+                      icon="bars" tint="var(--shell-blue-soft)" metricLabel={t("filters.kpis.impressions")} compare={compare} />
+                    <KpiCard label={t("dashboard.totalClicks")} display={kpiDisplay("count", compare.metrics.clicks?.current, compare.current_n_ads === 0)}
+                      icon="click" tint="var(--shell-blue-soft)" metricLabel={t("filters.kpis.clicks")} compare={compare} />
+                    <KpiCard label={t("dashboard.averageRoas")} display={kpiDisplay("mult", compare.metrics.roas?.current, compare.current_n_ads === 0)}
+                      icon="users" tint="var(--shell-teal-soft)" metricLabel={t("filters.kpis.roas")} compare={compare}
                       note={kpiPlaceholderNote("mult", compare.metrics.roas?.current, compare.current_n_ads === 0)} />
                   </>
                 ) : (
                   <>
-                    <KpiCard label="Total Impressions" display={fmtCompact(pooled.impr)}
-                      icon="bars" tint="var(--shell-blue-soft)" metricLabel="Impressions" compare={null} />
-                    <KpiCard label="Total Clicks" display={fmtCompact(pooled.clicks)}
-                      icon="click" tint="var(--shell-blue-soft)" metricLabel="Clicks" compare={null} />
-                    <KpiCard label="Average ROAS" display={kpiDisplay("mult", pooled.roas, lengthRows.length === 0)}
-                      icon="users" tint="var(--shell-teal-soft)" metricLabel="ROAS" compare={null}
+                    <KpiCard label={t("dashboard.totalImpressions")} display={fmtCompact(pooled.impr)}
+                      icon="bars" tint="var(--shell-blue-soft)" metricLabel={t("filters.kpis.impressions")} compare={null} />
+                    <KpiCard label={t("dashboard.totalClicks")} display={fmtCompact(pooled.clicks)}
+                      icon="click" tint="var(--shell-blue-soft)" metricLabel={t("filters.kpis.clicks")} compare={null} />
+                    <KpiCard label={t("dashboard.averageRoas")} display={kpiDisplay("mult", pooled.roas, lengthRows.length === 0)}
+                      icon="users" tint="var(--shell-teal-soft)" metricLabel={t("filters.kpis.roas")} compare={null}
                       note={kpiPlaceholderNote("mult", pooled.roas, lengthRows.length === 0)} />
                   </>
                 )}
@@ -499,8 +513,8 @@ export function CreativesPage() {
             </div>
           )}
           <Panel
-            title="Top Creatives"
-            action={<Link className="link-teal" to="/creatives">See All</Link>}
+            title={t("creatives.topCreatives")}
+            action={<Link className="link-teal" to="/creatives">{t("creatives.seeAll")}</Link>}
           >
             {creatives.data ? (
               topCards.length ? (
@@ -508,7 +522,7 @@ export function CreativesPage() {
                   {topCards.map((c) => {
                     const s = secondsOf(c);
                     const badge = c.annotation?.creator_vs_branded
-                      ? c.annotation.creator_vs_branded[0].toUpperCase() + c.annotation.creator_vs_branded.slice(1)
+                      ? codeVia(t, "filters.creators", c.annotation.creator_vs_branded)
                       : (c.format ?? "Video").replace(/ video$/i, "");
                     return (
                       <div className="creative-card" key={c.creative_key}>
@@ -528,32 +542,32 @@ export function CreativesPage() {
                     );
                   })}
                 </div>
-              ) : <EmptyState icon="creatives" title="No creatives yet" text="Upload creative data or loosen the filters to see top performers." />
+              ) : <EmptyState icon="creatives" title={t("creatives.noTopTitle")} text={t("creatives.noTopBody")} />
             ) : <Skeleton height={190} />}
           </Panel>
           <Panel
-            title={`All Creatives (${fmtCompact(rows.length)})`}
+            title={t("creatives.allCreatives", { count: fmtCompact(rows.length) })}
             style={{ flex: "1 0 auto" }}
             action={(
               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                <label htmlFor="cr-sort" className="panel-sub">Sort By</label>
+                <label htmlFor="cr-sort" className="panel-sub">{t("creatives.sortBy")}</label>
                 <select id="cr-sort" value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
-                  {SORTS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+                  {SORTS.map((v) => <option key={v} value={v}>{t(`creatives.sorts.${v}`)}</option>)}
                 </select>
-                <div role="group" aria-label="Table Layout" style={{ display: "flex", gap: 4 }}>
-                  <button type="button" className="icon-btn view-btn" aria-pressed={view === "list"} aria-label="List View"
+                <div role="group" aria-label={t("creatives.layoutGroup")} style={{ display: "flex", gap: 4 }}>
+                  <button type="button" className="icon-btn view-btn" aria-pressed={view === "list"} aria-label={t("creatives.listView")}
                     style={{ width: 32, height: 32 }}
                     onClick={() => setView("list")}>
                     <Icon name="list" size={16} />
                   </button>
-                  <button type="button" className="icon-btn view-btn" aria-pressed={view === "grid"} aria-label="Grid View"
+                  <button type="button" className="icon-btn view-btn" aria-pressed={view === "grid"} aria-label={t("creatives.gridView")}
                     style={{ width: 32, height: 32 }}
                     onClick={() => setView("grid")}>
                     <Icon name="grid" size={16} />
                   </button>
                 </div>
-                <LoadingButton type="button" className="btn-outline" loading={exportBusy} loadingLabel="Exporting…" spinnerClass="spinner dark" disabled={exportBusy} onClick={() => void onExport()}>
-                  <Icon name="download" size={15} /> Export
+                <LoadingButton type="button" className="btn-outline" loading={exportBusy} loadingLabel={t("creatives.exporting")} spinnerClass="spinner dark" disabled={exportBusy} onClick={() => void onExport()}>
+                  <Icon name="download" size={15} /> {t("common.export")}
                 </LoadingButton>
               </div>
             )}
@@ -566,30 +580,30 @@ export function CreativesPage() {
                       <thead>
                         <tr>
                           <th scope="col">
-                            <input type="checkbox" aria-label="Select All Creatives" checked={allChecked}
+                            <input type="checkbox" aria-label={t("creatives.selectAll")} checked={allChecked}
                               onChange={() => setSelected(allChecked ? new Set() : new Set(rows.map((r) => r.creative_key)))} />
                           </th>
-                          <th scope="col">Creative</th>
-                          <th scope="col">Campaign</th>
-                          <th scope="col">Format</th>
-                          <th scope="col">Hook Type</th>
-                          <th scope="col">Length</th>
-                          <th scope="col">Platform</th>
-                          <th scope="col" className="num">Impressions</th>
-                          <th scope="col" className="num">CTR</th>
-                          <th scope="col" className="num">ROAS</th>
-                          <th scope="col">Retention</th>
-                          <th scope="col">Performance</th>
+                          <th scope="col">{t("creatives.headers.creative")}</th>
+                          <th scope="col">{t("creatives.headers.campaign")}</th>
+                          <th scope="col">{t("creatives.headers.format")}</th>
+                          <th scope="col">{t("creatives.headers.hook")}</th>
+                          <th scope="col">{t("creatives.headers.length")}</th>
+                          <th scope="col">{t("creatives.headers.platform")}</th>
+                          <th scope="col" className="num">{t("filters.kpis.impressions")}</th>
+                          <th scope="col" className="num">{t("filters.kpis.ctr")}</th>
+                          <th scope="col" className="num">{t("filters.kpis.roas")}</th>
+                          <th scope="col">{t("creatives.headers.retention")}</th>
+                          <th scope="col">{t("creatives.headers.performance")}</th>
                         </tr>
                       </thead>
                       <tbody>
                         {rows.map((c) => {
                           const s = secondsOf(c);
-                          const perf = perfLabel(c.metrics.roas, roasBase);
+                          const perf = perfLabel(t, c.metrics.roas, roasBase);
                           return (
                             <tr key={c.creative_key}>
                               <td>
-                                <input type="checkbox" aria-label={`Select ${c.name || c.creative_key}`}
+                                <input type="checkbox" aria-label={t("creatives.selectOne", { name: c.name || c.creative_key })}
                                   checked={selected.has(c.creative_key)} onChange={() => toggle(c.creative_key)} />
                               </td>
                               <td>
@@ -607,7 +621,7 @@ export function CreativesPage() {
                               </td>
                               <td>{(c.campaigns ?? [])[0] ?? "—"}</td>
                               <td>{c.format ?? "—"}</td>
-                              <td>{shortHook(c.annotation?.hook_type)}</td>
+                              <td>{shortHook(t, c.annotation?.hook_type)}</td>
                               <td>{s ? `${s}s` : "—"}</td>
                               <td>{platformLabel(c.platform)}</td>
                               <td className="num">{fmtCompact(num(c.metrics.impressions))}</td>
@@ -643,7 +657,7 @@ export function CreativesPage() {
                     })}
                   </div>
                 )
-              ) : <EmptyState compact icon="creatives" title="No matches" text="Try loosening the current filters." />
+              ) : <EmptyState compact icon="creatives" title={t("creatives.noMatchTitle")} text={t("creatives.noMatchBody")} />
             ) : creatives.error ? (
               <EmptyState text={creatives.error} />
             ) : <Skeleton height={220} />}
@@ -657,7 +671,7 @@ export function CreativesPage() {
           ) : null}
         </div>
         <div className="rail-stack">
-          <Panel title="Top Learnings" action={<Link className="link-teal" to="/insights">See All</Link>}>
+          <Panel title={t("creatives.learnings")} action={<Link className="link-teal" to="/insights">{t("creatives.seeAll")}</Link>}>
             {creatives.data ? (
               learnings.length ? (
                 <div>
@@ -673,28 +687,28 @@ export function CreativesPage() {
                     </div>
                   ))}
                 </div>
-              ) : <EmptyState compact icon="spark" title="No learnings yet" text="Learnings appear once creatives are in scope." />
+              ) : <EmptyState compact icon="spark" title={t("creatives.noLearningsTitle")} text={t("creatives.noLearningsBody")} />
             ) : <Skeleton height={220} />}
           </Panel>
           {/* With zero creatives in the scoped group there is no
             evidence for test ideas: show an empty state, not ideas. */}
-          <Panel title="Next Tests" action={<Link className="link-teal" to="/insights">See All</Link>} style={{ flex: "1 0 auto" }}>
+          <Panel title={t("creatives.nextTests")} action={<Link className="link-teal" to="/insights">{t("creatives.seeAll")}</Link>} style={{ flex: "1 0 auto" }}>
             {creatives.data ? (
               lengthRows.length ? (
                 <div>
-                  {tests.map((t) => (
-                    <div className="insight" key={t.title}>
+                  {tests.map((idea) => (
+                    <div className="insight" key={idea.title}>
                       <span className="insight-ico" style={{ background: "var(--shell-blue-soft)" }}>
-                        <Icon name={t.icon} size={20} />
+                        <Icon name={idea.icon} size={20} />
                       </span>
                       <div>
-                        <h4>{t.title}</h4>
-                        <p>{t.body}</p>
+                        <h4>{idea.title}</h4>
+                        <p>{idea.body}</p>
                       </div>
                     </div>
                   ))}
                 </div>
-              ) : <EmptyState compact icon="target" title="No recommendations yet" text="Test ideas appear once creatives are in scope." />
+              ) : <EmptyState compact icon="target" title={t("creatives.noTestsTitle")} text={t("creatives.noTestsBody")} />
             ) : <Skeleton height={220} />}
           </Panel>
         </div>

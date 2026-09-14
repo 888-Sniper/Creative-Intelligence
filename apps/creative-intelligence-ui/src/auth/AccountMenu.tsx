@@ -3,7 +3,8 @@ import { Link } from "react-router-dom";
 import { api, ApiError } from "@/api/client";
 import { useAuth } from "@/auth/AuthProvider";
 import { Icon } from "@/components/icons";
-import { EmployeeAvatar } from "@/components/product";
+import { EmployeeAvatar, codeLabel } from "@/components/product";
+import { useLocale } from "@/i18n";
 
 interface StoredAccount {
   employee_id: string;
@@ -27,6 +28,7 @@ export function Avatar({ url, label }: { url: string; label: string }) {
  *  account (item 19). */
 export function AccountMenu() {
   const { me, switching, switchAccount, logout } = useAuth();
+  const { t } = useLocale();
   const [accounts, setAccounts] = useState<StoredAccount[] | null>(null);
   const [error, setError] = useState("");
   // Collapsed by default: the menu is position:fixed, so an always-open
@@ -44,7 +46,7 @@ export function AccountMenu() {
         if (live) setAccounts(r.accounts);
       })
       .catch((err) => {
-        if (live) setError(err instanceof ApiError ? err.message : "Could Not Load Accounts.");
+        if (live) setError(err instanceof ApiError ? err.message : t("auth.account.loadFailed"));
       });
     return () => {
       live = false;
@@ -79,7 +81,7 @@ export function AccountMenu() {
     try {
       await switchAccount(employeeId);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Switch Failed.");
+      setError(err instanceof ApiError ? err.message : t("auth.account.switchFailed"));
     }
   };
 
@@ -88,7 +90,7 @@ export function AccountMenu() {
       <button
         type="button"
         className="menu-toggle"
-        aria-label="Toggle Account Menu"
+        aria-label={t("auth.account.toggle")}
         aria-expanded={expanded}
         aria-controls="account-menu-body"
         onClick={() => setExpanded((v) => !v)}
@@ -98,7 +100,7 @@ export function AccountMenu() {
           <strong>{name}</strong>
           <br />
           <span className="muted">
-            {employee.role} · {employee.status}
+            {codeLabel(t, "roles", employee.role)} · {codeLabel(t, "statuses", employee.status)}
           </span>
         </span>
         <span aria-hidden="true" className="menu-chevron"
@@ -109,10 +111,10 @@ export function AccountMenu() {
       {expanded ? (
         <div id="account-menu-body">
           <Link to="/settings" className="link-btn" onClick={() => setExpanded(false)}>
-            Settings
+            {t("auth.account.settings")}
           </Link>
           {accounts === null ? (
-            <p className="muted">Loading Accounts…</p>
+            <p className="muted">{t("auth.account.loading")}</p>
           ) : (
             <ul className="plain">
               {accounts
@@ -126,10 +128,10 @@ export function AccountMenu() {
                         email={a.email}
                         size={24}
                       />
-                      Switch To {`${a.first_name} ${a.last_name}`.trim() || a.email}
+                      {t("auth.account.switchTo", { name: `${a.first_name} ${a.last_name}`.trim() || a.email })}
                     </button>{" "}
                     <span className="muted">
-                      ({a.role} · {a.status})
+                      ({codeLabel(t, "roles", a.role)} · {codeLabel(t, "statuses", a.status)})
                     </span>
                   </li>
                 ))}
@@ -137,7 +139,7 @@ export function AccountMenu() {
           )}
           {error ? <p className="muted">{error}</p> : null}
           <button type="button" className="link-btn" onClick={() => void logout()}>
-            Log Out
+            {t("auth.account.logout")}
           </button>
         </div>
       ) : null}

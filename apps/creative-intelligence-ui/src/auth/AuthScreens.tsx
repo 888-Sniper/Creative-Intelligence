@@ -2,25 +2,14 @@ import { useAuth } from "@/auth/AuthProvider";
 import { EmployeeOAuthButtons } from "@/auth/OAuthButton";
 import { EmailSignIn } from "@/auth/EmailSignIn";
 import { Icon } from "@/components/icons";
+import { useLocale } from "@/i18n";
 
 // Brand single-source: served by the backend from Web/assets
 // (GET /foap-logo.png); never duplicated into the frontend tree.
 const FOAP_LOGO = "/foap-logo.png";
 
-const TITLES: Record<string, string> = {
-  pending: "Access Pending",
-  suspended: "Access Suspended",
-  revoked: "Access Revoked",
-};
-
-const NOTES: Record<string, string> = {
-  pending:
-    "Your Account Has Been Authenticated, But You Don't Currently Have Access To Creative Intelligence. An Administrator Needs To Approve Your Account.",
-  suspended:
-    "Your Access To Creative Intelligence Has Been Suspended. Contact An Administrator If You Believe This Is Incorrect.",
-  revoked:
-    "Your Access To Creative Intelligence Has Been Revoked. Contact An Administrator If You Believe This Is Incorrect.",
-};
+/** Gate titles/notes render through the UI locale (§9); the who-line
+ *  stays account data, never translated. */
 
 export function AccessPending() {
   return <GateScreen gate="pending" />;
@@ -59,6 +48,9 @@ function AuthShell({ children, dense = false }: { children: React.ReactNode; den
 
 function GateScreen({ gate }: { gate: "pending" | "suspended" | "revoked" }) {
   const { me, refresh, logout } = useAuth();
+  const { t } = useLocale();
+  const titles = { pending: t("auth.gate.pending"), suspended: t("auth.gate.suspended"), revoked: t("auth.gate.revoked") };
+  const notes = { pending: t("auth.gate.pendingNote"), suspended: t("auth.gate.suspendedNote"), revoked: t("auth.gate.revokedNote") };
   const employee = me?.employee;
   const who =
     `${employee?.first_name ?? ""} ${employee?.last_name ?? ""}`.trim() ||
@@ -67,14 +59,14 @@ function GateScreen({ gate }: { gate: "pending" | "suspended" | "revoked" }) {
   return (
     <AuthShell>
       <div className="auth-card" role="alert">
-        <h1>{TITLES[gate]}</h1>
+        <h1>{titles[gate]}</h1>
         <p className="muted">{who}</p>
-        <p>{NOTES[gate]}</p>
+        <p>{notes[gate]}</p>
         <button type="button" className="auth-btn" onClick={() => void refresh()}>
-          Refresh Access
+          {t("auth.gate.refresh")}
         </button>
         <button type="button" className="auth-btn" onClick={() => void logout()}>
-          Log Out
+          {t("auth.gate.logout")}
         </button>
       </div>
     </AuthShell>
@@ -82,24 +74,25 @@ function GateScreen({ gate }: { gate: "pending" | "suspended" | "revoked" }) {
 }
 
 export function LoginPage() {
+  const { t } = useLocale();
   const params = new URLSearchParams(window.location.search);
   const authError = params.get("auth_error") ?? "";
   if (authError) window.history.replaceState(null, "", window.location.pathname);
   return (
     <AuthShell dense>
       <div className="auth-card login-card" style={{ maxWidth: 520, padding: "36px 40px 28px" }}>
-        <h1>Welcome Back</h1>
-        <p className="muted login-sub">Sign In To Your Employee Workspace.</p>
-        {authError ? <p className="muted">Sign-In Failed: {authError}</p> : null}
+        <h1>{t("auth.login.welcome")}</h1>
+        <p className="muted login-sub">{t("auth.login.sub")}</p>
+        {authError ? <p className="muted">{t("auth.login.failed", { error: authError })}</p> : null}
         <EmailSignIn />
         <div className="login-separator" aria-hidden="true">
-          <span>Or Continue With</span>
+          <span>{t("auth.login.orContinue")}</span>
         </div>
         <div className="login-providers">
           <EmployeeOAuthButtons />
         </div>
         <p className="muted login-footer">
-          <Icon name="lock" size={14} /> For Foap Employees Only.
+          <Icon name="lock" size={14} /> {t("auth.login.employeesOnly")}
         </p>
       </div>
     </AuthShell>

@@ -549,13 +549,13 @@ export function FilterPanel({ onApply, kpi = true, creative = false, trailing, a
         </div>
         {actions === "panel" ? (
           <div className="filter-actions">
-            <button type="button" className="link-teal" onClick={clearFilters}
-              style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <Icon name="reset" size={15} /> Reset Filters
-            </button>
             <button type="button" className="btn-primary"
               onClick={() => (onApply ? onApply() : undefined)}>
               Apply Filters
+            </button>
+            <button type="button" className="link-teal" onClick={clearFilters}
+              style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <Icon name="reset" size={15} /> Reset Filters
             </button>
           </div>
         ) : null}
@@ -607,13 +607,13 @@ export function FilterPanel({ onApply, kpi = true, creative = false, trailing, a
       </div>
       {actions === "panel" ? (
         <div className="filter-actions">
-          <button type="button" className="link-teal" onClick={clearFilters}
-            style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-            <Icon name="reset" size={15} /> Reset Filters
-          </button>
           <button type="button" className="btn-primary"
             onClick={() => (onApply ? onApply() : undefined)}>
             Apply Filters
+          </button>
+          <button type="button" className="link-teal" onClick={clearFilters}
+            style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <Icon name="reset" size={15} /> Reset Filters
           </button>
         </div>
       ) : null}
@@ -723,7 +723,7 @@ export function InfoTip({ label, text }: { label: string; text: string }) {
   );
 }
 
-export function Panel({ title, action, sub, icon, tint, children, style }: {
+export function Panel({ title, action, sub, icon, tint, children, style, headClassName }: {
   /** Optional: hero-style cards (§2) render no header at all. */
   title?: string; action?: React.ReactNode; sub?: string;
   icon?: string; tint?: string;
@@ -731,15 +731,18 @@ export function Panel({ title, action, sub, icon, tint, children, style }: {
   /** Optional outer-style override (e.g. flex grow inside a rail
    *  stack so row members share a bottom edge). */
   style?: React.CSSProperties;
+  /** Optional extra class on the header row (e.g. a responsive
+   *  control layout that only applies to one panel). */
+  headClassName?: string;
 }) {
   const showHead = Boolean(title || sub || icon || action);
   return (
     <section className="panel" style={style}>
       {showHead ? (
-      <div className="panel-head">
+      <div className={headClassName ? `panel-head ${headClassName}` : "panel-head"}>
         {icon ? (
           <span className="insight-ico" aria-hidden="true"
-            style={{ background: tint ?? "#E7F1FB", flex: "0 0 auto", marginRight: 2, alignSelf: "flex-start" }}>
+            style={{ background: tint ?? "var(--shell-blue-soft)", flex: "0 0 auto", marginRight: 2, alignSelf: "flex-start" }}>
             <Icon name={icon} size={20} />
           </span>
         ) : null}
@@ -762,6 +765,83 @@ export function Panel({ title, action, sub, icon, tint, children, style }: {
       ) : null}
       {children}
     </section>
+  );
+}
+
+/* Shared overflow menu (§8): a ⋯ toggle opening one small
+ * theme-aware menu. Escape/outside-click dismiss, focus returns to
+ * the toggle, arrows move between items. Callers keep a single
+ * implementation behind both the inline control and its menu item. */
+export interface OverflowItem {
+  label: string; icon?: string; disabled?: boolean; onSelect: () => void;
+}
+export function OverflowMenu({ label, items, className }: {
+  label: string; items: OverflowItem[]; className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement | null>(null);
+  const toggle = useRef<HTMLButtonElement | null>(null);
+  const list = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => {
+      if (root.current && !root.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setOpen(false);
+        toggle.current?.focus();
+      }
+    };
+    document.addEventListener("pointerdown", onDown);
+    document.addEventListener("keydown", onKey);
+    const first = list.current?.querySelector("button:not(:disabled)");
+    if (first instanceof HTMLElement) first.focus();
+    return () => {
+      document.removeEventListener("pointerdown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open ]);
+  const move = (e: React.KeyboardEvent) => {
+    const btns = list.current ? [...list.current.querySelectorAll("button:not(:disabled)")].filter((b): b is HTMLElement => b instanceof HTMLElement) : [];
+    if (!btns.length) return;
+    const i = btns.indexOf(document.activeElement as HTMLElement);
+    if (e.key === "ArrowDown") { e.preventDefault(); btns[(i + 1) % btns.length].focus(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); btns[(i - 1 + btns.length) % btns.length].focus(); }
+    else if (e.key === "Home") { e.preventDefault(); btns[0].focus(); }
+    else if (e.key === "End") { e.preventDefault(); btns[btns.length - 1].focus(); }
+  };
+  return (
+    <div className={className ? `ov-menu ${className}` : "ov-menu"} ref={root}>
+      <button
+        ref={toggle}
+        type="button"
+        className="icon-btn"
+        aria-label={label}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <Icon name="dots" size={18} />
+      </button>
+      {open ? (
+        <div className="ov-menu-list" role="menu" aria-label={label} ref={list} onKeyDown={move}>
+          {items.map((it) => (
+            <button
+              key={it.label}
+              type="button"
+              role="menuitem"
+              className="ov-menu-item"
+              disabled={it.disabled}
+              onClick={() => { setOpen(false); toggle.current?.focus(); it.onSelect(); }}
+            >
+              {it.icon ? <Icon name={it.icon} size={15} /> : null}
+              <span>{it.label}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -793,6 +873,45 @@ export function Toggle({ label, body, checked, onChange }: {
           borderRadius: "50%", background: "#fff", transition: "left .15s",
         }} />
       </button>
+    </div>
+  );
+}
+
+/** Layout-matched page loading shell (§10): header block plus a
+ *  two-column panel arrangement approximating the final page, so the
+ *  populated/error/empty state swaps in without a layout shift. The
+ *  announcement lives in an sr-only live region — no visible text. */
+export function PageSkeleton({ label, panels = 4 }: { label: string; panels?: number }) {
+  return (
+    <div role="status" aria-label={label}>
+      <span className="sr-only">{label}</span>
+      <div className="skel" style={{ height: 30, width: "32%", margin: "2px 0 8px" }} aria-hidden="true" />
+      <div className="skel" style={{ height: 15, width: "55%", marginBottom: 14 }} aria-hidden="true" />
+      <div className="cols-2-even">
+        {Array.from({ length: panels }, (_, i) => (
+          <div key={i} className="skel" style={{ height: i % 2 ? 190 : 150 }} aria-hidden="true" />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Brief nonblocking success toast (§8): auto-dismisses, announced
+ *  through role=status. Callers show it after a successful save and
+ *  return their submit control to its normal state. */
+export function Toast({ message, onClose, durationMs = 3200 }: {
+  message: string; onClose: () => void; durationMs?: number;
+}) {
+  useEffect(() => {
+    const t = window.setTimeout(onClose, durationMs);
+    return () => window.clearTimeout(t);
+  }, [onClose, durationMs, message]);
+  return (
+    <div className="toast-wrap">
+      <div className="toast" role="status">
+        <Icon name="check" size={16} />
+        <span>{message}</span>
+      </div>
     </div>
   );
 }

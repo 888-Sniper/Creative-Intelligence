@@ -255,7 +255,7 @@ export function InsightsPage() {
           <Panel title="Pinned Learnings" sub="Your most important insights, always within reach.">
             {cards.data ? (
               findings.pinned.filter(matchAxes).length ? (
-                <div style={{ background: "#E5F5F2", borderRadius: 10, padding: 10 }}>
+                <div style={{ background: "var(--shell-teal-soft)", borderRadius: 10, padding: 10 }}>
                   <div className="cards-3" style={{ gap: 10 }}>
                     {findings.pinned.filter(matchAxes).map((c) => (
                       <div className="cmp-card" key={c.creative_key} style={{ padding: 12 }}>
@@ -276,7 +276,7 @@ export function InsightsPage() {
               )
             ) : <Skeleton height={120} />}
           </Panel>
-          <Panel title={`Your Saved Insights (${savedCards.length})`}>
+          <Panel title={`Your Saved Insights (${savedCards.length})`} style={{ flex: "1 0 auto" }}>
             {conversations === null || views === null ? <Skeleton height={160} /> : (
               savedCards.length ? (
                 <div className="cards-3">
@@ -329,7 +329,7 @@ export function InsightsPage() {
                 <div>
                   {recent.map((c) => (
                     <div className="insight" key={c.id}>
-                      <span className="insight-ico" style={{ background: "#E7F1FB" }}>
+                      <span className="insight-ico" style={{ background: "var(--shell-blue-soft)" }}>
                         <Icon name="chat" size={20} />
                       </span>
                       <div>
@@ -342,13 +342,13 @@ export function InsightsPage() {
               ) : <EmptyState compact icon="clock" title="No recent activity" text="Analyst conversations will appear here." />
             )}
           </Panel>
-          <Panel title="Related Insights">
+          <Panel title="Related Insights" style={{ flex: "1 0 auto" }}>
             {cards.data ? (
               findings.rest.filter(matchAxes).length ? (
               <div>
                 {findings.rest.filter(matchAxes).slice(0, 4).map((c) => (
                   <div className="insight" key={c.creative_key}>
-                    <span className="insight-ico" style={{ background: "#E5F5F2" }}>
+                    <span className="insight-ico" style={{ background: "var(--shell-teal-soft)" }}>
                       <Icon name="spark" size={20} />
                     </span>
                     <div>

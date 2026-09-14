@@ -701,28 +701,28 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
       label: "Higher CTR",
       sub: bestHook ? `${titleCase(bestHook.key)} hooks` : "No Hook Data",
       icon: "click",
-      tint: "#E7F1FB",
+      tint: "var(--shell-blue-soft)",
     },
     {
       value: liftDisplay(roasLift),
       label: "Higher ROAS",
       sub: bestPlat ? `${platformLabel(bestPlat.key)} leading` : "No Platform Data",
       icon: "coin",
-      tint: "#E5F5EC",
+      tint: "var(--shell-green-soft)",
     },
     {
       value: kpiDisplay("mult", engagement.ready ? engagement.mult : null, emptyScope),
       label: "More Engagement",
       sub: "Top Creative Vs Average",
       icon: "users",
-      tint: "#EFEAFB",
+      tint: "var(--shell-violet-soft)",
     },
     {
       value: bestLength ? bestLength.label.replace("–", "-") : "—",
       label: "Optimal Video Length",
       sub: bestLength?.ctr != null ? `${bestLength.ctr.toFixed(1)}% CTR in band` : "No Duration Data",
       icon: "bars",
-      tint: "#FBF3E2",
+      tint: "var(--shell-amber-soft)",
     },
   ];
 
@@ -1235,7 +1235,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
       </div>
 
       <div className="section-gap" />
-      <Panel title="Top Creatives" sub="From this analysis — ranked by ROAS, then CTR.">
+      <Panel title="Top Creatives" sub="Top creatives from this analysis ranked by ROAS, then CTR.">
         {creatives.data === null ? <Skeleton height={180} /> : topCreatives.length ? (
           <div className="creative-cards-4">
             {topCreatives.map((c) => (

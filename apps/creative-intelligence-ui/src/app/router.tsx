@@ -13,7 +13,6 @@ import { InsightsPage } from "@/pages/InsightsPage";
 import { WorkbookPage } from "@/pages/WorkbookPage";
 import { AskPage } from "@/pages/AskPage";
 import { ReportsPage } from "@/pages/ReportsPage";
-import { ProfilePage } from "@/profile/ProfilePage";
 import { AdminEmployeesPage } from "@/admin/AdminEmployeesPage";
 import { useAuth } from "@/auth/AuthProvider";
 import type { ReactNode } from "react";
@@ -65,7 +64,7 @@ export const router = createBrowserRouter([
       { path: "reports", element: <ReportsPage /> },
       { path: "workbook", element: <WorkbookPage /> },
       { path: "ask", element: <AskPage /> },
-      { path: "profile", element: <ProfilePage /> },
+      { path: "profile", element: <Navigate to="/settings" replace /> },
       { path: "settings", element: <SettingsPage /> },
       {
         path: "admin",

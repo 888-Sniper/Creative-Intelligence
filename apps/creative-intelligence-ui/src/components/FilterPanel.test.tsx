@@ -79,4 +79,19 @@ describe("FilterPanel", () => {
     const creator = screen.getByLabelText("Creator vs Branded") as HTMLSelectElement;
     expect([...creator.options].map((o) => o.value)).toEqual(["", "creator", "branded", "hybrid"]);
   });
+
+  it("orders Apply Filters before Reset Filters in the DOM (§9)", () => {
+    render(
+      <FilterProvider>
+        <FilterPanel />
+      </FilterProvider>,
+    );
+    const buttons = screen.getAllByRole("button");
+    const names = buttons.map((b) => b.textContent?.trim());
+    const apply = names.indexOf("Apply Filters");
+    const reset = names.indexOf("Reset Filters");
+    expect(apply).toBeGreaterThanOrEqual(0);
+    expect(reset).toBeGreaterThanOrEqual(0);
+    expect(apply).toBeLessThan(reset);
+  });
 });

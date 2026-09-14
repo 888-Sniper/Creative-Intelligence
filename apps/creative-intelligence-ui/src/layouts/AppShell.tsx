@@ -21,7 +21,6 @@ const NAV = [
 
 const NAV_ACCOUNT = [
   { to: "/admin", label: "Admin", icon: "users", admin: true },
-  { to: "/profile", label: "Profile", icon: "user" },
   { to: "/settings", label: "Settings", icon: "gear" },
 ] as const;
 

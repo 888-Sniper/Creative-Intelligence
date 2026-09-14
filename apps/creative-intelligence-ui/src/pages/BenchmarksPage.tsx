@@ -8,6 +8,7 @@ import { LoadingButton } from "@/components/LoadingButton";
 import {
   EmptyState,
   MetaSelect,
+  OverflowMenu,
   PageHeader,
   Panel,
   Skeleton,
@@ -260,12 +261,12 @@ export function BenchmarksPage() {
           </div>
           <div className="field" style={{ gridColumn: "1 / -1" }}>
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+              <button type="button" className="btn-primary" onClick={() => setApplied((n) => n + 1)}>
+                Apply Filters
+              </button>
               <button type="button" className="link-teal" onClick={clearFilters}
                 style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                 <Icon name="reset" size={15} /> Reset Filters
-              </button>
-              <button type="button" className="btn-primary" onClick={() => setApplied((n) => n + 1)}>
-                Apply Filters
               </button>
             </div>
           </div>
@@ -282,7 +283,7 @@ export function BenchmarksPage() {
                   {views.slice(0, 4).map((v) => (
                     <button key={v.id} type="button" className="cmp-card" onClick={() => applyView(v)}
                       style={{ textAlign: "left", cursor: "pointer", padding: 12 }}>
-                      <span className="insight-ico" style={{ background: "#E5F5F2", marginBottom: 6 }}>
+                      <span className="insight-ico" style={{ background: "var(--shell-teal-soft)", marginBottom: 6 }}>
                         <Icon name="bookmark" size={18} />
                       </span>
                       <strong style={{ display: "block", fontSize: 13 }}>{v.name}</strong>
@@ -300,18 +301,26 @@ export function BenchmarksPage() {
             title="Benchmark Results"
             sub="Benchmarks From Current Campaign Data"
             style={{ flex: "1 0 auto" }}
+            headClassName="bench-head"
             action={(
-              <div className="panel-controls">
-                <label htmlFor="b-axis" className="panel-sub" style={{ margin: 0 }}>Group By</label>
-                <select id="b-axis" aria-label="Group By" value={axis}
-                  onChange={(e) => { setAxis(e.target.value as Axis); setSelected(new Set()); }}
-                  style={{ background: "var(--shell-card)", border: "1px solid var(--shell-line)", borderRadius: 8, padding: "7px 26px 7px 10px", fontSize: 12.5, color: "var(--shell-navy)", fontFamily: "inherit" }}>
-                  {AXES.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
-                </select>
-                <LoadingButton type="button" className="btn-outline" loading={exportBusy} loadingLabel="Exporting…" spinnerClass="spinner dark" disabled={exportBusy} onClick={() => void onExport()}>
-                  <Icon name="download" size={15} /> Export
-                </LoadingButton>
-              </div>
+              <>
+                <OverflowMenu
+                  className="hide-desktop"
+                  label="Benchmark Results actions"
+                  items={[{ label: exportBusy ? "Exporting…" : "Export", icon: "download", disabled: exportBusy, onSelect: () => void onExport() }]}
+                />
+                <div className="panel-controls bench-controls">
+                  <label htmlFor="b-axis" className="panel-sub" style={{ margin: 0 }}>Group By</label>
+                  <select id="b-axis" aria-label="Group By" value={axis}
+                    onChange={(e) => { setAxis(e.target.value as Axis); setSelected(new Set()); }}
+                    style={{ background: "var(--shell-card)", border: "1px solid var(--shell-line)", borderRadius: 8, padding: "7px 26px 7px 10px", fontSize: 12.5, color: "var(--shell-navy)", fontFamily: "inherit" }}>
+                    {AXES.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
+                  </select>
+                  <LoadingButton type="button" className="btn-outline hide-mobile" loading={exportBusy} loadingLabel="Exporting…" spinnerClass="spinner dark" disabled={exportBusy} onClick={() => void onExport()}>
+                    <Icon name="download" size={15} /> Export
+                  </LoadingButton>
+                </div>
+              </>
             )}
           >
             {benchmarks.data ? (
@@ -384,7 +393,7 @@ export function BenchmarksPage() {
         <div className="rail-stack">
           <Panel title="Benchmark Insights" sub="Understand the data behind these benchmarks.">
             <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 10 }}>
-              <span className="insight-ico" style={{ background: "#E5F5F2" }}>
+              <span className="insight-ico" style={{ background: "var(--shell-teal-soft)" }}>
                 <Icon name="bars" size={22} />
               </span>
               <div>

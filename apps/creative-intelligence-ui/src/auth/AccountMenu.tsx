@@ -108,8 +108,8 @@ export function AccountMenu() {
       </button>
       {expanded ? (
         <div id="account-menu-body">
-          <Link to="/profile" className="link-btn" onClick={() => setExpanded(false)}>
-            Profile
+          <Link to="/settings" className="link-btn" onClick={() => setExpanded(false)}>
+            Settings
           </Link>
           {accounts === null ? (
             <p className="muted">Loading Accounts…</p>

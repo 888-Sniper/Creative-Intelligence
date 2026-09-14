@@ -72,7 +72,7 @@ export function GoogleDriveCard() {
 
   return (
     <div className="insight" id="integration-google">
-      <span className="insight-ico" style={{ background: "#E7F1FB" }}>
+      <span className="insight-ico" style={{ background: "var(--shell-blue-soft)" }}>
         <Icon name="info" size={18} />
       </span>
       <div style={{ flex: 1 }}>

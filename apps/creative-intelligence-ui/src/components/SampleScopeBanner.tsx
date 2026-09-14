@@ -82,7 +82,7 @@ export function SampleScopeBanner() {
   return (
     <div role="status" aria-label="Sample Data Scope"
       style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap",
-        background: "#EAF6F1", border: "1px solid var(--shell-line)",
+        background: "var(--shell-green-soft)", border: "1px solid var(--shell-line)",
         borderRadius: 10, padding: "8px 12px", marginBottom: 12 }}>
       <span className="badge-demo">Sample Data</span>
       <span className="panel-sub" style={{ margin: 0 }}>

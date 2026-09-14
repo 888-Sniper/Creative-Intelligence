@@ -197,7 +197,7 @@ test.describe("full demo visuals", () => {
       ["d-benchmarks", "/benchmarks", "Benchmarks"],
       ["d-analyst", "/analyst", "Your Creative Partner"],
       ["d-admin", "/admin", "Admin"],
-      ["d-profile", "/profile", "Profile"],
+      ["d-profile-redirect", "/profile", "Settings"],
       ["d-settings", "/settings", "Settings"],
     ];
     for (const [shot, path, heading] of routes) {

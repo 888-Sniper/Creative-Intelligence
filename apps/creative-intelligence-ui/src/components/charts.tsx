@@ -160,7 +160,7 @@ export function RetentionCurve({ points, callout, height = 190 }: {
           </text>
         </g>
       ))}
-      <path d={area} fill="#E5F5F2" opacity={0.8} />
+      <path d={area} fill="var(--shell-teal-soft)" opacity={0.8} />
       <path d={line} fill="none" stroke="#0A9183" strokeWidth={2.2}
         strokeLinejoin="round" strokeLinecap="round" />
       {points.length > 1 ? (

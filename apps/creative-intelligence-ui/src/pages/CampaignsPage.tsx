@@ -204,7 +204,7 @@ export function CampaignsPage() {
       const avg = plats.reduce((t, p) => t + (p.roas ?? 0), 0) / plats.length;
       const d = rate(plats[0].roas ?? 0, avg);
       items.push({
-        icon: "trend", tint: "#E5F5F2",
+        icon: "trend", tint: "var(--shell-teal-soft)",
         title: "Scale High-Performing Campaigns",
         body: `${platformLabel(plats[0].key)} campaigns average ${(plats[0].roas ?? 0).toFixed(1)}x ROAS${d != null ? `, ${d >= 0 ? "+" : ""}${d.toFixed(0)}% above the platform average` : ""}. Consider increasing budget allocation.`,
         action: "View Campaigns", href: "/campaigns",
@@ -212,7 +212,7 @@ export function CampaignsPage() {
     }
     if (underperformers.length) {
       items.push({
-        icon: "users", tint: "#E5F5F2",
+        icon: "users", tint: "var(--shell-teal-soft)",
         title: "Improve Underperforming Creatives",
         body: `${underperformers.length} campaign${underperformers.length === 1 ? " is" : "s are"} underperforming on CTR versus the ${avgCtr == null ? "" : `${avgCtr.toFixed(1)}% `}scope average. Refresh creative assets to improve engagement.`,
         action: "View Recommendations", href: "/creatives",
@@ -224,7 +224,7 @@ export function CampaignsPage() {
       .sort((a, b) => (b.ctr ?? 0) - (a.ctr ?? 0));
     if (hookRows[0]?.ctr != null) {
       items.push({
-        icon: "spark", tint: "#E7F1FB",
+        icon: "spark", tint: "var(--shell-blue-soft)",
         title: "Optimize for Video Content",
         body: `${hookRows[0].key.replace(/_/g, " ")} openings lead the current scope at ${(hookRows[0].ctr ?? 0).toFixed(1)}% CTR. Lead with the strongest hook in the first 3 seconds.`,
         action: "See Insights", href: "/insights",
@@ -235,7 +235,7 @@ export function CampaignsPage() {
       .sort((a, b) => (b.roas ?? 0) - (a.roas ?? 0))[0];
     if (topRoas?.roas != null) {
       items.push({
-        icon: "target", tint: "#E5F5F2",
+        icon: "target", tint: "var(--shell-teal-soft)",
         title: "Refine Audience Targeting",
         body: `${topRoas.name} leads the current scope at ${topRoas.roas.toFixed(1)}x ROAS. Mirror its audience and hook formula in the next flight.`,
         action: "View Details", href: "/compare",
@@ -372,12 +372,12 @@ export function CampaignsPage() {
         sub="Plan, monitor, and optimize your creative campaigns with real-time insights."
         actions={(
           <>
+            <button type="button" className="btn-primary" onClick={() => setApplied((n) => n + 1)}>
+              Apply Filters
+            </button>
             <button type="button" className="link-teal" onClick={resetAll}
               style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
               <Icon name="reset" size={15} /> Reset Filters
-            </button>
-            <button type="button" className="btn-primary" onClick={() => setApplied((n) => n + 1)}>
-              Apply Filters
             </button>
           </>
         )}
@@ -507,7 +507,7 @@ export function CampaignsPage() {
           {compare ? (
             <div className="kpi-grid">
               <div className="kpi-card">
-                <span className="kpi-ico" style={{ background: "#E4F4ED", color: "#0E7C5B" }}>
+                <span className="kpi-ico" style={{ background: "var(--shell-green-soft)", color: "var(--glyph-green)" }}>
                   <Icon name="users" size={20} />
                 </span>
                 <div className="kpi-body">
@@ -516,11 +516,11 @@ export function CampaignsPage() {
                 </div>
               </div>
               <KpiCard label="Total Impressions" display={kpiDisplay("count", compare.metrics.impressions?.current, compare.current_n_ads === 0)}
-                icon="megaphone" tint="#E5F5F2" metricLabel="Impressions" compare={compare} />
+                icon="megaphone" tint="var(--shell-teal-soft)" metricLabel="Impressions" compare={compare} />
               <KpiCard label="Total Clicks" display={kpiDisplay("count", compare.metrics.clicks?.current, compare.current_n_ads === 0)}
-                icon="click" tint="#E7F1FB" metricLabel="Clicks" compare={compare} />
+                icon="click" tint="var(--shell-blue-soft)" metricLabel="Clicks" compare={compare} />
               <KpiCard label="Average ROAS" display={kpiDisplay("mult", compare.metrics.roas?.current, compare.current_n_ads === 0)}
-                icon="coin" tint="#E4F4ED" metricLabel="ROAS" compare={compare}
+                icon="coin" tint="var(--shell-green-soft)" metricLabel="ROAS" compare={compare}
                 note={kpiPlaceholderNote("mult", compare.metrics.roas?.current, compare.current_n_ads === 0)} />
             </div>
           ) : compareError ? (
@@ -536,8 +536,8 @@ export function CampaignsPage() {
                 <TrendChart
                   height={200}
                   series={[
-                    { label: "Impressions", color: "#0A9183", soft: "#E5F5F2", points: daily.map((p) => num(p.impressions)) },
-                    { label: "Clicks", color: "#1D3A8F", soft: "#E4EAF7", points: daily.map((p) => num(p.clicks)), axis: "right" },
+                    { label: "Impressions", color: "var(--glyph-teal)", soft: "#E5F5F2", points: daily.map((p) => num(p.impressions)) },
+                    { label: "Clicks", color: "var(--glyph-navy)", soft: "#E4EAF7", points: daily.map((p) => num(p.clicks)), axis: "right" },
                   ]}
                   labels={daily.map((p) => p.date.slice(5))}
                 />

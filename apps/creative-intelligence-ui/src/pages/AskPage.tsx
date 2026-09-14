@@ -252,7 +252,7 @@ export function AskPage() {
             </div>
           </section>
           {asked ? (
-            <Panel title={asked} sub="Today">
+            <Panel title={asked} sub="Today" style={{ flex: "1 0 auto" }}>
               {busy ? <Skeleton height={120} /> : error ? (
                 <EmptyState text={error} />
               ) : answer ? (
@@ -267,7 +267,7 @@ export function AskPage() {
                           display={k.display}
                           note={k.note}
                           icon={k.metric === "spend" ? "coin" : k.metric === "conversions" ? "click" : k.metric === "cpa" ? "users" : "bars"}
-                          tint="#E7F1FB"
+                          tint="var(--shell-blue-soft)"
                           metricLabel={k.metric === "roas" ? "ROAS" : k.metric === "cpa" ? "CPA" : k.label.replace("Average ", "").replace("Total ", "")}
                           compare={compare}
                         />
@@ -279,7 +279,7 @@ export function AskPage() {
                   <Panel title="Revenue Trend">
                     {daily ? (
                       <TrendChart
-                        series={[{ label: "Revenue", color: "#0A9183", soft: "#E5F5F2", points: roi.values }]}
+                        series={[{ label: "Revenue", color: "var(--glyph-teal)", soft: "#E5F5F2", points: roi.values }]}
                         labels={roi.labels}
                       />
                     ) : <Skeleton height={200} />}
@@ -323,7 +323,7 @@ export function AskPage() {
               ) : null}
             </Panel>
           ) : (
-            <Panel title="Ask a Question to Begin">
+            <Panel title="Ask a Question to Begin" style={{ flex: "1 0 auto" }}>
               <EmptyState
                 icon="chat"
                 title="Ask Your First Question"
@@ -344,14 +344,14 @@ export function AskPage() {
               ))}
             </div>
           </Panel>
-          <Panel title="Recent Chats" action={<Link className="link-teal" to="/analyst">View All</Link>}>
+          <Panel title="Recent Chats" action={<Link className="link-teal" to="/analyst">View All</Link>} style={{ flex: "1 0 auto" }}>
             {chats === null ? <Skeleton height={120} /> : (
               chats.length ? (
                 <div>
                   {chats.slice(0, 5).map((c) => (
                     <Link key={c.id} to={`/analyst?conversation=${encodeURIComponent(c.id)}`}
                       style={{ display: "flex", alignItems: "center", gap: 9, padding: "7px 0", borderBottom: "1px solid var(--shell-line)", textDecoration: "none" }}>
-                      <span className="insight-ico" style={{ background: "#E7F1FB", width: 30, height: 30, borderRadius: 9 }}>
+                      <span className="insight-ico" style={{ background: "var(--shell-blue-soft)", width: 30, height: 30, borderRadius: 9 }}>
                         <Icon name="chat" size={15} />
                       </span>
                       <div style={{ minWidth: 0 }}>

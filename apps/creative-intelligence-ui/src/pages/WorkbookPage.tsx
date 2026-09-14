@@ -1,10 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Icon } from "@/components/icons";
 import { LoadingButton } from "@/components/LoadingButton";
 import {
   CreativeThumb,
   EmptyState,
-  PageHeader,
   Panel,
   Skeleton,
   fmtCell,
@@ -61,8 +60,8 @@ function num(v: unknown): number {
  * fullscreen dialog. Blocks hide/show with the selected modules:
  * Campaign Summary owns the KPI block, Creative Breakdown owns the
  * creative table. */
-function PreviewDoc({ name, today, modules, kpis, previewKpis, top }: {
-  name: string | null | undefined; today: string; modules: string[]; kpis: string[];
+function PreviewDoc({ name, today, modules, previewKpis, top }: {
+  name: string | null | undefined; today: string; modules: string[];
   previewKpis: { label: string; value: string }[];
   top: { creative_key: string; name?: string | null; metrics?: Record<string, number | null> | null;
     annotation?: { duration_s?: number | null } | null; duration_s?: number | null }[];
@@ -73,7 +72,7 @@ function PreviewDoc({ name, today, modules, kpis, previewKpis, top }: {
     <div className="wb-doc">
       <div className="wb-doc-head">
         <img src={FOAP_LOGO} alt="Foap" style={{ height: 22, width: "auto" }} />
-        <div style={{ minWidth: 0 }}>
+        <div style={{ minWidth: 0, marginLeft: 7 }}>
           <strong style={{ display: "block", fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
             {name || "Untitled Workbook"}
           </strong>
@@ -84,17 +83,12 @@ function PreviewDoc({ name, today, modules, kpis, previewKpis, top }: {
         {showSummary ? (
           previewKpis.length ? (
             <div className="wb-kpis-auto">
-              {previewKpis.slice(0, 4).map((k) => (
+              {previewKpis.map((k) => (
                 <div key={k.label} style={{ background: "var(--shell-bg)", border: "1px solid var(--shell-line)", borderRadius: 8, padding: "8px 10px" }}>
                   <strong style={{ display: "block", fontSize: 15, fontVariantNumeric: "tabular-nums" }}>{k.value}</strong>
                   <span className="panel-sub" style={{ fontSize: 11 }}>{k.label}</span>
                 </div>
               ))}
-              {previewKpis.length > 4 ? (
-                <div style={{ background: "transparent", border: "1px dashed var(--shell-line)", borderRadius: 8, padding: "8px 10px", display: "flex", alignItems: "center" }}>
-                  <span className="panel-sub" style={{ fontSize: 11 }}>+{previewKpis.length - 4} more in the finished report</span>
-                </div>
-              ) : null}
             </div>
           ) : <EmptyState text="Select KPIs to preview the summary block." />
         ) : null}
@@ -123,14 +117,11 @@ function PreviewDoc({ name, today, modules, kpis, previewKpis, top }: {
                 </tbody>
               </table>
             </div>
-          ) : <EmptyState text="No creatives in the current scope." />
+          ) : null
         ) : null}
         {!showSummary && !showBreakdown ? (
           <EmptyState text="Enable Campaign Summary or Creative Breakdown to preview workbook content." />
         ) : null}
-        <p className="panel-sub" style={{ marginTop: 8, fontSize: 11.5 }}>
-          Modules: {modules.length ? modules.map((id) => MODULES.find((m) => m.id === id)?.title ?? id).join(", ") : "none selected"} · KPIs: {kpis.join(", ") || "none"}
-        </p>
       </div>
     </div>
   );
@@ -255,17 +246,25 @@ export function WorkbookPage() {
 
   return (
     <>
-      <PageHeader
-        title="Blank Workbook"
-        sub="Create a custom report workbook to analyze, compare, and share your creative performance insights."
-        actions={(
-          <button type="button" className="link-teal" aria-expanded={learnOpen}
-            style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
-            onClick={() => setLearnOpen((v) => !v)}>
-            <Icon name="info" size={16} /> Learn About Workbooks
-          </button>
-        )}
-      />
+      <div className="page-head">
+        <div style={{ minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <h1 style={{ margin: 0 }}>Blank Workbook</h1>
+            <button
+              type="button"
+              className="icon-btn"
+              style={{ width: 26, height: 26 }}
+              aria-label="About workbooks"
+              title="About workbooks"
+              aria-expanded={learnOpen}
+              onClick={() => setLearnOpen((v) => !v)}
+            >
+              <Icon name="info" size={15} />
+            </button>
+          </div>
+          <p className="sub">Create a custom report workbook to analyze, compare, and share your creative performance insights.</p>
+        </div>
+      </div>
       {learnOpen ? (
         <div className="panel" style={{ marginBottom: 12 }}>
           <p className="panel-sub" style={{ margin: 0 }}>
@@ -284,18 +283,18 @@ export function WorkbookPage() {
               <button
                 key={m.id}
                 type="button"
-                className="cmp-card"
+                className="cmp-card mod-card"
                 aria-pressed={on}
                 onClick={() => toggleModule(m.id)}
-                style={{ textAlign: "left", cursor: "pointer", padding: 12, overflow: "hidden", background: m.tint, borderColor: on ? "var(--shell-teal)" : "var(--shell-line)", opacity: on ? 1 : 0.6 }}
+                style={{ textAlign: "left", cursor: "pointer", padding: 12, overflow: "hidden", borderColor: on ? "var(--shell-teal)" : "var(--shell-line)", opacity: on ? 1 : 0.6, "--card-tint": m.tint } as CSSProperties}
               >
                 <span style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
                   <input type="checkbox" checked={on} readOnly aria-hidden="true" tabIndex={-1} style={{ marginTop: 3 }} />
-                  <span style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 42, height: 42, borderRadius: 12, background: "rgba(255,255,255,.75)", flex: "0 0 auto" }}>
+                  <span className="mod-ico" aria-hidden="true">
                     <Icon name={m.icon} size={22} />
                   </span>
                   <span style={{ minWidth: 0 }}>
-                    <strong style={{ display: "block", fontSize: 13 }}>{m.title}</strong>
+                    <strong className="mod-title">{m.title}</strong>
                     <span className="panel-sub" style={{ fontSize: 12 }}>{m.body}</span>
                   </span>
                 </span>
@@ -339,13 +338,19 @@ export function WorkbookPage() {
         <Panel
           title="3. Workbook Preview"
           action={(
-            <button type="button" className="link-teal" onClick={() => setFullScreen(true)}>
-              ⛶ Full Screen
+            <button
+              type="button"
+              className="icon-btn"
+              aria-label="Full screen"
+              title="Full screen"
+              onClick={() => setFullScreen(true)}
+            >
+              <Icon name="expand" size={18} />
             </button>
           )}
         >
           {compare && creatives.data ? (
-            <PreviewDoc name={name} today={today} modules={modules} kpis={kpis}
+            <PreviewDoc name={name} today={today} modules={modules}
               previewKpis={previewKpis} top={top} />
           ) : <Skeleton height={280} />}
         </Panel>
@@ -355,17 +360,17 @@ export function WorkbookPage() {
               <button
                 key={t.id}
                 type="button"
-                className="cmp-card"
+                className="cmp-card mod-card"
                 aria-pressed={template === t.id}
                 onClick={() => applyTemplate(t.id)}
-                style={{ textAlign: "left", cursor: "pointer", padding: "10px 12px", borderColor: template === t.id ? "var(--shell-teal)" : undefined }}
+                style={{ textAlign: "left", cursor: "pointer", padding: "10px 12px", borderColor: template === t.id ? "var(--shell-teal)" : undefined, "--tile-tint": t.tint } as CSSProperties}
               >
                 <span style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-                  <span className="insight-ico" aria-hidden="true" style={{ background: t.tint, flex: "0 0 auto" }}>
+                  <span className="mod-ico" aria-hidden="true">
                     <Icon name={t.icon} size={18} />
                   </span>
                   <span>
-                    <strong style={{ display: "block", fontSize: 13 }}>{t.title}</strong>
+                    <strong className="mod-title">{t.title}</strong>
                     <span className="panel-sub" style={{ fontSize: 12 }}>{t.body}</span>
                   </span>
                 </span>
@@ -374,8 +379,7 @@ export function WorkbookPage() {
           </div>
         </Panel>
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 14, padding: "8px 4px", borderTop: "1px solid var(--shell-line)" }}>
-        <strong style={{ fontSize: 13.5 }}>Finish Your Workbook</strong>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 14, padding: "10px 4px", borderTop: "1px solid var(--shell-line)", position: "sticky", bottom: 0, background: "var(--shell-bg)", zIndex: 5 }}>
         {status ? <span className="panel-sub" role="status" style={{ margin: 0, flex: "1 1 auto", minWidth: 200 }}>{status}</span> : <span style={{ flex: "1 1 auto" }} />}
         <button type="button" className="btn-outline" onClick={() => applyTemplate(template)}>
           <Icon name="report" size={16} /> Duplicate from Template
@@ -392,12 +396,18 @@ export function WorkbookPage() {
             <div className="modal-head">
               <strong style={{ fontSize: 14 }}>{name || "Untitled Workbook"}</strong>
               <span style={{ flex: "1 1 auto" }} />
-              <button type="button" className="btn-outline" onClick={() => setFullScreen(false)}>
-                Close
+              <button
+                type="button"
+                className="icon-btn"
+                aria-label="Exit full screen"
+                title="Exit full screen"
+                onClick={() => setFullScreen(false)}
+              >
+                <Icon name="compress" size={18} />
               </button>
             </div>
             {compare && creatives.data ? (
-              <PreviewDoc name={name} today={today} modules={modules} kpis={kpis}
+              <PreviewDoc name={name} today={today} modules={modules}
                 previewKpis={previewKpis} top={top} />
             ) : <Skeleton height={280} />}
           </div>

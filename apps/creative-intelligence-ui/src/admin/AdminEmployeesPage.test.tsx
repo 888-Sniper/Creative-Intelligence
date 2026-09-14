@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { AdminEmployeesPage, friendlyDate } from "@/admin/AdminEmployeesPage";
 
 interface Call {
@@ -158,10 +158,19 @@ describe("AdminEmployeesPage", () => {
     expect(screen.getByRole("button", { name: "Approve" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Suspend" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Reactivate" })).toBeDefined();
-    // Revoked rows offer no Revoke action; every other row does.
-    expect(screen.getAllByRole("button", { name: "Revoke" })).toHaveLength(3);
-    expect(screen.getByRole("button", { name: "Make Employee" })).toBeDefined();
-    expect(screen.getAllByRole("button", { name: "Make Admin" })).toHaveLength(3);
+    // Row actions live behind one accessible More Actions menu per row.
+    const toggles = screen.getAllByRole("button", { name: /More Actions For/ });
+    expect(toggles).toHaveLength(4);
+    fireEvent.click(toggles[0]);
+    expect(screen.getByRole("menuitem", { name: "Revoke" })).toBeDefined();
+    expect(screen.getByRole("menuitem", { name: "Make Admin" })).toBeDefined();
+    expect(screen.getByRole("menuitem", { name: "Invalidate Sessions" })).toBeDefined();
+    fireEvent.keyDown(document, { key: "Escape" });
+    // Revoked rows offer no Revoke action.
+    fireEvent.click(toggles[3]);
+    expect(screen.queryByRole("menuitem", { name: "Revoke" })).toBeNull();
+    expect(screen.getByRole("menuitem", { name: "Make Admin" })).toBeDefined();
+    fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.getByText("Last Active")).toBeDefined();
     expect(screen.getByText("Team")).toBeDefined();
     // No Approval column: access state lives in Status only.
@@ -170,9 +179,9 @@ describe("AdminEmployeesPage", () => {
     expect(screen.getByText(/Sep 1, 2026/)).toBeDefined();
     expect(screen.queryByText("2026-09-01")).toBeNull();
     expect(screen.getByText("Never Signed In")).toBeDefined();
-    expect(screen.getByText("Audit Trail")).toBeDefined();
+    expect(screen.getByRole("table", { name: "Workspace Activity" })).toBeDefined();
     expect(screen.getByText("Employee Approved")).toBeDefined();
-    expect(screen.getByText("pending → active")).toBeDefined();
+    expect(screen.getByText("Pending → Active")).toBeDefined();
   });
 
   it("shows a loading state before data arrives", () => {
@@ -220,14 +229,16 @@ describe("AdminEmployeesPage", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Approve" })).toBeDefined();
     });
-    const revoke = screen.getAllByRole("button", { name: "Revoke" })[0];
-    fireEvent.click(revoke);
+    const toggle = screen.getByRole("button", { name: "More Actions For pip@foap.test" });
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Revoke" }));
     expect(window.confirm).toHaveBeenCalledWith(
       "Revoke This Employee's Access? Their Sessions Stop Working Immediately.",
     );
     expect(calls.some((c) => c.method === "POST")).toBe(false);
     stubConfirm(true);
-    fireEvent.click(revoke);
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Revoke" }));
     await waitFor(() => {
       expect(
         calls.some(
@@ -258,7 +269,8 @@ describe("AdminEmployeesPage", () => {
       ).toBe(true);
     });
     stubConfirm(false);
-    fireEvent.click(screen.getByRole("button", { name: "Make Employee" }));
+    fireEvent.click(screen.getByRole("button", { name: "More Actions For ada@foap.test" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Make Employee" }));
     expect(window.confirm).toHaveBeenCalledWith(
       "Demote This Admin To Employee? They Lose Admin Access Immediately.",
     );
@@ -277,15 +289,27 @@ describe("AdminEmployeesPage", () => {
       expect(screen.getByRole("button", { name: "Approve" })).toBeDefined();
     });
     // The permanent Add Employee panel is gone: inviting happens in a modal.
-    expect(screen.queryByPlaceholderText("email")).toBeNull();
+    expect(screen.queryByPlaceholderText("Email Address")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Add Employee" }));
-    fireEvent.change(screen.getByPlaceholderText("email"), {
+    const dialog = screen.getByRole("dialog", { name: "Add Employee" });
+    // Field order: First Name, Last Name, Email Address, Role.
+    const fields = within(dialog).getAllByRole("textbox");
+    expect(fields.map((f) => f.getAttribute("placeholder"))).toEqual([
+      "First Name",
+      "Last Name",
+      "Email Address",
+    ]);
+    // X close control shares the title row.
+    expect(
+      within(dialog).getByRole("button", { name: "Close Add Employee dialog" }),
+    ).toBeDefined();
+    fireEvent.change(screen.getByPlaceholderText("Email Address"), {
       target: { value: "new@foap.test" },
     });
     fireEvent.change(screen.getByLabelText("New Employee Role"), {
       target: { value: "employee" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Add (Active)" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Add Employee" }));
     await waitFor(() => {
       expect(screen.getByText("Employee Added As Active.")).toBeDefined();
     });
@@ -298,6 +322,20 @@ describe("AdminEmployeesPage", () => {
     });
   });
 
+  it("groups Admin actions two-above-one in DOM order (§1)", async () => {
+    setupFetch();
+    render(<AdminEmployeesPage />);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Approve" })).toBeDefined();
+    });
+    const wrap = document.querySelector(".actions-2-1");
+    expect(wrap).not.toBeNull();
+    const labels = [...wrap!.querySelectorAll(":scope > button")].map((b) =>
+      b.textContent?.trim(),
+    );
+    expect(labels).toEqual(["Export Access Report", "Create Team", "Add Employee"]);
+  });
+
   it("confirms before invalidating sessions and reports the count", async () => {
     const calls = setupFetch({ revoked: 2 });
     stubConfirm(true);
@@ -305,9 +343,8 @@ describe("AdminEmployeesPage", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Suspend" })).toBeDefined();
     });
-    fireEvent.click(
-      screen.getAllByRole("button", { name: "Invalidate Sessions" })[1],
-    );
+    fireEvent.click(screen.getByRole("button", { name: "More Actions For ada@foap.test" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Invalidate Sessions" }));
     expect(window.confirm).toHaveBeenCalledWith(
       "Invalidate All Sessions For This Employee? They Are Signed Out Everywhere Immediately.",
     );

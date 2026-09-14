@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import datetime
 import hashlib
+import re
 import secrets
 import uuid
 
@@ -115,8 +116,42 @@ class ProfileUpdate(BaseModel):
     avatar_url: str | None = None
 
 
+_EMP_NO_RE = re.compile(r"EMP-(\d+)")
+
+
+def _assign_employee_no(db: Session, emp: Employee, attempts: int = 25) -> str:
+    """Give a new employee the next free EMP-NNN display number.
+
+    Monotonic from the highest existing number — never from a live
+    count, so deletions leave gaps instead of reusing numbers, and
+    status changes never renumber. A UNIQUE index plus bounded retry
+    keeps concurrent creations from colliding: the loser rolls back
+    its flush and reads the new maximum.
+    """
+    for _ in range(attempts):
+        top = 0
+        for (raw,) in db.execute(select(Employee.emp_no)).all():
+            m = _EMP_NO_RE.fullmatch((raw or "").strip().upper())
+            if m:
+                top = max(top, int(m.group(1)))
+        emp.emp_no = "EMP-%03d" % (top + 1)
+        try:
+            db.flush()
+            return emp.emp_no
+        except IntegrityError as exc:
+            # Only number collisions retry: any other constraint
+            # (e.g. a duplicate email racing us) belongs to the caller.
+            detail = str(exc.orig or exc)
+            if "employees.emp_no" not in detail and "employees_emp_no" not in detail:
+                raise
+            db.rollback()
+            db.add(emp)
+    raise StoreError("Could not assign an employee number.")
+
+
 class PublicEmployee(BaseModel):
     id: str = ""
+    employee_no: str = ""
     email: str = ""
     first_name: str = ""
     last_name: str = ""
@@ -167,7 +202,7 @@ def public_employee(emp: Employee | None) -> PublicEmployee | None:
     if emp is None:
         return None
     return PublicEmployee(
-        id=emp.id, email=emp.email, first_name=emp.first_name,
+        id=emp.id, employee_no=emp.emp_no or "", email=emp.email, first_name=emp.first_name,
         last_name=emp.last_name, avatar_url=emp.avatar_url,
         provider=emp.provider or "", role=emp.role,
         status=emp.status, created_at=emp.created_at,
@@ -234,6 +269,7 @@ def ensure_identity(db: Session, identity: dict, settings=None) -> tuple[Employe
             approved_by="bootstrap" if bootstrapped else "",
             last_login_at="", updated_at=now)
         db.add(emp)
+        _assign_employee_no(db, emp)
         try:
             db.flush()
         except IntegrityError as exc:
@@ -785,6 +821,7 @@ def admin_create(db: Session, admin_id: str, email: str, first_name: str = "",
         status="active", created_at=now, approved_at=now,
         approved_by=admin_id, last_login_at="", updated_at=now)
     db.add(emp)
+    _assign_employee_no(db, emp)
     db.flush()
     _audit(db, emp.id, admin_id, "EMPLOYEE_CREATED", "", "%s/active" % role)
     db.commit()

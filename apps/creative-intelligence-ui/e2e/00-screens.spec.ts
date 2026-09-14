@@ -38,7 +38,7 @@ const ROUTES: Route[] = [
   ["10-ask", "/ask", "Ask The Data"],
   ["11-analyst", "/analyst", "Your Creative Partner"],
   ["12-admin", "/admin", "Admin"],
-  ["13-profile", "/profile", "Profile"],
+  ["13-profile-redirect", "/profile", "Settings"],
   ["14-settings", "/settings", "Settings"],
 ];
 
@@ -146,7 +146,7 @@ test.describe("approved screens at mobile viewport", () => {
     ["m-ask", "/ask", "Ask The Data"],
     ["m-analyst", "/analyst", "Your Creative Partner"],
     ["m-admin", "/admin", "Admin"],
-    ["m-profile", "/profile", "Profile"],
+    ["m-profile-redirect", "/profile", "Settings"],
     ["m-settings", "/settings", "Settings"],
   ];
 

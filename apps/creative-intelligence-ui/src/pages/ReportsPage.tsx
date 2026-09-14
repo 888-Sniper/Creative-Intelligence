@@ -642,6 +642,7 @@ export function ReportsPage() {
           <Panel
             title="Generated Reports"
             sub="View, download, and manage your previously generated reports."
+            style={{ flex: "1 0 auto" }}
             action={(
               <span className="rep-filters">
                 <span className="rep-search">
@@ -746,24 +747,24 @@ export function ReportsPage() {
           <Panel title="Report Tips">
             <ul className="tips-list">
               <li>
-                <span className="insight-ico" style={{ background: "#E7F1FB" }}><Icon name="bars" size={18} /></span>
+                <span className="insight-ico" style={{ background: "var(--shell-blue-soft)" }}><Icon name="bars" size={18} /></span>
                 <div><h4>Focus on Key KPIs</h4><p>Include 3–5 core metrics to keep your report clear and impactful.</p></div>
               </li>
               <li>
-                <span className="insight-ico" style={{ background: "#E5F5EC" }}><Icon name="target" size={18} /></span>
+                <span className="insight-ico" style={{ background: "var(--shell-green-soft)" }}><Icon name="target" size={18} /></span>
                 <div><h4>Tailor to Your Audience</h4><p>Customize your report based on stakeholders – from creative teams to executive leadership.</p></div>
               </li>
               <li>
-                <span className="insight-ico" style={{ background: "#E7F1FB" }}><Icon name="report" size={18} /></span>
+                <span className="insight-ico" style={{ background: "var(--shell-blue-soft)" }}><Icon name="report" size={18} /></span>
                 <div><h4>Choose the Right Format</h4><p>Use a deck for presentations, XLSX for deep analysis, or a one-pager for quick sharing.</p></div>
               </li>
               <li>
-                <span className="insight-ico" style={{ background: "#E5F5EC" }}><Icon name="users" size={18} /></span>
+                <span className="insight-ico" style={{ background: "var(--shell-green-soft)" }}><Icon name="users" size={18} /></span>
                 <div><h4>Use Benchmarks for Context</h4><p>Compare against workspace benchmarks to highlight performance.</p></div>
               </li>
             </ul>
           </Panel>
-          <Panel title="Latest Generated Files">
+          <Panel title="Latest Generated Files" style={{ flex: "1 0 auto" }}>
             {latest.length ? (
               <ul className="tips-list">
                 {latest.map((r) => (

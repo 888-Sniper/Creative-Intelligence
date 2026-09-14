@@ -1,5 +1,8 @@
 export interface PublicEmployee {
   id: string;
+  /** Short readable display number (EMP-001…); optional for payloads
+   *  minted before the server assigned one. */
+  employee_no?: string;
   email: string;
   first_name: string;
   last_name: string;

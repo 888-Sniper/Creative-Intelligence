@@ -16,7 +16,8 @@ test.describe("admin journey", () => {
     await page.getByRole("button", { name: "Add Employee" }).click();
     await page.getByLabel("New employee email").fill(email);
     await page.getByLabel("New employee first name").fill("E2E");
-    await page.getByRole("button", { name: "Add (active)" }).click();
+    const inviteDialog = page.getByRole("dialog", { name: "Add Employee" });
+    await inviteDialog.getByRole("button", { name: "Add Employee", exact: true }).click();
     await expect(page.getByText("Employee added as active.")).toBeVisible();
 
     const row = page.getByRole("row", { name: new RegExp(email) });
@@ -29,12 +30,12 @@ test.describe("admin journey", () => {
     // Role change employee -> admin -> employee (accept confirms).
     // Role actions live in the row overflow menu; it closes after each pick.
     await row.getByRole("button", { name: /More Actions/ }).click();
-    await row.getByRole("button", { name: "Make admin" }).click();
+    await row.getByRole("menuitem", { name: "Make admin" }).click();
     await row.getByRole("button", { name: /More Actions/ }).click();
-    await expect(row.getByRole("button", { name: "Make employee" })).toBeVisible();
-    await row.getByRole("button", { name: "Make employee" }).click();
+    await expect(row.getByRole("menuitem", { name: "Make employee" })).toBeVisible();
+    await row.getByRole("menuitem", { name: "Make employee" }).click();
     await row.getByRole("button", { name: /More Actions/ }).click();
-    await expect(row.getByRole("button", { name: "Make admin" })).toBeVisible();
+    await expect(row.getByRole("menuitem", { name: "Make admin" })).toBeVisible();
     // Audit trail records the lifecycle (codes render Title Cased).
     await expect(page.getByText("Employee Created").first()).toBeVisible();
   });

@@ -1,488 +1,929 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { api, ApiError } from "@/api/client";
 import { useAuth } from "@/auth/AuthProvider";
+import { Icon } from "@/components/icons";
+import { LoadingButton } from "@/components/LoadingButton";
 import { GoogleDriveCard } from "@/components/GoogleDriveCard";
 import { CohortBuilder, RetentionPatterns } from "@/components/DataTools";
-import { useTheme } from "@/app/useTheme";
-import type { ThemeMode } from "@/app/useTheme";
-import { Icon } from "@/components/icons";
-import { PageHeader, Panel, Toggle } from "@/components/product";
-import { LoadingButton } from "@/components/LoadingButton";
+import { EmployeeAvatar } from "@/components/product";
+import {
+  EmptyState,
+  PageHeader,
+  PageSkeleton,
+  Panel,
+  Toast,
+  Toggle,
+} from "@/components/product";
 import { useSessionCount } from "@/auth/useSessionCount";
+import { useTheme } from "@/app/useTheme";
+import { useLocale } from "@/i18n";
+import {
+  DEFAULTS,
+  TIMEZONES,
+  clearPrefs,
+  loadPrefs,
+  savePrefs,
+  type Prefs,
+} from "@/state/prefs";
+import type { PublicEmployee } from "@/types/auth";
 
-/* Settings matches the approved reference. Workspace preferences persist
- * locally per browser; identity/security/drive actions stay backend-backed
- * (logout, session revoke, password-reset email, Drive OAuth status). */
-
-interface Prefs {
-  workspace: string;
-  timezone: string;
-  theme: ThemeMode;
-  defaultView: string;
-  currency: string;
-  dateRange: string;
-  campaignView: string;
-  emailReports: boolean;
-  campaignUpdates: boolean;
-  aiInsights: boolean;
-  productUpdates: boolean;
-  dataUsage: boolean;
-  shareAnalytics: boolean;
-  retention: string;
-  accent: string;
-  density: string;
-}
-
-const TIMEZONES = [
-  "(GMT-08:00) Pacific Time (US & Canada)",
-  "(GMT-05:00) Eastern Time (US & Canada)",
-  "(GMT+00:00) London",
-  "(GMT+10:00) Sydney",
-];
-
-/** First-run timezone guess from the browser: mapped onto the fixed
- *  option list so a new account never starts on a mock default. */
-function guessTimezone(): string {
-  let tz = "";
-  try {
-    tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
-  } catch {
-    tz = "";
-  }
-  if (/Australia/i.test(tz)) return "(GMT+10:00) Sydney";
-  if (/Pacific\/Auckland|Pacific\/Fiji/i.test(tz)) return "(GMT+10:00) Sydney";
-  if (/Europe\/London|Europe\/Dublin|Europe\/Lisbon/i.test(tz)) return "(GMT+00:00) London";
-  if (/Europe\//i.test(tz)) return "(GMT+00:00) London";
-  if (/America\/Los_Angeles|America\/Vancouver|America\/Tijuana|US\/Pacific/i.test(tz))
-    return "(GMT-08:00) Pacific Time (US & Canada)";
-  if (/America\/Chicago|America\/Denver|America\/Phoenix|US\/(Central|Mountain|Arizona)/i.test(tz))
-    return "(GMT-05:00) Eastern Time (US & Canada)";
-  if (/America\//i.test(tz)) return "(GMT-05:00) Eastern Time (US & Canada)";
-  return "(GMT+00:00) London";
-}
-
-const DEFAULTS: Prefs = {
-  workspace: "Foap Creative Intelligence",
-  timezone: guessTimezone(),
-  theme: "dark",
-  defaultView: "Dashboard",
-  currency: "USD – US Dollar",
-  dateRange: "Last 30 Days",
-  campaignView: "All Campaigns",
-  emailReports: true,
-  campaignUpdates: true,
-  aiInsights: true,
-  productUpdates: false,
-  dataUsage: true,
-  shareAnalytics: true,
-  retention: "24 Months",
-  accent: "Teal (Default)",
-  density: "Comfortable",
-};
-
-/* Accent overrides repoint the shared primary token (§6) so saved
- * choices keep working: Teal resolves to the logo teal with a dark
- * label (7.2:1; white would be 2.1:1), Blue/Violet keep white labels
- * (5.1:1 / 5.2:1). Hover/pressed derive via color-mix in CSS. */
 const ACCENTS: Record<string, { teal: string; dark: string; ink: string }> = {
   "Teal (Default)": { teal: "#00C7B2", dark: "#08786E", ink: "#182536" },
   "Blue": { teal: "#2F6FBE", dark: "#1F4E86", ink: "#FFFFFF" },
   "Violet": { teal: "#6D5BD0", dark: "#4A3F96", ink: "#FFFFFF" },
 };
 
-const PREFS_KEY = "ci-settings-prefs";
+function applyAccent(accentName: string, density: string): void {
+  const accent = ACCENTS[accentName] ?? ACCENTS["Teal (Default)"];
+  document.documentElement.style.setProperty("--shell-teal", accent.teal);
+  document.documentElement.style.setProperty("--shell-teal-dark", accent.dark);
+  document.documentElement.style.setProperty("--brand-teal", accent.teal);
+  document.documentElement.style.setProperty("--brand-teal-ink", accent.ink);
+  document.body.dataset.density = density === "Compact" ? "compact" : "";
+}
+const VIEWS = ["Dashboard", "Campaigns", "Creatives", "Compare", "Ask The Data", "Reports"];
+const CURRENCIES = ["USD – US Dollar", "AUD – Australian Dollar", "EUR – Euro", "GBP – British Pound"];
+const RANGES = ["Last 7 Days", "Last 30 Days", "Last 90 Days", "All Time"];
+const CAMPAIGN_VIEWS = ["All Campaigns", "Active Only", "By Platform"];
+const RETENTIONS = ["6 Months", "12 Months", "24 Months", "Indefinite"];
+const DENSITIES = ["Comfortable", "Compact"];
 
-function storageGet(): string | null {
-  try {
-    return window.localStorage.getItem(PREFS_KEY);
-  } catch {
-    return null;
-  }
+function cap(v: string): string {
+  return v ? v.charAt(0).toUpperCase() + v.slice(1) : v;
 }
 
-function storageSet(raw: string): boolean {
+/** Load prefs, honoring an explicit legacy `ci-theme` choice until the
+ *  stored prefs carry their own theme (useTheme owns that key and stays
+ *  the live source of truth; saveAll re-syncs both going forward). */
+function adoptPrefs(employeeId: string, liveTheme: Prefs["theme"]): Prefs {
+  const loaded = loadPrefs(employeeId);
   try {
-    window.localStorage.setItem(PREFS_KEY, raw);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function storageRemove(): void {
-  try {
-    window.localStorage.removeItem(PREFS_KEY);
-  } catch {
-    /* private mode: nothing persisted */
-  }
-}
-
-function loadPrefs(): Prefs {
-  const raw = storageGet();
-  if (raw) {
-    try {
-      const prefs = { ...DEFAULTS, ...(JSON.parse(raw) as Partial<Prefs>) };
-      // Retire the old mock default: anyone still carrying it gets the
-      // neutral product name (a deliberately renamed workspace is kept).
-      if (prefs.workspace === "Alex's Workspace") prefs.workspace = DEFAULTS.workspace;
-      return prefs;
-    } catch {
-      /* corrupt value: fall through to defaults */
+    const keys = employeeId
+      ? [`ci-settings-prefs:${employeeId}`, "ci-settings-prefs"]
+      : ["ci-settings-prefs"];
+    for (const k of keys) {
+      const raw = window.localStorage.getItem(k);
+      if (!raw) continue;
+      const parsed = JSON.parse(raw) as Partial<Prefs>;
+      if (typeof parsed.theme === "string") return loaded;
+      return { ...loaded, theme: liveTheme };
     }
+  } catch {
+    /* unreadable storage: fall through to the live theme */
   }
-  return { ...DEFAULTS };
+  return { ...loaded, theme: liveTheme };
 }
 
-/** Provider mark for integrations with no backend connection endpoint.
- *  Uses the shared stroke icon set (never letter placeholders) tinted per
- *  provider. The mark is iconography only — connection state stays honest
- *  ("Not Connected") and is never implied by the icon. */
-function IntegrationMark({ name }: { name: string }) {
-  const mark: Record<string, { bg: string; fg: string; icon: string }> = {
-    "Meta": { bg: "#E7F1FB", fg: "#2F6FBE", icon: "meta" },
-    "TikTok": { bg: "#F0E9FA", fg: "#1F2A37", icon: "tiktok" },
-    "Google Analytics 4": { bg: "#FBF3E2", fg: "#C2521F", icon: "google" },
-  };
-  const m = mark[name] ?? { bg: "#EDF1F6", fg: "#5C6B7A", icon: "grid" };
-  return (
-    <span className="insight-ico" aria-hidden="true" style={{ background: m.bg, color: m.fg }}>
-      <Icon name={m.icon} size={18} />
-    </span>
-  );
-}
-
-/** Static appearance mockup: previews the current theme, accent, and
- *  density choices with plain boxes (no live app preview). */
-function AppearancePreview({ accent, density, mode }: { accent: string; density: string; mode: string }) {
-  const accents: Record<string, string> = {
-    "Teal (Default)": "#00C7B2",
-    "Blue": "#2F6FBE",
-    "Violet": "#6D5BD0",
-  };
-  const color = accents[accent] ?? accents["Teal (Default)"];
-  const dark = mode === "dark";
-  const pad = density === "Compact" ? 4 : 8;
-  return (
-    <div aria-hidden="true" style={{
-      display: "flex", gap: 6, marginTop: 12, border: "1px solid var(--shell-line)",
-      borderRadius: 10, overflow: "hidden", background: dark ? "#1F2A37" : "#F4F7FA",
-    }}>
-      <div style={{ width: 44, background: dark ? "#2B3448" : "#fff", padding: pad, display: "grid", gap: 4, alignContent: "start" }}>
-        {[0, 1, 2].map((i) => (
-          <div key={i} style={{ height: 8, borderRadius: 4, background: i === 0 ? color : dark ? "#3A465E" : "#E3E9F0" }} />
-        ))}
-      </div>
-      <div style={{ flex: 1, padding: pad, display: "grid", gap: 4, alignContent: "start" }}>
-        <div style={{ height: 10, borderRadius: 4, background: color, width: "55%" }} />
-        <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 34, padding: "4px 6px",
-          background: dark ? "#2B3448" : "#fff", border: `1px solid ${dark ? "#3A465E" : "#E3E9F0"}`, borderRadius: 6 }}>
-          {[10, 18, 14, 24, 20, 30].map((h, i) => (
-            <div key={i} style={{ flex: 1, height: h, borderRadius: 2, background: i === 5 ? color : dark ? "#3A465E" : "#C9D6E2" }} />
-          ))}
-        </div>
-        <div style={{ height: 8, borderRadius: 4, background: dark ? "#3A465E" : "#fff", border: `1px solid ${dark ? "#3A465E" : "#E3E9F0"}` }} />
-      </div>
-    </div>
-  );
-}
+const AVATAR_MIME = ["image/jpeg", "image/png", "image/webp"];
+const AVATAR_MAX = 2 * 1024 * 1024;
 
 export function SettingsPage() {
-  const { me, logout, refresh } = useAuth();
-  const { mode, theme: resolvedTheme, set } = useTheme();
-  /* Staged edits (prefs) vs applied state (saved): accent, density, and
-   * theme apply only when Save Changes is clicked, so leaving the page
-   * with unsaved edits never mutates the live app appearance. */
-  const [prefs, setPrefs] = useState<Prefs>(() => ({ ...loadPrefs(), theme: mode }));
-  const [saved, setSaved] = useState<Prefs>(() => ({ ...loadPrefs(), theme: mode }));
+  const { me, logout: authLogout } = useAuth();
+  const { mode: liveThemeMode, set: setThemeMode } = useTheme();
+  const { t, tp, fmtDate, setLang, setTimezone } = useLocale();
+
+  const [employee, setEmployee] = useState<PublicEmployee | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+
+  // Staged vs saved workspace preferences (§9: per-employee key with
+  // legacy fallback, IANA time zones, staged language).
+  const [saved, setSaved] = useState<Prefs>(() => adoptPrefs(me?.employee?.id ?? "", liveThemeMode));
+  const [staged, setStaged] = useState<Prefs>(() => adoptPrefs(me?.employee?.id ?? "", liveThemeMode));
+  const [prefOwner, setPrefOwner] = useState(me?.employee?.id ?? "");
   const [status, setStatus] = useState("");
-  const [sessionOp, setSessionOp] = useState<null | "password" | "logout" | "logout-all">(null);
-  // One adaptive button (§9): "Log Out All Sessions" only when the
-  // server reports several live sessions, plain "Log Out" for exactly
-  // one. An unknown count renders loading/retry — never a guess.
-  const { count: sessionCount, error: sessionError, reload: reloadSessions } = useSessionCount();
-  const multiSession = (sessionCount ?? 0) > 1;
-  const employee = me?.employee;
-  const dirty = JSON.stringify(prefs) !== JSON.stringify(saved);
+  const [toast, setToast] = useState<string | null>(null);
+  const closeToast = useCallback(() => setToast(null), []);
+  const notifyOk = useCallback((message: string) => {
+    setStatus("");
+    setToast(message);
+  }, []);
+
+  // Personal-info editing (merged from Profile).
+  const [first, setFirst] = useState("");
+  const [last, setLast] = useState("");
+  const [avatarUrl, setAvatarUrl] = useState("");
+  const [avatarOpen, setAvatarOpen] = useState(false);
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const firstRef = useRef<HTMLInputElement | null>(null);
+  const [op, setOp] = useState<string | null>(null);
+
+  // Session actions (bounded hook, §11).
+  const sessions = useSessionCount();
+  const [sessionOp, setSessionOp] = useState<string | null>(null);
+
+  // Provider connection badge: Google sign-in alone never marks the
+  // provider row connected — only a live Google check does.
+  const [googleConnected, setGoogleConnected] = useState<boolean | null>(null);
+  useEffect(() => {
+    let live = true;
+    void api<{ connected: boolean }>("GET", "/api/auth/google/status")
+      .then((r) => {
+        if (live) setGoogleConnected(r.connected === true);
+      })
+      .catch(() => {
+        if (live) setGoogleConnected(false);
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  const loadEmployee = useCallback(async () => {
+    setLoading(true);
+    setLoadError("");
+    try {
+      const r = await api<{ employee: PublicEmployee | null }>("GET", "/api/auth/me");
+      if (r.employee) {
+        setEmployee(r.employee);
+        setFirst(r.employee.first_name || "");
+        setLast(r.employee.last_name || "");
+        setAvatarUrl(r.employee.avatar_url || "");
+      } else {
+        setLoadError("Account unavailable.");
+      }
+    } catch {
+      setLoadError("Could not load settings.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    const accent = ACCENTS[saved.accent] ?? ACCENTS["Teal (Default)"];
-    document.documentElement.style.setProperty("--shell-teal", accent.teal);
-    document.documentElement.style.setProperty("--shell-teal-dark", accent.dark);
-    document.documentElement.style.setProperty("--brand-teal", accent.teal);
-    document.documentElement.style.setProperty("--brand-teal-ink", accent.ink);
-    document.body.dataset.density = saved.density === "Compact" ? "compact" : "";
+    void loadEmployee();
+  }, [loadEmployee]);
+
+  // Adopt the signed-in employee's own preference key once identity
+  // arrives, without clobbering anything already staged.
+  useEffect(() => {
+    const id = employee?.id ?? me?.employee?.id ?? "";
+    if (id && id !== prefOwner) {
+      setPrefOwner(id);
+      setSaved(adoptPrefs(id, liveThemeMode));
+      setStaged(adoptPrefs(id, liveThemeMode));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [employee?.id]);
+
+  useEffect(() => {
+    applyAccent(saved.accent, saved.density);
   }, [saved.accent, saved.density]);
 
-  if (!employee) return <p className="muted">Sign In To Manage Settings.</p>;
-  const setPref = <K extends keyof Prefs>(k: K, v: Prefs[K]) =>
-    setPrefs((p) => ({ ...p, [k]: v }));
+  const dirty = JSON.stringify(staged) !== JSON.stringify(saved);
+  const set = <K extends keyof Prefs>(key: K, value: Prefs[K]) =>
+    setStaged((p) => ({ ...p, [key]: value }));
 
-  const save = () => {
-    if (!storageSet(JSON.stringify(prefs))) {
-      setStatus("Could Not Save Settings In This Browser.");
+  const saveAll = async () => {
+    setOp("saving");
+    const id = employee?.id ?? me?.employee?.id ?? "";
+    const ok = savePrefs(id, staged);
+    if (!ok) {
+      setStatus(t("settings.footer.couldNotSave"));
+      setOp(null);
       return;
     }
-    setSaved(prefs);
-    /* Theme persists in its own key via the theme hook: apply the staged
-     * choice here so Save is the single commit point for appearance. */
-    set(prefs.theme);
-    setStatus("Settings Saved.");
-  };
-  const reset = () => {
-    const next = { ...DEFAULTS, theme: "dark" as const };
-    setPrefs(next);
-    setSaved(next);
-    set("dark");
-    storageRemove();
-    setStatus("Defaults Restored.");
+    setSaved(staged);
+    setThemeMode(staged.theme);
+    applyAccent(staged.accent, staged.density);
+    setLang(staged.language);
+    setTimezone(staged.timezone);
+    setOp(null);
+    notifyOk(t("toast.settingsSaved"));
   };
 
-  const runSessionOp = async (name: NonNullable<typeof sessionOp>, fn: () => Promise<unknown>) => {
-    if (sessionOp !== null) return;
-    setSessionOp(name);
+  const resetDefaults = () => {
+    // Reset commits full defaults (prior behavior): stage + save them,
+    // clear stored prefs, apply the dark default live.
+    const next = { ...DEFAULTS };
+    const id = employee?.id ?? me?.employee?.id ?? "";
+    clearPrefs(id);
+    setStaged(next);
+    setSaved(next);
+    setThemeMode(next.theme);
+    applyAccent(next.accent, next.density);
+    notifyOk(t("toast.defaultsRestored"));
+  };
+
+  const saveProfile = async () => {
+    setOp("profile");
     try {
-      await fn();
+      // PATCH is the backend's update route; only send avatar_url when it
+      // changed so a plain name save can never clear the avatar.
+      const payload: { first_name: string; last_name: string; avatar_url?: string } = {
+        first_name: first.trim(),
+        last_name: last.trim(),
+      };
+      if (avatarUrl.trim() !== (employee?.avatar_url || "")) {
+        payload.avatar_url = avatarUrl.trim();
+      }
+      const r = await api<{ employee: PublicEmployee }>("PATCH", "/api/auth/me", payload);
+      setEmployee(r.employee);
+      setFirst(r.employee.first_name || "");
+      setLast(r.employee.last_name || "");
+      setAvatarUrl(r.employee.avatar_url || "");
+      notifyOk(t("toast.profileSaved"));
+    } catch (err) {
+      setStatus(err instanceof ApiError ? err.message : "Could not save profile.");
     } finally {
-      setSessionOp((cur) => (cur === name ? null : cur));
+      setOp(null);
+    }
+  };
+
+  const removeAvatar = async () => {
+    // No DELETE route exists; an empty avatar_url in PATCH clears the avatar.
+    setOp("avatar");
+    try {
+      const r = await api<{ employee: PublicEmployee }>("PATCH", "/api/auth/me", {
+        avatar_url: "",
+      });
+      setEmployee(r.employee);
+      setAvatarUrl("");
+      notifyOk(t("toast.avatarRemoved"));
+    } catch (err) {
+      setStatus(err instanceof ApiError ? err.message : "Could not remove avatar.");
+    } finally {
+      setOp(null);
+    }
+  };
+
+  const onAvatarFile = async (file: File | undefined) => {
+    if (!file) return;
+    if (!AVATAR_MIME.includes(file.type) || file.size > AVATAR_MAX) {
+      setStatus(t("settings.personalInfo.uploadHint"));
+      return;
+    }
+    setOp("avatar");
+    setStatus("");
+    try {
+      // The upload endpoint accepts multipart FormData only (avatar file field).
+      const form = new FormData();
+      form.append("avatar", file);
+      const up = await fetch("/api/auth/me/avatar", { method: "POST", body: form });
+      const uj = (await up.json().catch(() => ({}))) as {
+        error?: string;
+        employee?: PublicEmployee;
+      };
+      if (!up.ok) throw new Error(uj.error || String(up.status));
+      if (uj.employee) {
+        setEmployee(uj.employee);
+        setAvatarUrl(uj.employee.avatar_url || "");
+      }
+      notifyOk(t("toast.profileSaved"));
+    } catch (err) {
+      setStatus(err instanceof ApiError ? err.message : "Could not upload that photo.");
+    } finally {
+      setOp(null);
     }
   };
 
   const changePassword = async () => {
+    if (!employee) return;
+    setSessionOp("password");
     setStatus("");
     try {
+      // /email/reset sends the reset email; /password/reset completes one.
       await api("POST", "/api/auth/email/reset", { email: employee.email });
-      setStatus("Password Reset Email Sent.");
+      notifyOk(t("settings.security.passwordResetSent"));
     } catch (err) {
-      setStatus(err instanceof ApiError ? err.message : "Could Not Send Reset Email.");
+      setStatus(err instanceof ApiError ? err.message : t("settings.footer.couldNotSendReset"));
+    } finally {
+      setSessionOp(null);
     }
   };
 
-  const logoutAll = async () => {
+  const logOut = async () => {
+    // Gate-driven logout (prior behavior): the provider refreshes identity
+    // and the auth gate routes to login client-side. A full-document
+    // navigation would hit the API origin, which has no SPA fallback.
+    setSessionOp("logout");
+    try {
+      await authLogout();
+    } catch {
+      setSessionOp(null);
+    }
+  };
+
+  const logOutAll = async () => {
+    // Destructive session action: confirm first, matching prior behavior.
+    if (typeof window.confirm === "function" && !window.confirm(t("settings.security.logOutAllConfirm"))) {
+      return;
+    }
+    setSessionOp("logout-all");
     setStatus("");
-    if (!window.confirm("Log Out All Sessions? Every device and browser signed in as this account is signed out immediately.")) return;
     try {
       await api("POST", "/api/auth/sessions/revoke-all", {});
-      await refresh();
-      setStatus("All Sessions Signed Out.");
+      notifyOk(t("settings.security.allSessionsSignedOut"));
+      sessions.reload();
     } catch (err) {
-      setStatus(err instanceof ApiError ? err.message : "Could Not Sign Out All Sessions.");
+      setStatus(err instanceof ApiError ? err.message : t("settings.footer.couldNotSignOut"));
+    } finally {
+      setSessionOp(null);
     }
   };
 
-  const exportData = () => {
-    const blob = new Blob(
-      [JSON.stringify({ profile: employee, preferences: prefs, exported_at: new Date().toISOString() }, null, 2)],
-      { type: "application/json" },
-    );
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "workspace-data.json";
-    a.click();
-    URL.revokeObjectURL(url);
-    setStatus("Workspace Data Exported.");
+  const copyEmployeeNo = async (value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      notifyOk(t("toast.employeeIdCopied"));
+    } catch {
+      setStatus(t("toast.employeeIdCopied"));
+    }
   };
 
-  const modes: Array<{ id: ThemeMode; label: string }> = [
-    { id: "light", label: "Light" },
-    { id: "dark", label: "Dark (Default)" },
-    { id: "system", label: "System" },
+  const exportData = async () => {
+    setOp("export");
+    setStatus("");
+    try {
+      const r = await api<{ exported?: boolean }>("POST", "/api/auth/export", {});
+      if (r && r.exported === false) setStatus("Workspace export is unavailable.");
+      else notifyOk(t("settings.privacy.exported"));
+    } catch (err) {
+      setStatus(err instanceof ApiError ? err.message : "Workspace export is unavailable.");
+    } finally {
+      setOp(null);
+    }
+  };
+
+  if (loading || !employee) {
+    return (
+      <div className="settings">
+        <PageHeader title={t("settings.title")} sub={t("settings.sub")} />
+        {loadError ? (
+          <p role="alert" className="muted">{loadError}</p>
+        ) : (
+          <PageSkeleton label={t("settings.title")} panels={6} />
+        )}
+      </div>
+    );
+  }
+
+  const empNo = employee.employee_no || employee.id;
+  const lastSignIn = employee.last_login_at
+    ? fmtDate(employee.last_login_at, { hour: "numeric", minute: "2-digit" })
+    : t("settings.workspace.neverSignedIn");
+  const heroName = `${employee.first_name} ${employee.last_name}`.trim() || employee.email;
+  const heroStats = [
+    { label: t("settings.accountStatus"), value: employee.status ? cap(employee.status) : t("settings.workspace.unavailable") },
+    { label: t("settings.signInMethod"), value: employee.provider ? `${cap(employee.provider)} SSO` : t("settings.workEmail") },
+    { label: t("settings.lastSignIn"), value: lastSignIn },
   ];
+  const providerName = cap(employee.provider || "email");
+  const ssoBody = employee.provider === "google"
+    ? t("settings.connections.googleLinked")
+    : t("settings.connections.providerLinked", { provider: providerName });
 
   return (
-    <>
-      <PageHeader
-        title="Settings"
-        sub="Control your workspace, data, integrations, and application preferences."
-      />
-      <div className="cols-2-even" style={{ marginTop: 12 }}>
-          <Panel title="General Settings" icon="gear">
-            <div className="filter-grid" style={{ gridTemplateColumns: "repeat(2,minmax(0,1fr))" }}>
-              <div className="field">
-                <label htmlFor="s-workspace">Workspace Name</label>
-                <input id="s-workspace" value={prefs.workspace} onChange={(e) => setPref("workspace", e.target.value)} />
-              </div>
-              <div className="field">
-                <label htmlFor="s-tz">Time Zone</label>
-                <select id="s-tz" value={prefs.timezone} onChange={(e) => setPref("timezone", e.target.value)}>
-                  {TIMEZONES.includes(prefs.timezone) ? null : <option>{prefs.timezone}</option>}
-                  {TIMEZONES.map((o) => <option key={o}>{o}</option>)}
-                </select>
-              </div>
-              <div className="field">
-                <label htmlFor="s-view">Default View</label>
-                <select id="s-view" value={prefs.defaultView} onChange={(e) => setPref("defaultView", e.target.value)}>
-                  {["Dashboard", "Campaigns", "Creatives", "Compare", "Ask The Data", "AI Analyst"].map((o) => <option key={o}>{o}</option>)}
-                </select>
-              </div>
-              <div className="field">
-                <label htmlFor="s-currency">Default Currency</label>
-                <select id="s-currency" value={prefs.currency} onChange={(e) => setPref("currency", e.target.value)}>
-                  {["USD – US Dollar", "AUD – Australian Dollar", "EUR – Euro", "GBP – British Pound"].map((o) => <option key={o}>{o}</option>)}
-                </select>
-              </div>
-              <div className="field">
-                <label htmlFor="s-range">Default Date Range</label>
-                <select id="s-range" value={prefs.dateRange} onChange={(e) => setPref("dateRange", e.target.value)}>
-                  {["Last 7 Days", "Last 30 Days", "Last 90 Days"].map((o) => <option key={o}>{o}</option>)}
-                </select>
-              </div>
-              <div className="field">
-                <label htmlFor="s-campview">Default Campaign View</label>
-                <select id="s-campview" value={prefs.campaignView} onChange={(e) => setPref("campaignView", e.target.value)}>
-                  {["All Campaigns", "Active Only", "Top 10 by Spend"].map((o) => <option key={o}>{o}</option>)}
-                </select>
+    <div className="settings">
+      <PageHeader title={t("settings.title")} sub={t("settings.sub")} />
+
+      <Panel>
+        <div className="profile-hero">
+          <div className="profile-hero-left">
+            <EmployeeAvatar
+              url={employee.avatar_url || ""}
+              name={heroName}
+              email={employee.email || ""}
+              size={140}
+            />
+            <div style={{ minWidth: 0 }}>
+              <p style={{ margin: "2px 0 0", fontSize: 22, fontWeight: 800, color: "var(--shell-navy)" }}>
+                {heroName}
+              </p>
+              <p className="panel-sub" style={{ marginTop: 4 }}>
+                {`${cap(employee.role)} · ${cap(employee.status)}`}
+              </p>
+              <p className="panel-sub" style={{ marginTop: 2 }}>{employee.email}</p>
+              <div className="chip-row" style={{ marginTop: 12 }}>
+                <button type="button" className="btn-outline" onClick={() => firstRef.current?.focus()}>
+                  <Icon name="user" size={14} /> {t("settings.personalInfo.editProfile")}
+                </button>
+                <LoadingButton type="button" className="btn-primary" loading={op === "avatar"}
+                  loadingLabel={t("common.sending")} disabled={op !== null}
+                  title={t("settings.personalInfo.uploadHint")}
+                  onClick={() => fileRef.current?.click()}>
+                  <Icon name="download" size={14} /> {t("settings.personalInfo.uploadPhoto")}
+                </LoadingButton>
               </div>
             </div>
-          </Panel>
-          <Panel title="Notifications" icon="bell">
-            <Toggle label="Email Reports" body="Receive Reports And Insights By Email."
-              checked={prefs.emailReports} onChange={(v) => setPref("emailReports", v)} />
-            <Toggle label="Campaign Updates" body="Get Notified When Campaigns Are Updated."
-              checked={prefs.campaignUpdates} onChange={(v) => setPref("campaignUpdates", v)} />
-            <Toggle label="AI Insights" body="Receive Alerts For New AI Analysis."
-              checked={prefs.aiInsights} onChange={(v) => setPref("aiInsights", v)} />
-            <Toggle label="Product Updates" body="Get Updates On New Features."
-              checked={prefs.productUpdates} onChange={(v) => setPref("productUpdates", v)} />
-          </Panel>
-          <Panel title="Data & Privacy" icon="eye">
-            <Toggle label="Data Usage" body="Help Improve Foap With Anonymous Usage Data."
-              checked={prefs.dataUsage} onChange={(v) => setPref("dataUsage", v)} />
-            <Toggle label="Share Analytics Data" body="Contribute Anonymous Data To Benchmarks."
-              checked={prefs.shareAnalytics} onChange={(v) => setPref("shareAnalytics", v)} />
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", padding: "11px 0" }}>
-              <div>
-                <strong style={{ display: "block", fontSize: 13.5 }}>Data Retention Period</strong>
-                <span className="panel-sub" title="Browser preference only — actual workspace retention is managed by your administrator.">Choose Your Preferred Data Retention Period.</span>
-              </div>
-              <select aria-label="Data Retention Period" value={prefs.retention} onChange={(e) => setPref("retention", e.target.value)}>
-                {["12 Months", "24 Months", "36 Months"].map((o) => <option key={o}>{o}</option>)}
-              </select>
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", padding: "11px 0" }}>
-              <div>
-                <strong style={{ display: "block", fontSize: 13.5 }}>Export Your Data</strong>
-                <span className="panel-sub">Download Your Account And Workspace Data.</span>
-              </div>
-              <button type="button" className="btn-outline" onClick={exportData}>
-                <Icon name="download" size={15} /> Export Data
-              </button>
-            </div>
-          </Panel>
-          <Panel title="Integrations" icon="grid"
-            action={<a className="link-teal" href="#integration-google">Manage Integrations</a>}>
-            <GoogleDriveCard />
-            {[["Meta", "Import campaign performance data from Meta Ads."],
-              ["TikTok", "Connect your TikTok Ads account for deeper analysis."],
-              ["Google Analytics 4", "Link your GA4 property to analyze web performance."]].map(([n, d]) => (
-              <div key={n} className="insight">
-                <IntegrationMark name={n} />
-                <div style={{ flex: 1 }}>
-                  <h4>{n}</h4>
-                  <p>{d}</p>
-                </div>
-                <span className="badge-demo">Not Connected</span>
+          </div>
+          <div className="profile-hero-right">
+            {heroStats.map((s) => (
+              <div key={s.label} style={{ background: "var(--shell-bg)", border: "1px solid var(--shell-line)", borderRadius: 10, padding: "10px 12px", minWidth: 0 }}>
+                <p className="panel-sub" style={{ margin: 0, fontSize: 11.5 }}>{s.label}</p>
+                <p style={{ margin: "2px 0 0", fontSize: 14, fontWeight: 700, color: "var(--shell-navy)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {s.value}
+                </p>
               </div>
             ))}
-          </Panel>
-          <Panel title="Appearance" icon="spark">
-            <div className="filter-grid" style={{ gridTemplateColumns: "repeat(2,minmax(0,1fr))" }}>
-              <div className="field">
-                <label htmlFor="s-theme">Theme</label>
-                <select id="s-theme" value={prefs.theme} onChange={(e) => setPref("theme", e.target.value as ThemeMode)}>
-                  {modes.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
-                </select>
-              </div>
-              <div className="field">
-                <label htmlFor="s-accent">Accent Color</label>
-                <select id="s-accent" value={prefs.accent} onChange={(e) => setPref("accent", e.target.value)}>
-                  {Object.keys(ACCENTS).map((o) => <option key={o}>{o}</option>)}
-                </select>
-              </div>
-              <div className="field">
-                <label htmlFor="s-density">Interface Density</label>
-                <select id="s-density" value={prefs.density} onChange={(e) => setPref("density", e.target.value)}>
-                  {["Comfortable", "Compact"].map((o) => <option key={o}>{o}</option>)}
-                </select>
-              </div>
+          </div>
+        </div>
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".jpg,.jpeg,.png,.webp"
+          aria-label={t("settings.personalInfo.uploadPhoto")}
+          style={{ position: "absolute", width: 1, height: 1, opacity: 0, pointerEvents: "none" }}
+          onChange={(e) => {
+            void onAvatarFile(e.target.files?.[0]);
+            e.target.value = "";
+          }}
+        />
+      </Panel>
+
+      <div className="section-gap" />
+      <div className="cols-3">
+        <Panel title={t("settings.personalInfo.title")} sub={t("settings.personalInfo.sub")}>
+          <div className="cols-2-even" style={{ marginTop: 0 }}>
+            <div className="field">
+              <label htmlFor="s-first">{t("settings.personalInfo.firstName")}</label>
+              <input
+                id="s-first"
+                ref={firstRef}
+                type="text"
+                value={first}
+                autoComplete="given-name"
+                onChange={(e) => setFirst(e.target.value)}
+              />
             </div>
-            <p className="panel-sub" style={{ marginTop: 10 }}>Preview — shows your staged choices before you save.</p>
-            <AppearancePreview
-              accent={prefs.accent}
-              density={prefs.density}
-              mode={prefs.theme === "system" ? resolvedTheme : prefs.theme}
-            />
-            {dirty ? <p className="panel-sub">Unsaved changes — click Save Changes to apply.</p> : null}
-          </Panel>
-          <Panel title="Security" icon="lock">
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", padding: "11px 0", borderBottom: "1px solid var(--shell-line)" }}>
-              <div>
-                <strong style={{ display: "block", fontSize: 13.5 }}>Password</strong>
-                <span className="panel-sub">Reset your password by email.</span>
-              </div>
-              <LoadingButton type="button" className="btn-outline" loading={sessionOp === "password"} loadingLabel="Sending…" spinnerClass="spinner dark" disabled={sessionOp !== null} onClick={() => void runSessionOp("password", changePassword)}>
-                Change Password
+            <div className="field">
+              <label htmlFor="s-last">{t("settings.personalInfo.lastName")}</label>
+              <input
+                id="s-last"
+                type="text"
+                value={last}
+                autoComplete="family-name"
+                onChange={(e) => setLast(e.target.value)}
+              />
+            </div>
+          </div>
+          <div className="chip-row" style={{ marginTop: 12 }}>
+            <LoadingButton type="button" className="btn-primary" loading={op === "profile"}
+              loadingLabel={t("common.saving")} disabled={op !== null} onClick={() => void saveProfile()}>
+              {t("settings.personalInfo.saveProfile")}
+            </LoadingButton>
+            {employee.avatar_url ? (
+              <LoadingButton type="button" className="btn-outline" loading={op === "avatar"}
+                loadingLabel={t("common.sending")} disabled={op !== null} onClick={() => void removeAvatar()}>
+                {t("settings.personalInfo.removeAvatar")}
               </LoadingButton>
+            ) : null}
+            {status && op !== null ? (
+              <span className="panel-sub" role="status" style={{ margin: 0 }}>{status}</span>
+            ) : null}
+          </div>
+          <details style={{ marginTop: 12 }} open={avatarOpen} onToggle={(e) => setAvatarOpen((e.target as HTMLDetailsElement).open)}>
+            <summary className="panel-sub" style={{ cursor: "pointer", fontWeight: 600 }}>
+              {t("settings.personalInfo.advancedAvatar")}
+            </summary>
+            <div className="field" style={{ marginTop: 8 }}>
+              <label htmlFor="s-avatar">{t("settings.personalInfo.avatarUrl")}</label>
+              <input
+                id="s-avatar"
+                type="text"
+                value={avatarUrl}
+                onChange={(e) => setAvatarUrl(e.target.value)}
+                placeholder={t("settings.personalInfo.avatarUrlPlaceholder")}
+              />
             </div>
-            {/* Two-factor enrolment lives with the sign-in provider, not
-              in a browser preference: this control is explicitly
-              unavailable rather than a toggle that proves nothing. */}
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", padding: "11px 0", borderBottom: "1px solid var(--shell-line)" }}>
-              <div>
-                <strong style={{ display: "block", fontSize: 13.5 }}>Two-Factor Authentication</strong>
-                <span className="panel-sub">Managed by your sign-in provider or administrator.</span>
-              </div>
-              <span className="badge-demo" style={{ marginTop: 2, flexShrink: 0 }} title="Two-factor status comes from your sign-in provider">Unavailable</span>
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", padding: "11px 0", flexWrap: "wrap" }}>
-              <div>
-                <strong style={{ display: "block", fontSize: 13.5 }}>Active Sessions</strong>
-                <span className="panel-sub">
-                  {sessionCount !== null
-                    ? `${sessionCount} Active Session${sessionCount === 1 ? "" : "s"} On This Account.`
-                    : sessionError
-                      ? "Could Not Load Sessions."
-                      : "Checking Sessions…"}
+          </details>
+        </Panel>
+
+        <Panel title={t("settings.workspace.title")} sub={t("settings.workspace.sub")}>
+          <dl className="detail-list">
+            <div>
+              <dt>{t("settings.workspace.employeeId")}</dt>
+              <dd>
+                <span className="id-copy">
+                  <code title={empNo}>{empNo}</code>
+                  <button
+                    type="button"
+                    className="icon-btn"
+                    aria-label={t("settings.workspace.copyEmployeeNo")}
+                    title={t("settings.workspace.copied")}
+                    onClick={() => void copyEmployeeNo(empNo)}
+                  >
+                    <Icon name="copy" size={14} />
+                  </button>
                 </span>
+              </dd>
+            </div>
+            <div>
+              <dt>{t("settings.workspace.role")}</dt>
+              <dd style={{ textTransform: "capitalize" }}>{employee.role || "—"}</dd>
+            </div>
+            <div>
+              <dt>{t("settings.workspace.status")}</dt>
+              <dd style={{ textTransform: "capitalize" }}>{employee.status || "—"}</dd>
+            </div>
+            <div>
+              <dt>{t("settings.workspace.workEmail")}</dt>
+              <dd>{employee.email || "—"}</dd>
+            </div>
+            <div>
+              <dt>{t("settings.workspace.lastLogin")}</dt>
+              <dd>{lastSignIn}</dd>
+            </div>
+            <div>
+              <dt>{t("settings.workspace.accountCreated")}</dt>
+              <dd>{employee.created_at ? fmtDate(employee.created_at) : t("settings.activity.none")}</dd>
+            </div>
+          </dl>
+        </Panel>
+
+        <Panel title={t("settings.connections.title")} sub={t("settings.connections.sub")}>
+          <div className="insight">
+            <span className="insight-ico" style={{ background: "var(--shell-blue-soft)" }}>
+              <Icon name="user" size={18} />
+            </span>
+            <div style={{ flex: 1 }}>
+              <h4>{t("settings.connections.workEmail")}</h4>
+              <p>{employee.email}</p>
+            </div>
+            <span className="pill pill-ok">{t("settings.connections.connected")}</span>
+          </div>
+          {employee.provider ? (
+            <div className="insight">
+              <span className="insight-ico" style={{ background: "var(--shell-teal-soft)" }}>
+                <Icon name="check" size={18} />
+              </span>
+              <div style={{ flex: 1 }}>
+                <h4 style={{ textTransform: "capitalize" }}>{providerName} SSO</h4>
+                <p>{ssoBody}</p>
               </div>
-              {sessionCount !== null ? (
-                <LoadingButton type="button" className="btn-outline" loading={sessionOp !== null && sessionOp !== "password"} loadingLabel="Signing Out…" spinnerClass="spinner dark" disabled={sessionOp !== null} onClick={() => void runSessionOp(multiSession ? "logout-all" : "logout", multiSession ? logoutAll : logout)}>
-                  {multiSession ? "Log Out All Sessions" : "Log Out"}
-                </LoadingButton>
-              ) : sessionError ? (
-                <button type="button" className="btn-outline" onClick={reloadSessions}>
-                  Retry
-                </button>
+              {googleConnected === false && employee.provider === "google" ? (
+                <span className="pill pill-ok">{t("settings.connections.notConnected")}</span>
               ) : (
-                <button type="button" className="btn-outline" disabled aria-busy="true">
-                  Checking Sessions…
-                </button>
+                <span className="pill pill-ok">{t("settings.connections.connected")}</span>
               )}
             </div>
-          </Panel>
+          ) : null}
+          <GoogleDriveCard />
+        </Panel>
       </div>
-      <details className="panel" style={{ marginTop: 12 }}>
-        <summary style={{ cursor: "pointer", fontSize: 15.5, fontWeight: 700, color: "var(--shell-navy)" }}>
-          Advanced
-        </summary>
-        <p className="panel-sub">Power-user analysis tooling.</p>
+
+      <div className="section-gap" />
+      <div className="cols-3">
+        <Panel title={t("settings.security.title")}>
+          <SecRow
+            title={t("settings.security.password")}
+            body={t("settings.security.passwordBody")}
+            action={(
+              <LoadingButton type="button" className="btn-outline" loading={sessionOp === "password"}
+                loadingLabel={t("common.sending")} disabled={sessionOp !== null}
+                onClick={() => void changePassword()}>
+                {t("settings.security.changePassword")}
+              </LoadingButton>
+            )}
+          />
+          <SecRow
+            title={t("settings.security.activeSessions")}
+            body={
+              sessions.loading
+                ? t("settings.security.checkingSessions")
+                : sessions.error
+                  ? t("settings.security.couldNotLoadSessions")
+                  : tp("settings.security.activeSessions", sessions.count ?? 0, { count: sessions.count ?? 0 })
+            }
+            action={(
+              sessions.loading ? null : sessions.error ? (
+                <button type="button" className="link-teal" onClick={() => sessions.reload()}>
+                  {t("common.retry")}
+                </button>
+              ) : (sessions.count ?? 0) >= 2 ? (
+                <LoadingButton type="button" className="btn-outline" loading={sessionOp === "logout-all"}
+                  loadingLabel={t("common.signingOut")} disabled={sessionOp !== null}
+                  onClick={() => void logOutAll()}>
+                  {t("settings.security.logOutAll")}
+                </LoadingButton>
+              ) : (
+                <LoadingButton type="button" className="btn-outline" loading={sessionOp === "logout"}
+                  loadingLabel={t("common.signingOut")} disabled={sessionOp !== null}
+                  onClick={() => void logOut()}>
+                  {t("settings.security.logOut")}
+                </LoadingButton>
+              )
+            )}
+          />
+          <SecRow
+            title={t("settings.security.twoFactor")}
+            body={t("settings.security.twoFactorBody")}
+            action={(
+              <span className="badge-demo" title={t("settings.security.twoFactorBody")}>
+                {t("settings.connections.unavailable")}
+              </span>
+            )}
+            last
+          />
+        </Panel>
+
+        <Panel title={t("settings.notifications.title")}>
+          <Toggle label={t("settings.notifications.emailReports")} body={t("settings.notifications.emailReportsBody")}
+            checked={staged.emailReports} onChange={(v) => set("emailReports", v)} />
+          <Toggle label={t("settings.notifications.campaignUpdates")} body={t("settings.notifications.campaignUpdatesBody")}
+            checked={staged.campaignUpdates} onChange={(v) => set("campaignUpdates", v)} />
+          <Toggle label={t("settings.notifications.aiInsights")} body={t("settings.notifications.aiInsightsBody")}
+            checked={staged.aiInsights} onChange={(v) => set("aiInsights", v)} />
+          <Toggle label={t("settings.notifications.productUpdates")} body={t("settings.notifications.productUpdatesBody")}
+            checked={staged.productUpdates} onChange={(v) => set("productUpdates", v)} />
+        </Panel>
+
+        <Panel title={t("settings.activity.title")} sub={t("settings.activity.sub")}>
+          <ActivityList
+            items={[
+              { icon: "user", label: t("settings.activity.accountCreated"), value: employee.created_at ? fmtDate(employee.created_at) : t("settings.activity.none") },
+              { icon: "check", label: t("settings.activity.accessApproved"), value: employee.approved_at ? fmtDate(employee.approved_at) : t("settings.activity.none") },
+              { icon: "clock", label: t("settings.activity.lastSignedIn"), value: employee.last_login_at ? fmtDate(employee.last_login_at) : t("settings.activity.none") },
+            ]}
+            emptyText={t("settings.activity.empty")}
+            noneText={t("settings.activity.none")}
+          />
+        </Panel>
+      </div>
+      <div className="section-gap" />
+      <div className="cols-2-even">
+        <Panel title={t("settings.general.title")} icon="sliders">
+          <div className="filter-grid">
+            <div className="field">
+              <label htmlFor="s-workspace">{t("settings.general.workspaceName")}</label>
+              <input
+                id="s-workspace"
+                type="text"
+                value={staged.workspace}
+                onChange={(e) => set("workspace", e.target.value)}
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="s-timezone">{t("settings.general.timeZone")}</label>
+              <select
+                id="s-timezone"
+                value={staged.timezone}
+                onChange={(e) => set("timezone", e.target.value)}
+              >
+                {TIMEZONES.map((z) => (
+                  <option key={z.id} value={z.id}>{z.label}</option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="s-default-view">{t("settings.general.defaultView")}</label>
+              <select
+                id="s-default-view"
+                value={staged.defaultView}
+                onChange={(e) => set("defaultView", e.target.value)}
+              >
+                {VIEWS.map((v) => (
+                  <option key={v} value={v}>{v}</option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="s-currency">{t("settings.general.defaultCurrency")}</label>
+              <select
+                id="s-currency"
+                value={staged.currency}
+                onChange={(e) => set("currency", e.target.value)}
+              >
+                {CURRENCIES.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="s-range">{t("settings.general.defaultDateRange")}</label>
+              <select
+                id="s-range"
+                value={staged.dateRange}
+                onChange={(e) => set("dateRange", e.target.value)}
+              >
+                {RANGES.map((r) => (
+                  <option key={r} value={r}>{r}</option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="s-campaign-view">{t("settings.general.defaultCampaignView")}</label>
+              <select
+                id="s-campaign-view"
+                value={staged.campaignView}
+                onChange={(e) => set("campaignView", e.target.value)}
+              >
+                {CAMPAIGN_VIEWS.map((v) => (
+                  <option key={v} value={v}>{v}</option>
+                ))}
+              </select>
+            </div>
+            <div className="field" style={{ gridColumn: "1 / -1" }}>
+              <label htmlFor="s-language">{t("settings.general.language")}</label>
+              <select
+                id="s-language"
+                value={staged.language}
+                onChange={(e) => set("language", e.target.value as Prefs["language"])}
+              >
+                <option value="en">English — default</option>
+                <option value="es">Español</option>
+                <option value="pl">Polski</option>
+              </select>
+              <p className="panel-sub" style={{ margin: "6px 0 0", fontSize: 12 }}>
+                {t("settings.general.languageBody")}
+              </p>
+            </div>
+          </div>
+        </Panel>
+
+        <Panel title={t("settings.appearance.title")} icon="moon">
+          <div className="field">
+            <label htmlFor="s-theme">{t("settings.appearance.theme")}</label>
+            <select
+              id="s-theme"
+              value={staged.theme}
+              onChange={(e) => set("theme", e.target.value as Prefs["theme"])}
+            >
+              <option value="light">{t("settings.appearance.themeLight")}</option>
+              <option value="dark">{t("settings.appearance.themeDark")}</option>
+              <option value="system">{t("settings.appearance.themeSystem")}</option>
+            </select>
+          </div>
+          <p className="panel-sub" style={{ fontSize: 12 }}>
+            {t("settings.appearance.previewIntro")}
+          </p>
+          <div className="appearance-preview" aria-hidden="true">
+            <div className="appearance-side">
+              <span className="appearance-dot" />
+              <span className="appearance-line" />
+              <span className="appearance-line short" />
+            </div>
+            <div className="appearance-main">
+              <span className="appearance-bar" />
+              <span className="appearance-card" />
+            </div>
+          </div>
+          <div className="filter-grid" style={{ marginTop: 10 }}>
+            <div className="field">
+              <label htmlFor="s-accent">{t("settings.appearance.accent")}</label>
+              <select
+                id="s-accent"
+                value={staged.accent}
+                onChange={(e) => set("accent", e.target.value)}
+              >
+                {Object.keys(ACCENTS).map((a) => (
+                  <option key={a} value={a}>{a}</option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="s-density">{t("settings.appearance.density")}</label>
+              <select
+                id="s-density"
+                value={staged.density}
+                onChange={(e) => set("density", e.target.value)}
+              >
+                {DENSITIES.map((d) => (
+                  <option key={d} value={d}>
+                    {d === "Comfortable" ? t("settings.appearance.comfortable") : t("settings.appearance.compact")}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </Panel>
+
+        <Panel title={t("settings.integrations.title")} icon="grid">
+          <div className="insight">
+            <span className="insight-ico" aria-hidden="true">
+              <Icon name="campaign" size={18} />
+            </span>
+            <div style={{ flex: 1 }}>
+              <h4>Meta Ads</h4>
+              <p>{t("settings.integrations.metaBody")}</p>
+            </div>
+            <span className="pill pill-ok">{t("settings.connections.unavailable")}</span>
+          </div>
+          <div className="insight">
+            <span className="insight-ico" aria-hidden="true">
+              <Icon name="creatives" size={18} />
+            </span>
+            <div style={{ flex: 1 }}>
+              <h4>TikTok Ads</h4>
+              <p>{t("settings.integrations.tiktokBody")}</p>
+            </div>
+            <span className="pill pill-ok">{t("settings.connections.unavailable")}</span>
+          </div>
+          <div className="insight">
+            <span className="insight-ico" aria-hidden="true">
+              <Icon name="report" size={18} />
+            </span>
+            <div style={{ flex: 1 }}>
+              <h4>Google Analytics 4</h4>
+              <p>{t("settings.integrations.ga4Body")}</p>
+            </div>
+            <span className="pill pill-ok">{t("settings.connections.unavailable")}</span>
+          </div>
+        </Panel>
+
+        <Panel title={t("settings.privacy.title")} icon="shield">
+          <Toggle label={t("settings.privacy.dataUsage")} body={t("settings.privacy.dataUsageBody")}
+            checked={staged.dataUsage} onChange={(v) => set("dataUsage", v)} />
+          <Toggle label={t("settings.privacy.shareAnalytics")} body={t("settings.privacy.shareAnalyticsBody")}
+            checked={staged.shareAnalytics} onChange={(v) => set("shareAnalytics", v)} />
+          <div className="field" style={{ marginTop: 4 }}>
+            <label htmlFor="s-retention">{t("settings.privacy.retention")}</label>
+            <select
+              id="s-retention"
+              value={staged.retention}
+              onChange={(e) => set("retention", e.target.value)}
+            >
+              {RETENTIONS.map((r) => (
+                <option key={r} value={r}>{r}</option>
+              ))}
+            </select>
+            <p className="panel-sub" style={{ margin: "6px 0 0", fontSize: 12 }}>
+              {t("settings.privacy.retentionHint")}
+            </p>
+          </div>
+          <SecRow
+            title={t("settings.privacy.exportData")}
+            body={t("settings.privacy.exportDataBody")}
+            action={(
+              <LoadingButton type="button" className="btn-outline" loading={op === "export"}
+                loadingLabel={t("common.sending")} disabled={op !== null} onClick={() => void exportData()}>
+                {t("settings.privacy.exportButton")}
+              </LoadingButton>
+            )}
+            last
+          />
+        </Panel>
+      </div>
+
+      <div className="section-gap" />
+      <Panel title={t("settings.advanced.title")} sub={t("settings.advanced.sub")} icon="flask">
         <div style={{ marginTop: 12 }}>
           <RetentionPatterns />
         </div>
         <div style={{ marginTop: 16 }}>
           <CohortBuilder />
         </div>
-      </details>
-      <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10, marginTop: 12 }}>
-        {status ? (
-          <span className="panel-sub" role="status" style={{ marginRight: "auto" }}>
-            {status}
-          </span>
-        ) : null}
-        <button type="button" className="btn-outline" onClick={reset}>Reset Defaults</button>
-        <button type="button" className="btn-primary" disabled={!dirty} onClick={save}>Save Changes</button>
-      </div>
-    </>
+      </Panel>
+
+      <div className="section-gap" />
+      <Panel>
+        <div className="row" style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+          <LoadingButton type="button" className="btn-reset" loading={op === "resetting"}
+            loadingLabel={t("common.sending")} disabled={op !== null} onClick={() => void resetDefaults()}>
+            {t("settings.footer.resetDefaults")}
+          </LoadingButton>
+          <LoadingButton type="button" className="btn-primary" loading={op === "saving"}
+            loadingLabel={t("common.saving")} disabled={op !== null || !dirty}
+            onClick={() => void saveAll()}>
+            {t("settings.footer.saveChanges")}
+          </LoadingButton>
+          {status ? (
+            <span className="panel-sub" role="status" style={{ margin: 0 }}>{status}</span>
+          ) : null}
+        </div>
+      </Panel>
+      {toast ? <Toast message={toast} onClose={closeToast} /> : null}
+    </div>
   );
 }
 
+function SecRow({ title, body, action, last }: {
+  title: string; body: string; action: ReactNode; last?: boolean;
+}) {
+  return (
+    <div style={{
+      display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center",
+      padding: "14px 0", borderBottom: last ? 0 : "1px solid var(--shell-line)",
+    }}>
+      <div style={{ minWidth: 0 }}>
+        <strong style={{ display: "block", fontSize: 13 }}>{title}</strong>
+        <span className="panel-sub" style={{ fontSize: 12 }}>{body}</span>
+      </div>
+      {action}
+    </div>
+  );
+}
+
+function ActivityList({ items, emptyText, noneText }: {
+  items: Array<{ icon: string; label: string; value: string }>;
+  emptyText: string; noneText: string;
+}) {
+  if (items.every((a) => a.value === noneText)) {
+    return <EmptyState text={emptyText} />;
+  }
+  return (
+    <div>
+      {items.map((a) => (
+        <div className="insight" key={a.label}>
+          <span className="insight-ico" style={{ background: "var(--shell-bg)" }}>
+            <Icon name={a.icon} size={18} />
+          </span>
+          <div>
+            <h4>{a.label}</h4>
+            <p>{a.value}</p>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}

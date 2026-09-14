@@ -36,6 +36,10 @@ class Employee(Base):
     # provider photos must not silently restore it. Any explicit new
     # photo (upload or URL) resets this to "".
     avatar_removed: Mapped[str] = mapped_column(String, default="")
+    # Short readable display number (EMP-001…). Assigned once by the
+    # server, never derived from a count, stable across status changes.
+    # The uuid id stays the relational/authorization identity.
+    emp_no: Mapped[str] = mapped_column(String, default="")
     role: Mapped[str] = mapped_column(String, default="employee")
     status: Mapped[str] = mapped_column(String, default="pending")
     created_at: Mapped[str] = mapped_column(String, default="")
@@ -48,6 +52,7 @@ class Employee(Base):
     __table_args__ = (
         Index("employees_workos_uid", "workos_user_id", unique=True),
         Index("employees_email", "email", unique=True),
+        Index("employees_emp_no", "emp_no", unique=True),
         CheckConstraint("role IN ('admin', 'employee')",
                         name="ck_employees_role"),
         CheckConstraint(

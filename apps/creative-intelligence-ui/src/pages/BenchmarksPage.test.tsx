@@ -105,6 +105,25 @@ describe("BenchmarksPage", () => {
     click.mockRestore();
   });
 
+  it("exports from the mobile overflow menu through the same handler", async () => {
+    mockFetch();
+    const createObjectURL = vi.fn(() => "blob:mock");
+    window.URL.createObjectURL = createObjectURL as unknown as typeof URL.createObjectURL;
+    window.URL.revokeObjectURL = vi.fn();
+    const click = vi.spyOn(window.HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Benchmark Results actions" })).toBeDefined();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Benchmark Results actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Export" }));
+    await waitFor(() => {
+      expect(screen.getByText(/Exported 2 benchmark groups/)).toBeDefined();
+    });
+    expect(createObjectURL).toHaveBeenCalled();
+    click.mockRestore();
+  });
+
   it("renders list errors", async () => {
     window.fetch = vi.fn(async (input: string | URL | Request) => {
       const url = String(input);

@@ -209,8 +209,8 @@ export function DashboardPage() {
   const leftLabel = TREND_METRICS.find((m) => m.value === leftMetric)?.label ?? "Impressions";
   const rightLabel = TREND_METRICS.find((m) => m.value === rightMetric)?.label ?? "Clicks";
   const trendSeries = [
-    { label: leftLabel, color: "#0A9183", soft: "#E5F5F2", points: trend.map((p) => num(p[leftMetric])) },
-    { label: rightLabel, color: "#1D3A8F", soft: "#E4EAF7", points: trend.map((p) => num(p[rightMetric])), axis: "right" as const },
+    { label: leftLabel, color: "var(--glyph-teal)", soft: "#E5F5F2", points: trend.map((p) => num(p[leftMetric])) },
+    { label: rightLabel, color: "var(--glyph-navy)", soft: "#E4EAF7", points: trend.map((p) => num(p[rightMetric])), axis: "right" as const },
   ];
 
   const platformGroups = useMemo(() => {
@@ -342,7 +342,7 @@ export function DashboardPage() {
         const tied = verdict === "tie";
         items.push({
           icon: "trend",
-          tint: "#E5F5F2",
+          tint: "var(--shell-teal-soft)",
           title: tied
             ? `${titleCase(a.key)} and ${titleCase(b.key)} Tie on CTR`
             : `${titleCase(a.key)} Hooks Drive Higher CTR`,
@@ -368,7 +368,7 @@ export function DashboardPage() {
         const diff = percentDiff(topCtr, bottomCtr);
         items.push({
           icon: "users",
-          tint: "#E5F5F2",
+          tint: "var(--shell-teal-soft)",
           title: verdict === "tie"
             ? "Creator and Branded Content Tie on CTR"
             : `${topName} Content Outperforms ${topName === "Creator" ? "Branded" : "Creator"} Content`,
@@ -389,7 +389,7 @@ export function DashboardPage() {
         if (verdict === "tie") {
           items.push({
             icon: "tiktok",
-            tint: "#E7F1FB",
+            tint: "var(--shell-blue-soft)",
             title: "TikTok and Meta Tie on ROAS",
             body: `TikTok and Meta both average ${tiktok.roas.toFixed(1)}x ROAS across the current scope.`,
             action: "View Campaigns",
@@ -401,7 +401,7 @@ export function DashboardPage() {
           const diff = percentDiff(leader.roas ?? 0, trailer.roas ?? 0);
           items.push({
             icon: "tiktok",
-            tint: "#E7F1FB",
+            tint: "var(--shell-blue-soft)",
             title: `${platformLabel(leader.key)} Leads On ROAS`,
             body: `${platformLabel(leader.key)} averages ${(leader.roas ?? 0).toFixed(1)}x ROAS versus ${(trailer.roas ?? 0).toFixed(1)}x on ${platformLabel(trailer.key)}${diff != null ? ` (${diff >= 0 ? "+" : ""}${diff.toFixed(0)}%)` : ""} across the current scope.`,
             action: "View Campaigns",
@@ -421,7 +421,7 @@ export function DashboardPage() {
         const diff = percentDiff(sweet.ctr, base);
         items.push({
           icon: "play",
-          tint: "#E7F1FB",
+          tint: "var(--shell-blue-soft)",
           title: "15–30 Second Videos Hold Attention Best",
           body: `Videos between 15–30 seconds average ${sweet.ctr.toFixed(1)}% CTR${diff != null ? `, ${diff >= 0 ? "+" : ""}${diff.toFixed(0)}% above the next length bucket` : ""} across the current scope.`,
           action: "See Recommendations",
@@ -430,7 +430,7 @@ export function DashboardPage() {
       } else if (verdict === "tie") {
         items.push({
           icon: "play",
-          tint: "#E7F1FB",
+          tint: "var(--shell-blue-soft)",
           title: "15–30 Second Videos Share the Lead on Attention",
           body: `Videos between 15–30 seconds match the best length bucket at ${sweet.ctr.toFixed(1)}% CTR across the current scope.`,
           action: "See Recommendations",
@@ -454,10 +454,10 @@ export function DashboardPage() {
     note: compare ? kpiPlaceholderNote(kind, value, emptyScope) : null,
   });
   const kpiConfigs = [
-    { label: "Total Impressions", metric: "impressions", ...kpi("count", compare?.metrics.impressions?.current), icon: "users", tint: "#E5F5F2", color: "#0A9183" },
-    { label: "Total Clicks", metric: "clicks", ...kpi("count", compare?.metrics.clicks?.current), icon: "click", tint: "#E7F1FB", color: "#2F6FBE" },
-    { label: "Total Spend", metric: "spend", ...kpi("money", compare?.metrics.spend?.current), icon: "coin", tint: "#E4F4ED", color: "#0E7C5B" },
-    { label: "Average ROAS", metric: "roas", ...kpi("mult", compare?.metrics.roas?.current), icon: "bars", tint: "#E7F1FB", color: "#2F6FBE" },
+    { label: "Total Impressions", metric: "impressions", ...kpi("count", compare?.metrics.impressions?.current), icon: "users", tint: "var(--shell-teal-soft)", color: "var(--glyph-teal)" },
+    { label: "Total Clicks", metric: "clicks", ...kpi("count", compare?.metrics.clicks?.current), icon: "click", tint: "var(--shell-blue-soft)", color: "var(--glyph-blue)" },
+    { label: "Total Spend", metric: "spend", ...kpi("money", compare?.metrics.spend?.current), icon: "coin", tint: "var(--shell-green-soft)", color: "var(--glyph-green)" },
+    { label: "Average ROAS", metric: "roas", ...kpi("mult", compare?.metrics.roas?.current), icon: "bars", tint: "var(--shell-blue-soft)", color: "var(--glyph-blue)" },
   ];
 
   return (
@@ -467,12 +467,12 @@ export function DashboardPage() {
         sub="Your creative performance at a glance."
         actions={(
           <>
+            <button type="button" className="btn-primary" onClick={() => setApplied((n) => n + 1)}>
+              Apply Filters
+            </button>
             <button type="button" className="link-teal" onClick={clearFilters}
               style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
               <Icon name="reset" size={15} /> Reset Filters
-            </button>
-            <button type="button" className="btn-primary" onClick={() => setApplied((n) => n + 1)}>
-              Apply Filters
             </button>
           </>
         )}
@@ -646,17 +646,19 @@ export function DashboardPage() {
             ) : <Skeleton height={220} />}
           </Panel>
           <Panel title="Retention Insights">
-            <div className="tabs retention-tabs" role="tablist" aria-label="Retention Insights">
-              {[
-                { value: "retention", label: "Audience Retention" },
-                { value: "hooks", label: "Hook Analysis" },
-                { value: "length", label: "Video Length" },
-                { value: "format", label: "Format Comparison" },
-              ].map((t) => (
-                <button key={t.value} type="button" role="tab" aria-selected={tab === t.value} onClick={() => setTab(t.value)}>
-                  {t.label}
-                </button>
-              ))}
+            <div className="field" style={{ margin: "0 0 12px" }}>
+              <label htmlFor="dash-insight-type">Insight Type</label>
+              <select
+                id="dash-insight-type"
+                value={tab}
+                onChange={(e) => setTab(e.target.value)}
+                style={{ width: "100%" }}
+              >
+                <option value="retention">Audience Retention</option>
+                <option value="hooks">Hook Analysis</option>
+                <option value="length">Video Length</option>
+                <option value="format">Format Comparison</option>
+              </select>
             </div>
             {tab === "retention" ? (
               <div className="retention-split">

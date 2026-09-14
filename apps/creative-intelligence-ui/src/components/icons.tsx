@@ -42,6 +42,7 @@ const PATHS: Record<string, React.ReactNode> = {
   chat: <path d="M4 5h16v11H9l-5 4V5Z" />,
   send: <path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7Z" />,
   spark: <path d="M12 2v6m0 0 2.5-2.5M12 8 9.5 5.5M4 20l4.5-4.5M20 20l-4.5-4.5M12 8c-3 0-5 2.5-5 6l-1 4 4-1c.8.2 1.4.2 2 .2 3 0 5-2.5 5-6" />,
+  moon: <path d="M20 13.5A8 8 0 0 1 10.5 4 6.8 6.8 0 1 0 20 13.5Z" />,
   users: (
     <>
       <circle cx="9" cy="8" r="3.2" />
@@ -173,6 +174,8 @@ const PATHS: Record<string, React.ReactNode> = {
       <rect x="13" y="13" width="7" height="7" rx="1.5" />
     </>
   ),
+  expand: <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />,
+  compress: <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" />,
 };
 
 export function Icon({ name, size = 18 }: { name: string; size?: number }) {

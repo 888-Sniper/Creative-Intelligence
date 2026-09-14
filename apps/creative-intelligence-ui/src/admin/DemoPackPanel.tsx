@@ -240,7 +240,7 @@ export function DemoPackPanel() {
   return (
     <Panel
       title="Demo Data"
-      sub="One-time presentation pack (foap-presentation-pack-v2): 5 campaigns × 3 creatives. Synthetic demonstration figures — never real client performance. Deleted samples stay deleted."
+      sub="One-time presentation pack of 5 campaigns by 3 creatives with synthetic figures that never represent real client performance, and deleted samples stay deleted."
       action={<DemoDataBadge />}
     >
       {notice ? <p className="panel-sub" role="status" style={{ margin: "0 0 8px" }}>{notice}</p> : null}

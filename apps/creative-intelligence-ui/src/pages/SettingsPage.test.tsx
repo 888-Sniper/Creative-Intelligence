@@ -38,6 +38,8 @@ const patternsData = {
 
 const cohortsData = [{ id: 3, name: "Beauty", filters: { platform: ["tiktok"] }, created_at: "" }];
 
+let failGoogleStatus = false;
+
 function mockFetch(opts?: { googleConnected?: boolean; me?: MeResponse; sessions?: number }) {
   const calls: Array<[string, RequestInit | undefined]> = [];
   const googleConnected = opts?.googleConnected ?? false;
@@ -45,9 +47,21 @@ function mockFetch(opts?: { googleConnected?: boolean; me?: MeResponse; sessions
     const url = String(input);
     calls.push([url, init]);
     const method = init?.method ?? "GET";
+    if (url === "/api/auth/me" && method === "PATCH") {
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, string>;
+      return Response.json({ employee: { ...(opts?.me ?? authed).employee, ...body } });
+    }
     if (url === "/api/auth/me") return Response.json(opts?.me ?? authed);
+    if (url === "/api/auth/me/avatar" && method === "POST") {
+      return Response.json({
+        employee: { ...(opts?.me ?? authed).employee, avatar_url: "/api/auth/avatar/e1" },
+      });
+    }
     if (url === "/api/auth/sessions") return Response.json({ count: opts?.sessions ?? 2 });
-    if (url === "/api/auth/google/status") return Response.json({ connected: googleConnected });
+    if (url === "/api/auth/google/status") {
+      if (failGoogleStatus) throw new TypeError("Failed to fetch");
+      return Response.json({ connected: googleConnected });
+    }
     if (url.startsWith("/api/retention/patterns")) return Response.json(patternsData);
     if (url === "/api/cohorts" && method === "GET") return Response.json(cohortsData);
     if (url.startsWith("/api/cohorts/build")) {
@@ -75,6 +89,7 @@ function renderSettings() {
 
 describe("SettingsPage", () => {
   beforeEach(() => {
+    failGoogleStatus = false;
     // This jsdom build exposes no window.localStorage; install a fresh
     // in-memory stand-in so save/load persistence behaves like a browser.
     const store = new Map<string, string>();
@@ -143,7 +158,7 @@ describe("SettingsPage", () => {
     fireEvent.change(screen.getByLabelText("Workspace Name"), { target: { value: "Kept Light" } });
     fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
     await waitFor(() => {
-      expect(screen.getByText("Settings Saved.")).toBeDefined();
+      expect(screen.getByText("Settings saved.")).toBeDefined();
     });
     expect(window.localStorage.getItem("ci-theme")).toBe("light");
     expect(document.documentElement.dataset["theme"] ?? "").toBe("");
@@ -160,14 +175,16 @@ describe("SettingsPage", () => {
     expect(save.disabled).toBe(false);
     fireEvent.click(save);
     await waitFor(() => {
-      expect(screen.getByText("Settings Saved.")).toBeDefined();
+      expect(screen.getByText("Settings saved.")).toBeDefined();
     });
-    expect(window.localStorage.getItem("ci-settings-prefs")).toContain("Night Shift");
+    // Preferences persist per signed-in employee (§9).
+    expect(window.localStorage.getItem("ci-settings-prefs:e1")).toContain("Night Shift");
     fireEvent.click(screen.getByRole("button", { name: "Reset Defaults" }));
     await waitFor(() => {
-      expect(screen.getByText("Defaults Restored.")).toBeDefined();
+      expect(screen.getByText("Defaults restored.")).toBeDefined();
     });
     expect((screen.getByLabelText("Workspace Name") as HTMLInputElement).value).toBe("Foap Creative Intelligence");
+    expect(window.localStorage.getItem("ci-settings-prefs:e1")).toBeNull();
   });
 
   it("stages appearance choices and applies them only on Save", async () => {
@@ -186,7 +203,7 @@ describe("SettingsPage", () => {
     expect(save.disabled).toBe(false);
     fireEvent.click(save);
     await waitFor(() => {
-      expect(screen.getByText("Settings Saved.")).toBeDefined();
+      expect(screen.getByText("Settings saved.")).toBeDefined();
     });
     expect(document.documentElement.style.getPropertyValue("--shell-teal")).toBe("#2F6FBE");
     expect(document.documentElement.dataset["theme"] ?? "").toBe("");
@@ -200,7 +217,7 @@ describe("SettingsPage", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Change Password" }));
     await waitFor(() => {
-      expect(screen.getByText("Password Reset Email Sent.")).toBeDefined();
+      expect(screen.getByText("Password reset email sent.")).toBeDefined();
     });
     expect(calls.some(([url, init]) => url === "/api/auth/email/reset" && init?.method === "POST")).toBe(true);
   });
@@ -214,7 +231,7 @@ describe("SettingsPage", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Log Out All Sessions" }));
     await waitFor(() => {
-      expect(screen.getByText("All Sessions Signed Out.")).toBeDefined();
+      expect(screen.getByText("All sessions signed out.")).toBeDefined();
     });
     expect(calls.some(([url, init]) => url === "/api/auth/sessions/revoke-all" && init?.method === "POST")).toBe(true);
   });
@@ -249,27 +266,52 @@ describe("SettingsPage", () => {
   it("shows Google Drive as not connected by default", async () => {
     mockFetch({ googleConnected: false });
     renderSettings();
-    const integrations = await screen.findByRole("heading", { name: "Integrations" });
-    const panel = integrations.closest("section") ?? document.body;
+    // The Drive card lives in Connections with a single action area: a
+    // Connect button and no Connected badge while disconnected.
+    // Scope to the Drive card itself: the Connections panel also holds
+    // the always-connected Work Email badge.
+    await screen.findByRole("heading", { name: "Connections" });
+    const panel = document.getElementById("integration-google") ?? document.body;
     await waitFor(() => {
       expect(within(panel as HTMLElement).getByRole("button", { name: "Connect" })).toBeDefined();
     });
-    // Other integrations keep honest badges; Drive itself carries no
-    // duplicate "Status:" description line.
-    expect(within(panel as HTMLElement).getAllByText("Not Connected").length).toBeGreaterThan(0);
+    expect(within(panel as HTMLElement).queryByText("Connected")).toBeNull();
     expect(within(panel as HTMLElement).queryByText(/Status:/)).toBeNull();
   });
 
   it("shows disconnect when Google Drive is connected", async () => {
     mockFetch({ googleConnected: true });
     renderSettings();
+    // Scope to the Drive card itself: the Connections panel also holds
+    // the always-connected Work Email badge.
+    await screen.findByRole("heading", { name: "Connections" });
+    const panel = document.getElementById("integration-google") ?? document.body;
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Disconnect" })).toBeDefined();
+      expect(within(panel as HTMLElement).getByRole("button", { name: "Disconnect" })).toBeDefined();
     });
-    expect(screen.getByText("Connected")).toBeDefined();
-    fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
+    expect(within(panel as HTMLElement).getByText("Connected")).toBeDefined();
+    fireEvent.click(within(panel as HTMLElement).getByRole("button", { name: "Disconnect" }));
     await waitFor(() => {
-      expect(screen.getByText("Google Drive Disconnected.")).toBeDefined();
+      expect(within(panel as HTMLElement).getByText("Google Drive Disconnected.")).toBeDefined();
+    });
+  });
+
+  it("recovers the Drive status check through Retry", async () => {
+    failGoogleStatus = true;
+    mockFetch({ googleConnected: false });
+    renderSettings();
+    // Scope to the Drive card itself: the Connections panel also holds
+    // the always-connected Work Email badge.
+    await screen.findByRole("heading", { name: "Connections" });
+    const panel = document.getElementById("integration-google") ?? document.body;
+    await waitFor(() => {
+      expect(within(panel as HTMLElement).getByRole("button", { name: "Retry" })).toBeDefined();
+    });
+    expect(within(panel as HTMLElement).getByText("Could not check status.")).toBeDefined();
+    failGoogleStatus = false;
+    fireEvent.click(within(panel as HTMLElement).getByRole("button", { name: "Retry" }));
+    await waitFor(() => {
+      expect(within(panel as HTMLElement).getByRole("button", { name: "Connect" })).toBeDefined();
     });
   });
 
@@ -283,6 +325,103 @@ describe("SettingsPage", () => {
       expect(screen.getByText(/Lose ~7\.5 Pts/)).toBeDefined();
     });
     expect(screen.getByText(/2 Creatives,/)).toBeDefined();
+  });
+
+  it("saves first and last name without resending an unchanged avatar", async () => {
+    const calls = mockFetch();
+    renderSettings();
+    await waitFor(() => {
+      expect(screen.getByLabelText("First Name")).toBeDefined();
+    });
+    fireEvent.change(screen.getByLabelText("Last Name"), { target: { value: "Lovelace" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Profile" }));
+    await waitFor(() => {
+      expect(screen.getByText("Profile saved.")).toBeDefined();
+    });
+    const patch = calls.find(([url, init]) => url === "/api/auth/me" && init?.method === "PATCH");
+    expect(patch).toBeDefined();
+    expect(JSON.parse(String(patch?.[1]?.body ?? "{}"))).toEqual({
+      first_name: "Ada",
+      last_name: "Lovelace",
+    });
+  });
+
+  it("uploads an avatar file as multipart FormData", async () => {
+    const calls = mockFetch();
+    renderSettings();
+    await waitFor(() => {
+      expect(screen.getByLabelText("Upload Photo")).toBeDefined();
+    });
+    const file = new File(["bytes"], "photo.png", { type: "image/png" });
+    fireEvent.change(screen.getByLabelText("Upload Photo"), { target: { files: [file] } });
+    await waitFor(() => {
+      expect(screen.getByText("Profile saved.")).toBeDefined();
+    });
+    const up = calls.find(([url]) => url === "/api/auth/me/avatar");
+    expect(up?.[1]?.method).toBe("POST");
+    expect(up?.[1]?.body instanceof FormData).toBe(true);
+  });
+
+  it("removes the avatar by clearing it through PATCH", async () => {
+    const withAvatar: MeResponse = {
+      ...authed,
+      employee: { ...employee, avatar_url: "/api/auth/avatar/e1" },
+    };
+    const calls = mockFetch({ me: withAvatar });
+    renderSettings();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Remove Avatar" })).toBeDefined();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Remove Avatar" }));
+    await waitFor(() => {
+      expect(screen.getByText("Avatar removed.")).toBeDefined();
+    });
+    const patch = calls.find(([url, init]) => url === "/api/auth/me" && init?.method === "PATCH");
+    expect(JSON.parse(String(patch?.[1]?.body ?? "{}"))).toEqual({ avatar_url: "" });
+  });
+
+  it("shows the readable employee number instead of the technical id", async () => {
+    const numbered: MeResponse = {
+      ...authed,
+      employee: { ...employee, id: "tech-uuid-9f", employee_no: "EMP-004" },
+    };
+    mockFetch({ me: numbered });
+    renderSettings();
+    const heading = await screen.findByRole("heading", { name: "Workspace" });
+    const panel = heading.closest("section") ?? document.body;
+    await waitFor(() => {
+      expect(within(panel as HTMLElement).getByText("EMP-004")).toBeDefined();
+    });
+    expect(within(panel as HTMLElement).queryByText("tech-uuid-9f")).toBeNull();
+    expect(within(panel as HTMLElement).getByRole("button", { name: "Copy employee number" })).toBeDefined();
+  });
+
+  it("orders workspace, security, and activity rows per the spec", async () => {
+    const dated: MeResponse = {
+      ...authed,
+      employee: {
+        ...employee,
+        created_at: "2024-01-02T03:04:05Z",
+        approved_at: "2024-01-03T03:04:05Z",
+        last_login_at: "2024-02-04T05:06:07Z",
+      },
+    };
+    mockFetch({ me: dated });
+    renderSettings();
+    const sectionText = async (heading: string) => {
+      const h = await screen.findByRole("heading", { name: heading });
+      return h.closest("section")?.textContent ?? "";
+    };
+    for (const [heading, labels] of [
+      ["Workspace", ["Employee ID", "Role", "Status", "Work Email", "Last Login", "Account Created"]],
+      ["Security", ["Password", "Active Sessions", "Two-Factor Authentication"]],
+      ["Recent Activity", ["Account Created", "Access Approved", "Last Signed In"]],
+    ] as Array<[string, string[]]>) {
+      const text = await sectionText(heading);
+      const idx = labels.map((l) => text.indexOf(l));
+      expect(idx.every((i) => i >= 0)).toBe(true);
+      expect([...idx].sort((a, b) => a - b)).toEqual(idx);
+    }
   });
 
   it("creates a cohort copying every active filter plus include/exclude lists", async () => {

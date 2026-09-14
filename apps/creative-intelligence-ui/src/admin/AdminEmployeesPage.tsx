@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/api/client";
 import { Icon } from "@/components/icons";
 import { LoadingButton } from "@/components/LoadingButton";
 import { DemoPackPanel } from "./DemoPackPanel";
-import { EmployeeAvatar, EmptyState, PageHeader, Panel, Skeleton, plural, titleCase } from "@/components/product";
+import { EmployeeAvatar, EmptyState, OverflowMenu, PageHeader, Panel, Skeleton, plural, titleCase } from "@/components/product";
 
 /** Admin employee management (port of legacy Web/Index.html v-admin).
  *
@@ -159,6 +159,23 @@ export function AdminEmployeesPage() {
   const [addRole, setAddRole] = useState("employee");
   const [teamOpen, setTeamOpen] = useState(false);
   const [teamName, setTeamName] = useState("");
+  /* Add-employee dialog behaviour (§2): Escape dismisses, the first
+   * field takes focus on open, and focus returns to whatever opened
+   * the dialog when it closes. */
+  const inviteFirstField = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    if (!inviteOpen) return;
+    const opener = document.activeElement as HTMLElement | null;
+    inviteFirstField.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setInviteOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      opener?.focus?.();
+    };
+  }, [inviteOpen]);
   const [localTeams, setLocalTeams] = useState<string[]>(loadLocalTeams);
   /* One in-flight admin mutation at a time: every async action sets
    * its key so repeated clicks cannot double-submit while slow. */
@@ -369,12 +386,12 @@ export function AdminEmployeesPage() {
     const pending = rows.filter((e) => e.status === "pending").length;
     const admins = rows.filter((e) => e.role === "admin").length;
     return [
-      { label: "Total Employees", value: String(total), icon: "users", tint: "#E7F1FB", trend: total ? `${plural(rows.filter((e) => e.role !== "admin").length, "Employee")} · ${plural(admins, "Admin")}` : "No Employees Yet" },
-      { label: "Active Users", value: String(active), icon: "check", tint: "#E5F5EC", trend: pct(active) },
+      { label: "Total Employees", value: String(total), icon: "users", tint: "var(--shell-blue-soft)", trend: total ? `${plural(rows.filter((e) => e.role !== "admin").length, "Employee")} · ${plural(admins, "Admin")}` : "No Employees Yet" },
+      { label: "Active Users", value: String(active), icon: "check", tint: "var(--shell-green-soft)", trend: pct(active) },
       /* "Pending Approvals", not "Pending Invites": no invitation
        *  email exists — pending rows await an approval decision. */
-      { label: "Pending Approvals", value: String(pending), icon: "clock", tint: "#FBF3E2", trend: pending ? "Awaiting Approval" : "Inbox Zero" },
-      { label: "Admins", value: String(admins), icon: "lock", tint: "#EFEAFB", trend: pct(admins) },
+      { label: "Pending Approvals", value: String(pending), icon: "clock", tint: "var(--shell-amber-soft)", trend: pending ? "Awaiting Approval" : "Inbox Zero" },
+      { label: "Admins", value: String(admins), icon: "lock", tint: "var(--shell-violet-soft)", trend: pct(admins) },
     ];
   }, [employees]);
 
@@ -415,9 +432,9 @@ export function AdminEmployeesPage() {
     <>
       <PageHeader
         title="Admin"
-        sub="Access is decided here, on the server. Changes take effect immediately, including on live sessions."
+        sub="Access is decided on the server and changes take effect immediately, including on live sessions."
         actions={(
-          <>
+          <span className="actions-2-1">
             <button type="button" className="btn-outline" onClick={exportAccessReport}>
               <Icon name="download" size={14} /> Export Access Report
             </button>
@@ -427,7 +444,7 @@ export function AdminEmployeesPage() {
             <button type="button" className="btn-primary" onClick={() => setInviteOpen(true)}>
               <Icon name="plus" size={14} /> Add Employee
             </button>
-          </>
+          </span>
         )}
       />
       <div className="kpi-grid" style={{ marginTop: 0 }}>
@@ -591,47 +608,23 @@ export function AdminEmployeesPage() {
                                 Reactivate
                               </button>
                             )}
-                            <details className="row-menu">
-                              {/* role=button: some AT/summary mappings omit the
-                                  disclosure role, and tests drive this control. */}
-                              <summary role="button" aria-label={`More Actions For ${e.email}`} title="More Actions">
-                                <Icon name="dots" size={16} />
-                              </summary>
-                              <div className="row-menu-pop" role="menu">
-                                {e.status !== "revoked" && (
-                                  <button
-                                    type="button"
-                                    disabled={busyKey !== null}
-                                    onClick={(ev) => {
-                                      ev.currentTarget.closest("details")?.removeAttribute("open");
-                                      void runAction("revoke", e.id, e.role, "");
-                                    }}
-                                  >
-                                    Revoke
-                                  </button>
-                                )}
-                                <button
-                                  type="button"
-                                  disabled={busyKey !== null}
-                                  onClick={(ev) => {
-                                    ev.currentTarget.closest("details")?.removeAttribute("open");
-                                    void runAction("role", e.id, e.role, nextRole);
-                                  }}
-                                >
-                                  Make {nextRole === "admin" ? "Admin" : "Employee"}
-                                </button>
-                                <button
-                                  type="button"
-                                  disabled={busyKey !== null}
-                                  onClick={(ev) => {
-                                    ev.currentTarget.closest("details")?.removeAttribute("open");
-                                    void invalidateSessions(e.id);
-                                  }}
-                                >
-                                  Invalidate Sessions
-                                </button>
-                              </div>
-                            </details>
+                            <OverflowMenu
+                              label={`More Actions For ${e.email}`}
+                              items={[
+                                ...(e.status !== "revoked" ? [{
+                                  label: "Revoke",
+                                  onSelect: () => { void runAction("revoke", e.id, e.role, ""); },
+                                }] : []),
+                                {
+                                  label: `Make ${nextRole === "admin" ? "Admin" : "Employee"}`,
+                                  onSelect: () => { void runAction("role", e.id, e.role, nextRole); },
+                                },
+                                {
+                                  label: "Invalidate Sessions",
+                                  onSelect: () => { void invalidateSessions(e.id); },
+                                },
+                              ]}
+                            />
                           </span>
                         </td>
                       </tr>
@@ -654,7 +647,7 @@ export function AdminEmployeesPage() {
               </span>
               <div>
                 <h4>Admins{employees !== null ? ` (${adminCount})` : ""}</h4>
-                <p>Approve, suspend, revoke, and re-activate employees; change roles; invalidate sessions; read the audit trail.</p>
+                <p>Approve, suspend, revoke and reactivate employees, change roles, invalidate sessions and review the audit trail.</p>
               </div>
             </div>
             {/* Teams count row (§8): server-authoritative team names
@@ -670,7 +663,7 @@ export function AdminEmployeesPage() {
                 <p>{teams === null
                   ? "Loading teams…"
                   : teams.length === 0
-                    ? "None yet — teams appear when campaigns carry a team name."
+                    ? "Teams appear when campaigns include a team name."
                     : `${plural(teams.length, "Team")} named in the current dataset.`}</p>
               </div>
             </div>
@@ -680,7 +673,7 @@ export function AdminEmployeesPage() {
               </span>
               <div>
                 <h4>Employees{employees !== null ? ` (${employeeCount})` : ""}</h4>
-                <p>Full product access — dashboards, campaigns, creatives, reports, Ask The Data, and AI Analyst — without admin controls.</p>
+                <p>Access dashboards, campaigns, creatives, reports, Ask The Data and AI Analyst without admin controls.</p>
               </div>
             </div>
             {allTeams.map((t) => (
@@ -736,12 +729,11 @@ export function AdminEmployeesPage() {
         title="Workspace Activity"
         sub="Every access decision, newest first."
       >
-        <h3 style={{ margin: "0 0 10px", fontSize: 13.5, fontWeight: 700 }}>Audit Trail</h3>
         {events.length === 0 ? (
           <EmptyState text="No Events Yet." />
         ) : (
           <div className="tbl-wrap">
-            <table className="tbl">
+            <table className="tbl" aria-label="Workspace Activity">
               <thead>
                 <tr>
                   <th scope="col">When</th>
@@ -759,7 +751,7 @@ export function AdminEmployeesPage() {
                     <td>{identityCell(v.target_id)}</td>
                     <td>{identityCell(v.admin_id)}</td>
                     <td>
-                      {v.prev_value} → {v.new_value}
+                      {titleCase(v.prev_value)} → {titleCase(v.new_value)}
                     </td>
                   </tr>
                 ))}
@@ -795,36 +787,43 @@ export function AdminEmployeesPage() {
             onClick={(e) => e.stopPropagation()}
             style={{ width: "100%", maxWidth: 460, margin: 0 }}
           >
-            <div className="panel-head">
-              <div>
-                <h2 className="panel-title">Add Employee</h2>
-                <p className="panel-sub">New employees join as Active immediately — no invitation email is sent.</p>
-              </div>
-              <button type="button" className="link-teal" onClick={() => setInviteOpen(false)}>
-                Close
+            <div className="panel-head dialog-head">
+              <h2 className="panel-title">Add Employee</h2>
+              <button
+                type="button"
+                className="icon-btn"
+                aria-label="Close Add Employee dialog"
+                onClick={() => setInviteOpen(false)}
+              >
+                <Icon name="x" size={16} />
               </button>
             </div>
+            <p className="panel-sub" style={{ marginTop: -8, marginBottom: 12 }}>New employees join as Active immediately — no invitation email is sent.</p>
             <div className="rep-filters" style={{ flexDirection: "column", alignItems: "stretch" }}>
               <input
+                ref={inviteFirstField}
                 type="text"
-                placeholder="email"
-                aria-label="New Employee Email"
-                value={addEmail}
-                onChange={(e) => setAddEmail(e.target.value)}
-              />
-              <input
-                type="text"
-                placeholder="First Name (Optional)"
+                placeholder="First Name"
                 aria-label="New Employee First Name"
+                autoComplete="given-name"
                 value={addFirst}
                 onChange={(e) => setAddFirst(e.target.value)}
               />
               <input
                 type="text"
-                placeholder="last name (optional)"
+                placeholder="Last Name"
                 aria-label="New Employee Last Name"
+                autoComplete="family-name"
                 value={addLast}
                 onChange={(e) => setAddLast(e.target.value)}
+              />
+              <input
+                type="email"
+                placeholder="Email Address"
+                aria-label="New Employee Email"
+                autoComplete="email"
+                value={addEmail}
+                onChange={(e) => setAddEmail(e.target.value)}
               />
               <select
                 aria-label="New Employee Role"
@@ -837,7 +836,7 @@ export function AdminEmployeesPage() {
               <LoadingButton type="button" className="btn-primary"
                 loading={busyKey === "add"} loadingLabel="Adding…"
                 disabled={busyKey !== null} onClick={() => void addEmployee()}>
-                <Icon name="plus" size={14} /> Add (Active)
+                <Icon name="plus" size={14} /> Add Employee
               </LoadingButton>
             </div>
           </div>

@@ -84,15 +84,19 @@ test.describe("employee journey", () => {
     await expect(page).toHaveTitle("Creative Intelligence");
     await expect(page.getByText("Ada L")).toBeVisible();
 
-    await page.getByRole("link", { name: "Profile" }).click();
-    await expect(page.getByRole("heading", { name: "Profile" }).first()).toBeVisible();
-    // Email is shown read-only (bare address, no verified suffix): hero
-    // and Workspace surfaces carry it, never an editable field.
-    await expect(page.getByText("ada@foap.test", { exact: true })).toHaveCount(2);
+    await page.getByRole("link", { name: "Settings" }).click();
+    await expect(page.getByRole("heading", { name: "Settings", exact: true }).first()).toBeVisible();
+    // Email is shown read-only (bare address, no verified suffix): hero,
+    // Workspace, and Connections surfaces carry it, never an editable field.
+    await expect(page.getByText("ada@foap.test", { exact: true })).toHaveCount(3);
     await expect(page.getByRole("textbox", { name: /email/i })).toHaveCount(0);
+    // The old Profile route redirects to the merged Settings page.
+    await page.goto("/profile");
+    await expect(page).toHaveURL(/\/settings$/);
+    await expect(page.getByRole("heading", { name: "Settings", exact: true }).first()).toBeVisible();
 
     // The account menu ships collapsed; expand it to reach Log Out
-    // (scoped: Profile Security carries its own adaptive Log Out now).
+    // (scoped: Settings Security carries its own adaptive Log Out now).
     await page.getByRole("button", { name: "Toggle Account Menu" }).click();
     await page.locator("#account-menu-body").getByRole("button", { name: "Log Out", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Welcome Back" })).toBeVisible();
@@ -158,24 +162,23 @@ test.describe("employee journey", () => {
     await expect(page.getByText("Google Drive is not configured.")).toBeVisible();
   });
 
-  test("settings shows appearance and logout-all; identity lives in profile", async ({ page, context }) => {
+  test("settings shows identity, appearance and logout-all", async ({ page, context }) => {
     const seeds = readSeeds();
     // NOTE: the admin session (the employee session is destroyed by the
     // logout step of the first journey in this file).
     await loginAs(context, page, seeds.admin, "/settings");
     await expect(page.getByRole("heading", { name: "Settings", exact: true })).toBeVisible();
-    // No duplicate identity block in General Settings: the account email
-    // is absent here and intact on the Profile page.
-    await expect(page.getByText(/boss@foap\.test/)).toHaveCount(0);
-    await page.getByRole("link", { name: "Profile" }).click();
+    // Merged page: the account identity lives here (hero, Workspace,
+    // Connections) with no separate Profile destination.
     await expect(page.getByText("boss@foap.test", { exact: true }).first()).toBeVisible();
-    await page.getByRole("link", { name: "Settings" }).click();
+    await expect(page.getByRole("link", { name: "Profile" })).toHaveCount(0);
     // Reskinned appearance control is a Theme select with a System option.
     await expect(page.getByLabel("Theme")).toBeVisible();
     await expect(page.getByLabel("Theme").locator("option", { hasText: "System" })).toHaveCount(1);
     // Exactly one adaptive logout control, labelled by the server count
-    // (the seeded admin holds a single session → Log Out). Signing out
-    // returns the gate to login.
+    // (Log Out for a single session, Log Out All Sessions otherwise —
+    // earlier specs may legitimately leave extra admin sessions).
+    // Signing out returns the gate to login.
     const logoutAll = page.getByRole("button", { name: "Log Out All Sessions" });
     const logoutOne = page.getByRole("button", { name: "Log Out", exact: true });
     const shown = await logoutAll.count() + await logoutOne.count();

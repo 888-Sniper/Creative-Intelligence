@@ -228,6 +228,15 @@ ul.plain li{padding:6px 0;border-bottom:1px solid var(--line)}
   --shell-bg:#F6F8FB; --shell-card:#FFFFFF; --shell-navy:#182536;
   --shell-muted:#627186; --shell-faint:#8CA0B5; --shell-line:#E4E9EF;
   --shell-teal:#0A9183; --shell-teal-dark:#08786E; --shell-teal-soft:#E5F5F2;
+  /* Adaptive icon-glyph tones (§5): light values equal the legacy hexes
+   * so Light is pixel-identical; dark uses same-hue brighter tones that
+   * stay visible on the dark soft tiles. */
+  --glyph-teal:#0A9183; --glyph-blue:#2F6FBE; --glyph-green:#0E7C5B; --glyph-navy:#1D3A8F;
+  /* Brand-text variant (§5/§6): teal titles/icons on cards. Light uses
+   * the darker teal (5.4:1 on white); dark uses the bright logo teal
+   * (7.1:1 on the dark card). Follows a saved accent repointing of
+   * --brand-teal in dark mode. */
+  --brand-text:var(--shell-teal-dark);
   /* AI composer chrome (§12): a clearer default outline and icon than
    * the generic faint linework, in both themes. */
   --composer-line:#C9D4E0; --composer-ico:#627186;
@@ -242,6 +251,8 @@ ul.plain li{padding:6px 0;border-bottom:1px solid var(--line)}
   --shell-bg:#141A26; --shell-card:#1D2635; --shell-navy:#EDF2F9;
   --shell-muted:#93A3BA; --shell-faint:#6E7F97; --shell-line:#2B3448;
   --shell-teal-soft:#123B37; --shell-blue-soft:#1B2F47; --shell-green-soft:#16352A;
+  --glyph-teal:#00C7B2; --glyph-blue:#7FB3D5; --glyph-green:#0E9F6E; --glyph-navy:#7FB3D5;
+  --brand-text:var(--brand-teal);
   --shell-amber-soft:#3A2F17; --shell-violet-soft:#2B2547;
   --shell-shadow:0 1px 2px rgba(0,0,0,.3),0 2px 8px rgba(0,0,0,.3);
 }
@@ -283,7 +294,12 @@ ul.plain li{padding:6px 0;border-bottom:1px solid var(--line)}
 .page{padding:20px 24px 36px;max-width:1440px;width:100%;margin:0 auto}
 .page-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin:2px 0 14px}
 .page-head h1{margin:0;font-size:24px;font-weight:700;letter-spacing:-.015em;color:var(--shell-navy)}
-.page-head .sub{margin:5px 0 0;font-size:13.5px;font-weight:400;color:var(--shell-muted)}
+.page-head .sub{margin:5px 0 0;font-size:13.5px;font-weight:400;color:var(--shell-muted);max-width:60%}
+.panel-head .panel-sub{max-width:60%}
+@media (max-width:900px){.page-head .sub,.panel-head .panel-sub{max-width:none}}
+/* Small filter labels (§13): lighter weight and muted tone in dark mode,
+ * keeping headings and selected values prominent. */
+[data-theme="dark"] .field>label{font-weight:500;color:var(--shell-muted)}
 .head-actions{display:flex;align-items:center;gap:10px;flex:0 1 auto;padding-top:4px;flex-wrap:wrap;justify-content:flex-end;min-width:0}
 .panel{background:var(--shell-card);border:1px solid var(--shell-line);border-radius:var(--shell-radius);box-shadow:var(--shell-shadow);padding:16px}
 /* Compact density (Settings → Appearance → Interface Density). Applied via
@@ -309,8 +325,18 @@ body[data-density="compact"] .kpi-grid{grid-gap:8px;gap:8px}
 .btn-send:disabled{opacity:.65;cursor:default}
 .composer.ask-composer{align-items:center;background:var(--shell-card);border:1px solid var(--composer-line);border-radius:12px;padding:5px 5px 5px 12px;color:var(--shell-navy)}
 .composer.ask-composer svg{color:var(--composer-ico)}
+/* The composer icon tint must never win over the send-button glyph:
+ * the send icon inherits the shared primary foreground (§4). Higher
+ * specificity than the rule above, same token as .btn-send text. */
+.composer.ask-composer .btn-send svg,.composer .btn-send svg,.btn-send svg{color:var(--brand-teal-ink)}
 .composer.ask-composer input{border:0;background:transparent;padding:8px 4px;min-height:0;color:var(--shell-navy)}
-.composer.ask-composer input::placeholder{color:var(--shell-faint)}
+.composer.ask-composer input::placeholder{color:var(--shell-muted);opacity:1}
+/* AI composer placeholders (§3): muted guidance grey, clearly dimmer
+ * than entered values but ≥4.5:1 in both themes (measured 4.97 light,
+ * 5.93 dark). opacity:1 defeats the browser's default placeholder
+ * fade so the measured ratio holds. Prefilled/typed values keep the
+ * full-contrast input-text colour untouched. */
+.composer input::placeholder,.composer textarea::placeholder,.ask-bar input::placeholder{color:var(--shell-muted);opacity:1}
 .composer.ask-composer input:focus{outline:none}
 .composer.ask-composer:focus-within{outline:2px solid var(--shell-teal);outline-offset:-1px;border-color:var(--shell-teal)}
 .btn-primary:hover{background:var(--brand-teal-hover)}
@@ -333,9 +359,13 @@ body[data-density="compact"] .kpi-grid{grid-gap:8px;gap:8px}
 .field .date-pair>input+input{border-left:1px solid var(--shell-line)}
 .field .date-pair>input:focus{outline:2px solid var(--shell-teal);outline-offset:-2px}
 .field-span-2{grid-column:span 2}
-.field label{display:block;font-size:13px;font-weight:600;color:var(--shell-navy);margin:0 0 6px}
+.field label{display:block;font-size:13px;font-weight:600;color:var(--shell-muted);margin:0 0 6px}
 .field select,.field input{width:100%;box-sizing:border-box;background:var(--shell-card);border:1px solid var(--shell-line);border-radius:8px;padding:7px 10px;font-size:13.5px;color:var(--shell-navy);font-family:inherit;min-height:34px}
-.field select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748F' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;padding-right:30px}
+.field select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748F' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 14px center;padding-right:34px}
+/* Shared chevron treatment for selects outside .field (Sort By, Add KPI,
+ * filter-bar and panel-head selects): same inset so text clears the arrow. */
+select:not([multiple]):not([size]){appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748F' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 14px center;padding-right:34px}
+.multicheck-opt:focus-within{background:var(--shell-bg)}
 .field input[type="date"]{background-image:none;padding-right:11px}
 .field select:focus,.field input:focus{outline:2px solid var(--shell-teal);outline-offset:-1px;border-color:var(--shell-teal)}
 .filter-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}
@@ -375,6 +405,27 @@ body[data-density="compact"] .kpi-grid{grid-gap:8px;gap:8px}
 .panel-head>a,.panel-head>button{white-space:nowrap;flex:0 0 auto}
 .panel-controls{display:flex;align-items:center;gap:8px;flex:0 1 auto;min-width:0}
 @media (max-width:560px){.panel-controls{flex-wrap:wrap}.panel-head>a,.panel-head>button{white-space:normal}}
+/* Shared overflow menu (§8): theme-aware dropdown off a ⋯ toggle. */
+.ov-menu{position:relative;flex:0 0 auto}
+.ov-menu-list{position:absolute;right:0;top:calc(100% + 6px);z-index:70;min-width:200px;max-width:min(260px,70vw);background:var(--shell-card);border:1px solid var(--shell-line);border-radius:10px;box-shadow:var(--shell-shadow);padding:6px}
+.ov-menu-item{display:flex;align-items:center;gap:9px;width:100%;text-align:left;background:transparent;border:0;border-radius:7px;padding:10px 12px;min-height:42px;font-size:13.5px;font-weight:500;color:var(--shell-navy);cursor:pointer;font-family:inherit}
+.ov-menu-item:hover:not(:disabled){background:var(--shell-teal-soft)}
+.ov-menu-item:disabled{opacity:.6;cursor:default}
+.ov-menu-item:focus-visible{outline:2px solid var(--shell-teal);outline-offset:-1px}
+/* Benchmark Results mobile header (§8): title + ⋯ on row one,
+ * description full width, Group By + full-width select below.
+ * Export stays inline on desktop, lives in the menu on mobile —
+ * both call the same handler. */
+@media (max-width:560px){
+  .hide-mobile{display:none!important}
+  .panel-head.bench-head{flex-wrap:wrap}
+  .panel-head.bench-head .ov-menu{align-self:flex-start}
+  .panel-head.bench-head .bench-controls{flex:1 1 100%;display:grid;grid-template-columns:minmax(0,1fr);gap:6px}
+  .panel-head.bench-head .bench-controls select{width:100%}
+}
+@media (min-width:561px){
+  .hide-desktop{display:none!important}
+}
 /* KPI trend slot: a card with no comparison keeps the same body height
  * as one with a trend row, so value baselines align across the row. */
 .kpi-trend-slot{display:block;min-height:22px}
@@ -479,6 +530,17 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13.5px}
 .lb-face[aria-hidden="true"]{visibility:hidden}
 @keyframes spin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.spinner{animation:none}}
+@media (prefers-reduced-motion:reduce){.skel{animation:none}}
+/* Page skeleton (§10): layout-matched loading shells that mirror the
+ * final header + panel arrangement, so content swaps in without a
+ * layout shift. Announced via an sr-only live region, never visible
+ * text (no "Loading…" flash). */
+/* Nonblocking success toast (§8): bottom-centre, auto-dismissing,
+ * role=status so success is announced accessibly. */
+.toast-wrap{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:200;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none}
+.toast{display:flex;align-items:center;gap:9px;background:var(--shell-navy);color:var(--shell-bg);border-radius:10px;padding:11px 16px;font-size:13.5px;font-weight:600;box-shadow:var(--shell-shadow);max-width:min(420px,90vw);pointer-events:auto}
+.toast svg{flex:0 0 auto;color:var(--brand-teal)}
+@media (prefers-reduced-motion:reduce){.toast{transition:none}}
 .badge-demo{display:inline-flex;align-items:center;font-size:11px;font-weight:700;letter-spacing:.04em;color:var(--shell-teal-dark);background:var(--shell-teal-soft);border-radius:6px;padding:3px 9px}
 .empty{padding:34px 20px;text-align:center;color:var(--shell-muted);font-size:14px}
 /* Structured empty state: icon + title + one-line body + optional CTA,
@@ -511,9 +573,9 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13.5px}
 .profile-hero-left{display:flex;gap:20px;align-items:flex-start;flex:1 1 340px;min-width:0}
 .profile-hero-right{flex:1 1 240px;min-width:220px;display:grid;gap:10px;align-content:start}
 @media (max-width:900px){.profile-hero{flex-direction:column}.profile-hero-left,.profile-hero-right{flex:1 1 100%;width:100%}}
-.wb-kpis-auto{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px}
+.wb-kpis-auto{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;max-height:212px;overflow-y:auto}
 .wb-doc{border:1px solid var(--shell-line);border-radius:10px;overflow:hidden}
-.wb-doc-head{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--shell-line);background:var(--shell-bg)}
+.wb-doc-head{display:flex;align-items:center;gap:16px;padding:10px 14px;border-bottom:1px solid var(--shell-line);background:var(--shell-bg)}
 .wb-doc-body{padding:10px 14px}
 /* Fullscreen preview dialog (Workbook Full Screen). */
 .modal-overlay{position:fixed;inset:0;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;padding:24px;z-index:80}
@@ -529,6 +591,16 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13.5px}
 .creative-cards{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}
 .cmp-card{background:var(--shell-card);border:1px solid var(--shell-line);border-radius:var(--shell-radius);box-shadow:var(--shell-shadow);padding:16px}
 .cmp-card.sel{border:1.5px solid var(--shell-teal)}
+/* Workbook module + Quick-Start template cards (§5/§6): explicit ink
+ * and font so mobile-browser default blue never wins; pastel tints
+ * come from --card-tint/--tile-tint in Light, consistent dark-grey
+ * surfaces in Dark. Behaviour (selection, order, payload) untouched. */
+.mod-card{background:var(--card-tint,var(--shell-card));color:var(--shell-navy);font-family:inherit}
+[data-theme="dark"] .mod-card{background:var(--shell-card)}
+.mod-card .mod-ico{display:flex;align-items:center;justify-content:center;width:42px;height:42px;border-radius:12px;background:var(--tile-tint,rgba(255,255,255,.75));color:var(--brand-text);flex:0 0 auto}
+[data-theme="dark"] .mod-card .mod-ico{background:var(--shell-teal-soft)}
+.mod-card .mod-title{display:block;font-size:13px;color:var(--brand-text)}
+.mod-card input[type="checkbox"]{accent-color:var(--shell-teal);width:15px;height:15px;flex:0 0 auto}
 .chip-row{display:flex;flex-wrap:wrap;gap:8px}
 .chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--shell-line);border-radius:999px;padding:5px 11px;font-size:13px;font-weight:600;color:var(--shell-navy);background:var(--shell-card);cursor:pointer;font-family:inherit;min-height:34px}
 .chip[aria-pressed="true"]{background:var(--shell-navy);color:#fff;border-color:var(--shell-navy)}
@@ -572,7 +644,38 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13.5px}
   .page-head{flex-direction:column}
   .head-actions{align-self:stretch}
   .head-actions .btn-primary{flex:1}
+  /* Two-row header actions (§1): two equal outline buttons above one
+   * full-width primary. display:contents keeps the desktop flex row
+   * untouched; the grid applies at phone widths only. */
+  .head-actions .actions-2-1{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;width:100%}
+  .head-actions .actions-2-1>*{min-width:0}
+  .head-actions .actions-2-1 .btn-outline{white-space:normal;text-align:center;height:100%}
+  .head-actions .actions-2-1 .btn-outline svg{flex:none}
+  .head-actions .actions-2-1 .btn-primary{grid-column:1/-1;flex:none}
 }
+/* Desktop: the §1 wrapper vanishes so PageHeader flex is unchanged. */
+.actions-2-1{display:contents}
+/* Dialog header (§2): title and X share the top row; the explanatory
+ * sub sits beneath. Shared icon-button for dialog close controls. */
+.panel-head.dialog-head{align-items:flex-start}
+.panel-head.dialog-head .panel-title{padding-top:6px}
+.icon-btn{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;flex:0 0 auto;background:transparent;border:1px solid transparent;border-radius:9px;color:var(--shell-muted);cursor:pointer;font-family:inherit}
+.icon-btn:hover{background:var(--shell-teal-soft);color:var(--shell-navy);border-color:var(--shell-line)}
+.icon-btn:focus-visible{outline:2px solid var(--shell-teal);outline-offset:2px}
+/* Reset Defaults (§8): constant 2px outline (box-sizing keeps the
+ * footprint identical across states — no layout jump), stronger
+ * green text via the brand-text token, tinted hover. Stays
+ * secondary next to the filled primary. */
+.btn-reset{display:inline-flex;align-items:center;justify-content:center;gap:8px;background:transparent;color:var(--brand-text);border:2px solid var(--shell-teal);border-radius:9px;padding:7px 15px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;min-height:34px;box-sizing:border-box}
+.btn-reset:hover{background:var(--shell-teal-soft)}
+.btn-reset:focus-visible{outline:2px solid var(--shell-teal);outline-offset:2px}
+.btn-reset:disabled{opacity:.65;cursor:default}
+/* Text inputs share the select surface inside .rep-filters (§2): one
+ * dark-grey control treatment instead of near-black inputs beside
+ * blue-grey selects. Search inputs keep their transparent treatment
+ * via the more specific .rep-search rule below. */
+.rep-filters input[type="text"],.rep-filters input[type="email"]{background:var(--shell-card);border:1px solid var(--shell-line);border-radius:8px;padding:7px 10px;font-size:12.5px;color:var(--shell-navy);font-family:inherit;min-height:34px}
+.rep-filters input[type="text"]:focus,.rep-filters input[type="email"]:focus{outline:2px solid var(--shell-teal);outline-offset:-1px;border-color:var(--shell-teal)}
 .rec-list{margin:0;padding-left:18px;color:var(--shell-navy);font-size:13.5px;display:grid;gap:6px}
 .field-label{font-size:12.5px;color:var(--shell-muted);margin:0 0 6px;font-weight:500}
 .chip-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
@@ -659,7 +762,7 @@ button.cell-main{background:none;border:0;padding:0;cursor:pointer;text-align:le
 .rep-search{display:inline-flex;align-items:center;gap:7px;background:var(--shell-card);border:1px solid var(--shell-line);border-radius:8px;padding:7px 11px;color:var(--shell-faint)}
 .rep-search input{border:0;outline:0;background:transparent;font-size:12.5px;color:var(--shell-navy);font-family:inherit;width:130px}
 /* Admin employee search needs its full placeholder visible (220–240px). */
-.admin-search{flex:1 1 230px;max-width:320px}
+.admin-search{flex:1 1 230px;max-width:320px;min-height:34px;box-sizing:border-box}
 .admin-search input{width:100%;min-width:180px}
 /* Row overflow menu: one primary action inline, the rest behind ⋯. */
 .row-menu{position:relative;display:inline-flex}
@@ -701,3 +804,25 @@ button.cell-main{background:none;border:0;padding:0;cursor:pointer;text-align:le
  * provides a .tnum utility for future numeric copy. */
 .kpi-value,.kpi-card .kpi-value,.tbl td.num,.tbl th.num{font-variant-numeric:tabular-nums}
 .tnum{font-variant-numeric:tabular-nums}
+/* ============ Foap teal interaction states + status badges (§3/§4/§5) ============
+ * Reference bright teal: --brand-teal (#00C7B2, the enabled-toggle teal).
+ * Contrast audit (white text): #00C7B2 2.14:1 FAIL, #0A9183 3.9:1,
+ * #08786E (--shell-teal-dark) 5.35:1 PASS. Dark-mode badges therefore use
+ * --shell-teal-dark (same hue family, smallest adequate adjustment);
+ * danger badges (.pill-bad) intentionally keep their red error semantics. */
+.side-nav a{transition:background .15s ease,color .15s ease}
+[data-theme="dark"] .side-nav a:hover{background:color-mix(in srgb,var(--brand-teal) 16%,transparent)}
+[data-theme="dark"] .side-nav a.active{background:var(--brand-teal);color:var(--brand-teal-ink);font-weight:600}
+[data-theme="dark"] .side-nav a.active svg{opacity:1}
+[data-theme="dark"] .side-nav a.active:hover{background:color-mix(in srgb,var(--brand-teal) 86%,white)}
+#account-menu .menu-toggle:hover,.user-chip:hover{background:var(--shell-teal-soft)}
+[data-theme="dark"] .link-teal{color:var(--brand-teal)}
+.btn-outline{transition:background .15s ease,color .15s ease,border-color .15s ease}
+.btn-outline:hover{background:var(--shell-teal-soft)}
+.pill{min-height:30px;box-sizing:border-box;padding:6px 14px;font-size:12.5px}
+[data-theme="dark"] .pill-ok,[data-theme="dark"] .pill-info{background:var(--shell-teal-dark);color:#fff}
+/* List/Grid view toggle (§5): teal selected, subdued unselected in dark. */
+.view-btn{transition:background .15s ease,color .15s ease}
+.view-btn[aria-pressed="true"]{background:var(--shell-teal);color:#fff}
+.view-btn[aria-pressed="true"]:hover{background:var(--shell-teal-dark)}
+[data-theme="dark"] .view-btn:not([aria-pressed="true"]){background:rgba(255,255,255,.06)}

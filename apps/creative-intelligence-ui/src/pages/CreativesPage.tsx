@@ -404,6 +404,9 @@ export function CreativesPage() {
           <>
             {/* Reset restores local view state too: a stale length/sort
               selection after reset would keep sections disagreeing. */}
+            <button type="button" className="btn-primary" onClick={() => setApplied((n) => n + 1)}>
+              Apply Filters
+            </button>
             <button type="button" className="link-teal" onClick={() => {
               clearFilters();
               setApplied((n) => n + 1);
@@ -417,9 +420,6 @@ export function CreativesPage() {
             }}
               style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
               <Icon name="reset" size={15} /> Reset Filters
-            </button>
-            <button type="button" className="btn-primary" onClick={() => setApplied((n) => n + 1)}>
-              Apply Filters
             </button>
           </>
         )}
@@ -460,7 +460,7 @@ export function CreativesPage() {
               ) : null}
               <div className="kpi-grid">
                 <div className="kpi-card">
-                  <span className="kpi-ico" style={{ background: "#E5F5F2", color: "#0A9183" }}>
+                  <span className="kpi-ico" style={{ background: "var(--shell-teal-soft)", color: "var(--glyph-teal)" }}>
                     <Icon name="play" size={20} />
                   </span>
                   <div className="kpi-body">
@@ -471,21 +471,21 @@ export function CreativesPage() {
                 {length === "all" && compare ? (
                   <>
                     <KpiCard label="Total Impressions" display={kpiDisplay("count", compare.metrics.impressions?.current, compare.current_n_ads === 0)}
-                      icon="bars" tint="#E7F1FB" metricLabel="Impressions" compare={compare} />
+                      icon="bars" tint="var(--shell-blue-soft)" metricLabel="Impressions" compare={compare} />
                     <KpiCard label="Total Clicks" display={kpiDisplay("count", compare.metrics.clicks?.current, compare.current_n_ads === 0)}
-                      icon="click" tint="#E7F1FB" metricLabel="Clicks" compare={compare} />
+                      icon="click" tint="var(--shell-blue-soft)" metricLabel="Clicks" compare={compare} />
                     <KpiCard label="Average ROAS" display={kpiDisplay("mult", compare.metrics.roas?.current, compare.current_n_ads === 0)}
-                      icon="users" tint="#E5F5F2" metricLabel="ROAS" compare={compare}
+                      icon="users" tint="var(--shell-teal-soft)" metricLabel="ROAS" compare={compare}
                       note={kpiPlaceholderNote("mult", compare.metrics.roas?.current, compare.current_n_ads === 0)} />
                   </>
                 ) : (
                   <>
                     <KpiCard label="Total Impressions" display={fmtCompact(pooled.impr)}
-                      icon="bars" tint="#E7F1FB" metricLabel="Impressions" compare={null} />
+                      icon="bars" tint="var(--shell-blue-soft)" metricLabel="Impressions" compare={null} />
                     <KpiCard label="Total Clicks" display={fmtCompact(pooled.clicks)}
-                      icon="click" tint="#E7F1FB" metricLabel="Clicks" compare={null} />
+                      icon="click" tint="var(--shell-blue-soft)" metricLabel="Clicks" compare={null} />
                     <KpiCard label="Average ROAS" display={kpiDisplay("mult", pooled.roas, lengthRows.length === 0)}
-                      icon="users" tint="#E5F5F2" metricLabel="ROAS" compare={null}
+                      icon="users" tint="var(--shell-teal-soft)" metricLabel="ROAS" compare={null}
                       note={kpiPlaceholderNote("mult", pooled.roas, lengthRows.length === 0)} />
                   </>
                 )}
@@ -533,6 +533,7 @@ export function CreativesPage() {
           </Panel>
           <Panel
             title={`All Creatives (${fmtCompact(rows.length)})`}
+            style={{ flex: "1 0 auto" }}
             action={(
               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                 <label htmlFor="cr-sort" className="panel-sub">Sort By</label>
@@ -540,13 +541,13 @@ export function CreativesPage() {
                   {SORTS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
                 </select>
                 <div role="group" aria-label="Table Layout" style={{ display: "flex", gap: 4 }}>
-                  <button type="button" className="icon-btn" aria-pressed={view === "list"} aria-label="List View"
-                    style={{ width: 32, height: 32, background: view === "list" ? "#E7F1FB" : undefined }}
+                  <button type="button" className="icon-btn view-btn" aria-pressed={view === "list"} aria-label="List View"
+                    style={{ width: 32, height: 32 }}
                     onClick={() => setView("list")}>
                     <Icon name="list" size={16} />
                   </button>
-                  <button type="button" className="icon-btn" aria-pressed={view === "grid"} aria-label="Grid View"
-                    style={{ width: 32, height: 32, background: view === "grid" ? "#E7F1FB" : undefined }}
+                  <button type="button" className="icon-btn view-btn" aria-pressed={view === "grid"} aria-label="Grid View"
+                    style={{ width: 32, height: 32 }}
                     onClick={() => setView("grid")}>
                     <Icon name="grid" size={16} />
                   </button>
@@ -662,7 +663,7 @@ export function CreativesPage() {
                 <div>
                   {learnings.map((l) => (
                     <div className="insight" key={l.title}>
-                      <span className="insight-ico" style={{ background: "#E5F5F2" }}>
+                      <span className="insight-ico" style={{ background: "var(--shell-teal-soft)" }}>
                         <Icon name={l.icon} size={20} />
                       </span>
                       <div>
@@ -677,13 +678,13 @@ export function CreativesPage() {
           </Panel>
           {/* With zero creatives in the scoped group there is no
             evidence for test ideas: show an empty state, not ideas. */}
-          <Panel title="Next Tests" action={<Link className="link-teal" to="/insights">See All</Link>}>
+          <Panel title="Next Tests" action={<Link className="link-teal" to="/insights">See All</Link>} style={{ flex: "1 0 auto" }}>
             {creatives.data ? (
               lengthRows.length ? (
                 <div>
                   {tests.map((t) => (
                     <div className="insight" key={t.title}>
-                      <span className="insight-ico" style={{ background: "#E7F1FB" }}>
+                      <span className="insight-ico" style={{ background: "var(--shell-blue-soft)" }}>
                         <Icon name={t.icon} size={20} />
                       </span>
                       <div>

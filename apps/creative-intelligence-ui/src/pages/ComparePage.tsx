@@ -668,7 +668,7 @@ export function ComparePage() {
               ))}
             </div>
             <select id="cmp-add" value="" onChange={(e) => { addOption(e.target.value); e.target.value = ""; }}>
-              <option value="">{mode === "campaigns" ? "Add a campaign…" : "Add a creative…"}</option>
+              <option value="">{mode === "campaigns" ? "Add Campaign…" : "Add Creative…"}</option>
               {options.filter((o) => !picked.includes(o)).map((o) => (
                 <option key={o} value={o}>{optionLabel(o)}</option>
               ))}
@@ -829,7 +829,7 @@ export function ComparePage() {
                 <div>
                   {takeaways.map((t) => (
                     <div className="insight" key={t}>
-                      <span className="insight-ico" style={{ background: "#E5F5F2" }}>
+                      <span className="insight-ico" style={{ background: "var(--shell-teal-soft)" }}>
                         <Icon name="check" size={18} />
                       </span>
                       <div><p style={{ color: "var(--shell-navy)" }}>{t}</p></div>
@@ -858,7 +858,7 @@ export function ComparePage() {
           </div>
         </>
       ) : !loading ? (
-        <Panel title={mode === "creatives" ? "Creative Comparison" : "Campaign Comparison"}>
+        <Panel title={mode === "creatives" ? "Creative Comparison" : "Campaign Comparison"} style={{ marginTop: 12 }}>
           <EmptyState
             compact
             icon="compare"

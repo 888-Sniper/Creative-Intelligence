@@ -132,7 +132,7 @@ describe("AnalystPage", () => {
     renderPage();
     expect(screen.getByRole("heading", { name: "Your Creative Partner" })).toBeDefined();
     expect(
-      screen.getByText("Ask questions, uncover insights, and get recommendations from your creative data."),
+      screen.getByText("Ask questions and get recommendations from your creative data."),
     ).toBeDefined();
   });
 
@@ -304,6 +304,133 @@ describe("AnalystPage", () => {
     });
     expect(screen.queryByText("Hook rate: A 30%, B 12%.")).toBeNull();
     expect(screen.queryByText("hook rate for each creative")).toBeNull();
+  });
+
+  it("renders a plain 0 with No Duration Data when durations are missing", async () => {
+    // Item 20: missing duration is a display-only 0 (not 0.0, not a
+    // dash) with the "No Duration Data" note kept underneath.
+    window.fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.startsWith("/api/analyst/conversations")) return Response.json({ conversations: [] });
+      if (url.startsWith("/api/benchmarks")) return Response.json({});
+      if (url.startsWith("/api/campaigns")) return Response.json({ campaigns: [] });
+      if (url.startsWith("/api/creatives")) {
+        return Response.json([
+          { creative_key: "a", name: "A", metrics: { clicks: 5, impressions: 100 }, annotation: { duration_s: null }, duration_s: null },
+        ]);
+      }
+      return Response.json({ error: "not found" }, { status: 404 });
+    }) as unknown as typeof fetch;
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("Optimal Video Length")).toBeDefined();
+    });
+    const card = screen.getByText("Optimal Video Length").closest(".kpi-card") as HTMLElement;
+    expect(card.querySelector(".kpi-value")?.textContent).toBe("0");
+    expect(card.textContent).toContain("No Duration Data");
+  });
+
+  it("keeps the display-only zero out of length calculations", async () => {
+    // A duration-less high-volume creative must not dilute the
+    // bucketed CTR: only the timed 20s creative counts (10% CTR).
+    window.fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.startsWith("/api/analyst/conversations")) return Response.json({ conversations: [] });
+      if (url.startsWith("/api/benchmarks")) return Response.json({});
+      if (url.startsWith("/api/campaigns")) return Response.json({ campaigns: [] });
+      if (url.startsWith("/api/creatives")) {
+        return Response.json([
+          { creative_key: "a", name: "A", metrics: { clicks: 10, impressions: 100 }, annotation: { duration_s: 20 }, duration_s: 20 },
+          { creative_key: "b", name: "B", metrics: { clicks: 10000, impressions: 10000 }, annotation: { duration_s: null }, duration_s: null },
+        ]);
+      }
+      return Response.json({ error: "not found" }, { status: 404 });
+    }) as unknown as typeof fetch;
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("Optimal Video Length")).toBeDefined();
+    });
+    const card = screen.getByText("Optimal Video Length").closest(".kpi-card") as HTMLElement;
+    expect(card.querySelector(".kpi-value")?.textContent).toBe("15-30s");
+    expect(card.textContent).toContain("10.0% CTR in band");
+  });
+
+  it("explains the empty state and disables 3 Points with no conversation", () => {
+    mockFetch();
+    renderPage();
+    expect(screen.getByText("Ask something first — 3 Points will condense the answer to 3 key points.")).toBeDefined();
+    expect((screen.getByRole("button", { name: "3 Points" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("condenses the last answer from a populated conversation with empty input", async () => {
+    const condensed = {
+      conversation_id: "conv-1",
+      answer: { text: "In 3 points (numbers and caveats kept):\n1. A\n2. B\n3. C", language: "en" },
+    };
+    let resolveAsk!: (value: Response) => void;
+    window.fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith("/api/analyst/conversations") && (!init || init.method === "GET")) {
+        return Response.json({ conversations: [] });
+      }
+      if (url.startsWith("/api/analyst/ask")) {
+        if (init?.body && String(init.body).includes("hook rate")) return Response.json(askPayload);
+        return new Promise<Response>((resolve) => { resolveAsk = resolve; });
+      }
+      return Response.json({ error: "not found" }, { status: 404 });
+    }) as unknown as typeof fetch;
+    renderPage();
+    // Populate the conversation first.
+    fireEvent.change(screen.getByLabelText("Ask Foap Analyst"), {
+      target: { value: "hook rate for each creative" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Ask" }));
+    await waitFor(() => {
+      expect(screen.getByText("Hook rate: A 30%, B 12%.")).toBeDefined();
+    });
+    // Input cleared by send; 3 Points stays enabled on the thread …
+    expect((screen.getByRole("button", { name: "3 Points" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.getByText("3 Points condenses the latest answer — numbers and caveats kept.")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "3 Points" }));
+    // … sends the condense override with the cap and spins …
+    await waitFor(() => {
+      const fetchMock = window.fetch as unknown as ReturnType<typeof vi.fn>;
+      const call = fetchMock.mock.calls.find((c) =>
+        String(c[0]).startsWith("/api/analyst/ask")
+        && String(c[1]?.body ?? "").includes("Condense the last answer"),
+      );
+      expect(call).toBeDefined();
+      expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({ max_points: 3 });
+    });
+    expect(screen.getByRole("button", { name: "Condensing…" })).toBeDefined();
+    // … and visibly renders the condensed answer.
+    await act(async () => { resolveAsk(Response.json(condensed)); });
+    await waitFor(() => {
+      expect(screen.getByText(/In 3 points/)).toBeDefined();
+    });
+  });
+
+  it("surfaces 3 Points failures instead of hanging", async () => {
+    window.fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith("/api/analyst/conversations") && (!init || init.method === "GET")) {
+        return Response.json({ conversations: [] });
+      }
+      if (url.startsWith("/api/analyst/ask")) {
+        return Response.json({ error: "Analyst overloaded" }, { status: 503 });
+      }
+      return Response.json({ error: "not found" }, { status: 404 });
+    }) as unknown as typeof fetch;
+    renderPage();
+    fireEvent.change(screen.getByLabelText("Ask Foap Analyst"), {
+      target: { value: "condense this thread" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "3 Points" }));
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toBeDefined();
+    });
+    expect(screen.getByRole("alert").textContent).toContain("Analyst overloaded");
+    expect((screen.getByRole("button", { name: "3 Points" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("clears chat state when the account key changes", async () => {

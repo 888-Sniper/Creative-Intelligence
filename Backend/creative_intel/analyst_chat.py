@@ -65,8 +65,9 @@ def route_task(question, history):
 
     if has("naglow", "nagłów", "headline", "napisz mi lepiej"):
         return "headline", {}
-    if has("ogranicz", "skroc", "skróc", "condense", "shorter",
-           "3 punkt", "trzech punkt", "3 points", "three points"):
+    if has("ogranicz", "skroc", "skróc", "condense", "condensa",
+           "shorter", "3 punkt", "trzech punkt", "3 points",
+           "three points", "3 puntos"):
         target = "tests" if has("przetest", "testowac", "testować",
                                 "co przetest") else "recommendations"
         # "...i tak samo co przetestować" inherits the last limit.
@@ -742,6 +743,16 @@ def answer_turn(conn, owner_id, question, conversation_id=None,
                    {"scope": scope, "objective": objective})
     history = assistant_history(conn, conv_id)
     task, args = route_task(question, history)
+    # UI "N points" intent (max_points): route_task only reaches
+    # condense when the wording asks for it, so a plain analysis
+    # question plus max_points would silently return the full
+    # answer and the 3 Points button would appear dead. Retask
+    # analysis-shaped answers to condense so the cap is visible.
+    # help/headline have nothing condensable and keep their task.
+    if max_points is not None and task in (
+            "full_analysis", "full_table", "group_awt", "all_watchtime"):
+        task, args = "condense", {"target": "recommendations",
+                                  "limit": max_points}
     analysis = analyst.analyze_campaign(conn, scope, objective)
     note = _scope_changed_note(old_scope, scope, old_dv,
                                analysis.get("dataset_version", ""),
@@ -834,7 +845,18 @@ def answer_turn(conn, owner_id, question, conversation_id=None,
             text, items = render_recommendations(recs, lang, limit)
             payload.update({"recommendations": items})
         payload["condensed_to"] = len(items)
-        if lang == "pl":
+        if not items:
+            # Nothing condensable: say what is missing instead of
+            # emitting a hollow "In 0 points" header.
+            if lang == "pl":
+                text = "Brak rekomendacji do streszczenia w tym " \
+                    "zakresie. Wgraj raport CSV/XLSX albo poluzuj " \
+                    "filtry.%s" % note
+            else:
+                text = "No recommendations to condense in this " \
+                    "scope. Upload a CSV/XLSX report or loosen " \
+                    "filters.%s" % note
+        elif lang == "pl":
             text = "W %d punktach (liczby i zastrzeżenia bez zmian):\n" \
                 % len(items) + text + note
         else:

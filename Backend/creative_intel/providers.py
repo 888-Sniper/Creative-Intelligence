@@ -40,6 +40,15 @@ KEYCHAIN_IDS = {
     "teamorouter": "creative-intel-teamorouter",
     "openrouter": "creative-intel-openrouter",
     "litellm": "creative-intel-litellm",
+    # Canonical managed ids (provider_inventory.py). kimi shares the
+    # moonshot service, grok the xai service, glm the zai service —
+    # same vendor accounts, Nextly spellings.
+    "groq": "creative-intel-groq",
+    "muse": "creative-intel-muse",
+    "qwen": "creative-intel-qwen",
+    "glm": "creative-intel-glm",
+    "kimi": "creative-intel-moonshot",
+    "grok": "creative-intel-xai",
 }
 
 # Capability groups used by key_status() / LiveBundle.
@@ -47,7 +56,10 @@ GROUPS = {
     "stt": ("deepgram", "groq-whisper"),
     "vision": ("gemini", "nvidia", "openai", "anthropic", "zai"),
     "llm": ("deepseek", "moonshot", "xai", "gemini", "openai",
-            "anthropic", "teamorouter", "openrouter"),
+            "anthropic", "teamorouter", "openrouter",
+            # Canonical managed spellings (same keys as the legacy
+            # ids above where services are shared).
+            "kimi", "grok", "glm", "groq", "muse", "qwen"),
 }
 
 # Full Active/Fallback registry: (kind, active_model, fallback_model).
@@ -325,6 +337,23 @@ def live_base(provider, default):
 HTTP_TIMEOUT_S = 30.0
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuse every redirect: credentials must never be forwarded to a
+    URL the administrator did not configure, even same-origin. A 3xx
+    is reported as a failure with retry guidance instead."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise ProviderUnavailable(
+            "refusing redirect (%s) to %s: credentials stay on the "
+            "configured endpoint; check the provider base URL and retry"
+            % (code, _host_of(newurl)))
+
+
+def _urlopen(req, timeout):
+    opener = urllib.request.build_opener(_NoRedirect)
+    return opener.open(req, timeout=timeout)
+
+
 def _http_json(url, payload=None, headers=None, timeout=HTTP_TIMEOUT_S):
     """POST (dict payload) or GET (None); returns decoded JSON. No logging."""
     data = json.dumps(payload).encode() if payload is not None else None
@@ -333,7 +362,7 @@ def _http_json(url, payload=None, headers=None, timeout=HTTP_TIMEOUT_S):
     if data:
         req.add_header("Content-Type", "application/json")
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with _urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode("utf-8") or "{}")
     except urllib.error.HTTPError as e:
         try:
@@ -402,6 +431,24 @@ ENDPOINTS = {
                 "key": "creative-intel-litellm", "path": "/v1/chat/completions"},
     "ollama": {"kind": "chat", "base": "http://127.0.0.1:11434",
                "key": None, "path": "/v1/chat/completions"},
+    # Canonical managed generation ids (chat URL shapes mirror Nextly
+    # providers/live.py _chat_url; legacy moonshot/xai/zai rows above
+    # stay untouched for STT/vision race paths).
+    "groq": {"kind": "chat", "base": "https://api.groq.com",
+             "key": "creative-intel-groq",
+             "path": "/openai/v1/chat/completions"},
+    "muse": {"kind": "chat", "base": "https://api.meta.ai",
+             "key": "creative-intel-muse", "path": "/v1/chat/completions"},
+    "qwen": {"kind": "chat",
+             "base": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+             "key": "creative-intel-qwen", "path": "/chat/completions"},
+    "glm": {"kind": "chat", "base": "https://api.z.ai/api/paas/v4",
+            "key": "creative-intel-zai", "path": "/chat/completions"},
+    "kimi": {"kind": "chat", "base": "https://api.moonshot.ai",
+             "key": "creative-intel-moonshot",
+             "path": "/v1/chat/completions"},
+    "grok": {"kind": "chat", "base": "https://api.x.ai",
+             "key": "creative-intel-xai", "path": "/v1/chat/completions"},
 }
 
 VISION_PROMPT = (
@@ -446,18 +493,30 @@ class OpenAiChat:
     """OpenAI-compatible chat client (OpenAI, NVIDIA, DeepSeek, Kimi,
     Grok, Zhipu, OpenRouter, LiteLLM proxies, Ollama)."""
 
-    def __init__(self, provider, model):
+    def __init__(self, provider, model, secret=None, base_url=None,
+                 keyless=False):
         cfg = ENDPOINTS[provider]
-        base = live_base(provider, cfg["base"])
+        # Managed override: an explicitly supplied base_url/secret
+        # (from the admin-managed encrypted store) wins over the
+        # legacy env/Keychain lookup. secret=None keeps legacy
+        # behaviour; any other value (including "") is authoritative
+        # and fails closed when empty. keyless=True covers proxies
+        # that need no credential (explicit opt-in only — never
+        # inferred — so a missing secret cannot silently downgrade).
+        base = (base_url or live_base(provider, cfg["base"]))
         if not base:
             raise ProviderUnavailable(
                 "%s needs %s set (private proxy base)" % (
                     provider, _env_base_name(provider)))
         self.url = base.rstrip("/") + cfg["path"]
-        self.key = live_secret(cfg["key"]) if cfg["key"] else None
-        if cfg["key"] and not self.key:
+        if secret is not None:
+            self.key = secret or None
+        else:
+            self.key = live_secret(cfg["key"]) if cfg["key"] else None
+        if cfg["key"] and not self.key and not keyless:
             raise ProviderUnavailable("missing key for %s" % provider)
         self.model = model
+        self.provider = provider
 
     def chat(self, messages, max_tokens=2048):
         headers = {}
@@ -473,14 +532,18 @@ class OpenAiChat:
 
 
 class GeminiChat:
-    def __init__(self, model):
-        base = live_base("gemini", ENDPOINTS["gemini"]["base"])
-        self.key = live_secret(ENDPOINTS["gemini"]["key"])
+    def __init__(self, model, secret=None, base_url=None):
+        base = base_url or live_base("gemini", ENDPOINTS["gemini"]["base"])
+        if secret is not None:
+            self.key = secret or None
+        else:
+            self.key = live_secret(ENDPOINTS["gemini"]["key"])
         if not self.key:
             raise ProviderUnavailable("missing key for gemini")
         self.url = ("%s/v1beta/models/%s:generateContent?key=%s"
                     % (base.rstrip("/"), model, self.key))
         self.model = model
+        self.provider = "gemini"
 
     def chat(self, messages, max_tokens=2048):
         parts = []
@@ -509,13 +572,18 @@ class GeminiChat:
 
 
 class AnthropicChat:
-    def __init__(self, model):
-        base = live_base("anthropic", ENDPOINTS["anthropic"]["base"])
-        self.key = live_secret(ENDPOINTS["anthropic"]["key"])
+    def __init__(self, model, secret=None, base_url=None):
+        base = (base_url or live_base("anthropic",
+                                      ENDPOINTS["anthropic"]["base"]))
+        if secret is not None:
+            self.key = secret or None
+        else:
+            self.key = live_secret(ENDPOINTS["anthropic"]["key"])
         if not self.key:
             raise ProviderUnavailable("missing key for anthropic")
         self.url = base.rstrip("/") + "/v1/messages"
         self.model = model
+        self.provider = "anthropic"
 
     def chat(self, messages, max_tokens=2048):
         conv = []
@@ -549,13 +617,24 @@ class AnthropicChat:
             raise ProviderUnavailable("unexpected anthropic response shape")
 
 
-def make_chat(provider, model):
-    native = ENDPOINTS[provider].get("native")
+def make_chat(provider, model, secret=None, base_url=None, keyless=False):
+    """Build the chat client for one provider+model.
+
+    secret/base_url overrides (admin-managed path) win over the
+    legacy env/Keychain lookup; None keeps legacy behaviour exactly.
+    Raises ProviderUnavailable (never KeyError) for unknown ids so
+    managed callers get a typed error.
+    """
+    try:
+        native = ENDPOINTS[provider].get("native")
+    except KeyError:
+        raise ProviderUnavailable("unknown provider %r" % (provider,))
     if native == "gemini":
-        return GeminiChat(model)
+        return GeminiChat(model, secret=secret, base_url=base_url)
     if native == "anthropic":
-        return AnthropicChat(model)
-    return OpenAiChat(provider, model)
+        return AnthropicChat(model, secret=secret, base_url=base_url)
+    return OpenAiChat(provider, model, secret=secret, base_url=base_url,
+                      keyless=keyless)
 
 
 def _image_part(jpeg_bytes):
@@ -645,7 +724,7 @@ class LiveStt:
                                               "Content-Type": mime},
                                      method="POST")
         try:
-            with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_S) as resp:
+            with _urlopen(req, timeout=HTTP_TIMEOUT_S) as resp:
                 got = json.loads(resp.read().decode("utf-8") or "{}")
         except urllib.error.HTTPError as e:
             e.close()
@@ -681,7 +760,7 @@ class LiveStt:
                      "Content-Type": "multipart/form-data; boundary=" + boundary},
             method="POST")
         try:
-            with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_S) as resp:
+            with _urlopen(req, timeout=HTTP_TIMEOUT_S) as resp:
                 got = json.loads(resp.read().decode("utf-8") or "{}")
         except urllib.error.HTTPError as e:
             e.close()
@@ -717,6 +796,19 @@ class LiveVision:
         if not images:
             raise ProviderUnavailable(
                 "no frame images: upload creative media first")
+        # Video-eligibility gate (item 32): explicitly text/audio-only
+        # models are refused up front, naming the model, instead of
+        # burning a call that fails opaquely inside the race (which
+        # would then silently fall through to the next roster entry).
+        from creative_intel import provider_inventory as _inv
+        for _provider, _model, _tier in (self.roster or []):
+            _level, _doc = _inv.frame_support(_provider, _model)
+            if _level in ("text-only", "audio"):
+                raise ProviderUnavailable(
+                    "model %r (%s) is %s and cannot annotate "
+                    "video frames: use a video-eligible model for "
+                    "the vision step [provider=%s]"
+                    % (_model, _provider, _level, _provider))
         t_all = [f.get("t_sec", 0) for f in frames]
         out = []
         for start in range(0, len(images), self.MAX_IMAGES):
@@ -923,7 +1015,14 @@ class _Unavailable:
 
 
 class Providers:
-    def __init__(self):
+    def __init__(self, db_path=None):
+        """Provider bundle. db_path (identity sqlite file) enables the
+        admin-managed single-active LLM: in live mode the LLM slot is
+        the persisted selection ONLY (or an honest not-configured
+        error when paused) — never the legacy race. STT/vision keep
+        the legacy race behaviour untouched. Mock mode ignores
+        db_path entirely.
+        """
         self.mode = mode()
         self._live_error = None
         if self.mode == "live":
@@ -938,7 +1037,31 @@ class Providers:
             else:
                 # Live requested but unconfigured: stages raise, never mock.
                 self.stt = self.vision = self.llm = _Unavailable(self._live_error)
+            if db_path:
+                self._attach_managed_llm(db_path)
         else:
             self.stt = MockStt()
             self.vision = MockVision()
             self.llm = MockLlm()
+
+    def _attach_managed_llm(self, db_path):
+        """Swap the LLM slot for the managed dispatcher selection.
+
+        Selection present -> ManagedLlm (per-call exact-model-only).
+        Selection absent -> honest not-configured error. Unreadable
+        managed tables (pre-migration DB) -> keep legacy bundle so
+        old databases boot exactly as before.
+        """
+        try:
+            from . import dispatcher as dispatcher_mod
+        except ImportError:
+            return
+        try:
+            if dispatcher_mod.has_selection(db_path):
+                self.llm = dispatcher_mod.ManagedLlm(db_path=db_path)
+            else:
+                self.llm = _Unavailable(ProviderUnavailable(
+                    dispatcher_mod.NOT_CONFIGURED_MESSAGE))
+        except Exception:
+            # Managed tables unreadable: legacy behaviour preserved.
+            pass

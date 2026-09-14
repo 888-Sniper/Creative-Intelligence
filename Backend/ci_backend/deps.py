@@ -61,7 +61,12 @@ def get_providers(request: Request):
     if prov is not None:
         return prov
     from creative_intel import providers as providers_mod
-    return providers_mod.Providers()
+    # The managed single-active LLM rides the same sqlite file: in
+    # live mode with a persisted selection, Providers swaps its LLM
+    # slot to the dispatcher (exact-model-only); paused means an
+    # honest not-configured error — never legacy race, never mocks.
+    return providers_mod.Providers(
+        db_path=getattr(request.app.state, "ci_db_path", None))
 
 
 def bearer_token(request: Request) -> str:

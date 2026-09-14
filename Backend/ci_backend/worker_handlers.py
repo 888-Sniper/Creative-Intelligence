@@ -25,8 +25,34 @@ from ci_backend import actions as legacy  # noqa: E402
 from ci_backend.config import Settings  # noqa: E402
 
 
-def _providers():
-    return providers_mod.Providers()
+def _db_path(ctx, conn):
+    """Identity sqlite path for the managed LLM (same file as conn).
+
+    The product connection's own database file (PRAGMA database_list)
+    is authoritative — it is the same sqlite file as the identity
+    tables by construction (deps.bind_database). ctx settings are
+    only a fallback (their configured path can differ from the bound
+    file, e.g. in tests).
+    """
+    try:
+        for _seq, _name, path in conn.execute("PRAGMA database_list"):
+            if _name == "main" and path:
+                return str(path)
+    except Exception:
+        pass
+    try:
+        settings = (ctx or {}).get("settings")
+        path = getattr(settings, "database_path", None)
+        if path:
+            return str(path)
+    except Exception:
+        pass
+    return None
+
+
+def _providers(ctx=None, conn=None):
+    return providers_mod.Providers(db_path=_db_path(ctx, conn)
+                                   if conn is not None else None)
 
 
 def _control(conn, job_id):
@@ -66,7 +92,7 @@ def run_pipeline(conn, payload, owner, ctx, job_id=None):
         progress(5, "start")
         _raise_if_cancelled(cancelled)
     result = legacy.apply_action(
-        conn, "pipeline", dict(payload or {}), _providers(),
+        conn, "pipeline", dict(payload or {}), _providers(ctx, conn),
         media_dir=ctx.get("media_dir"), actor=owner or "",
         progress=progress, cancelled=cancelled)
     if not isinstance(result, dict):
@@ -82,7 +108,7 @@ def run_ask(conn, payload, owner, ctx, job_id=None):
         progress, cancelled = _control(conn, job_id)
         progress(10, "start")
         _raise_if_cancelled(cancelled)
-    prov = _providers()
+    prov = _providers(ctx, conn)
     live = prov.llm if getattr(prov, "mode", "mock") == "live" else None
     scope = benchmarks.Scope.from_payload(payload).resolve(conn)
     result = qa.answer(conn, payload.get("question", ""), llm=live,

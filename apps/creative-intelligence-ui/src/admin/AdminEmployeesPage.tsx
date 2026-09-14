@@ -391,12 +391,12 @@ export function AdminEmployeesPage() {
     const admins = rows.filter((e) => e.role === "admin").length;
     const staff = rows.filter((e) => e.role !== "admin").length;
     return [
-      { label: t("admin.stats.total"), value: String(total), icon: "users", tint: "var(--shell-blue-soft)", trend: total ? tp("admin.stats.staffMix", staff, { employees: staff, admins }) : t("admin.stats.noEmployees") },
-      { label: t("admin.stats.active"), value: String(active), icon: "check", tint: "var(--shell-green-soft)", trend: pct(active) },
+      { label: t("admin.stats.total"), value: String(total), icon: "users", trend: total ? tp("admin.stats.staffMix", staff, { employees: staff, admins }) : t("admin.stats.noEmployees") },
+      { label: t("admin.stats.active"), value: String(active), icon: "check", trend: pct(active) },
       /* "Pending Approvals", not "Pending Invites": no invitation
        *  email exists — pending rows await an approval decision. */
-      { label: t("admin.stats.pending"), value: String(pending), icon: "clock", tint: "var(--shell-amber-soft)", trend: pending ? t("admin.stats.awaitingApproval") : t("admin.stats.inboxZero") },
-      { label: t("admin.stats.admins"), value: String(admins), icon: "lock", tint: "var(--shell-violet-soft)", trend: pct(admins) },
+      { label: t("admin.stats.pending"), value: String(pending), icon: "clock", trend: pending ? t("admin.stats.awaitingApproval") : t("admin.stats.inboxZero") },
+      { label: t("admin.stats.admins"), value: String(admins), icon: "lock", trend: pct(admins) },
     ];
   }, [employees, t, tp]);
 
@@ -462,7 +462,7 @@ export function AdminEmployeesPage() {
       <div className="kpi-grid" style={{ marginTop: 0 }}>
         {stats.map((s) => (
           <div className="kpi-card" key={s.label}>
-            <span className="kpi-ico" style={{ background: s.tint }}>
+            <span className="kpi-ico">
               <Icon name={s.icon} size={20} />
             </span>
             <div className="kpi-body">
@@ -654,7 +654,7 @@ export function AdminEmployeesPage() {
         <Panel title={t("admin.teams.title")} sub={t("admin.teams.sub")}>
           <div>
             <div className="insight">
-              <span className="insight-ico" style={{ background: "var(--shell-blue-soft)" }}>
+              <span className="insight-ico">
                 <Icon name="lock" size={18} />
               </span>
               <div>
@@ -667,7 +667,7 @@ export function AdminEmployeesPage() {
               shared count. Zero shows Teams (0); an unresolved lookup
               shows no count rather than a fabricated zero. */}
             <div className="insight">
-              <span className="insight-ico" style={{ background: "var(--shell-green-soft)" }}>
+              <span className="insight-ico">
                 <Icon name="users" size={18} />
               </span>
               <div>
@@ -680,7 +680,7 @@ export function AdminEmployeesPage() {
               </div>
             </div>
             <div className="insight">
-              <span className="insight-ico" style={{ background: "var(--shell-teal-soft)" }}>
+              <span className="insight-ico">
                 <Icon name="user" size={18} />
               </span>
               <div>
@@ -690,7 +690,7 @@ export function AdminEmployeesPage() {
             </div>
             {allTeams.map((team) => (
               <div className="insight" key={team.name}>
-                <span className="insight-ico" style={{ background: "var(--shell-green-soft)" }}>
+                <span className="insight-ico">
                   <Icon name="users" size={18} />
                 </span>
                 <div style={{ flex: 1 }}>
@@ -706,7 +706,7 @@ export function AdminEmployeesPage() {
         <Panel title={t("admin.rules.title")} sub={t("admin.rules.sub")}>
           <ul className="tips-list">
             <li>
-              <span className="insight-ico" style={{ background: "var(--shell-green-soft)" }}>
+              <span className="insight-ico">
                 <Icon name="check" size={18} />
               </span>
               <div>
@@ -715,7 +715,7 @@ export function AdminEmployeesPage() {
               </div>
             </li>
             <li>
-              <span className="insight-ico" style={{ background: "var(--shell-blue-soft)" }}>
+              <span className="insight-ico">
                 <Icon name="clock" size={18} />
               </span>
               <div>
@@ -724,7 +724,7 @@ export function AdminEmployeesPage() {
               </div>
             </li>
             <li>
-              <span className="insight-ico" style={{ background: "var(--shell-amber-soft)" }}>
+              <span className="insight-ico">
                 <Icon name="lock" size={18} />
               </span>
               <div>
@@ -776,10 +776,11 @@ export function AdminEmployeesPage() {
       {/* Advanced Demo Tools (§8): directly below Workspace Activity in
         normal flow — same column, same width, disclosure unchanged. */}
       <div className="section-gap" />
-      <details className="adv-disclosure">
+      <details className="adv-disclosure disclosure">
         <summary>
           <span className="adv-title">{t("admin.demoTools")}</span>
           <span className="panel-sub">{t("admin.demoToolsSub")}</span>
+          <span className="disc-chev" aria-hidden="true"><Icon name="chev" size={15} /></span>
         </summary>
         <div style={{ marginTop: 10 }}>
           <DemoPackPanel />
@@ -868,15 +869,18 @@ export function AdminEmployeesPage() {
             onClick={(e) => e.stopPropagation()}
             style={{ width: "100%", maxWidth: 420, margin: 0 }}
           >
-            <div className="panel-head">
-              <div>
-                <h2 className="panel-title">{t("admin.teamDialog.title")}</h2>
-                <p className="panel-sub">{t("admin.teamDialog.sub")}</p>
-              </div>
-              <button type="button" className="link-teal" onClick={() => setTeamOpen(false)}>
-                {t("admin.teamDialog.close")}
+            <div className="panel-head dialog-head">
+              <h2 className="panel-title">{t("admin.teamDialog.title")}</h2>
+              <button
+                type="button"
+                className="icon-btn"
+                aria-label={t("admin.teamDialog.close")}
+                onClick={() => setTeamOpen(false)}
+              >
+                <Icon name="x" size={16} />
               </button>
             </div>
+            <p className="panel-sub" style={{ marginTop: -8, marginBottom: 12 }}>{t("admin.teamDialog.sub")}</p>
             <div className="field">
               <label htmlFor="new-team-name">{t("admin.teamDialog.nameLabel")}</label>
               <input

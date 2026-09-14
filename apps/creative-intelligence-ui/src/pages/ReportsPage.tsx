@@ -778,7 +778,9 @@ export function ReportsPage() {
                 </table>
               </div>
             ) : (
-              <EmptyState compact icon="report" title={isFiltered ? t("reports.noMatchTitle") : t("reports.noReportsTitle")} text={isFiltered ? t("reports.noMatchBody") : t("reports.noReportsBody")} />
+              <div className="empty-center">
+                <EmptyState compact icon="report" title={isFiltered ? t("reports.noMatchTitle") : t("reports.noReportsTitle")} text={isFiltered ? t("reports.noMatchBody") : t("reports.noReportsBody")} />
+              </div>
             )}
           </Panel>
         </div>
@@ -786,19 +788,19 @@ export function ReportsPage() {
           <Panel title={t("reports.tipsTitle")}>
             <ul className="tips-list">
               <li>
-                <span className="insight-ico" style={{ background: "var(--shell-blue-soft)" }}><Icon name="bars" size={18} /></span>
+                <span className="insight-ico"><Icon name="bars" size={18} /></span>
                 <div><h4>{t("reports.tips.kpiTitle")}</h4><p>{t("reports.tips.kpiBody")}</p></div>
               </li>
               <li>
-                <span className="insight-ico" style={{ background: "var(--shell-green-soft)" }}><Icon name="target" size={18} /></span>
+                <span className="insight-ico"><Icon name="target" size={18} /></span>
                 <div><h4>{t("reports.tips.audienceTitle")}</h4><p>{t("reports.tips.audienceBody")}</p></div>
               </li>
               <li>
-                <span className="insight-ico" style={{ background: "var(--shell-blue-soft)" }}><Icon name="report" size={18} /></span>
+                <span className="insight-ico"><Icon name="report" size={18} /></span>
                 <div><h4>{t("reports.tips.formatTitle")}</h4><p>{t("reports.tips.formatBody")}</p></div>
               </li>
               <li>
-                <span className="insight-ico" style={{ background: "var(--shell-green-soft)" }}><Icon name="users" size={18} /></span>
+                <span className="insight-ico"><Icon name="users" size={18} /></span>
                 <div><h4>{t("reports.tips.benchTitle")}</h4><p>{t("reports.tips.benchBody")}</p></div>
               </li>
             </ul>

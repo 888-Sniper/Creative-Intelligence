@@ -90,9 +90,12 @@ const PATHS: Record<string, React.ReactNode> = {
       <circle cx="12" cy="8" r=".5" />
     </>
   ),
+  /* Pointer hand with a click burst above the fingertip: reads as
+   * "click" at 12–20px everywhere the Total Clicks metric appears. */
   click: (
     <>
-      <path d="m9 9 5 12 1.8-5.2L21 14 9 9ZM9 9l-5-5M4 4l.5 2M4 4l2 .5M4 4 2.6 2.6" />
+      <path d="M12 3.5v2.6M7.6 5.2l1.3 2.2M16.4 5.2l-1.3 2.2" />
+      <path d="M10.2 11.2V6.8a1.4 1.4 0 0 1 2.8 0v3.4m0-2.6a1.4 1.4 0 0 1 2.8 0v3.2m0-2a1.4 1.4 0 0 1 2.8 0v4.4c0 3.2-2.2 5.8-5.4 5.8-2 0-3.2-.9-4.3-2.6l-2.1-3.3c-.6-1 .1-2.2 1.2-2.2h2.2" />
     </>
   ),
   coin: (

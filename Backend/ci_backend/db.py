@@ -111,6 +111,74 @@ class OAuthToken(Base):
     refresh_token_enc: Mapped[str] = mapped_column(String, default="")
 
 
+class ProviderConfig(Base):
+    """Admin-managed secret + endpoint per canonical provider.
+
+    secret_enc is a Fernet token under the server master key (see
+    ci_backend.token_crypto); NULL means unconfigured. Plaintext
+    secrets never touch this table. Rows are seeded by migration
+    0012; the admin providers router owns all writes.
+    """
+
+    __tablename__ = "provider_configs"
+
+    provider_id: Mapped[str] = mapped_column(String, primary_key=True)
+    display: Mapped[str] = mapped_column(String, default="")
+    kind: Mapped[str] = mapped_column(String, default="")
+    base_url: Mapped[str | None] = mapped_column(String, nullable=True,
+                                                default=None)
+    secret_enc: Mapped[str | None] = mapped_column(String, nullable=True,
+                                                  default=None)
+    secret_updated_at: Mapped[str | None] = mapped_column(
+        String, nullable=True, default=None)
+    created_at: Mapped[str] = mapped_column(String, default="")
+    updated_at: Mapped[str] = mapped_column(String, default="")
+
+
+class ProviderModelCache(Base):
+    """Last-known offered-model catalog per provider.
+
+    Replaced wholesale on every successful refresh (merge = live
+    discovery intersected with the static inventory filter); a failed
+    refresh leaves rows untouched so inference keeps the last good
+    catalog until its 24h TTL lapses.
+    """
+
+    __tablename__ = "provider_model_cache"
+
+    provider_id: Mapped[str] = mapped_column(String, primary_key=True)
+    model_id: Mapped[str] = mapped_column(String, primary_key=True)
+    display: Mapped[str] = mapped_column(String, default="")
+    offered: Mapped[int] = mapped_column(default=1)
+    fetched_at: Mapped[str] = mapped_column(String, default="")
+
+
+class ActiveProviderSelection(Base):
+    """Singleton (id=1) single-active-provider selection.
+
+    NULL provider_id/model_id (or a missing row) means paused: live
+    inference fails closed with an honest "not configured" error.
+    revision is optimistic concurrency for activate/deactivate: the
+    writer's UPDATE filters on the revision it read, so a concurrent
+    change collides with 0 affected rows instead of silently winning.
+    """
+
+    __tablename__ = "active_provider_selection"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    provider_id: Mapped[str | None] = mapped_column(String, nullable=True,
+                                                   default=None)
+    model_id: Mapped[str | None] = mapped_column(String, nullable=True,
+                                                default=None)
+    revision: Mapped[int] = mapped_column(default=1)
+    updated_by: Mapped[str] = mapped_column(String, default="")
+    updated_at: Mapped[str] = mapped_column(String, default="")
+
+    __table_args__ = (
+        CheckConstraint("id = 1", name="ck_active_provider_singleton"),
+    )
+
+
 class EmployeeAudit(Base):
     __tablename__ = "employee_audit"
 

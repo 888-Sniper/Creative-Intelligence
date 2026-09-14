@@ -181,7 +181,11 @@ class LiveProviderTest(unittest.TestCase):
         self.assertEqual(creative.validate(ann), [])
 
     def test_live_vision_annotates_images(self):
-        vision = providers.LiveVision([("deepseek", "deepseek-v4-flash",
+        # Unverified stub id: this test covers transport parsing against
+        # the loopback stub, not capability classification (text-only
+        # inventory ids are refused up front — see
+        # test_cohort_delete.py::test_vision_refuses_text_only_model_without_fallback).
+        vision = providers.LiveVision([("deepseek", "stub-vision-1",
                                         "active")])
         labels = vision.annotate([{"t_sec": 0.0}], images=[TINY_JPEG])
         self.assertEqual(len(labels), 1)
@@ -207,6 +211,65 @@ class LiveProviderTest(unittest.TestCase):
                                   "active")])
         with self.assertRaises(providers.ProviderUnavailable):
             stt.transcribe("k", audio_bytes=b"xx")
+
+    def test_redirects_refused_without_forwarding_credentials(self):
+        # A redirect target must never receive the request: the
+        # transport raises instead of following, so Authorization
+        # cannot leak across origins.
+        hits = []
+
+        class SinkHandler(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def _drain_and_record(self):
+                length = int(self.headers.get("Content-Length", 0))
+                self.rfile.read(length)
+                hits.append((self.path,
+                             self.headers.get("Authorization")))
+                body = b"{}"
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_POST(self):
+                self._drain_and_record()
+
+            def do_GET(self):
+                self._drain_and_record()
+
+        sink = HTTPServer(("127.0.0.1", 0), SinkHandler)
+        port = sink.server_address[1]
+        thread = threading.Thread(target=sink.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(sink.shutdown)
+        self.addCleanup(thread.join, 10)
+        self.addCleanup(sink.server_close)
+
+        class Redirector(StubHandler):
+            def do_POST(self):
+                length = int(self.headers.get("Content-Length", 0))
+                self.rfile.read(length)
+                self.send_response(307)
+                self.send_header(
+                    "Location",
+                    "http://127.0.0.1:%d/chat/completions" % port)
+                self.end_headers()
+
+        redir = HTTPServer(("127.0.0.1", 0), Redirector)
+        rthread = threading.Thread(target=redir.serve_forever, daemon=True)
+        rthread.start()
+        self.addCleanup(redir.shutdown)
+        self.addCleanup(rthread.join, 10)
+        self.addCleanup(redir.server_close)
+        os.environ["CREATIVE_INTEL_BASE_DEEPSEEK"] = \
+            "http://127.0.0.1:%d" % redir.server_address[1]
+        chat = providers.OpenAiChat("deepseek", "deepseek-v4-flash")
+        with self.assertRaises(providers.ProviderUnavailable) as ctx:
+            chat.chat([{"role": "user", "content": "hi"}], 32)
+        self.assertIn("redirect", str(ctx.exception))
+        self.assertEqual(hits, [])
 
     def test_flux_model_refused_over_http(self):
         # A08: a Flux model must fail closed BEFORE any HTTP request:

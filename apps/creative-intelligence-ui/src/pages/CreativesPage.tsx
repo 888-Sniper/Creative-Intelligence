@@ -558,11 +558,7 @@ export function CreativesPage() {
             title={t("creatives.allCreatives", { count: fmtCompact(rows.length, locale) })}
             style={{ flex: "1 0 auto" }}
             action={(
-              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                <label htmlFor="cr-sort" className="panel-sub">{t("creatives.sortBy")}</label>
-                <select id="cr-sort" value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
-                  {SORTS.map((v) => <option key={v} value={v}>{t(`creatives.sorts.${v}`)}</option>)}
-                </select>
+              <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
                 <div role="group" aria-label={t("creatives.layoutGroup")} style={{ display: "flex", gap: 4 }}>
                   <button type="button" className="icon-btn view-btn" aria-pressed={view === "list"} aria-label={t("creatives.listView")}
                     style={{ width: 32, height: 32 }}
@@ -575,7 +571,12 @@ export function CreativesPage() {
                     <Icon name="grid" size={16} />
                   </button>
                 </div>
-                <LoadingButton type="button" className="btn-outline" loading={exportBusy} loadingLabel={t("creatives.exporting")} spinnerClass="spinner dark" disabled={exportBusy} onClick={() => void onExport()}>
+                <label htmlFor="cr-sort" className="panel-sub">{t("creatives.sortBy")}</label>
+                <select id="cr-sort" value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
+                  {SORTS.map((v) => <option key={v} value={v}>{t(`creatives.sorts.${v}`)}</option>)}
+                </select>
+                <LoadingButton type="button" className="btn-outline" loading={exportBusy} loadingLabel={t("creatives.exporting")} spinnerClass="spinner dark" disabled={exportBusy} onClick={() => void onExport()}
+                  style={{ marginLeft: "auto" }}>
                   <Icon name="download" size={15} /> {t("common.export")}
                 </LoadingButton>
               </div>
@@ -686,7 +687,7 @@ export function CreativesPage() {
                 <div>
                   {learnings.map((l) => (
                     <div className="insight" key={l.title}>
-                      <span className="insight-ico" style={{ background: "var(--shell-teal-soft)" }}>
+                      <span className="insight-ico">
                         <Icon name={l.icon} size={20} />
                       </span>
                       <div>
@@ -707,7 +708,7 @@ export function CreativesPage() {
                 <div>
                   {tests.map((idea) => (
                     <div className="insight" key={idea.title}>
-                      <span className="insight-ico" style={{ background: "var(--shell-blue-soft)" }}>
+                      <span className="insight-ico">
                         <Icon name={idea.icon} size={20} />
                       </span>
                       <div>

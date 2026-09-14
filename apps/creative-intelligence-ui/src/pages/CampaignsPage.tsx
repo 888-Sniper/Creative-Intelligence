@@ -532,7 +532,7 @@ export function CampaignsPage() {
           {compare ? (
             <div className="kpi-grid">
               <div className="kpi-card">
-                <span className="kpi-ico" style={{ background: "var(--shell-green-soft)", color: "var(--glyph-green)" }}>
+                <span className="kpi-ico">
                   <Icon name="users" size={20} />
                 </span>
                 <div className="kpi-body">

@@ -14,7 +14,13 @@ from fastapi.responses import JSONResponse  # noqa: E402
 from ci_backend.config import Settings  # noqa: E402
 from ci_backend.deps import bind_database  # noqa: E402
 from ci_backend.observability import access_log_middleware  # noqa: E402
-from ci_backend.routers import admin, auth, google, product  # noqa: E402
+from ci_backend.routers import (  # noqa: E402
+    admin,
+    admin_providers,
+    auth,
+    google,
+    product,
+)
 
 
 def _requeue_interrupted_jobs(db_path: str) -> None:
@@ -190,6 +196,7 @@ def create_app(db_path: str = "", settings: Settings | None = None,
 
     app.include_router(auth.router)
     app.include_router(admin.router)
+    app.include_router(admin_providers.router)
     app.include_router(google.router)
     app.include_router(product.router)
 

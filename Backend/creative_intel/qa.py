@@ -401,6 +401,8 @@ def _llm_answer(conn, question, llm, scope=None):
     pack = _fact_pack(conn, scope=scope)
     try:
         data = _extract_json_obj(providers, llm, question, pack)
+    except providers.ProviderUnavailable:
+        raise  # keep managed/honest messages verbatim for surfacing
     except Exception:
         raise providers.ProviderUnavailable("ask model output unusable")
     text = data.get("answer") if isinstance(data, dict) else None
@@ -469,7 +471,17 @@ def answer(conn, question, llm=None, scope=None):
     if llm is not None:
         try:
             return _llm_answer(conn, question, llm, scope=scope)
-        except providers.ProviderUnavailable:
+        except providers.ProviderUnavailable as exc:
+            # Managed single-active failures (and the honest
+            # not-configured message) surface to the caller instead
+            # of falling back to rules: silently answering from a
+            # different source would hide that the SELECTED provider
+            # failed or that AI is paused. Legacy/live-race failures
+            # keep the old rule fallback.
+            from . import provider_inventory as inventory_mod
+            if getattr(llm, "managed", False) or str(exc) == \
+                    inventory_mod.NOT_CONFIGURED_MESSAGE:
+                raise
             pass  # live failed: rules below never leave the user empty-handed
     q = (question or "").lower()
     parts, cites = [], []

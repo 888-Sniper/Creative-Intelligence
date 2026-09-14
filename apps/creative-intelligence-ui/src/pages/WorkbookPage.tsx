@@ -37,23 +37,23 @@ interface CreativeRow {
  *  (§9): ids stay stable (selection state, export params) while the
  *  display copy follows workbook.modules.* / workbook.templates.*. */
 const MODULES = [
-  { id: "summary", icon: "bars", tint: "#E3F2EF" },
-  { id: "breakdown", icon: "play", tint: "#ECEAF6" },
-  { id: "benchmarks", icon: "bars", tint: "#E6EFF7" },
-  { id: "compare", icon: "compare", tint: "#F6F1E4" },
-  { id: "insights", icon: "trend", tint: "#F7ECEA" },
-  { id: "recommendations", icon: "spark", tint: "#E6F2EA" },
-  { id: "export", icon: "report", tint: "#ECE8F4" },
+  { id: "summary", icon: "bars" },
+  { id: "breakdown", icon: "play" },
+  { id: "benchmarks", icon: "bars" },
+  { id: "compare", icon: "compare" },
+  { id: "insights", icon: "trend" },
+  { id: "recommendations", icon: "spark" },
+  { id: "export", icon: "report" },
 ];
 
 const KPI_CHOICES = ["Impressions", "Clicks", "CTR", "CVR", "ROAS", "CPA", "Spend", "Conversions"];
 
 const TEMPLATES = [
-  { id: "executive", icon: "bars", tint: "#E3F2EF", modules: ["summary", "insights", "recommendations"], kpis: ["Impressions", "Clicks", "ROAS"] },
-  { id: "deepdive", icon: "play", tint: "#ECEAF6", modules: ["breakdown", "benchmarks", "compare", "insights"], kpis: ["Impressions", "CTR", "CVR", "ROAS"] },
-  { id: "platform", icon: "compare", tint: "#E6EFF7", modules: ["summary", "benchmarks", "compare"], kpis: ["Impressions", "Clicks", "Spend", "ROAS"] },
-  { id: "monthly", icon: "trend", tint: "#E6F2EA", modules: ["summary", "breakdown", "insights", "export"], kpis: ["Impressions", "Clicks", "CTR", "Conversions", "Spend"] },
-  { id: "custom", icon: "report", tint: "#ECE8F4", modules: [], kpis: ["Impressions"] },
+  { id: "executive", icon: "bars", modules: ["summary", "insights", "recommendations"], kpis: ["Impressions", "Clicks", "ROAS"] },
+  { id: "deepdive", icon: "play", modules: ["breakdown", "benchmarks", "compare", "insights"], kpis: ["Impressions", "CTR", "CVR", "ROAS"] },
+  { id: "platform", icon: "compare", modules: ["summary", "benchmarks", "compare"], kpis: ["Impressions", "Clicks", "Spend", "ROAS"] },
+  { id: "monthly", icon: "trend", modules: ["summary", "breakdown", "insights", "export"], kpis: ["Impressions", "Clicks", "CTR", "Conversions", "Spend"] },
+  { id: "custom", icon: "report", modules: [], kpis: ["Impressions"] },
 ];
 
 function num(v: unknown): number {
@@ -330,10 +330,10 @@ export function WorkbookPage() {
               <button
                 key={m.id}
                 type="button"
-                className="cmp-card mod-card"
+                className={on ? "cmp-card mod-card" : "cmp-card mod-card mod-blank"}
                 aria-pressed={on}
                 onClick={() => toggleModule(m.id)}
-                style={{ textAlign: "left", cursor: "pointer", padding: 12, overflow: "hidden", borderColor: on ? "var(--shell-teal)" : "var(--shell-line)", opacity: on ? 1 : 0.6, "--card-tint": m.tint } as CSSProperties}
+                style={{ textAlign: "left", cursor: "pointer", padding: 12, overflow: "hidden", borderColor: on ? "var(--shell-teal)" : "var(--shell-line)", opacity: on ? 1 : 0.75 } as CSSProperties}
               >
                 <span style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
                   <input type="checkbox" checked={on} readOnly aria-hidden="true" tabIndex={-1} style={{ marginTop: 3 }} />
@@ -411,7 +411,7 @@ export function WorkbookPage() {
                 className="cmp-card mod-card"
                 aria-pressed={template === tpl.id}
                 onClick={() => applyTemplate(tpl.id)}
-                style={{ textAlign: "left", cursor: "pointer", padding: "10px 12px", borderColor: template === tpl.id ? "var(--shell-teal)" : undefined, "--tile-tint": tpl.tint } as CSSProperties}
+                style={{ textAlign: "left", cursor: "pointer", padding: "10px 12px", borderColor: template === tpl.id ? "var(--shell-teal)" : undefined } as CSSProperties}
               >
                 <span style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
                   <span className="mod-ico" aria-hidden="true">

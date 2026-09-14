@@ -717,28 +717,28 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
       label: t("analyst.higherCtr"),
       sub: bestHook ? `${hookName(t, bestHook.key)} ${t("analyst.hooksSuffix")}` : t("analyst.noHook"),
       icon: "click",
-      tint: "var(--shell-blue-soft)",
     },
     {
       value: liftDisplay(roasLift),
       label: t("analyst.higherRoas"),
       sub: bestPlat ? `${platformLabel(bestPlat.key)} ${t("analyst.leadingSuffix")}` : t("analyst.noPlat"),
       icon: "coin",
-      tint: "var(--shell-green-soft)",
     },
     {
       value: kpiDisplay("mult", engagement.ready ? engagement.mult : null, emptyScope, uiLocale, unavailable),
       label: t("analyst.moreEng"),
       sub: t("analyst.topVsAvg"),
       icon: "users",
-      tint: "var(--shell-violet-soft)",
     },
     {
-      value: bestLength ? bestLength.label.replace("–", "-") : "—",
+      // Missing duration renders a plain display-only 0 (never 0.0,
+      // never a dash); "No Duration Data" stays underneath. The 0 is
+      // cosmetic: lengthRows skips duration-less creatives, so it
+      // never enters CTR/ROAS math, analysis text or exports.
+      value: bestLength ? bestLength.label.replace("–", "-") : "0",
       label: t("analyst.optLen"),
       sub: bestLength?.ctr != null ? t("analyst.ctrInBand", { ctr: dec1(bestLength.ctr) }) : t("analyst.noDur"),
       icon: "bars",
-      tint: "var(--shell-amber-soft)",
     },
   ];
 
@@ -959,16 +959,20 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
             <LoadingButton
               type="button"
               className="btn-outline btn-compact"
-              disabled={busy || !input.trim()}
+              disabled={busy || (!input.trim() && messages.length === 0)}
               loading={op === "three-points"}
               loadingLabel={t("analyst.condensing")}
-              onClick={() => void send("three-points", 3)}
+              onClick={() => void send("three-points", 3, input.trim() ? undefined : t("analyst.condenseLast"))}
               title={t("analyst.threePointsTitle")}
+              aria-describedby="analyst-three-points-hint"
             >
               <Icon name="list" size={14} /> {t("analyst.threePoints")}
             </LoadingButton>
           </div>
         </form>
+        <p id="analyst-three-points-hint" className="panel-sub" style={{ margin: "8px 0 0", fontSize: 12 }}>
+          {messages.length === 0 ? t("analyst.threePointsEmpty") : t("analyst.threePointsHint")}
+        </p>
         <div className="prompt-chips" aria-label={t("analyst.tryAria")}>
           <span style={{ fontSize: 13, fontWeight: 600, color: "var(--shell-muted)", alignSelf: "center" }}>
             {t("analyst.tryLabel")}
@@ -1051,9 +1055,10 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
             </select>
           </div>
         </div>
-        <details style={{ marginTop: 10 }}>
-          <summary className="link-teal" style={{ cursor: "pointer", display: "inline-block" }}>
-            {t("analyst.moreFilters")}
+        <details className="disclosure" style={{ marginTop: 16 }}>
+          <summary>
+            <span className="link-teal">{t("analyst.moreFilters")}</span>
+            <span className="disc-chev" aria-hidden="true"><Icon name="chev" size={15} /></span>
           </summary>
           <div className="cols-2-even" style={{ marginTop: 10 }}>
             <MetaSelect id="a-client" label={t("filters.client")} allLabel={t("filters.allClients")}
@@ -1132,7 +1137,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
             <div className="kpi-grid">
               {statCards.map((s) => (
                 <div className="kpi-card" key={s.label}>
-                  <span className="kpi-ico" style={{ background: s.tint }}>
+                  <span className="kpi-ico">
                     <Icon name={s.icon} size={20} />
                   </span>
                   <div className="kpi-body">
@@ -1239,7 +1244,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
             <div>
               {relatedInsights.map((r) => (
                 <div className="insight" key={r.title}>
-                  <span className="insight-ico" style={{ background: "var(--shell-blue-soft)" }}>
+                  <span className="insight-ico">
                     <Icon name="spark" size={18} />
                   </span>
                   <div>

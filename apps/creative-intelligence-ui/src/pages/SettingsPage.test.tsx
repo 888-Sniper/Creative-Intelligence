@@ -38,11 +38,20 @@ const patternsData = {
 
 const cohortsData = [{ id: 3, name: "Beauty", filters: { platform: ["tiktok"] }, created_at: "" }];
 
+const adminMe: MeResponse = {
+  authenticated: true, gate: "app",
+  employee: { ...employee, role: "admin" },
+  is_admin: true, message: "", workos_configured: true,
+};
+
 let failGoogleStatus = false;
 
-function mockFetch(opts?: { googleConnected?: boolean; me?: MeResponse; sessions?: number }) {
+function mockFetch(opts?: { googleConnected?: boolean; me?: MeResponse; sessions?: number; cohorts?: typeof cohortsData; deleteFails?: number }) {
   const calls: Array<[string, RequestInit | undefined]> = [];
   const googleConnected = opts?.googleConnected ?? false;
+  // Stateful cohort list: DELETE removes the row so a re-fetched
+  // list proves the deletion sticks (refresh persistence).
+  const deleted = new Set<number>();
   window.fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     calls.push([url, init]);
@@ -63,7 +72,14 @@ function mockFetch(opts?: { googleConnected?: boolean; me?: MeResponse; sessions
       return Response.json({ connected: googleConnected });
     }
     if (url.startsWith("/api/retention/patterns")) return Response.json(patternsData);
-    if (url === "/api/cohorts" && method === "GET") return Response.json(cohortsData);
+    if (url === "/api/cohorts" && method === "GET") {
+      return Response.json((opts?.cohorts ?? cohortsData).filter((c) => !deleted.has(c.id)));
+    }
+    if (url.startsWith("/api/cohorts/") && method === "DELETE") {
+      if (opts?.deleteFails) return Response.json({ error: "forbidden" }, { status: opts.deleteFails });
+      deleted.add(Number(url.split("/").pop()));
+      return Response.json({ ok: true, deleted: "Beauty" });
+    }
     if (url.startsWith("/api/cohorts/build")) {
       return Response.json({ name: "Beauty", metric: "cpa", n_ads: 5, status: "ok" });
     }
@@ -107,6 +123,7 @@ describe("SettingsPage", () => {
 
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     try {
@@ -130,10 +147,10 @@ describe("SettingsPage", () => {
     expect(screen.getByText("Integrations")).toBeDefined();
     expect(screen.getByText("Security")).toBeDefined();
     expect(screen.getByText("Advanced")).toBeDefined();
-    expect(screen.getByRole("button", { name: "Save Changes" })).toBeDefined();
-    // No idle footer text and no reserved status space when clean.
-    expect(screen.queryByText("No unsaved changes.")).toBeNull();
-    expect(screen.queryByText("Unsaved changes.")).toBeNull();
+    // Autosave: no page-level Save button anywhere.
+    expect(screen.queryByRole("button", { name: "Save Changes" })).toBeNull();
+    // Reset Defaults lives in the header as a secondary button.
+    expect(screen.getByRole("button", { name: "Reset Defaults" })).toBeDefined();
   });
 
   it("retires the legacy mock workspace name on load", async () => {
@@ -153,32 +170,112 @@ describe("SettingsPage", () => {
     await waitFor(() => {
       expect((screen.getByLabelText("Theme") as HTMLSelectElement).value).toBe("light");
     });
-    // Explicit choice wins over the dark default, before and after save.
+    // Explicit choice wins over the dark default.
     expect(document.documentElement.dataset["theme"] ?? "").toBe("");
+    // Typing a name autosaves (debounced) without any Save click.
+    vi.useFakeTimers();
     fireEvent.change(screen.getByLabelText("Workspace Name"), { target: { value: "Kept Light" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+    await vi.advanceTimersByTimeAsync(600);
+    vi.useRealTimers();
     await waitFor(() => {
-      expect(screen.getByText("Settings saved.")).toBeDefined();
+      expect(window.localStorage.getItem("ci-settings-prefs:e1")).toContain("Kept Light");
     });
     expect(window.localStorage.getItem("ci-theme")).toBe("light");
     expect(document.documentElement.dataset["theme"] ?? "").toBe("");
   });
 
-  it("saves and resets workspace preferences", async () => {
+  it("autosaves the workspace name debounced, without a Save button", async () => {
     mockFetch();
     renderSettings();
     await waitFor(() => {
       expect(screen.getByLabelText("Workspace Name")).toBeDefined();
     });
+    vi.useFakeTimers();
+    fireEvent.change(screen.getByLabelText("Workspace Name"), { target: { value: "Night" } });
     fireEvent.change(screen.getByLabelText("Workspace Name"), { target: { value: "Night Shift" } });
-    const save = screen.getByRole("button", { name: "Save Changes" }) as HTMLButtonElement;
-    expect(save.disabled).toBe(false);
-    fireEvent.click(save);
+    // Debounce pending: header save status shows, nothing persisted yet.
+    // (role=status scopes past LoadingButtons' hidden loading faces.)
+    expect(screen.getByRole("status").textContent).toBe("Saving…");
+    expect(window.localStorage.getItem("ci-settings-prefs:e1")).toBeNull();
+    await vi.advanceTimersByTimeAsync(600);
+    vi.useRealTimers();
+    // Last write wins: only the final text persisted.
     await waitFor(() => {
-      expect(screen.getByText("Settings saved.")).toBeDefined();
+      expect(window.localStorage.getItem("ci-settings-prefs:e1")).toContain("Night Shift");
     });
-    // Preferences persist per signed-in employee (§9).
-    expect(window.localStorage.getItem("ci-settings-prefs:e1")).toContain("Night Shift");
+    expect(screen.getByRole("status").textContent).toBe("All changes saved.");
+  });
+
+  it("autosaves toggles and selects immediately with feedback", async () => {
+    mockFetch();
+    renderSettings();
+    await waitFor(() => {
+      expect(screen.getByLabelText("Interface Density")).toBeDefined();
+    });
+    fireEvent.change(screen.getByLabelText("Interface Density"), { target: { value: "Compact" } });
+    await waitFor(() => {
+      expect(window.localStorage.getItem("ci-settings-prefs:e1")).toContain("Compact");
+    });
+    expect(screen.getByRole("status").textContent).toBe("All changes saved.");
+    expect(document.body.dataset["density"]).toBe("compact");
+  });
+
+  it("shows failure with retry when storage throws, keeping the attempted values", async () => {
+    mockFetch();
+    renderSettings();
+    await waitFor(() => {
+      expect(screen.getByLabelText("Interface Density")).toBeDefined();
+    });
+    const store = new Map<string, string>();
+    const working = {
+      getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
+      setItem: (k: string, v: string) => { store.set(k, String(v)); },
+      removeItem: (k: string) => { store.delete(k); },
+      clear: () => { store.clear(); },
+    };
+    Object.defineProperty(window, "localStorage", {
+      value: { ...working, setItem: () => { throw new Error("quota"); } },
+      configurable: true, writable: true,
+    });
+    fireEvent.change(screen.getByLabelText("Interface Density"), { target: { value: "Compact" } });
+    // Optimistic UI keeps the attempt visible with an error + Retry.
+    expect(await screen.findByText("Could not save settings in this browser.")).toBeDefined();
+    expect((screen.getByLabelText("Interface Density") as HTMLSelectElement).value).toBe("Compact");
+    expect(screen.getByRole("button", { name: "Retry" })).toBeDefined();
+    Object.defineProperty(window, "localStorage", {
+      value: working, configurable: true, writable: true,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => {
+      expect(store.get("ci-settings-prefs:e1")).toContain("Compact");
+    });
+    expect(screen.getByRole("status").textContent).toBe("All changes saved.");
+  });
+
+  it("validates the workspace name instead of saving blanks", async () => {
+    mockFetch();
+    renderSettings();
+    await waitFor(() => {
+      expect(screen.getByLabelText("Workspace Name")).toBeDefined();
+    });
+    vi.useFakeTimers();
+    fireEvent.change(screen.getByLabelText("Workspace Name"), { target: { value: "   " } });
+    await vi.advanceTimersByTimeAsync(600);
+    vi.useRealTimers();
+    expect(await screen.findByText("Workspace name cannot be empty.")).toBeDefined();
+    expect(window.localStorage.getItem("ci-settings-prefs:e1")).toBeNull();
+  });
+
+  it("resets live values from the header button", async () => {
+    mockFetch();
+    renderSettings();
+    await waitFor(() => {
+      expect(screen.getByLabelText("Interface Density")).toBeDefined();
+    });
+    fireEvent.change(screen.getByLabelText("Interface Density"), { target: { value: "Compact" } });
+    await waitFor(() => {
+      expect(window.localStorage.getItem("ci-settings-prefs:e1")).toContain("Compact");
+    });
     fireEvent.click(screen.getByRole("button", { name: "Reset Defaults" }));
     await waitFor(() => {
       expect(screen.getByText("Defaults restored.")).toBeDefined();
@@ -195,26 +292,20 @@ describe("SettingsPage", () => {
     expect(loadPrefs("e1").language).toBe("en");
   });
 
-  it("stages appearance choices and applies them only on Save", async () => {
+  it("applies appearance choices immediately, with no staged state", async () => {
     mockFetch();
     renderSettings();
     await waitFor(() => {
       expect(screen.getByLabelText("Theme")).toBeDefined();
     });
-    const appliedTeal = document.documentElement.style.getPropertyValue("--shell-teal");
     fireEvent.change(screen.getByLabelText("Accent Color"), { target: { value: "Blue" } });
     fireEvent.change(screen.getByLabelText("Theme"), { target: { value: "light" } });
-    // Staged only: live appearance is untouched until Save.
-    expect(document.documentElement.style.getPropertyValue("--shell-teal")).toBe(appliedTeal);
-    expect(document.documentElement.dataset["theme"] ?? "").toBe("dark");
-    const save = screen.getByRole("button", { name: "Save Changes" }) as HTMLButtonElement;
-    expect(save.disabled).toBe(false);
-    fireEvent.click(save);
+    // Autosaved at once: live appearance tracks the selects.
     await waitFor(() => {
-      expect(screen.getByText("Settings saved.")).toBeDefined();
+      expect(document.documentElement.style.getPropertyValue("--shell-teal")).toBe("#2F6FBE");
     });
-    expect(document.documentElement.style.getPropertyValue("--shell-teal")).toBe("#2F6FBE");
     expect(document.documentElement.dataset["theme"] ?? "").toBe("");
+    expect(window.localStorage.getItem("ci-settings-prefs:e1")).toContain("Blue");
   });
 
   it("sends a password reset email from Security", async () => {
@@ -401,7 +492,8 @@ describe("SettingsPage", () => {
       expect(within(panel as HTMLElement).getByText("EMP-004")).toBeDefined();
     });
     expect(within(panel as HTMLElement).queryByText("tech-uuid-9f")).toBeNull();
-    expect(within(panel as HTMLElement).getByRole("button", { name: "Copy employee number" })).toBeDefined();
+    // No copy control: the ID stays visible and aligned, without a button.
+    expect(within(panel as HTMLElement).queryByRole("button", { name: "Copy employee number" })).toBeNull();
   });
 
   it("orders workspace, security, and activity rows per the spec", async () => {
@@ -454,5 +546,65 @@ describe("SettingsPage", () => {
     expect(body.name).toBe("Beauty");
     expect(body.filters["include_projects"]).toEqual(["Glow", "Vita"]);
     expect(body.filters["exclude_projects"]).toEqual(["Nook"]);
+  });
+
+  it("deletes a cohort as admin and clears its displayed result", async () => {
+    const calls = mockFetch({ me: adminMe });
+    window.confirm = vi.fn(() => true);
+    renderSettings();
+    // Build first so a result is displayed for this cohort …
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Build" })).toBeDefined();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Build" }));
+    await waitFor(() => {
+      expect(screen.getByText(/Cohort: Beauty/)).toBeDefined();
+    });
+    // … then delete it.
+    fireEvent.click(screen.getByRole("button", { name: "Delete cohort Beauty" }));
+    await waitFor(() => {
+      expect(screen.getByText("Cohort Beauty deleted.")).toBeDefined();
+    });
+    expect(calls.some(([url, init]) => url === "/api/cohorts/3" && init?.method === "DELETE")).toBe(true);
+    // List and displayed result update together …
+    expect(screen.queryByText(/Cohort: Beauty/)).toBeNull();
+    expect(screen.getByText("No Saved Cohorts Yet.")).toBeDefined();
+  });
+
+  it("keeps a cohort when the delete confirmation is dismissed", async () => {
+    const calls = mockFetch({ me: adminMe });
+    window.confirm = vi.fn(() => false);
+    renderSettings();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Delete cohort Beauty" })).toBeDefined();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Delete cohort Beauty" }));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(calls.some(([url]) => url === "/api/cohorts/3")).toBe(false);
+    expect(screen.getByText("Beauty")).toBeDefined();
+  });
+
+  it("hides cohort delete for non-admins", async () => {
+    mockFetch();
+    renderSettings();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Build" })).toBeDefined();
+    });
+    expect(screen.queryByRole("button", { name: "Delete cohort Beauty" })).toBeNull();
+  });
+
+  it("surfaces delete permission failures visibly", async () => {
+    mockFetch({ me: adminMe, deleteFails: 403 });
+    window.confirm = vi.fn(() => true);
+    renderSettings();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Delete cohort Beauty" })).toBeDefined();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Delete cohort Beauty" }));
+    await waitFor(() => {
+      expect(screen.getByText("Only administrators can delete cohorts.")).toBeDefined();
+    });
+    // Failed delete keeps the row.
+    expect(screen.getByText("Beauty")).toBeDefined();
   });
 });

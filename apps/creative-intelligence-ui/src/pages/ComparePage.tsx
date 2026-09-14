@@ -891,12 +891,15 @@ export function ComparePage() {
           />
         </Panel>
       ) : null}
-      <details className="panel" style={{ marginTop: 12 }}>
-        <summary style={{ cursor: "pointer", fontSize: 16.5, fontWeight: 700, color: "var(--shell-navy)" }}>
-          {t("compare.periodTitle")}
-          <span className="panel-sub" style={{ display: "block", fontWeight: 400 }}>
-            {t("compare.periodSub")}
+      <details className="panel disclosure" style={{ marginTop: 12 }}>
+        <summary>
+          <span style={{ flex: "1 1 auto", minWidth: 0, fontSize: 16.5, fontWeight: 700, color: "var(--shell-navy)" }}>
+            {t("compare.periodTitle")}
+            <span className="panel-sub" style={{ display: "block", fontWeight: 400 }}>
+              {t("compare.periodSub")}
+            </span>
           </span>
+          <span className="disc-chev" aria-hidden="true"><Icon name="chev" size={15} /></span>
         </summary>
         <div className="filter-grid fg-4" style={{ marginTop: 12 }}>
           <div className="field">

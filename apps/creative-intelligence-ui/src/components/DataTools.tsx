@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, scopedPath } from "@/api/client";
+import { useAuth } from "@/auth/AuthProvider";
 import { useFilters } from "@/state/FilterContext";
 import { useLocale } from "@/i18n";
 import { EmptyState, Panel, Skeleton } from "@/components/product";
@@ -153,6 +154,8 @@ export function RetentionPatterns() {
 export function CohortBuilder() {
   const { scope } = useFilters();
   const { t, tp, fmtNum, fmtDate } = useLocale();
+  const { me } = useAuth();
+  const canDelete = me?.is_admin === true;
   const scopeKey = scope.toString();
   const [cohortName, setCohortName] = useState("");
   const [cohortMetric, setCohortMetric] = useState("cpa");
@@ -162,8 +165,11 @@ export function CohortBuilder() {
   const [cohortsLoading, setCohortsLoading] = useState(true);
   const [cohortsError, setCohortsError] = useState("");
   const [buildingId, setBuildingId] = useState<number | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
   const [build, setBuild] = useState<CohortBuild | null>(null);
+  const [builtId, setBuiltId] = useState<number | null>(null);
   const [buildError, setBuildError] = useState("");
+  const [opStatus, setOpStatus] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -222,10 +228,44 @@ export function CohortBuilder() {
       const q = new URLSearchParams({ id: String(id), metric: cohortMetric }).toString();
       const r = await api<CohortBuild>("GET", `/api/cohorts/build?${q}`);
       setBuild({ ...r, cohort: r.cohort ?? known?.find((c) => c.id === id) });
+      setBuiltId(id);
     } catch (e) {
       setBuildError(e instanceof Error ? e.message : String(e));
     } finally {
       setBuildingId(null);
+    }
+  }
+
+  async function deleteCohort(id: number, name: string): Promise<void> {
+    // Destructive and admin-only: confirm first, then DELETE. The
+    // row is removed server-side so it stays deleted after refresh;
+    // a displayed result for this cohort clears with it.
+    if (typeof window.confirm === "function"
+        && !window.confirm(t("dataTools.deleteConfirm", { name }))) {
+      return;
+    }
+    setDeletingId(id);
+    setOpStatus("");
+    setBuildError("");
+    try {
+      await api("DELETE", `/api/cohorts/${id}`);
+      const list = await api<Cohort[]>("GET", "/api/cohorts");
+      setCohorts(list);
+      setCohortsError("");
+      if (builtId === id) {
+        setBuild(null);
+        setBuiltId(null);
+      }
+      setOpStatus(t("dataTools.deleted", { name }));
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      // 403 (or any explicit forbidden) means the role changed
+      // mid-session: say so plainly instead of a generic failure.
+      setBuildError(/forbidden|administrator|403/i.test(message)
+        ? t("dataTools.deleteForbidden")
+        : (message || t("dataTools.deleteFailed")));
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -328,11 +368,21 @@ export function CohortBuilder() {
                     <td><span className="cell-main">{c.name}</span></td>
                     <td>{tp("dataTools.axes", Object.keys(c.filters ?? {}).length, { count: Object.keys(c.filters ?? {}).length })}</td>
                     <td>
-                      <LoadingButton type="button" className="btn-outline" loading={buildingId === c.id} loadingLabel={t("dataTools.building")} spinnerClass="spinner dark"
-                        disabled={buildingId === c.id}
-                        onClick={() => void buildCohort(c.id, cohorts ?? [])}>
-                        {t("dataTools.build")}
-                      </LoadingButton>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        <LoadingButton type="button" className="btn-outline" loading={buildingId === c.id} loadingLabel={t("dataTools.building")} spinnerClass="spinner dark"
+                          disabled={buildingId === c.id || deletingId === c.id}
+                          onClick={() => void buildCohort(c.id, cohorts ?? [])}>
+                          {t("dataTools.build")}
+                        </LoadingButton>
+                        {canDelete ? (
+                          <LoadingButton type="button" className="btn-outline" loading={deletingId === c.id} loadingLabel={t("dataTools.deleting")} spinnerClass="spinner dark"
+                            disabled={buildingId === c.id || deletingId === c.id}
+                            onClick={() => void deleteCohort(c.id, c.name)}
+                            aria-label={t("dataTools.deleteLabel", { name: c.name })}>
+                            {t("dataTools.delete")}
+                          </LoadingButton>
+                        ) : null}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -340,6 +390,7 @@ export function CohortBuilder() {
             </table>
           </div>
         )}
+        {opStatus ? <p className="panel-sub" role="status" style={{ margin: "8px 0 0" }}>{opStatus}</p> : null}
         {buildError ? <EmptyState text={buildError} /> : null}
         {build ? (
           <p className="panel-sub">

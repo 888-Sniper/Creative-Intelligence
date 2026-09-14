@@ -318,11 +318,13 @@ export function AskPage() {
             </Panel>
           ) : (
             <Panel title={t("ask.beginTitle")} style={{ flex: "1 0 auto" }}>
-              <EmptyState
-                icon="chat"
-                title={t("ask.firstTitle")}
-                text={t("ask.firstBody")}
-              />
+              <div className="empty-center">
+                <EmptyState
+                  icon="chat"
+                  title={t("ask.firstTitle")}
+                  text={t("ask.firstBody")}
+                />
+              </div>
             </Panel>
           )}
         </div>
@@ -348,7 +350,7 @@ export function AskPage() {
                   {chats.slice(0, 5).map((c) => (
                     <Link key={c.id} to={`/analyst?conversation=${encodeURIComponent(c.id)}`}
                       style={{ display: "flex", alignItems: "center", gap: 9, padding: "7px 0", borderBottom: "1px solid var(--shell-line)", textDecoration: "none" }}>
-                      <span className="insight-ico" style={{ background: "var(--shell-blue-soft)", width: 30, height: 30, borderRadius: 9 }}>
+                      <span className="insight-ico" style={{ width: 30, height: 30, borderRadius: 9 }}>
                         <Icon name="chat" size={15} />
                       </span>
                       <div style={{ minWidth: 0 }}>

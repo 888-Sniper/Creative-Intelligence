@@ -131,5 +131,7 @@ def test_deploy_migration_command_from_repo_root(tmp_path):
             "SELECT name FROM sqlite_master WHERE type='table'")}
     finally:
         conn.close()
-    assert version == ["0011"], version
+    assert version == ["0012"], version
     assert {"employees", "auth_sessions", "oauth_tokens"} <= tables
+    assert {"provider_configs", "provider_model_cache",
+            "active_provider_selection"} <= tables

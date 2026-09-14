@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, scopedPath } from "@/api/client";
-import { applySavedView, VIEW_ROUTES, type SavedView } from "@/components/savedViews";
+import { applySavedView, type SavedView } from "@/components/savedViews";
 import { useFilters } from "@/state/FilterContext";
 import { useLocale } from "@/i18n";
 import { Icon } from "@/components/icons";
@@ -18,6 +18,7 @@ import {
   fmtMult,
   fmtPct,
   platformLabel,
+  scopeBody,
   useCampaignMeta,
   useScopedApi,
 } from "@/components/product";
@@ -75,20 +76,27 @@ function MiniBars({ values, format }: { values: number[]; format: (v: number) =>
   );
 }
 
+/* User-facing saved-benchmark description: the stored grouping plus
+ * the stored filter scope (setup, not live results). Opening a card
+ * restores exactly these two, so the card must promise nothing else —
+ * no route paths or view ids. */
 function BenchmarkViewSub({ view }: { view: SavedView }) {
   const { t, tp } = useLocale();
-  const axes = Object.keys(view.state?.filters ?? {}).length;
-  const dest = view.state?.view ? (VIEW_ROUTES[view.state.view] ?? view.state.view) : "";
-  return (
-    <span className="panel-sub">
-      {axes ? tp("benchmarks.viewFilters", axes, { count: axes }) : t("benchmarks.savedSetup")}
-      {dest ? ` · ${t("benchmarks.opensDest", { dest })}` : ""}
-    </span>
-  );
+  const state = view.state ?? {};
+  const axis = typeof state.benchmark === "string"
+    && (BENCHMARK_AXES as ReadonlyArray<string>).includes(state.benchmark)
+    ? t(`benchmarks.axes.${state.benchmark}`)
+    : null;
+  const axes = Object.keys(state.filters ?? {}).length;
+  const parts = [
+    axis ? t("benchmarks.savedGrouping", { axis }) : t("benchmarks.savedSetup"),
+    axes ? tp("benchmarks.viewFilters", axes, { count: axes }) : t("benchmarks.savedNoFilters"),
+  ];
+  return <span className="panel-sub">{parts.join(" · ")}</span>;
 }
 
 export function BenchmarksPage() {
-  const { filters, setFilter, clearFilters } = useFilters();
+  const { filters, setFilter, clearFilters, scope } = useFilters();
   const { t, tp, fmtDate, fmtNum, locale } = useLocale();
   const unavailable = t("common.unavailable");
   const [axis, setAxis] = useState<Axis>("platform");
@@ -171,6 +179,10 @@ export function BenchmarksPage() {
     applySavedView(v, setFilter, navigate);
   };
 
+  /* What Create Benchmark persists (verified against the backend
+   * save_view contract): the live scope filters, the KPI, the
+   * benchmark grouping axis and the benchmark scope — everything
+   * the saved card promises and opening restores. */
   const createBenchmark = async () => {
     setSaving(true);
     setStatus("");
@@ -184,7 +196,16 @@ export function BenchmarksPage() {
         axis: t(`benchmarks.axes.${axis}`),
         date: fmtDate(new Date().toISOString(), { month: "short", day: "numeric", year: "numeric" }),
       });
-      await api("POST", "/api/views", { name, state: { filters: {}, kpi: filters.kpi, view: "benchmark" } });
+      await api("POST", "/api/views", {
+        name,
+        state: {
+          filters: scopeBody(scope),
+          kpi: filters.kpi,
+          view: "benchmark",
+          benchmark: axis,
+          benchmark_scope: "filters",
+        },
+      });
       void data;
       const list = await api<SavedView[]>("GET", "/api/views");
       setViews(Array.isArray(list) ? list : []);
@@ -193,6 +214,22 @@ export function BenchmarksPage() {
       setStatus(e instanceof Error ? e.message : t("benchmarks.saveFailed"));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+
+  const deleteView = async (v: SavedView) => {
+    setDeletingId(v.id);
+    setStatus("");
+    try {
+      await api("POST", "/api/views/delete", { id: v.id });
+      setViews((prev) => (prev ?? []).filter((x) => x.id !== v.id));
+      setStatus(t("benchmarks.deleted", { name: v.name }));
+    } catch (e) {
+      setStatus(e instanceof Error ? e.message : t("benchmarks.deleteFailed"));
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -273,7 +310,7 @@ export function BenchmarksPage() {
             </select>
           </div>
           <div className="field" style={{ gridColumn: "1 / -1" }}>
-            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+            <div className="bench-filter-actions">
               <button type="button" className="btn-primary" onClick={() => setApplied((n) => n + 1)}>
                 {t("filters.apply")}
               </button>
@@ -294,14 +331,25 @@ export function BenchmarksPage() {
               views.length ? (
                 <div className="cards-4">
                   {views.slice(0, 4).map((v) => (
-                    <button key={v.id} type="button" className="cmp-card" onClick={() => applyView(v)}
-                      style={{ textAlign: "left", cursor: "pointer", padding: 12 }}>
-                      <span className="insight-ico" style={{ background: "var(--shell-teal-soft)", marginBottom: 6 }}>
+                    <div key={v.id} className="cmp-card" style={{ textAlign: "left", padding: 12 }}>
+                      <span className="insight-ico" style={{ marginBottom: 6 }}>
                         <Icon name="bookmark" size={18} />
                       </span>
                       <strong style={{ display: "block", fontSize: 13 }}>{v.name}</strong>
                       <BenchmarkViewSub view={v} />
-                    </button>
+                      <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                        <button type="button" className="btn-soft" onClick={() => applyView(v)}>
+                          {t("benchmarks.openBenchmark")}
+                        </button>
+                        <LoadingButton type="button" className="btn-outline" loading={deletingId === v.id}
+                          loadingLabel={t("benchmarks.deleting")} spinnerClass="spinner dark"
+                          disabled={deletingId === v.id}
+                          onClick={() => void deleteView(v)}
+                          aria-label={t("benchmarks.deleteBenchmark", { name: v.name })}>
+                          {t("benchmarks.delete")}
+                        </LoadingButton>
+                      </div>
+                    </div>
                   ))}
                 </div>
               ) : <EmptyState compact icon="bookmark" title={t("benchmarks.noSavedTitle")} text={t("benchmarks.noSavedBody")} />
@@ -404,15 +452,14 @@ export function BenchmarksPage() {
           </Panel>
         </div>
         <div className="rail-stack">
-          <Panel title={t("benchmarks.insightsTitle")} sub={t("benchmarks.insightsSub")}>
-            <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 10 }}>
-              <span className="insight-ico" style={{ background: "var(--shell-teal-soft)" }}>
+          <Panel title={t("benchmarks.insightsTitle")}>
+            <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 12 }}>
+              <span className="insight-ico">
                 <Icon name="bars" size={22} />
               </span>
               <div>
-                <p className="panel-sub" style={{ margin: 0 }}>{t("benchmarks.coverageLabel")}</p>
-                <strong style={{ fontSize: 26 }}>{fmtNum(coverage.total)}</strong>
-                <p className="panel-sub" style={{ margin: 0 }}>{t("benchmarks.totalRecords")}</p>
+                <strong style={{ fontSize: 26, lineHeight: 1.1 }}>{fmtNum(coverage.total)}</strong>
+                <p className="panel-sub" style={{ margin: "2px 0 0" }}>{t("benchmarks.totalRecords")}</p>
               </div>
             </div>
             <div style={{ display: "flex", gap: 8 }}>

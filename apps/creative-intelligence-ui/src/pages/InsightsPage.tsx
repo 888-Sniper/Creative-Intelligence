@@ -141,7 +141,26 @@ export function InsightsPage() {
     return has("client", client) && has("platform", platform) && has("market", market);
   };
 
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+
+  const deleteView = async (v: SavedView) => {
+    setDeletingId(v.id);
+    setSaveStatus("");
+    try {
+      await api("POST", "/api/views/delete", { id: v.id });
+      setViews((prev) => (prev ?? []).filter((x) => x.id !== v.id));
+      setSaveStatus(t("pageInsights.deleted", { name: v.name }));
+    } catch (e) {
+      setSaveStatus(e instanceof Error ? e.message : t("pageInsights.deleteFailed"));
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   const savedCards = useMemo(() => {
+    // Item 31: saved-view cards carry no badge — only conversations
+    // and findings keep theirs. The card keeps item, title,
+    // description and Open Insight.
     const out: Array<{ key: string; badge: string; title: string; body: string; meta: string; to: string; apply?: SavedView }> = [];
     if (itype === "all" || itype === "conversations") {
       for (const c of conversations ?? []) {
@@ -166,7 +185,7 @@ export function InsightsPage() {
         const route = v.state?.view ? (VIEW_ROUTES[v.state.view] ?? v.state.view) : "";
         out.push({
           key: `v-${v.id}`,
-          badge: t("pageInsights.badgeSavedView"),
+          badge: "",
           title: v.name,
           body: t("pageInsights.setupBody", { across: axes ? tp("pageInsights.across", axes, { count: axes }) : "" }),
           meta: route ? t("pageInsights.opensLabel", { route }) : "",
@@ -284,14 +303,22 @@ export function InsightsPage() {
                 <div className="cards-3">
                   {savedCards.map((s) => (
                     <div className="cmp-card" key={s.key} style={{ padding: 14 }}>
-                      <span className="badge-demo">{s.badge}</span>
-                      <h4 style={{ margin: "8px 0 6px", fontSize: 13.5 }}>{s.title}</h4>
+                      {s.badge ? <span className="badge-demo">{s.badge}</span> : null}
+                      <h4 style={{ margin: s.badge ? "8px 0 6px" : "0 0 6px", fontSize: 13.5 }}>{s.title}</h4>
                       <p className="panel-sub" style={{ margin: 0 }}>{s.body}</p>
                       <p className="panel-sub" style={{ margin: "4px 0 8px" }}>{s.meta}</p>
                       {s.apply ? (
-                        <button type="button" className="btn-soft" onClick={() => applyView(s.apply as SavedView)}>
-                          {t("pageInsights.openInsight")}
-                        </button>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          <button type="button" className="btn-soft" onClick={() => applyView(s.apply as SavedView)}>
+                            {t("pageInsights.openInsight")}
+                          </button>
+                          <button type="button" className="btn-outline"
+                            disabled={deletingId === (s.apply as SavedView).id}
+                            onClick={() => void deleteView(s.apply as SavedView)}
+                            aria-label={t("pageInsights.deleteInsight", { name: s.title })}>
+                            {deletingId === (s.apply as SavedView).id ? t("pageInsights.deleting") : t("pageInsights.delete")}
+                          </button>
+                        </div>
                       ) : (
                         <Link className="btn-soft" to={s.to}>{t("pageInsights.openInsight")}</Link>
                       )}
@@ -331,7 +358,7 @@ export function InsightsPage() {
                 <div>
                   {recent.map((c) => (
                     <div className="insight" key={c.id}>
-                      <span className="insight-ico" style={{ background: "var(--shell-blue-soft)" }}>
+                      <span className="insight-ico">
                         <Icon name="chat" size={20} />
                       </span>
                       <div>
@@ -350,7 +377,7 @@ export function InsightsPage() {
               <div>
                 {findings.rest.filter(matchAxes).slice(0, 4).map((c) => (
                   <div className="insight" key={c.creative_key}>
-                    <span className="insight-ico" style={{ background: "var(--shell-teal-soft)" }}>
+                    <span className="insight-ico">
                       <Icon name="spark" size={20} />
                     </span>
                     <div>
@@ -360,7 +387,11 @@ export function InsightsPage() {
                   </div>
                 ))}
               </div>
-              ) : <EmptyState verbatim text={t("pageInsights.noRelatedBody")} />
+              ) : (
+              <div className="empty-center">
+                <EmptyState compact verbatim icon="spark" title={t("pageInsights.noRelatedBody")} />
+              </div>
+              )
             ) : <Skeleton height={160} />}
           </Panel>
         </div>

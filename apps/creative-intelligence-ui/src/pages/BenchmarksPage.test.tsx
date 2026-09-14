@@ -10,15 +10,26 @@ const platformBenchmarks = {
 };
 
 function mockFetch() {
+  // Stateful saved views: POST appends, /views/delete removes, so a
+  // re-fetched list proves deletes stick (refresh persistence).
+  let views: Array<{ id: number; name: string; state: Record<string, unknown> }> = [
+    { id: 1, name: "Saved Benchmark", state: { filters: {}, view: "benchmark" } },
+  ];
   window.fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? "GET";
-    if (url === "/api/views" && method === "GET") {
-      return Response.json([
-        { id: 1, name: "Saved Benchmark", state: { filters: {}, view: "benchmark" } },
-      ]);
+    if (url === "/api/views" && method === "GET") return Response.json(views);
+    if (url === "/api/views" && method === "POST") {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { name: string; state: Record<string, unknown> };
+      const rec = { id: Math.max(0, ...views.map((v) => v.id)) + 1, name: body.name, state: body.state };
+      views = [...views, rec];
+      return Response.json(rec);
     }
-    if (url === "/api/views" && method === "POST") return Response.json({ id: 2 });
+    if (url === "/api/views/delete" && method === "POST") {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { id: number };
+      views = views.filter((v) => v.id !== body.id);
+      return Response.json({ ok: true, deleted: body.id });
+    }
     if (url.startsWith("/api/exports/benchmarks")) {
       return new Response("a,b\n1,2\n", { status: 200, headers: { "Content-Type": "text/csv" } });
     }
@@ -83,7 +94,53 @@ describe("BenchmarksPage", () => {
       expect(screen.getByText(/Saved Benchmark —/)).toBeDefined();
     });
     const fetchMock = window.fetch as unknown as ReturnType<typeof vi.fn>;
-    expect(fetchMock.mock.calls.some((c) => String(c[0]) === "/api/views" && (c[1] as RequestInit)?.method === "POST")).toBe(true);
+    const post = fetchMock.mock.calls.find((c) => String(c[0]) === "/api/views" && (c[1] as RequestInit)?.method === "POST");
+    expect(post).toBeDefined();
+    // What Create Benchmark persists: grouping + filters + KPI —
+    // everything the card promises and opening restores.
+    const state = (JSON.parse(String((post?.[1] as RequestInit)?.body ?? "{}")) as { state: Record<string, unknown> }).state;
+    expect(state).toMatchObject({ view: "benchmark", benchmark: "platform", benchmark_scope: "filters" });
+    expect(state).toHaveProperty("filters");
+    expect(state).toHaveProperty("kpi");
+  });
+
+  it("describes saved benchmarks without route jargon and opens what the card promises", async () => {
+    mockFetch();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("Saved Benchmark")).toBeDefined();
+    });
+    // User-facing description (grouping + scope), no route paths.
+    expect(screen.getByText("Saved Setup · Whole dataset")).toBeDefined();
+    expect(screen.queryByText(/\/benchmarks/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Open Benchmark" }));
+    // Opening the legacy view without a stored axis keeps the page
+    // and reports nothing broken.
+    await waitFor(() => {
+      expect(screen.getByText("Benchmark Results")).toBeDefined();
+    });
+  });
+
+  it("deletes a saved benchmark and keeps it deleted", async () => {
+    mockFetch();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Delete benchmark Saved Benchmark" })).toBeDefined();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Delete benchmark Saved Benchmark" }));
+    await waitFor(() => {
+      expect(screen.getByText("Deleted Saved Benchmark.")).toBeDefined();
+    });
+    const fetchMock = window.fetch as unknown as ReturnType<typeof vi.fn>;
+    expect(fetchMock.mock.calls.some((c) =>
+      String(c[0]) === "/api/views/delete"
+      && JSON.parse(String((c[1] as RequestInit)?.body ?? "{}")).id === 1,
+    )).toBe(true);
+    // List updates from the re-fetched state: stays deleted.
+    await waitFor(() => {
+      expect(screen.queryByText("Saved Benchmark")).toBeNull();
+    });
+    expect(screen.getByText("No Saved Benchmarks")).toBeDefined();
   });
 
   it("exports benchmarks to CSV", async () => {

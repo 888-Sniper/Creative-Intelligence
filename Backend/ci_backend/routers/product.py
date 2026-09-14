@@ -41,8 +41,11 @@ from creative_intel import (  # noqa: E402
     sync,
     thumbnails,
 )
-from creative_intel import (
+from creative_intel import (  # noqa: E402
     jobs as jobs_mod,
+)
+from creative_intel import (
+    provider_inventory as inventory_mod,
 )
 from creative_intel import (
     providers as providers_mod,
@@ -59,12 +62,31 @@ from ci_backend.deps import (  # noqa: E402
     UPLOAD_RATE_LIMIT,
     ai_rate_limit,
     check_user_limit,
+    get_current_admin,
     get_current_employee,
     get_product_conn,
     get_providers,
     json_payload,
     query_multidict,
 )
+
+
+def _provider_failure(exc: Exception) -> HTTPException:
+    """Map a provider failure to HTTP without leaking internals.
+
+    Paused AI (honest not-configured message) -> 409 like other
+    state conflicts; a chosen-model transport failure (marked
+    [provider=<id>] by the managed dispatcher) -> 502 Bad Gateway.
+    """
+    text = str(exc)
+    # Substring match: job rows carry str(exc)[:500], so a wrapped
+    # message still classifies correctly.
+    if inventory_mod.NOT_CONFIGURED_MESSAGE in text:
+        return HTTPException(
+            status_code=409,
+            detail={"error": inventory_mod.NOT_CONFIGURED_MESSAGE})
+    return HTTPException(status_code=502, detail={"error": text})
+
 
 router = APIRouter(tags=["product"])
 
@@ -796,6 +818,10 @@ async def ask(request: Request, conn=Depends(get_product_conn),
     except jobs_mod.JobFailed as exc:
         paudit.audit_request(request, conn, employee_id=who.id,
                              action="ask", result="error")
+        # Managed single-active transport failures surface as 502;
+        # paused AI and every legacy failure keep the 409 contract.
+        if "[provider=" in str(exc):
+            raise _provider_failure(exc)
         raise _conflict(exc)
     except (ValueError, export_gate.ExportBlocked, emp.StoreError) as exc:
         paudit.audit_request(request, conn, employee_id=who.id,
@@ -1345,6 +1371,31 @@ async def save_cohort(request: Request, conn=Depends(get_product_conn),
         raise _conflict(exc)
 
 
+@router.delete("/api/cohorts/{cohort_id}")
+def delete_cohort(cohort_id: int, request: Request,
+                  conn=Depends(get_product_conn),
+                  who=Depends(get_current_admin)):
+    """Delete a saved benchmark cohort (admin only, audited).
+
+    Non-admin employees get 403 from the admin guard; unknown ids
+    get 404. The row is removed from SQLite so the cohort stays
+    deleted across refreshes.
+    """
+    try:
+        out = cohorts.delete_cohort(conn, cohort_id=cohort_id)
+    except ValueError as exc:
+        paudit.audit_request(request, conn, employee_id=who.id,
+                             action="cohort-deleted",
+                             target=str(cohort_id), result="error")
+        if "unknown cohort" in str(exc):
+            raise HTTPException(status_code=404,
+                                detail={"error": str(exc)})
+        raise _conflict(exc)
+    paudit.audit_request(request, conn, employee_id=who.id,
+                         action="cohort-deleted", target=str(cohort_id))
+    return out
+
+
 @router.post("/api/compare/campaigns")
 async def compare_campaigns_post(request: Request,
                                  conn=Depends(get_product_conn),
@@ -1587,6 +1638,16 @@ async def _run_action(conn, prov, action: str, payload: dict, actor: str = "",
                                  target=_audit_target(action, payload),
                                  result="error")
         raise _conflict(exc)
+    except providers_mod.ProviderUnavailable as exc:
+        # Pipeline/verify stages have no rule fallback: paused AI is
+        # a 409, a chosen-model transport failure a 502 (previously
+        # an unmapped 500).
+        if audit_name is not None and request is not None:
+            paudit.audit_request(request, conn, employee_id=actor,
+                                 action=audit_name,
+                                 target=_audit_target(action, payload),
+                                 result="error")
+        raise _provider_failure(exc)
     finally:
         if isinstance(payload, dict):
             payload.pop("_google_bearer", None)
@@ -1834,7 +1895,7 @@ def sample_file_download(file_key: str, request: Request,
 # refreshes work (item 51). Explicit list — unknown paths still 404.
 _SPA_PATHS = ("campaigns", "creatives", "compare", "benchmarks",
               "reports", "profile", "settings", "admin", "analyst",
-              "insights", "workbook", "ask", "dashboard")
+              "insights", "workbook", "ask", "dashboard", "providers")
 
 
 @router.get("/{spa_path}")

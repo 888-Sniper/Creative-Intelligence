@@ -28,6 +28,8 @@ import {
   type Prefs,
 } from "@/state/prefs";
 import type { PublicEmployee } from "@/types/auth";
+import metaLogo from "@/assets/meta.svg";
+import tiktokLogo from "@/assets/tiktok.svg";
 
 const ACCENTS: Record<string, { teal: string; dark: string; ink: string }> = {
   "Teal (Default)": { teal: "#00C7B2", dark: "#08786E", ink: "#182536" },
@@ -73,7 +75,7 @@ function cap(v: string): string {
 
 /** Load prefs, honoring an explicit legacy `ci-theme` choice until the
  *  stored prefs carry their own theme (useTheme owns that key and stays
- *  the live source of truth; saveAll re-syncs both going forward). */
+ *  the live source of truth; every autosave commit re-syncs both). */
 function adoptPrefs(employeeId: string, liveTheme: Prefs["theme"]): Prefs {
   const loaded = loadPrefs(employeeId);
   try {
@@ -96,12 +98,12 @@ function adoptPrefs(employeeId: string, liveTheme: Prefs["theme"]): Prefs {
 const AVATAR_MIME = ["image/jpeg", "image/png", "image/webp"];
 const AVATAR_MAX = 2 * 1024 * 1024;
 
-/** Resolve a staged theme choice for the appearance preview: an
- *  explicit staged mode wins, while staged "system" follows the OS
- *  (falling back to the live resolved theme where matchMedia is
- *  unavailable, e.g. unit tests). */
-function resolvePreviewTheme(staged: Prefs["theme"], live: Theme): Theme {
-  if (staged !== "system") return staged;
+/** Resolve the live theme choice for the appearance preview: an
+ *  explicit mode wins, while "system" follows the OS (falling back
+ *  to the live resolved theme where matchMedia is unavailable,
+ *  e.g. unit tests). */
+function resolvePreviewTheme(live_choice: Prefs["theme"], live: Theme): Theme {
+  if (live_choice !== "system") return live_choice;
   if (typeof window !== "undefined" && typeof window.matchMedia === "function") {
     try {
       return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
@@ -112,9 +114,9 @@ function resolvePreviewTheme(staged: Prefs["theme"], live: Theme): Theme {
   return live;
 }
 
-/** Appearance preview driven by the STAGED theme, accent and density
+/** Appearance preview driven by the LIVE theme, accent and density
  *  (§8): choosing in the selects above visibly changes this mockup
- *  before Save is clicked. */
+ *  at once, because every choice saves automatically. */
 function AppearancePreview({ accent, density, mode }: { accent: string; density: string; mode: Theme }) {
   const color = ACCENTS[accent]?.teal ?? ACCENTS["Teal (Default)"].teal;
   const dark = mode === "dark";
@@ -152,11 +154,14 @@ export function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
 
-  // Staged vs saved workspace preferences (§9: per-employee key with
-  // legacy fallback, IANA time zones, staged language).
-  const [saved, setSaved] = useState<Prefs>(() => adoptPrefs(me?.employee?.id ?? "", liveThemeMode));
-  const [staged, setStaged] = useState<Prefs>(() => adoptPrefs(me?.employee?.id ?? "", liveThemeMode));
+  // Workspace preferences (§9: per-employee key with legacy
+  // fallback, IANA time zones). Autosaved: every control persists
+  // immediately (text fields debounced + validated), so there is no
+  // staged form and no Save button. `prefs` is the live truth.
+  const [prefs, setPrefs] = useState<Prefs>(() => adoptPrefs(me?.employee?.id ?? "", liveThemeMode));
   const [prefOwner, setPrefOwner] = useState(me?.employee?.id ?? "");
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [saveError, setSaveError] = useState("");
   const [status, setStatus] = useState("");
   const [toast, setToast] = useState<string | null>(null);
   const closeToast = useCallback(() => setToast(null), []);
@@ -209,62 +214,132 @@ export function SettingsPage() {
     void loadEmployee();
   }, [loadEmployee]);
 
+  // Live mirror of prefs for debounced commits (avoids stale
+  // closures inside timers).
+  const prefsRef = useRef(prefs);
+  prefsRef.current = prefs;
+  // Monotonic revision: each commit bumps it, so a debounced text
+  // commit only lands when no newer keystroke superseded it
+  // (last-write-wins with an in-flight guard against lost updates).
+  const revRef = useRef(0);
+  const nameTimer = useRef<number | null>(null);
+  const [nameDraft, setNameDraft] = useState(prefs.workspace);
+  const [nameError, setNameError] = useState("");
+  const nameDraftRef = useRef(nameDraft);
+  nameDraftRef.current = nameDraft;
+
+  const applyLive = useCallback((next: Prefs) => {
+    setThemeMode(next.theme);
+    applyAccent(next.accent, next.density);
+    setLang(next.language);
+    setTimezone(next.timezone);
+  }, [setThemeMode, setLang, setTimezone]);
+
+  /** Persist one autosave commit synchronously (localStorage).
+   *  Optimistic: live values apply first so the controls never snap
+   *  back; storage failure keeps them visible with an error + Retry
+   *  (which re-persists exactly what is shown). */
+  const commit = useCallback((next: Prefs) => {
+    const id = employee?.id ?? me?.employee?.id ?? "";
+    revRef.current += 1;
+    setPrefs(next);
+    if (next.workspace !== nameDraftRef.current) setNameDraft(next.workspace);
+    applyLive(next);
+    setSaveState("saving");
+    setSaveError("");
+    const ok = savePrefs(id, next);
+    if (!ok) {
+      setSaveState("error");
+      setSaveError(t("settings.footer.couldNotSave"));
+      return false;
+    }
+    setSaveState("saved");
+    return true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [employee?.id, t, applyLive]);
+
+  const retrySave = useCallback(() => {
+    commit(prefsRef.current);
+  }, [commit]);
+
+  const update = useCallback(<K extends keyof Prefs>(key: K, value: Prefs[K]) => {
+    commit({ ...prefsRef.current, [key]: value });
+  }, [commit]);
+
+  const onWorkspaceInput = useCallback((raw: string) => {
+    setNameDraft(raw);
+    setNameError("");
+    setSaveState("saving");
+    const rev = revRef.current + 1;
+    revRef.current = rev;
+    if (nameTimer.current !== null) window.clearTimeout(nameTimer.current);
+    nameTimer.current = window.setTimeout(() => {
+      // In-flight guard: a newer keystroke already superseded this
+      // commit — drop it so the latest text wins.
+      if (rev !== revRef.current || raw !== nameDraftRef.current) return;
+      const value = raw.trim();
+      if (!value) {
+        setNameError(t("settings.general.workspaceRequired"));
+        setSaveState("idle");
+        return;
+      }
+      commit({ ...prefsRef.current, workspace: value.slice(0, 80) });
+    }, 450);
+  }, [commit, t]);
+
+  useEffect(() => () => {
+    if (nameTimer.current !== null) window.clearTimeout(nameTimer.current);
+  }, []);
+
   // Adopt the signed-in employee's own preference key once identity
-  // arrives, without clobbering anything already staged.
+  // arrives. With autosave there is no staged form to clobber, but a
+  // debounced name commit still in flight must not be lost: persist
+  // the live values under the new key instead of reloading.
   useEffect(() => {
     const id = employee?.id ?? me?.employee?.id ?? "";
     if (id && id !== prefOwner) {
       setPrefOwner(id);
-      setSaved(adoptPrefs(id, liveThemeMode));
-      setStaged(adoptPrefs(id, liveThemeMode));
+      if (saveState === "saving" || nameDraftRef.current !== prefsRef.current.workspace) {
+        savePrefs(id, { ...prefsRef.current, workspace: nameDraftRef.current.trim() || prefsRef.current.workspace });
+      } else {
+        const loaded = adoptPrefs(id, liveThemeMode);
+        setPrefs(loaded);
+        setNameDraft(loaded.workspace);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [employee?.id]);
 
   useEffect(() => {
-    applyAccent(saved.accent, saved.density);
-  }, [saved.accent, saved.density]);
-
-  const dirty = JSON.stringify(staged) !== JSON.stringify(saved);
-  const set = <K extends keyof Prefs>(key: K, value: Prefs[K]) =>
-    setStaged((p) => ({ ...p, [key]: value }));
-
-  const saveAll = async () => {
-    setOp("saving");
-    const id = employee?.id ?? me?.employee?.id ?? "";
-    const ok = savePrefs(id, staged);
-    if (!ok) {
-      setStatus(t("settings.footer.couldNotSave"));
-      setOp(null);
-      return;
-    }
-    setSaved(staged);
-    setThemeMode(staged.theme);
-    applyAccent(staged.accent, staged.density);
-    setLang(staged.language);
-    setTimezone(staged.timezone);
-    setOp(null);
-    notifyOk(t("toast.settingsSaved"));
-  };
+    applyAccent(prefs.accent, prefs.density);
+  }, [prefs.accent, prefs.density]);
 
   const resetDefaults = () => {
-    // Reset commits full defaults: stage them, persist them under this
-    // employee's key (never delete it — deletion lets a stale legacy
-    // global record resurface on the next load), and apply every one
-    // live — including the locale context (§9), so the active
-    // language/time zone return to defaults instead of staying on the
-    // previous selection.
+    // Reset applies full defaults immediately (autosave: live values,
+    // not a staged form): persist them under this employee's key
+    // (never delete it — deletion lets a stale legacy global record
+    // resurface on the next load), and apply every one live —
+    // including the locale context (§9), so the active language/time
+    // zone return to defaults instead of staying on the previous
+    // selection.
     const next = { ...DEFAULTS };
     const id = employee?.id ?? me?.employee?.id ?? "";
     savePrefs(id, next);
-    setStaged(next);
-    setSaved(next);
+    setPrefs(next);
+    setNameDraft(next.workspace);
+    setNameError("");
+    setSaveState("saved");
+    setSaveError("");
     setThemeMode(next.theme);
     applyAccent(next.accent, next.density);
     setLang(next.language);
     setTimezone(next.timezone);
     notifyOk(t("toast.defaultsRestored"));
   };
+
+  const saveFeedback = saveState === "saving" ? t("settings.autosave.saving")
+    : saveState === "saved" ? t("settings.autosave.saved")
+    : saveState === "error" ? saveError : "";
 
   const saveProfile = async () => {
     setOp("profile");
@@ -383,15 +458,6 @@ export function SettingsPage() {
     }
   };
 
-  const copyEmployeeNo = async (value: string) => {
-    try {
-      await navigator.clipboard.writeText(value);
-      notifyOk(t("toast.employeeIdCopied"));
-    } catch {
-      setStatus(t("toast.employeeIdCopied"));
-    }
-  };
-
   const exportData = async () => {
     setOp("export");
     setStatus("");
@@ -436,7 +502,27 @@ export function SettingsPage() {
 
   return (
     <div className="settings">
-      <PageHeader title={t("settings.title")} sub={t("settings.sub")} />
+      <PageHeader
+        title={t("settings.title")}
+        sub={t("settings.sub")}
+        actions={(
+          <>
+            {saveFeedback ? (
+              <span className="panel-sub" role="status" style={{ margin: 0, fontSize: 12.5 }}>
+                {saveFeedback}
+              </span>
+            ) : null}
+            {saveState === "error" ? (
+              <button type="button" className="link-teal" onClick={retrySave}>
+                {t("common.retry")}
+              </button>
+            ) : null}
+            <button type="button" className="btn-outline" onClick={() => resetDefaults()}>
+              {t("settings.footer.resetDefaults")}
+            </button>
+          </>
+        )}
+      />
 
       <Panel>
         <div className="profile-hero">
@@ -533,9 +619,10 @@ export function SettingsPage() {
               <span className="panel-sub" role="status" style={{ margin: 0 }}>{status}</span>
             ) : null}
           </div>
-          <details style={{ marginTop: 12 }} open={avatarOpen} onToggle={(e) => setAvatarOpen((e.target as HTMLDetailsElement).open)}>
-            <summary className="panel-sub" style={{ cursor: "pointer", fontWeight: 600 }}>
+          <details className="disclosure" style={{ marginTop: 12 }} open={avatarOpen} onToggle={(e) => setAvatarOpen((e.target as HTMLDetailsElement).open)}>
+            <summary className="panel-sub" style={{ fontWeight: 600 }}>
               {t("settings.personalInfo.advancedAvatar")}
+              <span className="disc-chev" aria-hidden="true"><Icon name="chev" size={15} /></span>
             </summary>
             <div className="field" style={{ marginTop: 8 }}>
               <label htmlFor="s-avatar">{t("settings.personalInfo.avatarUrl")}</label>
@@ -557,15 +644,6 @@ export function SettingsPage() {
               <dd>
                 <span className="id-copy">
                   <code title={empNo}>{empNo}</code>
-                  <button
-                    type="button"
-                    className="icon-btn"
-                    aria-label={t("settings.workspace.copyEmployeeNo")}
-                    title={t("settings.workspace.copied")}
-                    onClick={() => void copyEmployeeNo(empNo)}
-                  >
-                    <Icon name="copy" size={14} />
-                  </button>
                 </span>
               </dd>
             </div>
@@ -594,7 +672,7 @@ export function SettingsPage() {
 
         <Panel title={t("settings.connections.title")} sub={t("settings.connections.sub")}>
           <div className="insight">
-            <span className="insight-ico" style={{ background: "var(--shell-blue-soft)" }}>
+            <span className="insight-ico">
               <Icon name="user" size={18} />
             </span>
             <div style={{ flex: 1 }}>
@@ -605,7 +683,7 @@ export function SettingsPage() {
           </div>
           {employee.provider ? (
             <div className="insight">
-              <span className="insight-ico" style={{ background: "var(--shell-teal-soft)" }}>
+              <span className="insight-ico">
                 <Icon name="check" size={18} />
               </span>
               <div style={{ flex: 1 }}>
@@ -682,13 +760,13 @@ export function SettingsPage() {
 
         <Panel title={t("settings.notifications.title")}>
           <Toggle label={t("settings.notifications.emailReports")} body={t("settings.notifications.emailReportsBody")}
-            checked={staged.emailReports} onChange={(v) => set("emailReports", v)} />
+            checked={prefs.emailReports} onChange={(v) => update("emailReports", v)} />
           <Toggle label={t("settings.notifications.campaignUpdates")} body={t("settings.notifications.campaignUpdatesBody")}
-            checked={staged.campaignUpdates} onChange={(v) => set("campaignUpdates", v)} />
+            checked={prefs.campaignUpdates} onChange={(v) => update("campaignUpdates", v)} />
           <Toggle label={t("settings.notifications.aiInsights")} body={t("settings.notifications.aiInsightsBody")}
-            checked={staged.aiInsights} onChange={(v) => set("aiInsights", v)} />
+            checked={prefs.aiInsights} onChange={(v) => update("aiInsights", v)} />
           <Toggle label={t("settings.notifications.productUpdates")} body={t("settings.notifications.productUpdatesBody")}
-            checked={staged.productUpdates} onChange={(v) => set("productUpdates", v)} />
+            checked={prefs.productUpdates} onChange={(v) => update("productUpdates", v)} />
         </Panel>
 
         <Panel title={t("settings.activity.title")} sub={t("settings.activity.sub")}>
@@ -706,22 +784,45 @@ export function SettingsPage() {
       <div className="section-gap" />
       <div className="cols-2-even">
         <Panel title={t("settings.general.title")} icon="sliders">
-          <div className="filter-grid">
-            <div className="field">
+          {/* Balanced three-column rows: Workspace Name spans two
+            (wide), Time Zone spans two on its row so long zone labels
+            never truncate, and every label holds one line at desktop. */}
+          <div className="filter-grid gen-grid">
+            <div className="field span-2">
               <label htmlFor="s-workspace">{t("settings.general.workspaceName")}</label>
               <input
                 id="s-workspace"
                 type="text"
-                value={staged.workspace}
-                onChange={(e) => set("workspace", e.target.value)}
+                value={nameDraft}
+                maxLength={80}
+                aria-invalid={nameError ? true : undefined}
+                aria-describedby={nameError ? "s-workspace-error" : undefined}
+                onChange={(e) => onWorkspaceInput(e.target.value)}
               />
+              {nameError ? (
+                <p id="s-workspace-error" role="alert" className="panel-sub" style={{ margin: "6px 0 0", fontSize: 12 }}>
+                  {nameError}
+                </p>
+              ) : null}
             </div>
             <div className="field">
+              <label htmlFor="s-language">{t("settings.general.language")}</label>
+              <select
+                id="s-language"
+                value={prefs.language}
+                onChange={(e) => update("language", e.target.value as Prefs["language"])}
+              >
+                <option value="en">{t("settings.languageNames.englishDefault")}</option>
+                <option value="es">Español</option>
+                <option value="pl">Polski</option>
+              </select>
+            </div>
+            <div className="field span-2">
               <label htmlFor="s-timezone">{t("settings.general.timeZone")}</label>
               <select
                 id="s-timezone"
-                value={staged.timezone}
-                onChange={(e) => set("timezone", e.target.value)}
+                value={prefs.timezone}
+                onChange={(e) => update("timezone", e.target.value)}
               >
                 {TIMEZONES.map((z) => (
                   <option key={z.id} value={z.id}>{z.label}</option>
@@ -732,8 +833,8 @@ export function SettingsPage() {
               <label htmlFor="s-default-view">{t("settings.general.defaultView")}</label>
               <select
                 id="s-default-view"
-                value={staged.defaultView}
-                onChange={(e) => set("defaultView", e.target.value)}
+                value={prefs.defaultView}
+                onChange={(e) => update("defaultView", e.target.value)}
               >
                 {VIEWS.map((v) => (
                   <option key={v} value={v}>{v}</option>
@@ -744,8 +845,8 @@ export function SettingsPage() {
               <label htmlFor="s-currency">{t("settings.general.defaultCurrency")}</label>
               <select
                 id="s-currency"
-                value={staged.currency}
-                onChange={(e) => set("currency", e.target.value)}
+                value={prefs.currency}
+                onChange={(e) => update("currency", e.target.value)}
               >
                 {CURRENCIES.map((c) => (
                   <option key={c} value={c}>{c}</option>
@@ -756,8 +857,8 @@ export function SettingsPage() {
               <label htmlFor="s-range">{t("settings.general.defaultDateRange")}</label>
               <select
                 id="s-range"
-                value={staged.dateRange}
-                onChange={(e) => set("dateRange", e.target.value)}
+                value={prefs.dateRange}
+                onChange={(e) => update("dateRange", e.target.value)}
               >
                 {RANGES.map((r) => (
                   <option key={r} value={r}>{r}</option>
@@ -768,60 +869,39 @@ export function SettingsPage() {
               <label htmlFor="s-campaign-view">{t("settings.general.defaultCampaignView")}</label>
               <select
                 id="s-campaign-view"
-                value={staged.campaignView}
-                onChange={(e) => set("campaignView", e.target.value)}
+                value={prefs.campaignView}
+                onChange={(e) => update("campaignView", e.target.value)}
               >
                 {CAMPAIGN_VIEWS.map((v) => (
                   <option key={v} value={v}>{v}</option>
                 ))}
               </select>
             </div>
-            <div className="field" style={{ gridColumn: "1 / -1" }}>
-              <label htmlFor="s-language">{t("settings.general.language")}</label>
-              <select
-                id="s-language"
-                value={staged.language}
-                onChange={(e) => set("language", e.target.value as Prefs["language"])}
-              >
-                <option value="en">{t("settings.languageNames.englishDefault")}</option>
-                <option value="es">Español</option>
-                <option value="pl">Polski</option>
-              </select>
-              <p className="panel-sub" style={{ margin: "6px 0 0", fontSize: 12 }}>
-                {t("settings.general.languageBody")}
-              </p>
-            </div>
           </div>
         </Panel>
 
         <Panel title={t("settings.appearance.title")} icon="moon">
-          <div className="field">
-            <label htmlFor="s-theme">{t("settings.appearance.theme")}</label>
-            <select
-              id="s-theme"
-              value={staged.theme}
-              onChange={(e) => set("theme", e.target.value as Prefs["theme"])}
-            >
-              <option value="light">{t("settings.appearance.themeLight")}</option>
-              <option value="dark">{t("settings.appearance.themeDark")}</option>
-              <option value="system">{t("settings.appearance.themeSystem")}</option>
-            </select>
-          </div>
-          <p className="panel-sub" style={{ fontSize: 12 }}>
-            {t("settings.appearance.previewIntro")}
-          </p>
-          <AppearancePreview
-            accent={staged.accent}
-            density={staged.density}
-            mode={resolvePreviewTheme(staged.theme, liveTheme)}
-          />
-          <div className="filter-grid" style={{ marginTop: 10 }}>
+          {/* One top row at content-sized widths (never forced equal
+            columns); the live preview sits underneath. */}
+          <div className="appear-row">
+            <div className="field">
+              <label htmlFor="s-theme">{t("settings.appearance.theme")}</label>
+              <select
+                id="s-theme"
+                value={prefs.theme}
+                onChange={(e) => update("theme", e.target.value as Prefs["theme"])}
+              >
+                <option value="light">{t("settings.appearance.themeLight")}</option>
+                <option value="dark">{t("settings.appearance.themeDark")}</option>
+                <option value="system">{t("settings.appearance.themeSystem")}</option>
+              </select>
+            </div>
             <div className="field">
               <label htmlFor="s-accent">{t("settings.appearance.accent")}</label>
               <select
                 id="s-accent"
-                value={staged.accent}
-                onChange={(e) => set("accent", e.target.value)}
+                value={prefs.accent}
+                onChange={(e) => update("accent", e.target.value)}
               >
                 {Object.keys(ACCENTS).map((a) => (
                   <option key={a} value={a}>{t(ACCENT_LABEL_KEYS[a] ?? a)}</option>
@@ -832,8 +912,8 @@ export function SettingsPage() {
               <label htmlFor="s-density">{t("settings.appearance.density")}</label>
               <select
                 id="s-density"
-                value={staged.density}
-                onChange={(e) => set("density", e.target.value)}
+                value={prefs.density}
+                onChange={(e) => update("density", e.target.value)}
               >
                 {DENSITIES.map((d) => (
                   <option key={d} value={d}>
@@ -843,12 +923,20 @@ export function SettingsPage() {
               </select>
             </div>
           </div>
+          <p className="panel-sub" style={{ fontSize: 12 }}>
+            {t("settings.appearance.previewIntro")}
+          </p>
+          <AppearancePreview
+            accent={prefs.accent}
+            density={prefs.density}
+            mode={resolvePreviewTheme(prefs.theme, liveTheme)}
+          />
         </Panel>
 
         <Panel title={t("settings.integrations.title")} icon="grid">
           <div className="insight">
-            <span className="insight-ico" aria-hidden="true">
-              <Icon name="campaign" size={18} />
+            <span className="insight-ico svc-tile" aria-hidden="true">
+              <img className="svc-logo" src={metaLogo} alt="" />
             </span>
             <div style={{ flex: 1 }}>
               <h4>Meta Ads</h4>
@@ -857,8 +945,8 @@ export function SettingsPage() {
             <span className="pill pill-ok">{t("settings.connections.unavailable")}</span>
           </div>
           <div className="insight">
-            <span className="insight-ico" aria-hidden="true">
-              <Icon name="creatives" size={18} />
+            <span className="insight-ico svc-tile" aria-hidden="true">
+              <img className="svc-logo" src={tiktokLogo} alt="" />
             </span>
             <div style={{ flex: 1 }}>
               <h4>TikTok Ads</h4>
@@ -880,15 +968,15 @@ export function SettingsPage() {
 
         <Panel title={t("settings.privacy.title")} icon="shield">
           <Toggle label={t("settings.privacy.dataUsage")} body={t("settings.privacy.dataUsageBody")}
-            checked={staged.dataUsage} onChange={(v) => set("dataUsage", v)} />
+            checked={prefs.dataUsage} onChange={(v) => update("dataUsage", v)} />
           <Toggle label={t("settings.privacy.shareAnalytics")} body={t("settings.privacy.shareAnalyticsBody")}
-            checked={staged.shareAnalytics} onChange={(v) => set("shareAnalytics", v)} />
+            checked={prefs.shareAnalytics} onChange={(v) => update("shareAnalytics", v)} />
           <div className="field" style={{ marginTop: 4 }}>
             <label htmlFor="s-retention">{t("settings.privacy.retention")}</label>
             <select
               id="s-retention"
-              value={staged.retention}
-              onChange={(e) => set("retention", e.target.value)}
+              value={prefs.retention}
+              onChange={(e) => update("retention", e.target.value)}
             >
               {RETENTIONS.map((r) => (
                 <option key={r} value={r}>{t(RETENTION_LABEL_KEYS[r] ?? r)}</option>
@@ -922,23 +1010,6 @@ export function SettingsPage() {
         </div>
       </Panel>
 
-      <div className="section-gap" />
-      <Panel>
-        <div className="row" style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-          <LoadingButton type="button" className="btn-reset" loading={op === "resetting"}
-            loadingLabel={t("common.sending")} disabled={op !== null} onClick={() => void resetDefaults()}>
-            {t("settings.footer.resetDefaults")}
-          </LoadingButton>
-          <LoadingButton type="button" className="btn-primary" loading={op === "saving"}
-            loadingLabel={t("common.saving")} disabled={op !== null || !dirty}
-            onClick={() => void saveAll()}>
-            {t("settings.footer.saveChanges")}
-          </LoadingButton>
-          {status ? (
-            <span className="panel-sub" role="status" style={{ margin: 0 }}>{status}</span>
-          ) : null}
-        </div>
-      </Panel>
       {toast ? <Toast message={toast} onClose={closeToast} /> : null}
     </div>
   );
@@ -972,7 +1043,7 @@ function ActivityList({ items, emptyText, noneText }: {
     <div>
       {items.map((a) => (
         <div className="insight" key={a.label}>
-          <span className="insight-ico" style={{ background: "var(--shell-bg)" }}>
+          <span className="insight-ico">
             <Icon name={a.icon} size={18} />
           </span>
           <div>

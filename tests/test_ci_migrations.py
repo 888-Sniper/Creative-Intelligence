@@ -34,18 +34,31 @@ def _version(engine):
 def test_fresh_upgrade_downgrade_upgrade(tmp_path):
     engine = make_engine(str(tmp_path / "mig.db"))
     ensure_migrated(engine)
-    assert _version(engine) == ["0011"]
+    assert _version(engine) == ["0012"]
     with engine.connect() as conn:
         tables = set(inspect(conn).get_table_names())
     assert {"employees", "auth_sessions", "auth_pending",
             "employee_audit"} <= tables
+    # Managed-provider tables exist, configs seeded secretless, and
+    # no selection is pre-activated (paused by default).
+    assert {"provider_configs", "provider_model_cache",
+            "active_provider_selection"} <= tables
+    with engine.connect() as conn:
+        n = conn.execute(text("SELECT COUNT(*) FROM provider_configs")
+                         ).fetchone()[0]
+        secrets = conn.execute(text("SELECT COUNT(*) FROM provider_configs"
+                                    " WHERE secret_enc IS NOT NULL")
+                               ).fetchone()[0]
+        sel = conn.execute(text("SELECT COUNT(*) FROM"
+                                " active_provider_selection")).fetchone()[0]
+    assert n == 17 and secrets == 0 and sel == 0
     _downgrade(engine, "0001")
     assert _version(engine) == ["0001"]
     with engine.connect() as conn:
         cols = {c["name"] for c in inspect(conn).get_columns("auth_sessions")}
     assert "container_id" not in cols
     _upgrade(engine, "head")
-    assert _version(engine) == ["0011"]
+    assert _version(engine) == ["0012"]
     with engine.connect() as conn:
         cols = {c["name"] for c in inspect(conn).get_columns("auth_sessions")}
     assert "container_id" in cols
@@ -58,26 +71,26 @@ def test_fresh_upgrade_downgrade_upgrade(tmp_path):
     assert not ({"employees", "auth_sessions", "auth_pending",
                  "employee_audit"} & tables)
     ensure_migrated(engine)
-    assert _version(engine) == ["0011"]
+    assert _version(engine) == ["0012"]
     with engine.connect() as conn:
         tables = set(inspect(conn).get_table_names())
     assert {"employees", "auth_sessions", "auth_pending",
             "employee_audit"} <= tables
     # App boot stays on head and is idempotent.
     ensure_migrated(engine)
-    assert _version(engine) == ["0011"]
+    assert _version(engine) == ["0012"]
     engine.dispose()
 
 def test_ensure_upgrades_behind_database_forward(tmp_path):
     from ci_backend.db import script_head
-    assert script_head() == "0011"
+    assert script_head() == "0012"
     engine = make_engine(str(tmp_path / "behind.db"))
     ensure_migrated(engine)
     _downgrade(engine, "0003")
     assert _version(engine) == ["0003"]
     # Boot no longer sits stale on an old revision: it upgrades.
     ensure_migrated(engine)
-    assert _version(engine) == ["0011"]
+    assert _version(engine) == ["0012"]
     with engine.connect() as conn:
         cols = {c["name"] for c in inspect(conn).get_columns("oauth_tokens")}
     assert "refresh_token_enc" in cols
@@ -90,7 +103,7 @@ def test_legacy_create_all_db_migrates_with_data(tmp_path):
         admin = emp.admin_create(sess, "root", "ada@foap.test", role="admin")
         emp.create_session(sess, admin.id, "")
     ensure_migrated(engine)
-    assert _version(engine) == ["0011"]
+    assert _version(engine) == ["0012"]
     with engine.connect() as conn:
         assert conn.execute(text("SELECT count(*) FROM employees")
                             ).fetchone()[0] == 1

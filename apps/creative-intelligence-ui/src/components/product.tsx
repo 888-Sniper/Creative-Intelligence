@@ -495,7 +495,7 @@ export function DateRangeField({ id }: { id: string }) {
   const shortFrom = sameYear ? from.replace(/,\s*\d{4}$/, "") : from;
   const label = from || to ? `${shortFrom || "…"} – ${to || "…"}` : t("filters.allTime");
   return (
-    <div className="field">
+    <div className="field field-date">
       <label id={`${id}-label`}>{t("filters.dateRange")}</label>
       <div className="daterange" ref={boxRef}>
         <button type="button" className="daterange-btn" aria-labelledby={`${id}-label daterange-val-${id}`}
@@ -654,8 +654,12 @@ export function FilterPanel({ onApply, kpi = true, creative = false, trailing, a
 }
 
 /* ------------------------------- KPI card ------------------------------ */
-export function KpiCard({ label, display, icon, tint, metricLabel, compare, note }: {
-  label: string; display: string; icon: string; tint: string;
+export function KpiCard({ label, display, icon, metricLabel, compare, note }: {
+  label: string; display: string; icon: string;
+  /** Legacy per-card tint (ignored): icon tiles are uniformly gray
+   *  with teal symbols via theme.css (.kpi-ico). Kept optional so
+   *  existing callers keep compiling. */
+  tint?: string;
   metricLabel: string; compare: CompareResp | null;
   /** Unobtrusive accessible context (e.g. empty zero-placeholder note). */
   note?: string | null;
@@ -668,11 +672,11 @@ export function KpiCard({ label, display, icon, tint, metricLabel, compare, note
     ?? metrics[metricLabel.toUpperCase()];
   // KPI hierarchy lives in theme.css (.kpi-label Title Case 13/600,
   // .kpi-value 27/800): one authoritative definition shared by every
-  // KpiCard and hand-rolled card. Only the per-card icon tint stays
-  // inline because it is data, not system.
+  // KpiCard and hand-rolled card. The icon tile is uniformly gray
+  // with a teal symbol (.kpi-ico), never a per-card tint.
   return (
     <div className="kpi-card">
-      <span className="kpi-ico" style={{ background: tint }}>
+      <span className="kpi-ico">
         <Icon name={icon} size={20} />
       </span>
       <div className="kpi-body">
@@ -695,7 +699,11 @@ export function KpiCard({ label, display, icon, tint, metricLabel, compare, note
 
 /* --------------------------- insights / misc --------------------------- */
 export interface Insight {
-  icon: string; tint: string; title: string; body: string;
+  icon: string;
+  /** Legacy per-item tint (ignored): insight tiles are uniformly gray
+   *  with teal symbols via theme.css (.insight-ico). */
+  tint?: string;
+  title: string; body: string;
   action?: string; href?: string;
 }
 export function InsightList({ items }: { items: Insight[] }) {
@@ -703,7 +711,7 @@ export function InsightList({ items }: { items: Insight[] }) {
     <div>
       {items.map((it, i) => (
         <div className="insight" key={i}>
-          <span className="insight-ico" style={{ background: it.tint }}>
+          <span className="insight-ico">
             <Icon name={it.icon} size={21} />
           </span>
           <div style={{ minWidth: 0 }}>

@@ -14,14 +14,17 @@ import { WorkbookPage } from "@/pages/WorkbookPage";
 import { AskPage } from "@/pages/AskPage";
 import { ReportsPage } from "@/pages/ReportsPage";
 import { AdminEmployeesPage } from "@/admin/AdminEmployeesPage";
+import { ProvidersPage } from "@/admin/ProvidersPage";
 import { useAuth } from "@/auth/AuthProvider";
+import { useLocale } from "@/i18n";
 import type { ReactNode } from "react";
 
 /** Admin routes render only for admins (presentation layer). The backend
  *  re-authorizes every admin API call; this never grants access by itself. */
-function AdminOnly({ children }: { children: ReactNode }) {
+export function AdminOnly({ children }: { children: ReactNode }) {
   const { me } = useAuth();
-  if (!me?.is_admin) return <p className="muted">Admin Access Required.</p>;
+  const { t } = useLocale();
+  if (!me?.is_admin) return <p className="muted">{t("nav.adminRequired")}</p>;
   return <>{children}</>;
 }
 
@@ -71,6 +74,14 @@ export const router = createBrowserRouter([
         element: (
           <AdminOnly>
             <AdminEmployeesPage />
+          </AdminOnly>
+        ),
+      },
+      {
+        path: "providers",
+        element: (
+          <AdminOnly>
+            <ProvidersPage />
           </AdminOnly>
         ),
       },

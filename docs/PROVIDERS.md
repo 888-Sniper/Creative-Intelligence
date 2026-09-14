@@ -70,6 +70,70 @@ Nextly thresholds mirrored: `eot_threshold=0.7`,
 | Ollama (local) | host models | host models | none (`http://127.0.0.1:11434`) |
 | LiteLLM (gateway) | proxy models | proxy models | `creative-intel-litellm` |
 
+## Managed single-active provider (admin-controlled)
+
+Employee generation (copy structuring + grounded Q&A) no longer races
+provider rosters. Exactly one `(provider_id, model_id)` pair is
+active at a time — chosen by an admin under
+`/api/admin/providers` — or nothing is (NULL = paused). Live mode
+with no selection fails closed with `AI is not configured. Contact
+your administrator.` Paused never falls back to legacy race or mocks
+in live mode. STT and vision keep the race behaviour above
+untouched, and mock mode is unchanged.
+
+### Canonical ids
+
+`Backend/creative_intel/provider_inventory.py` is authoritative:
+`gemini, groq, muse, openai, anthropic, deepseek, kimi, grok, qwen,
+glm, openrouter, nvidia, teamorouter` (api_key), `chatgpt`
+(subscription, unsupported), `ollama` (local), `litellm` (gateway),
+`opencode` (local, unsupported). The `sapling` detector is excluded
+from the generation set.
+
+### Alias map (legacy Keychain-era ids -> canonical)
+
+`zai -> glm`, `moonshot -> kimi`, `xai -> grok`, `muse-glimmer ->
+nvidia`, `gpt -> openai`, `claude -> anthropic`, `glm-5v -> glm`.
+`groq-whisper` and `deepgram` are STT-only and never resolve to a
+generation provider.
+
+### Blocked entries
+
+- **ChatGPT (Codex):** status `unsupported`, no secret field, no test
+  / refresh / adopt / activate path. Nextly's entry works by reading
+  a local `~/.codex/auth.json` and impersonating the Codex client
+  against an undocumented `chatgpt.com/backend-api`; this backend
+  refuses to scrape local credentials or ship an unofficial API
+  impersonation.
+- **OpenCode:** status `unsupported` — verdict: its only transport is
+  a local `opencode` CLI subprocess (plan-mode agent); no safe
+  answer-only HTTP transport exists to adopt, so it stays listed
+  with its reason and can never be activated.
+
+### Adoption path
+
+Legacy Keychain/env secrets enter encrypted storage ONLY through
+`POST /api/admin/providers/{id}/adopt` (explicit, one-time, never
+activates). Inference and discovery always use the DB-decrypted
+secret — never an implicit env/Keychain read.
+
+### Master-key requirement
+
+Stored secrets are Fernet tokens under `CREATIVE_INTEL_MASTER_KEY`
+(or the OS keychain on developer Macs); without a resolvable master
+key every secret write/read fails closed — see
+`Backend/ci_backend/token_crypto.py`. Back the master key up with
+the database: losing it makes every stored provider secret
+undecryptable (re-save them after restoring a key).
+
+### Rollback note
+
+Migration `0012` is additive (new tables + seeded config rows, NULL
+secrets, no active selection). Downgrade drops the three managed
+tables; legacy Keychain/env race paths are untouched, so a rollback
+returns inference to the pre-managed behaviour with zero data loss
+outside the managed tables themselves.
+
 ## Grounded Q&A
 
 Answers are grounded **only** in uploaded data. Every cited fact

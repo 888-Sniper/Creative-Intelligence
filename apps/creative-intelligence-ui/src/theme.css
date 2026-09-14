@@ -244,7 +244,7 @@ ul.plain li{padding:6px 0;border-bottom:1px solid var(--line)}
   --shell-amber-soft:#FBF3E2; --shell-violet-soft:#F1ECFA;
   --shell-radius:10px; --shell-radius-sm:8px;
   --shell-shadow:0 1px 2px rgba(22,33,58,.05),0 2px 8px rgba(22,33,58,.05);
-  --shell-side-w:222px; --shell-rail-w:328px;
+  --shell-side-w:222px; --shell-rail-w:328px; --shell-side-collapsed:64px;
 }
 [data-theme="dark"]{
   --composer-line:#3A465E; --composer-ico:#93A3BA;
@@ -266,6 +266,17 @@ ul.plain li{padding:6px 0;border-bottom:1px solid var(--line)}
 .side-nav a:hover{background:var(--shell-teal-soft)}
 .side-nav a.active{background:color-mix(in srgb,var(--shell-teal-soft) 88%,var(--shell-card));font-weight:500}
 .side-nav .side-gap{margin-top:26px}
+/* Desktop collapse (item 14): the sidebar shrinks to an icon rail
+ * and the flex content column reflows into the freed space. Labels
+ * hide but every link keeps its icon, tooltip and accessible name,
+ * so collapsed navigation stays fully usable. */
+.collapse-btn{display:inline-flex}
+.sidebar.collapsed{width:var(--shell-side-collapsed);flex:0 0 var(--shell-side-collapsed)}
+.sidebar.collapsed .side-brand{justify-content:center;padding:20px 0 16px}
+.sidebar.collapsed .side-brand img{height:26px}
+.sidebar.collapsed .side-nav{padding:10px 8px 16px}
+.sidebar.collapsed .side-nav a{justify-content:center;padding:9px 0}
+.sidebar.collapsed .side-nav a .lbl{display:none}
 .side-foot{padding:12px;border-top:1px solid var(--shell-line);font-size:12px;color:var(--shell-faint)}
 .maincol{flex:1;min-width:0;display:flex;flex-direction:column}
 .topbar{position:sticky;top:0;z-index:50;background:color-mix(in srgb,var(--shell-bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--shell-line)}
@@ -290,7 +301,7 @@ ul.plain li{padding:6px 0;border-bottom:1px solid var(--line)}
 .user-chip:hover{background:var(--shell-card)}
 .avatar{width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,#7FB3D5,#5B8DB8);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex:0 0 auto}
 .user-chip .uname{font-size:13.5px;font-weight:600;color:var(--shell-navy)}
-.hamburger{display:none}
+.icon-btn.hamburger{display:none}
 .page{padding:20px 24px 36px;max-width:1440px;width:100%;margin:0 auto}
 .page-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin:2px 0 14px}
 .page-head h1{margin:0;font-size:24px;font-weight:700;letter-spacing:-.015em;color:var(--shell-navy)}
@@ -303,7 +314,7 @@ ul.plain li{padding:6px 0;border-bottom:1px solid var(--line)}
 .head-actions{display:flex;align-items:center;gap:10px;flex:0 1 auto;padding-top:4px;flex-wrap:wrap;justify-content:flex-end;min-width:0}
 .panel{background:var(--shell-card);border:1px solid var(--shell-line);border-radius:var(--shell-radius);box-shadow:var(--shell-shadow);padding:16px}
 /* Compact density (Settings → Appearance → Interface Density). Applied via
- * body[data-density="compact"] only after Save Changes. */
+ * body[data-density="compact"] as soon as the choice autosaves. */
 body[data-density="compact"] .panel{padding:12px}
 body[data-density="compact"] .panel-head{margin-bottom:10px}
 body[data-density="compact"] .cols-2-even,body[data-density="compact"] .cards-3,body[data-density="compact"] .cards-4{grid-gap:8px;gap:8px}
@@ -373,7 +384,7 @@ select:not([multiple]):not([size]){appearance:none;background-image:url("data:im
 .kpi-card{background:var(--shell-card);border:1px solid var(--shell-line);border-radius:var(--shell-radius);box-shadow:var(--shell-shadow);padding:14px;display:flex;gap:10px;align-items:flex-start;min-width:0}
 .kpi-ico{flex:0 0 auto;width:40px;height:40px;border-radius:11px;display:flex;align-items:center;justify-content:center}
 .kpi-body{flex:1;min-width:0}
-.kpi-label{font-size:12px;color:var(--shell-muted);font-weight:600;white-space:nowrap;letter-spacing:-.005em}
+.kpi-label{font-size:12px;color:var(--shell-muted);font-weight:600;letter-spacing:-.005em;line-height:1.35}
 .daterange{position:relative}
 .daterange-btn{display:flex;align-items:center;gap:8px;width:100%;box-sizing:border-box;background:var(--shell-card);border:1px solid var(--shell-line);border-radius:8px;padding:7px 10px;font-size:13.5px;color:var(--shell-navy);font-family:inherit;min-height:34px;cursor:pointer;text-align:left}
 .daterange-btn span{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -595,14 +606,17 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13.5px}
 .cmp-card{background:var(--shell-card);border:1px solid var(--shell-line);border-radius:var(--shell-radius);box-shadow:var(--shell-shadow);padding:16px}
 .cmp-card.sel{border:1.5px solid var(--shell-teal)}
 /* Workbook module + Quick-Start template cards (§5/§6): explicit ink
- * and font so mobile-browser default blue never wins; pastel tints
- * come from --card-tint/--tile-tint in Light, consistent dark-grey
- * surfaces in Dark. Behaviour (selection, order, payload) untouched. */
-.mod-card{background:var(--card-tint,var(--shell-card));color:var(--shell-navy);font-family:inherit}
+ * and font so mobile-browser default blue never wins. All cards use
+ * the preview Impressions-tile grey (--shell-bg) in Light with
+ * near-black titles; icon tiles stay white with teal symbols.
+ * Dark keeps dark-grey surfaces. Selection stays recognizable via
+ * the teal border + full opacity. Behaviour (selection, order,
+ * payload) untouched. */
+.mod-card{background:var(--shell-bg);color:var(--shell-navy);font-family:inherit}
 [data-theme="dark"] .mod-card{background:var(--shell-card)}
-.mod-card .mod-ico{display:flex;align-items:center;justify-content:center;width:42px;height:42px;border-radius:12px;background:var(--tile-tint,rgba(255,255,255,.75));color:var(--brand-text);flex:0 0 auto}
+.mod-card .mod-ico{display:flex;align-items:center;justify-content:center;width:42px;height:42px;border-radius:12px;background:rgba(255,255,255,.9);color:var(--brand-text);flex:0 0 auto}
 [data-theme="dark"] .mod-card .mod-ico{background:var(--shell-teal-soft)}
-.mod-card .mod-title{display:block;font-size:13px;color:var(--brand-text)}
+.mod-card .mod-title{display:block;font-size:13px;color:var(--shell-navy)}
 .mod-card input[type="checkbox"]{accent-color:var(--shell-teal);width:15px;height:15px;flex:0 0 auto}
 .chip-row{display:flex;flex-wrap:wrap;gap:8px}
 .chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--shell-line);border-radius:999px;padding:5px 11px;font-size:13px;font-weight:600;color:var(--shell-navy);background:var(--shell-card);cursor:pointer;font-family:inherit;min-height:34px}
@@ -621,7 +635,14 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13.5px}
   .cards-4{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 @media (max-width:900px){
+  .icon-btn.collapse-btn{display:none}
   .sidebar{position:fixed;left:0;top:0;transform:translateX(-102%);transition:transform .22s ease;box-shadow:var(--shell-shadow)}
+  .sidebar.collapsed{width:var(--shell-side-w);flex:0 0 var(--shell-side-w)}
+  .sidebar.collapsed .side-brand{justify-content:flex-start;padding:20px 20px 16px}
+  .sidebar.collapsed .side-brand img{height:30px}
+  .sidebar.collapsed .side-nav{padding:10px 12px 16px}
+  .sidebar.collapsed .side-nav a{justify-content:flex-start;padding:9px 12px}
+  .sidebar.collapsed .side-nav a .lbl{display:inline}
   .sidebar.open{transform:none}
   .side-overlay{display:block;position:fixed;inset:0;background:rgba(15,23,42,.4);z-index:55;border:0;padding:0}
   .hamburger{display:inline-flex}
@@ -838,3 +859,134 @@ button.cell-main{background:none;border:0;padding:0;cursor:pointer;text-align:le
 .view-btn[aria-pressed="true"]{background:var(--shell-teal);color:#fff}
 .view-btn[aria-pressed="true"]:hover{background:var(--shell-teal-dark)}
 [data-theme="dark"] .view-btn:not([aria-pressed="true"]){background:rgba(255,255,255,.06)}
+
+/* ============ LAYOUT/COPY pass (frontend only) ============
+ * One appended block so the pass stays reviewable: every rule below
+ * repeats an earlier selector at equal-or-higher specificity and wins
+ * by source order (dark-mode attribute rules keep winning where they
+ * are more specific). Light mode desktop sidebar-expanded is the
+ * reference; responsive + dark-mode behaviour is preserved. */
+
+/* (1) Subtitle containers ~40% wider (60% -> 84%) so short
+ * page/section descriptions hold one line at desktop. The <=900px
+ * rule above still lifts the cap on small screens. */
+.page-head>div:first-child{flex:1 1 auto;min-width:0}
+.page-head .sub,.panel-head .panel-sub{max-width:84%}
+
+/* (23) Nav selected/hover in the Apply Filters teal family. Selected
+ * is the solid button teal with its dark ink label (7.2:1, the same
+ * pairing as .btn-primary); hover stays the soft tint. Dark mode
+ * already pairs brand-teal with ink and is unchanged. */
+.side-nav a.active{background:var(--brand-teal);color:var(--brand-teal-ink);font-weight:600}
+.side-nav a.active svg{opacity:1}
+.side-nav a.active:hover{background:var(--brand-teal-hover)}
+
+/* (8) Status badges (Connected, Not Connected, Unavailable and
+ * equivalents): Apply Filters teal family with white text. The solid
+ * logo teal (#00C7B2) is 2.1:1 with white, so — like the existing
+ * dark-mode rule — badges use the darker same-hue step
+ * (--shell-teal-dark, 5.35:1 with white) with zero hue shift.
+ * Danger/error badges keep their red semantics. */
+.pill-ok,.pill-info{background:var(--shell-teal-dark);color:#fff}
+.badge.good{background:var(--shell-teal-dark);color:#fff}
+
+/* (9) Secondary buttons a touch darker (bg + border) site-wide, with
+ * distinguishable hover / focus / pressed / disabled states. */
+.btn-outline{background:var(--shell-bg);border-color:color-mix(in srgb,var(--shell-line) 72%,var(--shell-navy))}
+.btn-outline:active{filter:brightness(.94)}
+.btn-outline:disabled{opacity:.6;cursor:default}
+button.secondary{background:var(--bg);border-color:color-mix(in srgb,var(--line) 72%,var(--fg))}
+button.secondary:active{filter:brightness(.94)}
+button.secondary:disabled{opacity:.6;cursor:default}
+
+/* (24) Gray icon tiles + teal symbols across metric cards, empty
+ * states, settings sections and tips. Per-card inline tints are
+ * removed at the call sites so this one definition applies;
+ * service-logo tiles (.svc-tile) and workbook cards stay outside it.
+ * Dark mode keeps the gray tile and takes the bright logo teal. */
+.kpi-ico{background:var(--shell-bg);color:var(--shell-teal-dark)}
+.insight-ico{background:var(--shell-bg);color:var(--shell-teal-dark)}
+.empty-ico{background:var(--shell-bg);color:var(--shell-teal-dark)}
+[data-theme="dark"] .kpi-ico,[data-theme="dark"] .insight-ico,[data-theme="dark"] .empty-ico{color:var(--brand-teal)}
+
+/* (10) Local service-logo tiles: fixed light-gray tile in both themes
+ * so brand artwork stays legible on dark cards; the artwork itself
+ * keeps brand colors (exception to the teal-symbol rule). */
+.svc-tile{background:#E8EDF3;color:inherit}
+.svc-logo{width:22px;height:22px;display:block;flex:0 0 auto}
+
+/* (3) Centered empty-state units: icon + title + body center as one
+ * flex column with a responsive min-height so short panels still read
+ * as intentional states. Headings and controls stay top — only the
+ * wrapped group centers. */
+.empty-center{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;min-height:220px;padding:12px 0}
+.empty-center>.empty,.empty-center>.empty-structured{width:100%}
+@media (max-width:640px){.empty-center{min-height:150px}}
+
+/* (4) Deselected Workbook module cards dim (see the .mod-card rule
+ * above for the shared Impressions-tile grey + near-black titles). */
+.mod-card.mod-blank{opacity:.75}
+
+/* (7) General Settings rows: three content columns; Workspace Name
+ * spans two (wide), Time Zone spans two on its row so long zone
+ * labels never truncate. Labels hold one line at desktop and wrap
+ * on small screens. */
+.filter-grid.gen-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+.filter-grid.gen-grid .span-2{grid-column:span 2}
+.filter-grid.gen-grid .field>label{white-space:nowrap}
+@media (max-width:640px){
+  .filter-grid.gen-grid{grid-template-columns:minmax(0,1fr)}
+  .filter-grid.gen-grid .span-2{grid-column:auto}
+  .filter-grid.gen-grid .field>label{white-space:normal}
+  .page-head .sub,.panel-head .panel-sub{max-width:none}
+}
+/* (7) Appearance: Theme + Accent Color + Interface Density share one
+ * top row at content-sized widths (never forced equal columns);
+ * the staged preview sits underneath. */
+.appear-row{display:flex;flex-wrap:wrap;gap:10px 14px;align-items:flex-end}
+.appear-row>.field{flex:0 1 auto;min-width:150px}
+@media (max-width:640px){.appear-row>.field{flex:1 1 150px}}
+
+/* (25) Expandable headers, site-wide: title left, one gray chevron far
+ * right, slightly larger (15px) than the 12px dropdown arrows.
+ * Native <details>/<summary> keeps keyboard + pointer behaviour;
+ * the chevron points right collapsed and rotates down when open. */
+.disclosure>summary{list-style:none;display:flex;align-items:center;gap:10px;cursor:pointer;border-radius:8px}
+.disclosure>summary::-webkit-details-marker{display:none}
+.disclosure>summary::marker{content:""}
+.disclosure>summary:focus-visible{outline:2px solid var(--shell-teal);outline-offset:2px}
+.disc-chev{margin-left:auto;color:var(--shell-faint);display:inline-flex;flex:0 0 auto;transition:transform .15s ease;border-radius:6px}
+.disclosure>summary:hover .disc-chev{color:var(--shell-muted)}
+.disclosure[open] .disc-chev{transform:rotate(90deg)}
+/* The legacy teal ▸/▾ bar marker retires in favour of .disc-chev. */
+.adv-disclosure>summary::before{content:none}
+
+/* (27) Benchmarks Apply/Reset row: small space above, right-aligned
+ * (the flex-end justification already right-aligns). */
+.bench-filter-actions{margin-top:12px;display:flex;gap:10px;justify-content:flex-end}
+
+/* (29) Search Reports matches the All Statuses/All Formats/All Time
+ * selects: one row, one 36px control height, aligned padding. The
+ * search width stays content-suitable (130px). */
+.rep-filters select{min-height:36px;box-sizing:border-box}
+.rep-search{min-height:36px;box-sizing:border-box}
+
+/* (17) Benchmark baseline select owns the wider share so "Scope
+ * Average" / "Top Performer" read fully; the metric select keeps
+ * short KPI codes. */
+.dashboard .dash-charts .mini-selects{grid-template-columns:minmax(0,5fr) auto minmax(0,7fr)}
+
+/* (17) Top Creatives fixed table: name columns own the width, metric
+ * columns stay compact (tabular numerals); headers may wrap instead
+ * of clipping mid-word. */
+.dashboard .dash-table th:nth-child(3),.dashboard .dash-table td:nth-child(3){width:19%}
+.dashboard .dash-table th:nth-child(4),.dashboard .dash-table td:nth-child(4){width:20%}
+.dashboard .dash-table th:nth-child(5),.dashboard .dash-table td:nth-child(5){width:8.5%}
+.dashboard .dash-table th:nth-child(6),.dashboard .dash-table td:nth-child(6){width:8.5%}
+.dashboard .dash-table th:nth-child(7),.dashboard .dash-table td:nth-child(7){width:8.5%}
+.dashboard .dash-table th{white-space:normal;line-height:1.3;vertical-align:bottom}
+
+/* (17) The date-range value ("Dec 25, 2023 – Jan 05, 2024") needs
+ * roughly twice a standard filter column; span two tracks on wide
+ * screens only so mobile stacking is untouched. */
+@media (min-width:1181px){.filter-grid>.field-date{grid-column:span 2}}

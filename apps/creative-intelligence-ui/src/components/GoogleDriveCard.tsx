@@ -3,8 +3,8 @@ import { useSearchParams } from "react-router-dom";
 import { api, ApiError } from "@/api/client";
 import { useGoogleStatus } from "@/auth/useGoogleStatus";
 import { useLocale } from "@/i18n";
-import { Icon } from "@/components/icons";
 import { LoadingButton } from "@/components/LoadingButton";
+import driveLogo from "@/assets/drive.svg";
 
 /** Private Drive/Sheets connection. Server-side OAuth only: the browser
  *  is bounced to Google and back; tokens stay server-side. */
@@ -60,8 +60,8 @@ export function GoogleDriveCard() {
 
   return (
     <div className="insight" id="integration-google">
-      <span className="insight-ico" style={{ background: "var(--shell-blue-soft)" }}>
-        <Icon name="info" size={18} />
+      <span className="insight-ico svc-tile" aria-hidden="true">
+        <img className="svc-logo" src={driveLogo} alt="" />
       </span>
       <div style={{ flex: 1 }}>
         <h4>{t("drive.title")}</h4>

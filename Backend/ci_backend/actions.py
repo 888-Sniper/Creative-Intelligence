@@ -756,7 +756,7 @@ def build_compare(conn, q):
 
 def load_fixtures(db_path):
     conn = connect(db_path)
-    prov = providers.Providers()
+    prov = providers.Providers(db_path=db_path)
     total = 0
     for fname, platform in (("Meta Sample.csv", "meta"),
                             ("TikTok Sample.csv", "tiktok")):
@@ -1030,7 +1030,7 @@ def load_demo_dataset(db_path, media_dir=None):
     import random as _random
 
     conn = connect(db_path)
-    prov = providers.Providers()
+    prov = providers.Providers(db_path=db_path)
     rng = _random.Random(20260911)
     end = _dt.date.today() - _dt.timedelta(days=1)
     days = [_dt.date.toordinal(end) - (_DEMO_DAYS - 1 - i)

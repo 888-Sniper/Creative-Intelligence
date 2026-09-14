@@ -330,6 +330,23 @@ describe("AdminEmployeesPage", () => {
     });
   });
 
+  it("closes Create Team through a title-row X like Add Employee", async () => {
+    setupFetch();
+    render(<AdminEmployeesPage />);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Approve" })).toBeDefined();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create Team" }));
+    const dialog = screen.getByRole("dialog", { name: "Create Team" });
+    // X close control shares the title row; no visible Close text remains.
+    expect(
+      within(dialog).getByRole("button", { name: "Close Create Team dialog" }),
+    ).toBeDefined();
+    expect(within(dialog).queryByRole("button", { name: "Close" })).toBeNull();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close Create Team dialog" }));
+    expect(screen.queryByRole("dialog", { name: "Create Team" })).toBeNull();
+  });
+
   it("groups Admin actions two-above-one in DOM order (§1)", async () => {
     setupFetch();
     render(<AdminEmployeesPage />);

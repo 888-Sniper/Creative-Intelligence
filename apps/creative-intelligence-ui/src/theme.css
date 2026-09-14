@@ -645,7 +645,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13.5px}
   .sidebar.collapsed .side-nav a .lbl{display:inline}
   .sidebar.open{transform:none}
   .side-overlay{display:block;position:fixed;inset:0;background:rgba(15,23,42,.4);z-index:55;border:0;padding:0}
-  .hamburger{display:inline-flex}
+  .icon-btn.hamburger{display:inline-flex}
   .user-chip .uname,#account-menu .menu-toggle strong{display:none}
   .page{padding:18px 14px 40px}
   .topbar-inner{padding:11px 14px}

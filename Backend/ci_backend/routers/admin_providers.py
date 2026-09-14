@@ -416,7 +416,9 @@ async def put_config(provider_id: str, request: Request, db=Depends(get_db),
         stats = _cache_stats(db, provider_id)
         active, current = _selection_view(db)
         return {"ok": True, "provider_id": provider_id,
-                "configured": True, "has_secret": True,
+                "configured": bool(cfg.secret_enc)
+                or provider_id == "ollama",
+                "has_secret": bool(cfg.secret_enc),
                 "offered_count": stats["offered_count"],
                 "active": active, "current_revision": current}
 

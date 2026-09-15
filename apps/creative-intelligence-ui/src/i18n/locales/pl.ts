@@ -156,7 +156,6 @@ export const pl = {
     relatedTitle: "Powiązane wnioski",
     noRelatedBody: "Brak Rekomendacji Dla Bieżących Filtrów",
     badgeConversation: "Rozmowa",
-    badgeSavedView: "Zapisany widok",
     objectiveBody: "Cel: {objective}",
     analystConvBody: "Rozmowa z analitykiem.",
     updatedLabel: "Zaktualizowano {date}",

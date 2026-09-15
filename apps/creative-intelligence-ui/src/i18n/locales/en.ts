@@ -156,7 +156,6 @@ export const en = {
     relatedTitle: "Related Insights",
     noRelatedBody: "No Recommendations Match The Current Filters",
     badgeConversation: "Conversation",
-    badgeSavedView: "Saved View",
     objectiveBody: "Objective: {objective}",
     analystConvBody: "Analyst conversation.",
     updatedLabel: "Updated {date}",

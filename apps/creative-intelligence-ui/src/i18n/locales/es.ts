@@ -156,7 +156,6 @@ export const es = {
     relatedTitle: "Ideas relacionadas",
     noRelatedBody: "Ninguna Recomendación Coincide Con Los Filtros",
     badgeConversation: "Conversación",
-    badgeSavedView: "Vista guardada",
     objectiveBody: "Objetivo: {objective}",
     analystConvBody: "Conversación del analista.",
     updatedLabel: "Actualizada el {date}",

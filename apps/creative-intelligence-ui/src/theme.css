@@ -788,10 +788,11 @@ button.cell-main{background:none;border:0;padding:0;cursor:pointer;text-align:le
 /* Inner search field normalization (§12): the input inside the padded,
  * bordered .rep-search wrapper must not carry its own height, padding
  * or border — those stacked rules made the outer control ~50px next
- * to 34px selects. This beats .rep-filters input[type="text"] on
- * specificity so the wrapper alone sets the 34px outer height. */
-.rep-filters .rep-search input[type="text"]{min-height:0;height:auto;padding:0;border:0;border-radius:0}
-.rep-filters .rep-search input[type="text"]:focus{outline:none;border:0}
+ * to 36px selects. Plain `input` (no attribute selector, so it matches
+ * regardless of an explicit type attribute) beats the shared text-input
+ * surface on specificity, so the wrapper alone sets the outer height. */
+.rep-filters .rep-search input{min-height:0;height:auto;padding:0;border:0;border-radius:0}
+.rep-filters .rep-search input:focus{outline:none;border:0}
 .rep-filters .rep-search:focus-within{outline:2px solid var(--shell-teal);outline-offset:-1px;border-color:var(--shell-teal)}
 /* Admin employee search needs its full placeholder visible (220–240px). */
 .admin-search{flex:1 1 230px;max-width:320px;min-height:34px;box-sizing:border-box}

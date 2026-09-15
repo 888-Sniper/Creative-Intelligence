@@ -677,8 +677,12 @@ export function ReportsPage() {
             title={t("reports.listTitle")}
             sub={t("reports.listSub")}
             style={{ flex: "1 0 auto" }}
-            action={(
-              <span className="rep-filters">
+          >
+            {/* Full-width filter row (item 29): the header action slot
+              is only ~456px at desktop, which wrapped All Time onto a
+              second row. All four 36px controls share one row here and
+              still wrap gracefully on small screens. */}
+            <div className="rep-filters" style={{ margin: "0 0 12px" }}>
                 <span className="rep-search">
                   <Icon name="search" size={14} />
                   <input aria-label={t("reports.searchAria")} placeholder={t("reports.searchPlaceholder")} value={query} onChange={(e) => setQuery(e.target.value)} />
@@ -698,9 +702,7 @@ export function ReportsPage() {
                     <option key={o} value={o}>{t(`pageInsights.dates.${o === "All Time" ? "all" : o === "Last 7 Days" ? "d7" : "d30"}`)}</option>
                   ))}
                 </select>
-              </span>
-            )}
-          >
+            </div>
             {campaigns === null && !catalogError ? (
               <Skeleton height={220} />
             ) : rows.length ? (

@@ -483,7 +483,7 @@ export function CreativesPage() {
               ) : null}
               <div className="kpi-grid">
                 <div className="kpi-card">
-                  <span className="kpi-ico" style={{ background: "var(--shell-teal-soft)", color: "var(--glyph-teal)" }}>
+                  <span className="kpi-ico">
                     <Icon name="play" size={20} />
                   </span>
                   <div className="kpi-body">

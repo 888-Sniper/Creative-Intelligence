@@ -848,7 +848,7 @@ export function ComparePage() {
                 <div>
                   {takeaways.map((t) => (
                     <div className="insight" key={t}>
-                      <span className="insight-ico" style={{ background: "var(--shell-teal-soft)" }}>
+                      <span className="insight-ico">
                         <Icon name="check" size={18} />
                       </span>
                       <div><p style={{ color: "var(--shell-navy)" }}>{t}</p></div>
@@ -862,7 +862,7 @@ export function ComparePage() {
                 <div>
                   {tests.map((t) => (
                     <div className="insight" key={t.title}>
-                      <span className="insight-ico" style={{ background: t.color, color: "#fff", fontWeight: 800 }}>
+                      <span className="insight-ico" style={{ fontWeight: 800 }}>
                         {t.n}
                       </span>
                       <div>

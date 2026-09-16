@@ -215,6 +215,11 @@ describe("ProvidersPage", () => {
     // Brand logo sits left of the card title.
     const groqCard = screen.getByText("Groq").closest("section") as HTMLElement;
     expect(groqCard.querySelector("img.provider-logo")).toBeTruthy();
+    // No Not Configured badge: the header toggle carries activation.
+    expect(screen.queryByText("Not Configured")).toBeNull();
+    // The OpenAI card's toggle lives in the header beside the title.
+    const openAiCard = screen.getByText("OpenAI").closest("section") as HTMLElement;
+    expect(within(openAiCard).getByRole("switch", { name: "Use OpenAI As Active" })).toBeTruthy();
   });
 
   it("shows paused admin guidance when nothing is active", async () => {

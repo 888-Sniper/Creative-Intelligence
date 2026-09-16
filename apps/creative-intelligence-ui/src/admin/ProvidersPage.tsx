@@ -132,9 +132,10 @@ function FocusTip({ label, children }: { label: string; children: React.ReactNod
 }
 
 function Badge({ tone, children }: { tone: "active" | "muted" | "warn"; children: React.ReactNode }) {
-  /* Status badges (Configured / Not Configured / Active) share the
-   * Apply Filters teal family with white text; the Stale Catalog
-   * warning keeps its amber semantics. */
+  /* Status badges (Configured / Active) share the Apply Filters
+   * teal family with white text; the Stale Catalog warning keeps
+   * its amber semantics. Unconfigured cards show no badge — the
+   * header toggle carries activation instead. */
   const status = tone !== "warn";
   const bg = status ? "var(--shell-teal-dark)" : "var(--shell-amber-soft)";
   return (
@@ -647,9 +648,15 @@ function ProviderCard({ entry, active, activeName, revision, busy, setBusy, onRe
       sub={kindLabel(entry.kind)}
       action={(
         <span style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <Badge tone={entry.configured ? "active" : "muted"}>
-            {entry.configured ? t("providers.configured") : t("providers.notConfigured")}
-          </Badge>
+          <Switch
+            checked={isActive}
+            disabled={busy !== null}
+            label={isActive ? t("providers.activeBadge") : t("providers.useAsActive", { provider: entry.display })}
+            onChange={(v) => { if (v) requestActivate(); else requestDeactivate(); }}
+          />
+          {entry.configured ? (
+            <Badge tone="active">{t("providers.configured")}</Badge>
+          ) : null}
           {isActive ? (
             <Badge tone="active">
               <span role="status">{t("providers.activeBadge")}</span>
@@ -658,19 +665,11 @@ function ProviderCard({ entry, active, activeName, revision, busy, setBusy, onRe
         </span>
       )}
     >
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginBottom: 12 }}>
-        <Switch
-          checked={isActive}
-          disabled={busy !== null}
-          label={isActive ? t("providers.activeBadge") : t("providers.useAsActive", { provider: entry.display })}
-          onChange={(v) => { if (v) requestActivate(); else requestDeactivate(); }}
-        />
-        {busy !== null ? (
-          <span className="panel-sub" role="status" style={{ fontSize: 12 }}>
-            {busy === "deactivate" ? t("providers.deactivating") : t("providers.activating")}
-          </span>
-        ) : null}
-      </div>
+      {busy !== null ? (
+        <p className="panel-sub" role="status" style={{ fontSize: 12, margin: "0 0 12px" }}>
+          {busy === "deactivate" ? t("providers.deactivating") : t("providers.activating")}
+        </p>
+      ) : null}
 
       {cardError ? <p role="alert" className="empty" style={{ textAlign: "left" }}>{cardError}</p> : null}
 
@@ -830,9 +829,6 @@ function ProviderCard({ entry, active, activeName, revision, busy, setBusy, onRe
             </button>
           </p>
         ) : null}
-        <label htmlFor={modelId} style={{ marginTop: 6 }}>
-          {t("providers.modelLabel", { provider: entry.display })}
-        </label>
         {offered === null ? null : filtered.length === 0 ? (
           <p className="panel-sub" style={{ margin: "6px 0" }}>
             {t("providers.modelEmpty", { q: modelSearch.trim() })}
@@ -840,6 +836,7 @@ function ProviderCard({ entry, active, activeName, revision, busy, setBusy, onRe
         ) : (
           <select
             id={modelId}
+            aria-label={t("providers.modelLabel", { provider: entry.display })}
             value={selectedVisible || selectedModel === "" ? selectedModel : ""}
             onChange={(e) => setSelectedModel(e.target.value)}
             style={{ maxWidth: "100%" }}

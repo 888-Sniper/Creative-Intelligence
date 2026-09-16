@@ -286,11 +286,11 @@ class SecretsMaskedTest(ApiBase):
         chat, chat_thread, chat_base = start_server(
             ChatStub, fail=False, content=ASK_GOOD)
         try:
-            got = self.put("deepseek", {"secret": "sk-live-123",
+            got = self.put("groq", {"secret": "sk-live-123",
                                         "base_url": chat_base})
             self.assertEqual(got.status_code, 200, got.text)
             # Ciphertext at rest, never the plaintext…
-            enc = self.stored_secret("deepseek")
+            enc = self.stored_secret("groq")
             self.assertIsNotNone(enc)
             self.assertNotIn("sk-live-123", enc)
             self.assertEqual(token_crypto.decrypt_secret(enc),
@@ -301,7 +301,7 @@ class SecretsMaskedTest(ApiBase):
             self.assertNotIn("sk-live-123", got.text)
             self.assertNotIn(enc, got.text)
             row = next(p for p in got.json()["providers"]
-                       if p["provider_id"] == "deepseek")
+                       if p["provider_id"] == "groq")
             self.assertTrue(row["has_secret"])
             self.assertTrue(row["configured"])
             self.assertIsNone(got.json()["active"])
@@ -334,7 +334,7 @@ class SecretsMaskedTest(ApiBase):
     def test_no_secret_in_audit_log(self):
         logger = logging.getLogger("creative_intel.security")
         with self.assertLogs(logger, level="INFO") as captured:
-            self.put("deepseek", {"secret": "sk-log-probe-1"})
+            self.put("groq", {"secret": "sk-log-probe-1"})
         blob = "\n".join(captured.output)
         self.assertNotIn("sk-log-probe-1", blob)
 
@@ -343,15 +343,15 @@ class TestRefreshTest(ApiBase):
     def test_test_and_refresh_merge_prune(self):
         models, models_thread, models_base = start_server(
             ModelsStub, fail=False, shape="openai",
-            ids=["deepseek-v4-flash", "deepseek-v4-pro",
+            ids=["llama-3.3-70b-versatile", "llama-3.1-8b-instant",
                  "whisper-large-v3"])
         try:
             self.assertEqual(self.put(
-                "deepseek", {"secret": "sk-t1",
+                "groq", {"secret": "sk-t1",
                              "base_url": models_base}).status_code, 200)
             # /test: bounded probe returning latency + offered count,
             # Bearer auth asserted server-side below.
-            got = self.client.post(self.admin_prefix + "/deepseek/test")
+            got = self.client.post(self.admin_prefix + "/groq/test")
             self.assertEqual(got.status_code, 200, got.text)
             body = got.json()
             # whisper-* is filtered by the offered predicate.
@@ -364,31 +364,31 @@ class TestRefreshTest(ApiBase):
             # static, prunes the vanished id.
             self.sql("INSERT OR IGNORE INTO provider_model_cache"
                      " (provider_id, model_id, display, offered, fetched_at)"
-                     " VALUES ('deepseek', 'retired-model', 'Retired', 1,"
+                     " VALUES ('groq', 'retired-model', 'Retired', 1,"
                      " '2026-01-01T00:00:00+00:00')")
             got = self.client.post(
-                self.admin_prefix + "/deepseek/refresh")
+                self.admin_prefix + "/groq/refresh")
             self.assertEqual(got.status_code, 200, got.text)
             self.assertEqual(got.json()["offered_count"], 2)
             self.assertFalse(got.json()["stale"])
             ids = {r[0] for r in self.sql(
                 "SELECT model_id FROM provider_model_cache"
-                " WHERE provider_id = 'deepseek'")}
-            self.assertEqual(ids, {"deepseek-v4-flash", "deepseek-v4-pro"})
+                " WHERE provider_id = 'groq'")}
+            self.assertEqual(ids, {"llama-3.3-70b-versatile", "llama-3.1-8b-instant"})
             # Failed refresh preserves the last catalog verbatim
             # (rows + fetched_at kept) and marks stale + retry.
             before = self.sql("SELECT model_id, fetched_at FROM"
                               " provider_model_cache"
-                              " WHERE provider_id = 'deepseek'")
+                              " WHERE provider_id = 'groq'")
             models.fail = True
             got = self.client.post(
-                self.admin_prefix + "/deepseek/refresh")
+                self.admin_prefix + "/groq/refresh")
             self.assertEqual(got.status_code, 502, got.text)
             self.assertTrue(got.json()["stale"])
             self.assertIn("refresh", got.json()["retry"])
             after = self.sql("SELECT model_id, fetched_at FROM"
                              " provider_model_cache"
-                             " WHERE provider_id = 'deepseek'")
+                             " WHERE provider_id = 'groq'")
             self.assertEqual(sorted(before), sorted(after))
             self.assertNotIn("sk-t1", got.text)
         finally:
@@ -400,21 +400,21 @@ class TestRefreshTest(ApiBase):
         # the UI can badge them), never secret material.
         models, models_thread, models_base = start_server(
             ModelsStub, fail=False, shape="openai",
-            ids=["deepseek-v4-flash", "deepseek-v4-pro"])
+            ids=["llama-3.3-70b-versatile", "llama-3.1-8b-instant"])
         try:
             self.assertEqual(self.put(
-                "deepseek", {"secret": "sk-t1",
+                "groq", {"secret": "sk-t1",
                              "base_url": models_base}).status_code, 200)
             got = self.client.post(
-                self.admin_prefix + "/deepseek/refresh")
+                self.admin_prefix + "/groq/refresh")
             self.assertEqual(got.status_code, 200, got.text)
             got = self.client.get(self.admin_prefix)
             self.assertEqual(got.status_code, 200, got.text)
             entry = [c for c in got.json()["providers"]
-                     if c["provider_id"] == "deepseek"][0]
+                     if c["provider_id"] == "groq"][0]
             cached = {m["id"]: m["label"] for m in entry["cached_models"]}
-            self.assertEqual(set(cached), {"deepseek-v4-flash",
-                                           "deepseek-v4-pro"})
+            self.assertEqual(set(cached), {"llama-3.3-70b-versatile",
+                                           "llama-3.1-8b-instant"})
             self.assertFalse(entry["stale"])
             self.assertNotIn("sk-t1", got.text)
         finally:
@@ -423,23 +423,23 @@ class TestRefreshTest(ApiBase):
     def test_key_replace_fail_keeps_old_secret(self):
         models, models_thread, models_base = start_server(
             ModelsStub, fail=False, shape="openai",
-            ids=["deepseek-v4-flash"])
+            ids=["llama-3.3-70b-versatile"])
         try:
-            self.put("deepseek", {"secret": "sk-good",
+            self.put("groq", {"secret": "sk-good",
                                   "base_url": models_base})
-            self.client.post(self.admin_prefix + "/deepseek/refresh")
+            self.client.post(self.admin_prefix + "/groq/refresh")
             self.client.post(self.admin_prefix + "/activate",
-                             json={"provider_id": "deepseek",
-                                   "model_id": "deepseek-v4-flash",
+                             json={"provider_id": "groq",
+                                   "model_id": "llama-3.3-70b-versatile",
                                    "revision": 0})
             # New secret against a dead port: validation fails, the
             # ACTIVE config keeps serving the old secret.
-            got = self.put("deepseek", {"secret": "sk-bad",
+            got = self.put("groq", {"secret": "sk-bad",
                                         "base_url": "http://127.0.0.1:9"})
             self.assertEqual(got.status_code, 502, got.text)
             self.assertEqual(token_crypto.decrypt_secret(
-                self.stored_secret("deepseek")), "sk-good")
-            got = self.client.post(self.admin_prefix + "/deepseek/test")
+                self.stored_secret("groq")), "sk-good")
+            got = self.client.post(self.admin_prefix + "/groq/test")
             self.assertEqual(got.status_code, 200, got.text)
             self.assertEqual(models.calls[-1]["authorization"],
                              "Bearer sk-good")
@@ -451,10 +451,10 @@ class ActivateDeactivateTest(ApiBase):
     def _ready(self):
         models, models_thread, models_base = start_server(
             ModelsStub, fail=False, shape="openai",
-            ids=["deepseek-v4-flash"])
-        self.put("deepseek", {"secret": "sk-a",
+            ids=["llama-3.3-70b-versatile"])
+        self.put("groq", {"secret": "sk-a",
                               "base_url": models_base})
-        self.client.post(self.admin_prefix + "/deepseek/refresh")
+        self.client.post(self.admin_prefix + "/groq/refresh")
         return models, models_thread
 
     def test_activate_conflict_and_deactivate(self):
@@ -462,22 +462,22 @@ class ActivateDeactivateTest(ApiBase):
         try:
             got = self.client.post(
                 self.admin_prefix + "/activate",
-                json={"provider_id": "deepseek",
-                      "model_id": "deepseek-v4-flash", "revision": 0})
+                json={"provider_id": "groq",
+                      "model_id": "llama-3.3-70b-versatile", "revision": 0})
             self.assertEqual(got.status_code, 200, got.text)
             self.assertEqual(got.json()["current_revision"], 1)
             # Stale revision collides; the current revision is
             # returned for retry.
             got = self.client.post(
                 self.admin_prefix + "/activate",
-                json={"provider_id": "deepseek",
-                      "model_id": "deepseek-v4-flash", "revision": 0})
+                json={"provider_id": "groq",
+                      "model_id": "llama-3.3-70b-versatile", "revision": 0})
             self.assertEqual(got.status_code, 409, got.text)
             self.assertEqual(got.json()["current_revision"], 1)
             # Unknown models and unsupported entries never activate.
             got = self.client.post(
                 self.admin_prefix + "/activate",
-                json={"provider_id": "deepseek",
+                json={"provider_id": "groq",
                       "model_id": "nope-not-offered", "revision": 1})
             self.assertEqual(got.status_code, 409, got.text)
             got = self.client.post(
@@ -504,43 +504,43 @@ class ActivateDeactivateTest(ApiBase):
         models, models_thread = self._ready()
         try:
             self.client.post(self.admin_prefix + "/activate",
-                             json={"provider_id": "deepseek",
-                                   "model_id": "deepseek-v4-flash",
+                             json={"provider_id": "groq",
+                                   "model_id": "llama-3.3-70b-versatile",
                                    "revision": 0})
-            got = self.put("deepseek", {"secret": None})
+            got = self.put("groq", {"secret": None})
             self.assertEqual(got.status_code, 409, got.text)
             self.assertTrue(got.json().get("confirm_required"))
-            self.assertIsNotNone(self.stored_secret("deepseek"))
-            got = self.put("deepseek", {"secret": None, "confirm": True})
+            self.assertIsNotNone(self.stored_secret("groq"))
+            got = self.put("groq", {"secret": None, "confirm": True})
             self.assertEqual(got.status_code, 200, got.text)
             self.assertIsNone(got.json()["active"])
-            self.assertIsNone(self.stored_secret("deepseek"))
+            self.assertIsNone(self.stored_secret("groq"))
             self.assertEqual(
                 self.sql("SELECT COUNT(*) FROM provider_model_cache"
-                         " WHERE provider_id = 'deepseek'")[0][0], 0)
+                         " WHERE provider_id = 'groq'")[0][0], 0)
         finally:
             stop_server(models, models_thread)
 
 
 class AdoptUnsupportedSsrfTest(ApiBase):
     def test_adopt_then_readopt_conflicts(self):
-        os.environ["CREATIVE_INTEL_KEY_MOONSHOT"] = "legacy-kimi-1"
+        os.environ["CREATIVE_INTEL_KEY_GROQ"] = "legacy-groq-1"
         try:
-            got = self.client.post(self.admin_prefix + "/kimi/adopt")
+            got = self.client.post(self.admin_prefix + "/groq/adopt")
             self.assertEqual(got.status_code, 200, got.text)
             self.assertTrue(got.json()["has_secret"])
             self.assertFalse(got.json()["activated"])
-            self.assertNotIn("legacy-kimi-1", got.text)
+            self.assertNotIn("legacy-groq-1", got.text)
             self.assertEqual(token_crypto.decrypt_secret(
-                self.stored_secret("kimi")), "legacy-kimi-1")
+                self.stored_secret("groq")), "legacy-groq-1")
             # One-time: a stored secret blocks re-adoption.
-            got = self.client.post(self.admin_prefix + "/kimi/adopt")
+            got = self.client.post(self.admin_prefix + "/groq/adopt")
             self.assertEqual(got.status_code, 409, got.text)
             # Nothing is activated by adoption.
             self.assertIsNone(
                 self.client.get(self.admin_prefix + "/").json()["active"])
         finally:
-            del os.environ["CREATIVE_INTEL_KEY_MOONSHOT"]
+            del os.environ["CREATIVE_INTEL_KEY_GROQ"]
 
     def test_adopt_missing_source_and_blocked(self):
         got = self.client.post(self.admin_prefix + "/qwen/adopt")
@@ -559,6 +559,17 @@ class AdoptUnsupportedSsrfTest(ApiBase):
             self.assertEqual(got.status_code, 409, got.text)
             got = self.put(pid, {"secret": "x"})
             self.assertEqual(got.status_code, 409, got.text)
+        # Retired text-only providers: every mutating route refuses
+        # with the retirement reason; stored rows stay inert.
+        for pid in ("deepseek", "kimi"):
+            for route in ("test", "refresh", "adopt"):
+                got = self.client.post(
+                    "%s/%s/%s" % (self.admin_prefix, pid, route))
+                self.assertEqual(got.status_code, 409, got.text)
+                self.assertIn("Retired", got.text)
+            got = self.put(pid, {"secret": "x"})
+            self.assertEqual(got.status_code, 409, got.text)
+            self.assertIn("Retired", got.text)
         got = self.client.post("%s/nope/test" % self.admin_prefix)
         self.assertEqual(got.status_code, 404, got.text)
 
@@ -586,18 +597,18 @@ class ManagedInferenceTest(ApiBase):
         # discovery shape (the stored base_url drives both paths).
         deep, deep_thread, deep_base = start_server(
             _ComboStub, fail=False, chat_content=ASK_GOOD,
-            models_shape="openai", models_ids=["deepseek-v4-flash"])
+            models_shape="openai", models_ids=["llama-3.3-70b-versatile"])
         qwen, qwen_thread, qwen_base = start_server(
             _ComboStub, fail=False, chat_content=ASK_GOOD,
             models_shape="openai", models_ids=["qwen-turbo"])
-        self.put("deepseek", {"secret": "sk-deep",
+        self.put("groq", {"secret": "sk-deep",
                               "base_url": deep_base})
         self.put("qwen", {"secret": "sk-qwen", "base_url": qwen_base})
-        self.client.post(self.admin_prefix + "/deepseek/refresh")
+        self.client.post(self.admin_prefix + "/groq/refresh")
         self.client.post(self.admin_prefix + "/qwen/refresh")
         self.client.post(self.admin_prefix + "/activate",
-                         json={"provider_id": "deepseek",
-                               "model_id": "deepseek-v4-flash",
+                         json={"provider_id": "groq",
+                               "model_id": "llama-3.3-70b-versatile",
                                "revision": 0})
         self.seed_csv()
         return (deep, deep_thread, qwen, qwen_thread)
@@ -617,7 +628,7 @@ class ManagedInferenceTest(ApiBase):
             self.assertEqual(len(_posts(deep)), 1)
             self.assertEqual(len(_posts(qwen)), 0)
             call = _posts(deep)[0]
-            self.assertEqual(call["model"], "deepseek-v4-flash")
+            self.assertEqual(call["model"], "llama-3.3-70b-versatile")
             self.assertEqual(call["authorization"], "Bearer sk-deep")
             self.assertTrue(call["path"].endswith("/v1/chat/completions"))
             self.assertNotIn("sk-deep", got.text)
@@ -632,7 +643,7 @@ class ManagedInferenceTest(ApiBase):
             got = self.client.post("/api/ask",
                                    json={"question": "what is spend?"})
             self.assertEqual(got.status_code, 502, got.text)
-            self.assertIn("[provider=deepseek]", got.json()["error"])
+            self.assertIn("[provider=groq]", got.json()["error"])
             self.assertNotIn("sk-deep", got.text)
             # The job system retries the SAME selection once; no
             # request ever reaches the other provider.
@@ -657,7 +668,7 @@ class ManagedInferenceTest(ApiBase):
             self.assertEqual(len(_posts(deep)), 1)
             self.assertEqual(len(_posts(qwen)), 0)
             self.assertEqual(_posts(deep)[0]["model"],
-                             "deepseek-v4-flash")
+                             "llama-3.3-70b-versatile")
             # A failing chosen model raises with its provider id and
             # makes exactly one transport call (HTTP errors are never
             # retried — the vendor already did the work).
@@ -665,7 +676,7 @@ class ManagedInferenceTest(ApiBase):
             llm2 = dispatcher_mod.ManagedLlm(db_path=self.db_path)
             with self.assertRaises(providers_mod.ProviderUnavailable) as ctx:
                 llm2.structure("x", [])
-            self.assertIn("[provider=deepseek]", str(ctx.exception))
+            self.assertIn("[provider=groq]", str(ctx.exception))
             self.assertEqual(len(_posts(deep)), 2)
             self.assertEqual(len(_posts(qwen)), 0)
         finally:
@@ -718,7 +729,7 @@ class DiscoverySchemeTest(ApiBase):
             ids=["gemini-3.5-flash-lite", "gemini-2.5-flash"])
         bea, bea_thread, bea_base = start_server(
             ModelsStub, fail=False, shape="openai",
-            ids=["deepseek-v4-flash"])
+            ids=["llama-3.3-70b-versatile"])
         try:
             offered, _lat = dispatcher_mod.probe_provider(
                 "gemini", "g-secret", gem_base)
@@ -733,7 +744,7 @@ class DiscoverySchemeTest(ApiBase):
             self.assertEqual(offered[0]["label"],
                              "Gemini 3.5 Flash-Lite")
             # …while OpenAI-shaped vendors use Bearer.
-            dispatcher_mod.probe_provider("deepseek", "sk-x", bea_base)
+            dispatcher_mod.probe_provider("groq", "sk-x", bea_base)
             self.assertEqual(bea.calls[-1]["authorization"],
                              "Bearer sk-x")
         finally:
@@ -802,16 +813,16 @@ class DispatcherUnitTest(ApiBase):
                       fetched_at or now))
 
     def test_stale_cache_and_mismatch_fail_closed(self):
-        self._seed("deepseek", "deepseek-v4-flash", secret="sk-s",
+        self._seed("groq", "llama-3.3-70b-versatile", secret="sk-s",
                    fetched_at="2020-01-01T00:00:00+00:00",
-                   offered_models=["deepseek-v4-flash"])
+                   offered_models=["llama-3.3-70b-versatile"])
         with self.assertRaises(providers_mod.ProviderUnavailable) as ctx:
             dispatcher_mod.ManagedLlm(
                 db_path=self.db_path).ask_facts("q?", {})
         self.assertIn("stale", str(ctx.exception))
         # Exact-model-only: a near-miss id is not a match.
-        self._seed("deepseek", "deepseek-v4-flas", secret="sk-s",
-                   offered_models=["deepseek-v4-flash"])
+        self._seed("groq", "llama-3.3-70b-versatil", secret="sk-s",
+                   offered_models=["llama-3.3-70b-versatile"])
         with self.assertRaises(providers_mod.ProviderUnavailable) as ctx:
             dispatcher_mod.ManagedLlm(
                 db_path=self.db_path).ask_facts("q?", {})
@@ -825,8 +836,8 @@ class DispatcherUnitTest(ApiBase):
                          inv_mod.NOT_CONFIGURED_MESSAGE)
 
     def test_network_error_retries_once_same_selection(self):
-        self._seed("deepseek", "deepseek-v4-flash", secret="sk-s",
-                   offered_models=["deepseek-v4-flash"])
+        self._seed("groq", "llama-3.3-70b-versatile", secret="sk-s",
+                   offered_models=["llama-3.3-70b-versatile"])
         llm = dispatcher_mod.ManagedLlm(db_path=self.db_path)
         # Patch make_chat to a client that always fails at the
         # network level: exactly 2 transport calls (1 + 1 retry).
@@ -847,7 +858,7 @@ class DispatcherUnitTest(ApiBase):
         finally:
             providers_mod.make_chat = real
         self.assertEqual(len(calls), 2)
-        self.assertIn("[provider=deepseek]", str(ctx.exception))
+        self.assertIn("[provider=groq]", str(ctx.exception))
 
 
 if __name__ == "__main__":

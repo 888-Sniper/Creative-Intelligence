@@ -226,7 +226,10 @@ PROVIDERS = [
     },
     {
         "id": "deepseek", "display": "DeepSeek", "kind": "api_key",
-        "supported": True,
+        "supported": False,
+        "unsupported_reason": (
+            "Retired from the lineup: text-only models cannot serve "
+            "video workflows, which need frame or audio input."),
         "discovery": {"url": "https://api.deepseek.com/v1/models",
                       "auth": "bearer", "shape": "openai"},
         "chat": {"base": "https://api.deepseek.com",
@@ -241,7 +244,10 @@ PROVIDERS = [
     },
     {
         "id": "kimi", "display": "Kimi", "kind": "api_key",
-        "supported": True,
+        "supported": False,
+        "unsupported_reason": (
+            "Retired from the lineup: text-only models cannot serve "
+            "video workflows, which need frame or audio input."),
         # Nextly _chat_url("kimi"): {root}/v1/chat/completions with
         # root https://api.moonshot.ai/v1. Shares the legacy moonshot
         # Keychain service (same vendor account).

@@ -688,10 +688,10 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13.5px}
 .icon-btn:focus-visible{outline:2px solid var(--shell-teal);outline-offset:2px}
 /* Reset Defaults (§8): constant 2px outline (box-sizing keeps the
  * footprint identical across states — no layout jump), stronger
- * green text via the brand-text token, tinted hover. Stays
+ * green text via the brand-text token, transparent hover. Stays
  * secondary next to the filled primary. */
 .btn-reset{display:inline-flex;align-items:center;justify-content:center;gap:8px;background:transparent;color:var(--brand-text);border:2px solid var(--shell-teal);border-radius:9px;padding:7px 15px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;min-height:34px;box-sizing:border-box}
-.btn-reset:hover:not(:disabled){background:var(--shell-teal-soft)}
+.btn-reset:hover:not(:disabled){background:transparent}
 .btn-reset:focus-visible{outline:2px solid var(--shell-teal);outline-offset:2px}
 .btn-reset:disabled{opacity:.65;cursor:default}
 /* Text inputs share the select surface inside .rep-filters (§2): one
@@ -852,7 +852,9 @@ button.cell-main{background:none;border:0;padding:0;cursor:pointer;text-align:le
 [data-theme="dark"] .link-teal{color:var(--brand-teal)}
 [data-theme="dark"] .btn-outline:hover:not(:disabled){border-color:var(--brand-teal);color:var(--brand-teal)}
 .btn-outline{transition:background .15s ease,color .15s ease,border-color .15s ease}
-.btn-outline:hover:not(:disabled){background:var(--shell-teal-soft)}
+/* Outline-family hovers stay transparent inside site-wide: the teal
+ * border/text shift above carries the affordance, never a tint fill. */
+.btn-outline:hover:not(:disabled){background:transparent}
 .pill{min-height:30px;box-sizing:border-box;padding:6px 14px;font-size:12.5px}
 [data-theme="dark"] .pill-ok,[data-theme="dark"] .pill-info{background:var(--shell-teal-dark);color:#fff}
 /* List/Grid view toggle (§5): teal selected, subdued unselected in dark. */

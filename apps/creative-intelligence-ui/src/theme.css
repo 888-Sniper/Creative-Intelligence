@@ -68,13 +68,13 @@ tr.row-top td:first-child{border-left:3px solid var(--foap-primary)}
 .muted{color:var(--muted)}
 .empty-state{padding:28px;text-align:center;color:var(--muted);font-size:14px}
 button.action{background:var(--brand-teal);color:var(--brand-teal-ink);border:0;border-radius:999px;padding:8px 16px;cursor:pointer;margin-right:8px;font-size:14px;font-weight:700}
-button.action:hover{background:var(--brand-teal-hover)}
+button.action:hover:not(:disabled){background:var(--brand-teal-hover)}
 button.action:active{background:var(--brand-teal-pressed)}
 button.action:active{background:var(--foap-primary-pressed)}
 button.secondary{background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:999px;padding:8px 16px;cursor:pointer;font-size:14px;font-weight:600}
-button.secondary:hover{border-color:var(--foap-primary);color:var(--foap-primary)}
+button.secondary:hover:not(:disabled){border-color:var(--foap-primary);color:var(--foap-primary)}
 button.chip{background:var(--foap-primary-faint);color:var(--fg);border:1px solid var(--foap-primary);border-radius:999px;padding:5px 12px;margin:2px;cursor:pointer;font-size:13px;font-weight:600}
-button.chip:hover{background:var(--foap-primary-soft)}
+button.chip:hover:not(:disabled){background:var(--foap-primary-soft)}
 button.danger{background:var(--foap-danger-soft);color:var(--foap-danger);border:1px solid var(--foap-danger);border-radius:999px;padding:8px 16px;cursor:pointer;font-size:14px;font-weight:600}
 textarea{width:100%;min-height:120px;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:var(--foap-radius-sm);padding:10px;font-family:inherit}
 input,select{background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:var(--foap-radius-sm);padding:7px 10px;font-size:14px;font-family:inherit;min-height:34px}
@@ -181,7 +181,7 @@ video{max-width:100%;width:100%;border:1px solid var(--line);border-radius:var(-
 .login-link{background:none;border:none;color:var(--foap-primary);font-size:14px;font-weight:600;cursor:pointer;padding:2px 0;font-family:inherit;text-decoration:none}
 .login-link:hover{text-decoration:underline}
 .login-primary{display:block;width:100%;margin:0;padding:13px;border:none;border-radius:8px;background:var(--brand-teal);color:var(--brand-teal-ink);font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
-.login-primary:hover{background:var(--brand-teal-hover)}
+.login-primary:hover:not(:disabled){background:var(--brand-teal-hover)}
 .login-primary:active{background:var(--brand-teal-pressed)}
 .login-mode{margin:14px auto 0}
 .login-separator{display:flex;align-items:center;gap:12px;margin:23px 0 0;color:var(--muted);font-size:13px}
@@ -282,7 +282,7 @@ ul.plain li{padding:6px 0;border-bottom:1px solid var(--line)}
 .topbar{position:sticky;top:0;z-index:50;background:color-mix(in srgb,var(--shell-bg) 82%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--shell-line)}
 .topbar-inner{display:flex;align-items:center;gap:12px;padding:10px 24px}
 .icon-btn{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:50%;border:1px solid transparent;background:transparent;color:var(--shell-navy);cursor:pointer;position:relative}
-.icon-btn:hover{background:var(--shell-card);border-color:var(--shell-line)}
+.icon-btn:hover:not(:disabled){background:var(--shell-card);border-color:var(--shell-line)}
 .icon-btn .dot{position:absolute;top:8px;right:9px;width:8px;height:8px;border-radius:50%;background:var(--shell-teal);border:2px solid var(--shell-bg)}
 .globalsearch-wrap{flex:0 1 400px;margin:0 0 0 auto;position:relative;min-width:0}
 .globalsearch{display:flex;align-items:center;gap:8px;background:var(--shell-card);border:1px solid var(--shell-line);border-radius:9px;padding:7px 12px;color:var(--shell-faint)}
@@ -328,10 +328,10 @@ body[data-density="compact"] .kpi-grid{grid-gap:8px;gap:8px}
 .panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
 .panel-head .panel-title{margin:0}
 .link-teal{color:var(--shell-teal-dark);font-size:13.5px;font-weight:600;text-decoration:none;background:none;border:0;cursor:pointer;font-family:inherit;padding:0}
-.link-teal:hover{text-decoration:underline}
+.link-teal:hover:not(:disabled){text-decoration:underline}
 .btn-primary{display:inline-flex;align-items:center;justify-content:center;gap:8px;background:var(--brand-teal);color:var(--brand-teal-ink);border:0;border-radius:9px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;white-space:nowrap;min-height:34px}
 .btn-send{display:inline-flex;align-items:center;justify-content:center;background:var(--brand-teal);color:var(--brand-teal-ink);border:0;border-radius:10px;width:38px;height:38px;flex:0 0 auto;cursor:pointer;font-family:inherit}
-.btn-send:hover{background:var(--brand-teal-hover)}
+.btn-send:hover:not(:disabled){background:var(--brand-teal-hover)}
 .btn-send:active{background:var(--brand-teal-pressed)}
 .btn-send:disabled{opacity:.65;cursor:default}
 .composer.ask-composer{align-items:center;background:var(--shell-card);border:1px solid var(--composer-line);border-radius:12px;padding:5px 5px 5px 12px;color:var(--shell-navy)}
@@ -350,7 +350,7 @@ body[data-density="compact"] .kpi-grid{grid-gap:8px;gap:8px}
 .composer input::placeholder,.composer textarea::placeholder,.ask-bar input::placeholder{color:var(--shell-muted);opacity:1}
 .composer.ask-composer input:focus{outline:none}
 .composer.ask-composer:focus-within{outline:2px solid var(--shell-teal);outline-offset:-1px;border-color:var(--shell-teal)}
-.btn-primary:hover{background:var(--brand-teal-hover)}
+.btn-primary:hover:not(:disabled){background:var(--brand-teal-hover)}
 .btn-primary:active{background:var(--brand-teal-pressed)}
 .btn-primary:focus-visible{outline:2px solid var(--shell-teal-dark);outline-offset:2px}
 .btn-primary:disabled{opacity:.65;cursor:default}
@@ -358,9 +358,9 @@ body[data-density="compact"] .kpi-grid{grid-gap:8px;gap:8px}
  * logo teal would be 2.1:1. Outline buttons keep .spinner.dark. */
 .btn-primary .spinner,.btn-send .spinner,.login-primary .spinner{border-color:rgba(24,37,54,.32);border-top-color:var(--brand-teal-ink)}
 .btn-outline{display:inline-flex;align-items:center;gap:8px;background:var(--shell-card);color:var(--shell-navy);border:1px solid var(--shell-line);border-radius:9px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;white-space:nowrap;min-height:34px}
-.btn-outline:hover{border-color:var(--shell-teal);color:var(--shell-teal)}
+.btn-outline:hover:not(:disabled){border-color:var(--shell-teal);color:var(--shell-teal)}
 .btn-soft{display:inline-flex;align-items:center;justify-content:center;background:var(--shell-teal-soft);color:var(--shell-teal-dark);border:0;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;text-decoration:none;white-space:nowrap;min-height:34px}
-.btn-soft:hover{filter:brightness(.96)}
+.btn-soft:hover:not(:disabled){filter:brightness(.96)}
 .filter-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px 12px}
 /* Date-range pairs wrap into stacked full-width inputs on narrow
  * columns instead of squeezing two unreadable date fields side by
@@ -684,14 +684,14 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13.5px}
 .panel-head.dialog-head{align-items:flex-start}
 .panel-head.dialog-head .panel-title{padding-top:6px}
 .icon-btn{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;flex:0 0 auto;background:transparent;border:1px solid transparent;border-radius:9px;color:var(--shell-muted);cursor:pointer;font-family:inherit}
-.icon-btn:hover{background:var(--shell-teal-soft);color:var(--shell-navy);border-color:var(--shell-line)}
+.icon-btn:hover:not(:disabled){background:var(--shell-teal-soft);color:var(--shell-navy);border-color:var(--shell-line)}
 .icon-btn:focus-visible{outline:2px solid var(--shell-teal);outline-offset:2px}
 /* Reset Defaults (§8): constant 2px outline (box-sizing keeps the
  * footprint identical across states — no layout jump), stronger
  * green text via the brand-text token, tinted hover. Stays
  * secondary next to the filled primary. */
 .btn-reset{display:inline-flex;align-items:center;justify-content:center;gap:8px;background:transparent;color:var(--brand-text);border:2px solid var(--shell-teal);border-radius:9px;padding:7px 15px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;min-height:34px;box-sizing:border-box}
-.btn-reset:hover{background:var(--shell-teal-soft)}
+.btn-reset:hover:not(:disabled){background:var(--shell-teal-soft)}
 .btn-reset:focus-visible{outline:2px solid var(--shell-teal);outline-offset:2px}
 .btn-reset:disabled{opacity:.65;cursor:default}
 /* Text inputs share the select surface inside .rep-filters (§2): one
@@ -704,7 +704,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13.5px}
 .field-label{font-size:12.5px;color:var(--shell-muted);margin:0 0 6px;font-weight:500}
 .chip-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .chip{display:inline-flex;align-items:center;gap:6px;background:#EDF3FA;color:var(--shell-navy);border:1px solid var(--shell-line);border-radius:999px;padding:5px 10px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit}
-.chip:hover{border-color:var(--shell-teal)}
+.chip:hover:not(:disabled){border-color:var(--shell-teal)}
 /* Suggested-question text (§12): medium (500), same size/colour/targets.
  * Applied per-element so headings, primary buttons and picked-item chips
  * keep their weight. Later in the file than .chip/.btn-outline, so it wins
@@ -781,7 +781,7 @@ button.cell-main{background:none;border:0;padding:0;cursor:pointer;text-align:le
 .chip-static{display:inline-flex;align-items:center;font-size:12px;font-weight:600;color:var(--shell-navy);background:var(--shell-bg);border:1px solid var(--shell-line);border-radius:999px;padding:2px 10px;white-space:nowrap}
 .row-actions{display:inline-flex;align-items:center;gap:2px}
 .row-actions .icon-btn{width:30px;height:30px;color:var(--shell-muted)}
-.row-actions .icon-btn:hover{color:var(--shell-navy)}
+.row-actions .icon-btn:hover:not(:disabled){color:var(--shell-navy)}
 .rep-filters{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .rep-search{display:inline-flex;align-items:center;gap:7px;background:var(--shell-card);border:1px solid var(--shell-line);border-radius:8px;padding:7px 11px;color:var(--shell-faint)}
 .rep-search input{border:0;outline:0;background:transparent;font-size:12.5px;color:var(--shell-navy);font-family:inherit;width:130px}
@@ -850,9 +850,9 @@ button.cell-main{background:none;border:0;padding:0;cursor:pointer;text-align:le
 [data-theme="dark"] .side-nav a.active:hover{background:color-mix(in srgb,var(--brand-teal) 86%,white)}
 #account-menu .menu-toggle:hover,.user-chip:hover{background:var(--shell-teal-soft)}
 [data-theme="dark"] .link-teal{color:var(--brand-teal)}
-[data-theme="dark"] .btn-outline:hover{border-color:var(--brand-teal);color:var(--brand-teal)}
+[data-theme="dark"] .btn-outline:hover:not(:disabled){border-color:var(--brand-teal);color:var(--brand-teal)}
 .btn-outline{transition:background .15s ease,color .15s ease,border-color .15s ease}
-.btn-outline:hover{background:var(--shell-teal-soft)}
+.btn-outline:hover:not(:disabled){background:var(--shell-teal-soft)}
 .pill{min-height:30px;box-sizing:border-box;padding:6px 14px;font-size:12.5px}
 [data-theme="dark"] .pill-ok,[data-theme="dark"] .pill-info{background:var(--shell-teal-dark);color:#fff}
 /* List/Grid view toggle (§5): teal selected, subdued unselected in dark. */

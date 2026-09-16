@@ -8,6 +8,7 @@ import {
   PageHeader,
   Panel,
   Skeleton,
+  Switch,
   Toast,
 } from "@/components/product";
 import { useLocale } from "@/i18n";
@@ -649,28 +650,19 @@ function ProviderCard({ entry, active, activeName, revision, busy, setBusy, onRe
       )}
     >
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginBottom: 12 }}>
-        <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 600 }}>
-          <input
-            type="radio"
-            name="active-provider"
-            checked={isActive}
-            onChange={requestActivate}
-            aria-label={t("providers.useAsActive", { provider: entry.display })}
-          />
+        <Switch
+          checked={isActive}
+          disabled={busy !== null}
+          label={isActive ? t("providers.activeBadge") : t("providers.useAsActive", { provider: entry.display })}
+          onChange={(v) => { if (v) requestActivate(); else requestDeactivate(); }}
+        />
+        <span style={{ fontSize: 13, fontWeight: 600 }}>
           {isActive ? t("providers.activeBadge") : t("providers.useAsActive", { provider: entry.display })}
-        </label>
-        {isActive ? (
-          <LoadingButton
-            type="button"
-            className="btn-outline"
-            loading={busy === "deactivate"}
-            loadingLabel={t("providers.deactivating")}
-            spinnerClass="spinner dark"
-            onClick={requestDeactivate}
-            disabled={busy !== null}
-          >
-            {t("providers.deactivate")}
-          </LoadingButton>
+        </span>
+        {busy !== null ? (
+          <span className="panel-sub" role="status" style={{ fontSize: 12 }}>
+            {busy === "deactivate" ? t("providers.deactivating") : t("providers.activating")}
+          </span>
         ) : null}
       </div>
 
@@ -835,9 +827,7 @@ function ProviderCard({ entry, active, activeName, revision, busy, setBusy, onRe
         <label htmlFor={modelId} style={{ marginTop: 6 }}>
           {t("providers.modelLabel", { provider: entry.display })}
         </label>
-        {offered === null ? (
-          <p className="panel-sub" style={{ margin: "6px 0" }}>{t("providers.modelHint")}</p>
-        ) : filtered.length === 0 ? (
+        {offered === null ? null : filtered.length === 0 ? (
           <p className="panel-sub" style={{ margin: "6px 0" }}>
             {t("providers.modelEmpty", { q: modelSearch.trim() })}
           </p>

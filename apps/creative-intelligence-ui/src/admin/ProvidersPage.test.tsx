@@ -209,8 +209,8 @@ describe("ProvidersPage", () => {
     setupFetch(freshState());
     renderPage();
     await screen.findByText("Active Provider: Groq · llama-3.3-70b-versatile");
-    expect((screen.getByRole("radio", { name: "Use Groq As Active" }) as HTMLInputElement).checked).toBe(true);
-    expect((screen.getByRole("radio", { name: "Use OpenAI As Active" }) as HTMLInputElement).checked).toBe(false);
+    expect(screen.getByRole("switch", { name: "Active" }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("switch", { name: "Use OpenAI As Active" }).getAttribute("aria-checked")).toBe("false");
     expect(screen.getByText("ChatGPT")).toBeTruthy();
   });
 
@@ -233,7 +233,7 @@ describe("ProvidersPage", () => {
     expect(card).toBeTruthy();
     expect(within(card).getByText(/impersonates an unofficial API/)).toBeTruthy();
     expect(within(card).queryByRole("button")).toBeNull();
-    expect(within(card).queryByRole("radio")).toBeNull();
+    expect(within(card).queryByRole("switch")).toBeNull();
   });
 
   it("never prefills secrets: the key input starts empty with a masked placeholder", async () => {
@@ -263,11 +263,8 @@ describe("ProvidersPage", () => {
     const select = within(groqCard).getByLabelText("Active Model For Groq") as HTMLSelectElement;
     expect(select.options.length).toBe(3); // empty option + 2 offered
     fireEvent.change(select, { target: { value: "m1" } });
-    fireEvent.click(screen.getByRole("radio", { name: "Use Groq As Active" }));
-    // Groq is already active: the radio is checked, so no new call.
-    expect(calls.filter((c) => c.url.endsWith("/activate"))).toHaveLength(0);
     // Activate OpenAI instead: needs its own offered list first.
-    fireEvent.click(within(card).getByRole("radio", { name: "Use OpenAI As Active" }));
+    fireEvent.click(within(card).getByRole("switch", { name: "Use OpenAI As Active" }));
     await within(card).findByText("Pick an offered model before activating OpenAI.");
     expect(calls.filter((c) => c.url.endsWith("/activate"))).toHaveLength(0);
   });
@@ -321,20 +318,32 @@ describe("ProvidersPage", () => {
     expect(await within(groqCard).findByText("Video workflow: Text only.")).toBeTruthy();
   });
 
+  it("toggling the active switch off deactivates after confirm", async () => {
+    window.confirm = vi.fn(() => true) as unknown as typeof window.confirm;
+    const calls = setupFetch(freshState());
+    renderPage();
+    await screen.findByText("Active Provider: Groq · llama-3.3-70b-versatile");
+    fireEvent.click(screen.getByRole("switch", { name: "Active" }));
+    await waitFor(() => {
+      expect(calls.filter((c) => c.method === "POST" && c.url.endsWith("/deactivate"))).toHaveLength(1);
+    });
+    expect(window.confirm).toHaveBeenCalled();
+  });
+
   it("sends byte-exact model_id plus revision on activate", async () => {
     window.confirm = vi.fn(() => true) as unknown as typeof window.confirm;
     const calls = setupFetch(freshState());
     renderPage();
     await screen.findByText("Active Provider: Groq · llama-3.3-70b-versatile");
     // Switch path on the inactive OpenAI card: test loads its offered
-    // list, select picks the exact model id, the radio confirms.
+    // list, select picks the exact model id, the switch confirms.
     const card = screen.getByText("OpenAI").closest("section") as HTMLElement;
     fireEvent.click(within(card).getByRole("button", { name: "Test Connection" }));
     await within(card).findByText(/Connected In 123 ms\./);
     fireEvent.change(within(card).getByLabelText("Active Model For OpenAI"), {
       target: { value: "m2" },
     });
-    fireEvent.click(screen.getByRole("radio", { name: "Use OpenAI As Active" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Use OpenAI As Active" }));
     await waitFor(() => {
       expect(calls.filter((c) => c.method === "POST" && c.url.endsWith("/activate"))).toHaveLength(1);
     });
@@ -356,7 +365,7 @@ describe("ProvidersPage", () => {
     fireEvent.change(within(card).getByLabelText("Active Model For OpenAI"), {
       target: { value: "m1" },
     });
-    fireEvent.click(screen.getByRole("radio", { name: "Use OpenAI As Active" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Use OpenAI As Active" }));
     // Stale revision: the server 409s, the page refetches (revision 4
     // in the fixture now) and offers a retry.
     const retry = await screen.findByRole("button", { name: "Retry" });

@@ -812,7 +812,6 @@ export const en = {
     modelLabel: "Active Model For {provider}",
     modelSearchPlaceholder: "Search Offered Models…",
     modelSearchAria: "Search Offered Models",
-    modelHint: "Refresh the catalog or test the connection to load the offered models, then pick one and activate.",
     kindApiKey: "API Key",
     kindSubscription: "Subscription",
     kindLocal: "Local Runtime",

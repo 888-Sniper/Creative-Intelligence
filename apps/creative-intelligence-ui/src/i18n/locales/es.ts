@@ -812,7 +812,6 @@ export const es = {
     modelLabel: "Modelo activo para {provider}",
     modelSearchPlaceholder: "Buscar modelos ofrecidos…",
     modelSearchAria: "Buscar modelos ofrecidos",
-    modelHint: "Actualiza el catálogo o prueba la conexión para cargar los modelos ofrecidos, elige uno y actívalo.",
     kindApiKey: "Clave API",
     kindSubscription: "Suscripción",
     kindLocal: "Entorno local",

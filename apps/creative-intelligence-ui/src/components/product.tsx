@@ -952,6 +952,34 @@ export function Toggle({ label, body, checked, onChange }: {
   );
 }
 
+/* Compact on/off switch (Nextly-style pill + knob): for inline card
+ * actions such as the provider active selector, where the full Toggle
+ * settings row would be too heavy. Teal when on, slate when off. */
+export function Switch({ checked, onChange, label, disabled }: {
+  checked: boolean; onChange: (v: boolean) => void; label: string; disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      style={{
+        width: 36, height: 20, borderRadius: 999, border: 0, padding: 0,
+        cursor: disabled ? "default" : "pointer", flex: "none", position: "relative",
+        background: checked ? "var(--shell-teal)" : "#CBD5E1",
+      }}
+    >
+      <span style={{
+        position: "absolute", top: 2.5, left: checked ? 18.5 : 2.5, width: 15, height: 15,
+        borderRadius: "50%", background: "#fff", transition: "left .15s ease",
+      }} />
+    </button>
+  );
+}
+
 /** Layout-matched page loading shell (§10): header block plus a
  *  two-column panel arrangement approximating the final page, so the
  *  populated/error/empty state swaps in without a layout shift. The

@@ -756,7 +756,7 @@ export const en = {
       cancel: "Cancel",
       create: "Create Team",
     },
-    demoTools: "Advanced · Demo Tools",
+    demoTools: "Advanced Demo Tools",
     demoToolsSub: "Synthetic dataset controls for demo environments — not production access management.",
   },
   providers: {

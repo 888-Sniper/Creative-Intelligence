@@ -34,7 +34,7 @@ async function settle(page: Page) {
   await page.evaluate(() => document.fonts.ready);
 }
 
-/** The Demo Data panel lives in the "Advanced · Demo Tools"
+/** The Demo Data panel lives in the "Advanced Demo Tools"
  *  disclosure on /admin: expand it before touching pack controls. */
 async function openDemoTools(page: Page) {
   const details = page.locator("details.adv-disclosure").first();

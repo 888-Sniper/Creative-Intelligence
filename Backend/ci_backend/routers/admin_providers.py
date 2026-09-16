@@ -88,12 +88,15 @@ def _require_supported(spec: dict) -> None:
 def _video_info(provider_id: str, model_id: str) -> dict:
     """Video-workflow support flags for one exact model id.
 
-    eligible is True only for ids verified native-video capable in
-    official vendor docs (item 32; image-only never qualifies).
-    Additive: older clients ignore the keys.
+    video_eligible is True only for ids verified native-video capable
+    in official vendor docs (item 32). frame_eligible is True for the
+    ffmpeg breakdown (timed JPEG frames + WAV): image-level models
+    qualify because frames are plain images. Additive: older clients
+    ignore the keys.
     """
     level, doc = inv.frame_support(provider_id, model_id)
     return {"support": level, "video_eligible": level == "native-video",
+            "frame_eligible": inv.frame_eligible(provider_id, model_id),
             "support_doc": doc or None}
 
 

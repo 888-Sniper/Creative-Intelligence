@@ -675,3 +675,12 @@ def frame_support(provider_id: str, model_id: str) -> tuple:
 def video_eligible(provider_id: str, model_id: str) -> bool:
     """True only for exact ids verified native-video capable."""
     return frame_support(provider_id, model_id)[0] == "native-video"
+
+
+def frame_eligible(provider_id: str, model_id: str) -> bool:
+    """True when the id can consume the ffmpeg breakdown: ffmpeg emits
+    timed JPEG frames (readable by any image-input model) plus a WAV
+    track (handled by the STT roster), so both "native-video" and
+    "image" levels qualify. Text-only and unverified ids do not."""
+    return frame_support(provider_id, model_id)[0] in (
+        "native-video", "image")

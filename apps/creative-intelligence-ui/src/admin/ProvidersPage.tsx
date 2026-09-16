@@ -47,10 +47,12 @@ interface ActiveSelection {
   updated_by?: string;
   updated_at?: string;
   /** Video-workflow support for the exact active id (item 32):
-   *  eligible only when verified native-video capable. Absent on
-   *  older backends — UI treats that as unverified. */
+   *  frame_eligible when the id can consume the ffmpeg breakdown
+   *  (JPEG frames + WAV). Absent on older backends — UI falls back
+   *  to video_eligible. */
   support?: string;
   video_eligible?: boolean;
+  frame_eligible?: boolean;
   support_doc?: string | null;
 }
 
@@ -65,6 +67,7 @@ interface OfferedModel {
   label?: string;
   support?: string;
   video_eligible?: boolean;
+  frame_eligible?: boolean;
   support_doc?: string | null;
 }
 
@@ -327,7 +330,7 @@ export function ProvidersPage() {
             date: active.updated_at ? fmtDate(active.updated_at) : "—",
           })}
         >
-          {active.video_eligible === false ? (
+          {(active.frame_eligible ?? active.video_eligible) === false ? (
             <p className="panel-sub" role="status" style={{ margin: "8px 0 0" }}>
               {t("providers.videoNotEligible", {
                 model: active.model_id,

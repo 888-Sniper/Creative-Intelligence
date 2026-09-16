@@ -182,6 +182,18 @@ def test_frame_support_levels():
     assert inv_mod.video_eligible("openai", "gpt-5.6-luna") is False
 
 
+def test_frame_eligible_covers_ffmpeg_outputs():
+    # Native-video ids qualify, and so do image-level ids: ffmpeg
+    # emits timed JPEG frames, which any image-input model can read
+    # (the WAV track goes to the STT roster).
+    assert inv_mod.frame_eligible("gemini", "gemini-2.5-flash") is True
+    assert inv_mod.frame_eligible("anthropic", "claude-haiku-4-5") is True
+    assert inv_mod.frame_eligible("openrouter", "openai/gpt-4o-mini") is True
+    assert inv_mod.frame_eligible("deepseek", "deepseek-chat") is False
+    assert inv_mod.frame_eligible("kimi", "kimi-k3") is False
+    assert inv_mod.frame_eligible("openai", "gpt-5.6-luna") is False
+
+
 # ---------------------------------------------------------------------------
 # Item 30: max_points retasks analysis-shaped questions to condense
 # ---------------------------------------------------------------------------

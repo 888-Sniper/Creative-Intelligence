@@ -774,7 +774,7 @@ export const es = {
     },
     videoSupport: "Flujo de video: {support}.",
     videoDocs: "Docs",
-    videoNotEligible: "El modelo activo {model} no está verificado para entrada de video ({support}). El análisis de texto no se ve afectado; los pasos de fotogramas fallan de forma visible con un error nombrado en lugar de sustituir otro modelo.",
+    videoNotEligible: "El modelo activo {model} no puede leer fotogramas de video ni audio ({support}). El análisis de texto no se ve afectado; los pasos de visión fallan de forma controlada con un error nombrado en lugar de sustituir otro modelo.",
     bannerPausedTitle: "La IA está en pausa",
     bannerPausedBody: "No hay ningún proveedor activo. Preguntar a los datos y el Analista de IA responden “AI is not configured. Contact your administrator.” hasta que se active un proveedor. Todo lo demás sigue funcionando.",
     activeBadge: "Activo",

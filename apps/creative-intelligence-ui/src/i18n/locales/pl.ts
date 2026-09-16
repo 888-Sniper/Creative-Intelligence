@@ -788,7 +788,7 @@ export const pl = {
     },
     videoSupport: "Przepływ wideo: {support}.",
     videoDocs: "Docs",
-    videoNotEligible: "Aktywny model {model} nie jest zweryfikowany do wejścia wideo ({support}). Analiza tekstu działa bez zmian; kroki klatek potoku kończą się widocznym nazwanym błędem zamiast podmieniać inny model.",
+    videoNotEligible: "Aktywny model {model} nie odczytuje klatek wideo ani audio ({support}). Analiza tekstu działa bez zmian; kroki wizji kończą się kontrolowanym nazwanym błędem zamiast podstawiać inny model.",
     bannerPausedTitle: "AI wstrzymane",
     bannerPausedBody: "Brak aktywnego dostawcy. Zapytaj dane i Analityk AI odpowiadają “AI is not configured. Contact your administrator.” dopóki dostawca nie zostanie aktywowany. Wszystko inne działa dalej.",
     activeBadge: "Aktywny",

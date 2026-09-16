@@ -796,10 +796,12 @@ class LiveVision:
         if not images:
             raise ProviderUnavailable(
                 "no frame images: upload creative media first")
-        # Video-eligibility gate (item 32): explicitly text/audio-only
-        # models are refused up front, naming the model, instead of
-        # burning a call that fails opaquely inside the race (which
-        # would then silently fall through to the next roster entry).
+        # Frame-eligibility gate (item 32): frames are plain JPEGs, so
+        # native-video and image-level models all qualify; explicitly
+        # text/audio-only models are refused up front, naming the
+        # model, instead of burning a call that fails opaquely inside
+        # the race (which would then silently fall through to the next
+        # roster entry).
         from creative_intel import provider_inventory as _inv
         for _provider, _model, _tier in (self.roster or []):
             _level, _doc = _inv.frame_support(_provider, _model)

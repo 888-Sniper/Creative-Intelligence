@@ -48,7 +48,8 @@ function listFixture(): {
   active: {
     provider_id: string; model_id: string; revision: number;
     updated_by: string; updated_at: string;
-    support?: string; video_eligible?: boolean; support_doc?: string | null;
+    support?: string; video_eligible?: boolean; frame_eligible?: boolean;
+    support_doc?: string | null;
   } | null;
   current_revision: number;
 } {
@@ -289,6 +290,7 @@ describe("ProvidersPage", () => {
         ...state.list.active!,
         support: "text-only",
         video_eligible: false,
+        frame_eligible: false,
         support_doc: null,
       },
       providers: state.list.providers.map((p) =>
@@ -307,7 +309,7 @@ describe("ProvidersPage", () => {
     renderPage();
     await screen.findByText("Active Provider: Groq · llama-3.3-70b-versatile");
     // An active-but-unsupported selection surfaces clearly (no silent fallback).
-    expect(screen.getByText(/not verified for video input/)).toBeTruthy();
+    expect(screen.getByText(/cannot read video frames/)).toBeTruthy();
     const groqCard = screen.getByText("Groq").closest("section") as HTMLElement;
     const select = await within(groqCard).findByLabelText("Active Model For Groq") as HTMLSelectElement;
     // Verified levels suffix the exact option; unverified ids stay bare.
@@ -328,6 +330,34 @@ describe("ProvidersPage", () => {
       expect(calls.filter((c) => c.method === "POST" && c.url.endsWith("/deactivate"))).toHaveLength(1);
     });
     expect(window.confirm).toHaveBeenCalled();
+  });
+
+  it("warns only when the active model cannot read frames", async () => {
+    const state = freshState();
+    state.list.active = {
+      ...state.list.active!,
+      support: "image",
+      frame_eligible: true,
+      support_doc: null,
+    };
+    setupFetch(state);
+    renderPage();
+    await screen.findByText("Active Provider: Groq · llama-3.3-70b-versatile");
+    expect(screen.queryByText(/cannot read video frames/)).toBeNull();
+  });
+
+  it("warns when the active model is text-only", async () => {
+    const state = freshState();
+    state.list.active = {
+      ...state.list.active!,
+      support: "text-only",
+      frame_eligible: false,
+      support_doc: null,
+    };
+    setupFetch(state);
+    renderPage();
+    await screen.findByText("Active Provider: Groq · llama-3.3-70b-versatile");
+    expect(screen.queryByText(/cannot read video frames/)).not.toBeNull();
   });
 
   it("sends byte-exact model_id plus revision on activate", async () => {

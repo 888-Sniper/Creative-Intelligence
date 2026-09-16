@@ -774,7 +774,7 @@ export const en = {
     },
     videoSupport: "Video workflow: {support}.",
     videoDocs: "Docs",
-    videoNotEligible: "Active model {model} is not verified for video input ({support}). Text analysis is unaffected; pipeline frame steps fail closed with a named error instead of substituting another model.",
+    videoNotEligible: "Active model {model} cannot read video frames or audio ({support}). Text analysis is unaffected; pipeline vision steps fail closed with a named error instead of substituting another model.",
     bannerPausedTitle: "AI Is Paused",
     bannerPausedBody: "No provider is active. Ask The Data and AI Analyst answer “AI is not configured. Contact your administrator.” until a provider is activated. Everything else keeps working.",
     activeBadge: "Active",

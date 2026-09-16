@@ -304,8 +304,12 @@ ul.plain li{padding:6px 0;border-bottom:1px solid var(--line)}
 .icon-btn.hamburger{display:none}
 .page{padding:20px 24px 36px;max-width:1440px;width:100%;margin:0 auto}
 .page-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin:2px 0 14px}
+/* Title column fills the space beside the actions (never shrink-to-fit
+ * off the h1): the sub keeps a stable full-width measure in every
+ * load state instead of wrapping against half-loaded metrics. */
+.page-head>div:first-child{flex:1 1 auto;min-width:0}
 .page-head h1{margin:0;font-size:24px;font-weight:700;letter-spacing:-.015em;color:var(--shell-navy)}
-.page-head .sub{margin:5px 0 0;font-size:13.5px;font-weight:400;color:var(--shell-muted);max-width:60%}
+.page-head .sub{margin:5px 0 0;font-size:13.5px;font-weight:400;color:var(--shell-muted);max-width:62ch}
 .panel-head .panel-sub{max-width:60%}
 @media (max-width:900px){.page-head .sub,.panel-head .panel-sub{max-width:none}}
 /* Small filter labels (§13): lighter weight and muted tone in dark mode,

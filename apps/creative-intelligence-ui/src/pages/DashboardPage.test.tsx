@@ -116,10 +116,12 @@ describe("DashboardPage precision pass", () => {
     mockFetch();
     renderPage();
     // Creatives resolve empty: the retention chart must settle on an
-    // empty state, never a perpetual skeleton.
+    // empty state, never a perpetual skeleton — and with no retention
+    // data the Key Takeaways block stays hidden.
     await waitFor(() => {
       expect(screen.getByText("No Retention Data")).toBeDefined();
     });
-    expect(screen.getByText("No takeaways in the current scope yet.")).toBeDefined();
+    expect(screen.queryByText("Key Takeaways")).toBeNull();
+    expect(screen.queryByText("No takeaways in the current scope yet.")).toBeNull();
   });
 });

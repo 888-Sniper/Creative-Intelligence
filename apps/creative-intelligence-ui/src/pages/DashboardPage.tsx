@@ -506,6 +506,12 @@ export function DashboardPage() {
     return curve.slice().sort((a, b) => Math.abs(a[0] - 3) - Math.abs(b[0] - 3))[0];
   }, [curve]);
 
+  // Key Takeaways only renders when at least one takeaway exists; an empty
+  // retention scope shows the centered No Retention Data state instead.
+  const hasTakeaways = Boolean(nearThree)
+    || hookRows[0]?.ctr != null
+    || durationRows.find((r) => r.key === "15–30s")?.ctr != null;
+
   // Empty scope (no current records) shows formatted zero placeholders;
   // a loaded nonempty scope with an uncomputable metric says Unavailable.
   const emptyScope = compare ? compare.current_n_ads === 0 : false;
@@ -734,9 +740,12 @@ export function DashboardPage() {
                   ) : curveLoading || creatives.loading ? (
                     <Skeleton height={170} />
                   ) : (
-                    <EmptyState compact verbatim icon="play" title={t("dashboard.retention.emptyTitle")} text={t("dashboard.retention.emptyBody")} />
+                    <div className="empty-center">
+                      <EmptyState compact verbatim icon="play" title={t("dashboard.retention.emptyTitle")} text={t("dashboard.retention.emptyBody")} />
+                    </div>
                   )}
                 </div>
+                {hasTakeaways ? (
                 <div className="takeaways">
                   <h5><Icon name="check" size={15} /> {t("dashboard.retention.takeaways")}</h5>
                   <ul>
@@ -749,11 +758,9 @@ export function DashboardPage() {
                     {durationRows.find((r) => r.key === "15–30s")?.ctr != null ? (
                       <li><Icon name="check" size={13} /><span>{t("dashboard.retention.sweetLength", { ctr: dec1(durationRows.find((r) => r.key === "15–30s")?.ctr ?? 0) })}</span></li>
                     ) : null}
-                    {!nearThree && hookRows[0]?.ctr == null && durationRows.find((r) => r.key === "15–30s")?.ctr == null ? (
-                      <li className="muted">{t("dashboard.retention.noTakeaways")}</li>
-                    ) : null}
                   </ul>
                 </div>
+                ) : null}
               </div>
             ) : null}
             {tab === "hooks" ? (

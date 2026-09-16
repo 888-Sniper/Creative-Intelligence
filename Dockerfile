@@ -18,6 +18,14 @@ RUN pnpm build
 
 # ---- Python runtime ----
 FROM python:3.13-slim
+
+# Video preprocessing needs both ffmpeg and ffprobe in the runtime image.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && ffmpeg -version \
+    && ffprobe -version \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     CREATIVE_INTEL_DATA_DIR=/app/data \

@@ -834,6 +834,9 @@ def test_react_build_served_when_present(client, tmp_path, monkeypatch):
     assert r.status_code == 200
     assert "immutable" in r.headers.get("cache-control", "")
     assert client.get("/foap-logo.png").status_code == 200
+    r = client.get("/foap-mark.png")
+    assert r.status_code == 200
+    assert r.headers.get("content-type", "").startswith("image/png")
 
 
 def test_react_index_carries_strict_csp(client):

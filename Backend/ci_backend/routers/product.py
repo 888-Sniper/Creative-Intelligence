@@ -1804,12 +1804,18 @@ def serve_asset(name: str):
 # Brand files referenced by the React shell (single source in Web/assets;
 # no duplication into the frontend tree).
 _BRAND_FILES = {"foap-logo.png": "image/png",
+                "foap-mark.png": "image/png",
                 "favicon.png": "image/png"}
 
 
 @router.get("/foap-logo.png")
 def serve_logo():
     return _brand_file("foap-logo.png")
+
+
+@router.get("/foap-mark.png")
+def serve_mark():
+    return _brand_file("foap-mark.png")
 
 
 @router.get("/favicon.png")

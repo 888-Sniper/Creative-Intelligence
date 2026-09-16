@@ -68,7 +68,8 @@ export function AppShell() {
       <aside className={`sidebar${open ? " open" : ""}${collapsed ? " collapsed" : ""}`}
         aria-label={t("nav.primaryNav")}>
         <Link to="/" className="side-brand" aria-label="Foap Creative Intelligence Dashboard" onClick={close}>
-          <img src="/foap-logo.png" alt="Foap" />
+          <img className="brand-full" src="/foap-logo.png" alt="Foap" />
+          <img className="brand-mark" src="/foap-mark.png" alt="" aria-hidden="true" />
         </Link>
         <nav className="side-nav">
           {NAV.map((n) => {

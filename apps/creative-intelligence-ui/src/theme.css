@@ -274,6 +274,11 @@ ul.plain li{padding:6px 0;border-bottom:1px solid var(--line)}
 .sidebar.collapsed{width:var(--shell-side-collapsed);flex:0 0 var(--shell-side-collapsed)}
 .sidebar.collapsed .side-brand{justify-content:center;padding:20px 0 16px}
 .sidebar.collapsed .side-brand img{height:26px}
+/* Collapsed rail shows the camera mark only; the full wordmark
+ * returns on expand. The mark stays square at the rail width. */
+.side-brand .brand-mark{display:none}
+.sidebar.collapsed .side-brand .brand-full{display:none}
+.sidebar.collapsed .side-brand .brand-mark{display:block;height:26px;width:auto}
 .sidebar.collapsed .side-nav{padding:10px 8px 16px}
 .sidebar.collapsed .side-nav a{justify-content:center;padding:9px 0}
 .sidebar.collapsed .side-nav a .lbl{display:none}
@@ -644,6 +649,10 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13.5px}
   .sidebar.collapsed{width:var(--shell-side-w);flex:0 0 var(--shell-side-w)}
   .sidebar.collapsed .side-brand{justify-content:flex-start;padding:20px 20px 16px}
   .sidebar.collapsed .side-brand img{height:30px}
+  /* Narrow screens always open the full drawer, so the wordmark
+   * stays even when the desktop rail is collapsed. */
+  .sidebar.collapsed .side-brand .brand-full{display:block}
+  .sidebar.collapsed .side-brand .brand-mark{display:none}
   .sidebar.collapsed .side-nav{padding:10px 12px 16px}
   .sidebar.collapsed .side-nav a{justify-content:flex-start;padding:9px 12px}
   .sidebar.collapsed .side-nav a .lbl{display:inline}

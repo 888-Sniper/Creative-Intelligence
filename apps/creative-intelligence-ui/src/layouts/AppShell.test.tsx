@@ -77,6 +77,18 @@ describe("AppShell desktop collapse", () => {
     expect(aside.className).not.toContain("collapsed");
   });
 
+  it("renders the wordmark plus a collapsed-rail mark", () => {
+    renderShell();
+    const brand = screen.getByRole("link", { name: "Foap Creative Intelligence Dashboard" });
+    const full = within(brand).getByAltText("Foap") as HTMLImageElement;
+    expect(full.getAttribute("src")).toBe("/foap-logo.png");
+    // The icon-only mark rides along for the collapsed rail (CSS picks
+    // the visible one); it stays out of the accessible name.
+    const mark = brand.querySelector("img.brand-mark") as HTMLImageElement;
+    expect(mark.getAttribute("src")).toBe("/foap-mark.png");
+    expect(mark.getAttribute("aria-hidden")).toBe("true");
+  });
+
   it("keeps every nav link usable while collapsed", () => {
     renderShell();
     fireEvent.click(screen.getByRole("button", { name: "Collapse Sidebar" }));

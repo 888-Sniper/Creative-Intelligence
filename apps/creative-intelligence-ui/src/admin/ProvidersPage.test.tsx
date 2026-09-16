@@ -205,14 +205,16 @@ afterEach(() => {
 });
 
 describe("ProvidersPage", () => {
-  it("shows the active banner and one card per server provider", async () => {
+  it("shows the active banner and one card per supported server provider", async () => {
     window.confirm = vi.fn(() => true) as unknown as typeof window.confirm;
     setupFetch(freshState());
     renderPage();
     await screen.findByText("Active Provider: Groq · llama-3.3-70b-versatile");
     expect(screen.getByRole("switch", { name: "Active" }).getAttribute("aria-checked")).toBe("true");
     expect(screen.getByRole("switch", { name: "Use OpenAI As Active" }).getAttribute("aria-checked")).toBe("false");
-    expect(screen.getByText("ChatGPT")).toBeTruthy();
+    // Brand logo sits left of the card title.
+    const groqCard = screen.getByText("Groq").closest("section") as HTMLElement;
+    expect(groqCard.querySelector("img.provider-logo")).toBeTruthy();
   });
 
   it("shows paused admin guidance when nothing is active", async () => {
@@ -225,16 +227,17 @@ describe("ProvidersPage", () => {
     expect(screen.getByText(/AI is not configured\. Contact your administrator\./)).toBeTruthy();
   });
 
-  it("renders blocked entries with the server reason and zero actions", async () => {
+  it("hides unsupported entries instead of listing them", async () => {
     window.confirm = vi.fn(() => true) as unknown as typeof window.confirm;
     setupFetch(freshState());
     renderPage();
-    await screen.findByText("ChatGPT");
-    const card = screen.getByText("ChatGPT").closest("section") as HTMLElement;
-    expect(card).toBeTruthy();
-    expect(within(card).getByText(/impersonates an unofficial API/)).toBeTruthy();
-    expect(within(card).queryByRole("button")).toBeNull();
-    expect(within(card).queryByRole("switch")).toBeNull();
+    await screen.findByText("Active Provider: Groq · llama-3.3-70b-versatile");
+    expect(screen.queryByText("ChatGPT")).toBeNull();
+    expect(screen.queryByText(/impersonates an unofficial API/)).toBeNull();
+    // Supported cards still render.
+    expect(screen.getByText("Groq")).toBeTruthy();
+    expect(screen.getByText("OpenAI")).toBeTruthy();
+    expect(screen.getByText("Ollama")).toBeTruthy();
   });
 
   it("never prefills secrets: the key input starts empty with a masked placeholder", async () => {

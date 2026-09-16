@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { loginAs, readSeeds } from "./helpers";
 
 test.describe("providers admin page", () => {
-  test("admin sees Providers above Admin/Settings and the blocked ChatGPT card", async ({
+  test("admin sees Providers above Admin/Settings with logos and no unavailable cards", async ({
     page,
     context,
   }) => {
@@ -20,11 +20,17 @@ test.describe("providers admin page", () => {
     expect(providersAt).toBeLessThan(adminAt);
     expect(adminAt).toBeLessThan(settingsAt);
 
-    // Server-driven unsupported entry: listed with its reason, no actions.
-    const chatgpt = page.locator("section", { hasText: "ChatGPT" }).last();
-    await expect(chatgpt).toBeVisible();
-    await expect(chatgpt.getByText(/unofficial API|unsupported/i).first()).toBeVisible();
-    await expect(chatgpt.getByRole("button")).toHaveCount(0);
+    // Server-flagged unsupported entries are hidden from the list.
+    const retired = page.locator("section", {
+      has: page.locator("h2", { hasText: /ChatGPT|DeepSeek|Kimi/ }),
+    });
+    await expect(retired).toHaveCount(0);
+
+    // Supported providers show a brand logo left of the card title.
+    const groq = page.locator("section", {
+      has: page.locator("h2", { hasText: "Groq" }),
+    }).last();
+    await expect(groq.locator("img.provider-logo")).toBeVisible();
   });
 
   test("employee sees no Providers item and direct /providers is denied", async ({

@@ -3,6 +3,7 @@ import type { Dispatch, SetStateAction } from "react";
 import { api, ApiError } from "@/api/client";
 import { Icon } from "@/components/icons";
 import { LoadingButton } from "@/components/LoadingButton";
+import { ProviderLogo, hasProviderLogo } from "@/components/ProviderLogo";
 import {
   EmptyState,
   PageHeader,
@@ -16,8 +17,9 @@ import { useLocale } from "@/i18n";
 /** Admin single-active-provider management.
  *
  * Server-driven throughout: the provider list, active selection,
- * revision, cache stats and unsupported entries all come from
- * GET /api/admin/providers — nothing is hardcoded. Secrets are
+ * revision and cache stats all come from GET /api/admin/providers —
+ * nothing is hardcoded. Server-flagged unsupported entries are hidden
+ * from the list (activation against them fails closed server-side). Secrets are
  * write-only: inputs start empty, are never prefilled, and are
  * cleared on submit. Save/test/refresh never change activation;
  * only the Activate radio and Deactivate button do (both confirm).
@@ -364,7 +366,7 @@ export function ProvidersPage() {
       ) : (
         <div role="radiogroup" aria-label={t("providers.title")}
           style={{ display: "grid", gap: 12 }}>
-          {data.providers.map((entry) => (
+          {data.providers.filter((entry) => entry.supported).map((entry) => (
             <ProviderCard
               key={entry.provider_id}
               entry={entry}
@@ -633,10 +635,14 @@ function ProviderCard({ entry, active, activeName, revision, busy, setBusy, onRe
   const searchId = `prov-search-${id}`;
   const modelId = `prov-model-${id}`;
 
+  // Brand artwork sits on the fixed light svc-tile in both themes so
+  // dark marks stay legible; the Active badge + switch still mark selection.
+  const showLogo = hasProviderLogo(id);
   return (
     <Panel
-      icon={isActive ? "spark" : undefined}
-      tint={isActive ? "var(--shell-green-soft)" : undefined}
+      icon={isActive && !showLogo ? "spark" : undefined}
+      logo={showLogo ? <ProviderLogo id={id} /> : undefined}
+      tint={showLogo ? "#E8EDF3" : isActive ? "var(--shell-green-soft)" : undefined}
       title={entry.display}
       sub={kindLabel(entry.kind)}
       action={(

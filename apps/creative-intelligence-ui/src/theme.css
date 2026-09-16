@@ -915,6 +915,9 @@ button.secondary:disabled{opacity:.6;cursor:default}
  * keeps brand colors (exception to the teal-symbol rule). */
 .svc-tile{background:#E8EDF3;color:inherit}
 .svc-logo{width:22px;height:22px;display:block;flex:0 0 auto}
+/* Provider brand marks in card titles: same sizing contract as svc-logo,
+ * fixed light tile in both themes so artwork stays legible on dark cards. */
+.provider-logo{width:22px;height:22px;display:block;flex:0 0 auto}
 
 /* (3) Centered empty-state units: icon + title + body center as one
  * flex column with a responsive min-height so short panels still read

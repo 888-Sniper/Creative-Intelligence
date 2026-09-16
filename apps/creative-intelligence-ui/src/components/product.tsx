@@ -763,10 +763,13 @@ export function InfoTip({ label, text }: { label: string; text: string }) {
   );
 }
 
-export function Panel({ title, action, sub, icon, tint, children, style, headClassName }: {
+export function Panel({ title, action, sub, icon, logo, tint, children, style, headClassName }: {
   /** Optional: hero-style cards (§2) render no header at all. */
   title?: string; action?: React.ReactNode; sub?: string;
   icon?: string; tint?: string;
+  /** Optional brand mark rendered in the icon tile instead of the
+   *  `icon` glyph (e.g. a provider logo left of the title). */
+  logo?: React.ReactNode;
   children: React.ReactNode;
   /** Optional outer-style override (e.g. flex grow inside a rail
    *  stack so row members share a bottom edge). */
@@ -775,15 +778,15 @@ export function Panel({ title, action, sub, icon, tint, children, style, headCla
    *  control layout that only applies to one panel). */
   headClassName?: string;
 }) {
-  const showHead = Boolean(title || sub || icon || action);
+  const showHead = Boolean(title || sub || icon || logo || action);
   return (
     <section className="panel" style={style}>
       {showHead ? (
       <div className={headClassName ? `panel-head ${headClassName}` : "panel-head"}>
-        {icon ? (
+        {logo || icon ? (
           <span className="insight-ico" aria-hidden="true"
             style={{ background: tint ?? "var(--shell-blue-soft)", flex: "0 0 auto", marginRight: 2, alignSelf: "flex-start" }}>
-            <Icon name={icon} size={20} />
+            {logo ?? <Icon name={icon as string} size={20} />}
           </span>
         ) : null}
         {/* Titles start at the head top even beside taller actions:
@@ -792,7 +795,7 @@ export function Panel({ title, action, sub, icon, tint, children, style, headCla
           hugging its top edge. */}
         <div style={{
           flex: "1 1 auto", minWidth: 0, alignSelf: "flex-start",
-          ...(icon ? {
+          ...((icon || logo) ? {
             minHeight: 44, display: "flex",
             flexDirection: "column", justifyContent: "center",
           } : null),

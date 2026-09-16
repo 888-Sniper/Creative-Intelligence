@@ -69,8 +69,8 @@ tr.row-top td:first-child{border-left:3px solid var(--foap-primary)}
 .empty-state{padding:28px;text-align:center;color:var(--muted);font-size:14px}
 button.action{background:var(--brand-teal);color:var(--brand-teal-ink);border:0;border-radius:999px;padding:8px 16px;cursor:pointer;margin-right:8px;font-size:14px;font-weight:700}
 button.action:hover:not(:disabled){background:var(--brand-teal-hover)}
-button.action:active{background:var(--brand-teal-pressed)}
-button.action:active{background:var(--foap-primary-pressed)}
+button.action:active:not(:disabled){background:var(--brand-teal-pressed)}
+button.action:active:not(:disabled){background:var(--foap-primary-pressed)}
 button.secondary{background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:999px;padding:8px 16px;cursor:pointer;font-size:14px;font-weight:600}
 button.secondary:hover:not(:disabled){border-color:var(--foap-primary);color:var(--foap-primary)}
 button.chip{background:var(--foap-primary-faint);color:var(--fg);border:1px solid var(--foap-primary);border-radius:999px;padding:5px 12px;margin:2px;cursor:pointer;font-size:13px;font-weight:600}
@@ -182,7 +182,7 @@ video{max-width:100%;width:100%;border:1px solid var(--line);border-radius:var(-
 .login-link:hover{text-decoration:underline}
 .login-primary{display:block;width:100%;margin:0;padding:13px;border:none;border-radius:8px;background:var(--brand-teal);color:var(--brand-teal-ink);font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
 .login-primary:hover:not(:disabled){background:var(--brand-teal-hover)}
-.login-primary:active{background:var(--brand-teal-pressed)}
+.login-primary:active:not(:disabled){background:var(--brand-teal-pressed)}
 .login-mode{margin:14px auto 0}
 .login-separator{display:flex;align-items:center;gap:12px;margin:23px 0 0;color:var(--muted);font-size:13px}
 .login-separator::before,.login-separator::after{content:"";flex:1;height:1px;background:var(--line)}
@@ -332,7 +332,7 @@ body[data-density="compact"] .kpi-grid{grid-gap:8px;gap:8px}
 .btn-primary{display:inline-flex;align-items:center;justify-content:center;gap:8px;background:var(--brand-teal);color:var(--brand-teal-ink);border:0;border-radius:9px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;white-space:nowrap;min-height:34px}
 .btn-send{display:inline-flex;align-items:center;justify-content:center;background:var(--brand-teal);color:var(--brand-teal-ink);border:0;border-radius:10px;width:38px;height:38px;flex:0 0 auto;cursor:pointer;font-family:inherit}
 .btn-send:hover:not(:disabled){background:var(--brand-teal-hover)}
-.btn-send:active{background:var(--brand-teal-pressed)}
+.btn-send:active:not(:disabled){background:var(--brand-teal-pressed)}
 .btn-send:disabled{opacity:.65;cursor:default}
 .composer.ask-composer{align-items:center;background:var(--shell-card);border:1px solid var(--composer-line);border-radius:12px;padding:5px 5px 5px 12px;color:var(--shell-navy)}
 .composer.ask-composer svg{color:var(--composer-ico)}
@@ -351,7 +351,7 @@ body[data-density="compact"] .kpi-grid{grid-gap:8px;gap:8px}
 .composer.ask-composer input:focus{outline:none}
 .composer.ask-composer:focus-within{outline:2px solid var(--shell-teal);outline-offset:-1px;border-color:var(--shell-teal)}
 .btn-primary:hover:not(:disabled){background:var(--brand-teal-hover)}
-.btn-primary:active{background:var(--brand-teal-pressed)}
+.btn-primary:active:not(:disabled){background:var(--brand-teal-pressed)}
 .btn-primary:focus-visible{outline:2px solid var(--shell-teal-dark);outline-offset:2px}
 .btn-primary:disabled{opacity:.65;cursor:default}
 /* Primary-button spinner uses the dark label ink: a white spinner on
@@ -896,10 +896,10 @@ button.cell-main{background:none;border:0;padding:0;cursor:pointer;text-align:le
 /* (9) Secondary buttons a touch darker (bg + border) site-wide, with
  * distinguishable hover / focus / pressed / disabled states. */
 .btn-outline{background:var(--shell-bg);border-color:color-mix(in srgb,var(--shell-line) 72%,var(--shell-navy))}
-.btn-outline:active{filter:brightness(.94)}
+.btn-outline:active:not(:disabled){filter:brightness(.94)}
 .btn-outline:disabled{opacity:.6;cursor:default}
 button.secondary{background:var(--bg);border-color:color-mix(in srgb,var(--line) 72%,var(--fg))}
-button.secondary:active{filter:brightness(.94)}
+button.secondary:active:not(:disabled){filter:brightness(.94)}
 button.secondary:disabled{opacity:.6;cursor:default}
 
 /* (24) Gray icon tiles + teal symbols across metric cards, empty

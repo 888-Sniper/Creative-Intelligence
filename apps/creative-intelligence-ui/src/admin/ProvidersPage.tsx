@@ -656,9 +656,6 @@ function ProviderCard({ entry, active, activeName, revision, busy, setBusy, onRe
           label={isActive ? t("providers.activeBadge") : t("providers.useAsActive", { provider: entry.display })}
           onChange={(v) => { if (v) requestActivate(); else requestDeactivate(); }}
         />
-        <span style={{ fontSize: 13, fontWeight: 600 }}>
-          {isActive ? t("providers.activeBadge") : t("providers.useAsActive", { provider: entry.display })}
-        </span>
         {busy !== null ? (
           <span className="panel-sub" role="status" style={{ fontSize: 12 }}>
             {busy === "deactivate" ? t("providers.deactivating") : t("providers.activating")}

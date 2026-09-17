@@ -29,10 +29,10 @@ function ProviderMark({ provider }: { provider: string }) {
   return null;
 }
 
-// The employee login shows Google + Microsoft only. Apple/GitHub stay
+// The employee login shows Google only. Microsoft/Apple/GitHub stay
 // supported backend-side (WorkOS/providers untouched) but are hidden
 // from this internal login UI — no documented Foap-employee use.
-const EMPLOYEE_PROVIDERS = ["google", "microsoft"] as const;
+const EMPLOYEE_PROVIDERS = ["google"] as const;
 
 const CONNECTING_NAMES: Record<string, string> = {
   google: "Google",

@@ -70,7 +70,7 @@ test.describe("approved screens at desktop viewport", () => {
     await expect(page.getByText("Sign In To Your Employee Workspace.")).toBeVisible();
     await expect(page.getByRole("button", { name: "Sign In", exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Continue With Google" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Continue With Microsoft" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Continue With Microsoft" })).toHaveCount(0);
     await expectNoOverflow(page);
     await page.screenshot({ path: `${SHOTS}/01-login.png`, animations: "disabled" });
   });

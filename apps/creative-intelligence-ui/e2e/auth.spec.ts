@@ -37,7 +37,7 @@ test.describe("employee journey", () => {
     await expect(page.getByRole("textbox", { name: "Password" })).toHaveAttribute("type", "text");
     // Only employee SSO providers; code flow hidden behind its control.
     await expect(page.getByRole("button", { name: "Continue With Google" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Continue With Microsoft" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Continue With Microsoft" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Continue With Apple" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Continue With GitHub" })).toHaveCount(0);
     await expect(page.getByLabel("Verification Code")).toHaveCount(0);

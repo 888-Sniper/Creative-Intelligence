@@ -107,13 +107,13 @@ describe("AuthGate screens", () => {
     expect(screen.getByRole("button", { name: "Hide Password" })).toBeDefined();
   });
 
-  it("shows only Google and Microsoft on the employee login", async () => {
+  it("shows only Google on the employee login", async () => {
     mockMe(base);
     renderGate();
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Continue With Google" })).toBeDefined();
     });
-    expect(screen.getByRole("button", { name: "Continue With Microsoft" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Continue With Microsoft" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Continue With Apple" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Continue With GitHub" })).toBeNull();
   });
@@ -314,7 +314,6 @@ describe("login loading states", () => {
     });
     // Siblings disable but keep idle labels: no spinner leak.
     expect(screen.getByRole("button", { name: "Continue With Google" })).toBeDefined();
-    expect(screen.getByRole("button", { name: "Continue With Microsoft" })).toBeDefined();
     d.release(Response.json({}));
     await waitFor(() => {
       expect(screen.getByLabelText("Verification Code")).toBeDefined();
@@ -337,7 +336,7 @@ describe("login loading states", () => {
     await waitFor(() => {
       expect(screen.getByText("Verifying…")).toBeDefined();
     });
-    expect(screen.getByRole("button", { name: "Continue With Microsoft" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Continue With Google" })).toBeDefined();
     d.reject(new Error("network down"));
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Verify & Sign In" })).toBeDefined();
@@ -375,7 +374,6 @@ describe("login loading states", () => {
     });
     // OAuth siblings keep idle labels while email auth is in flight.
     expect(screen.getByRole("button", { name: "Continue With Google" })).toBeDefined();
-    expect(screen.getByRole("button", { name: "Continue With Microsoft" })).toBeDefined();
     d.release(new Response(JSON.stringify({ detail: { error: "Incorrect email or password." } }), {
       status: 409,
       headers: { "Content-Type": "application/json" },
@@ -396,8 +394,8 @@ describe("login loading states", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Connecting To Google…" })).toBeDefined();
     });
-    // Microsoft disables but never shows the spinner/label.
-    expect(screen.getByRole("button", { name: "Continue With Microsoft" })).toBeDefined();
+    // No other provider button exists to leak a spinner/label onto.
+    expect(screen.queryByRole("button", { name: "Continue With Microsoft" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Connecting To Microsoft…" })).toBeNull();
     d.release(Response.json({ url: "https://workos.test/authorize" }));
     // The auth URL resolved so navigation is underway: the spinner KEEPS

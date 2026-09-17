@@ -452,7 +452,7 @@ select:not([multiple]):not([size]){appearance:none;background-image:url("data:im
 /* KPI trend slot: a card with no comparison keeps nearly the same body
  * height as one with a trend row, so value baselines align across the
  * row without a tall empty gap under trend-less values. */
-.kpi-trend-slot{display:block;min-height:12px}
+.kpi-trend-slot{display:block;min-height:6px}
 
 .cols-2-even{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:4px}
 .cols-3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:4px}
@@ -475,7 +475,7 @@ select:not([multiple]):not([size]){appearance:none;background-image:url("data:im
 .dashboard .panel-head{flex-wrap:wrap;row-gap:8px;margin-bottom:12px}
 .dashboard .kpi-grid{margin:12px 0;gap:12px;align-items:stretch}
 .dashboard .kpi-grid>div{display:flex;min-width:0}
-.dashboard .kpi-grid .kpi-card{flex:1 1 auto;min-height:118px;padding:14px;gap:10px}
+.dashboard .kpi-grid .kpi-card{flex:1 1 auto;min-height:100px;padding:14px;gap:10px}
 .dashboard .dash-charts{grid-template-columns:minmax(0,1.08fr) minmax(0,.92fr);margin-top:0}
 .dashboard .dash-charts .panel-head{flex-direction:column;align-items:stretch}
 .dashboard .dash-charts .mini-selects{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center}

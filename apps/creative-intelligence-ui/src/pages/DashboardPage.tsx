@@ -580,7 +580,7 @@ export function DashboardPage() {
         <div className="panel"><EmptyState text={compareError} /></div>
       ) : (
         <div className="kpi-grid">
-          {[0, 1, 2, 3].map((i) => <Skeleton key={i} height={118} />)}
+          {[0, 1, 2, 3].map((i) => <Skeleton key={i} height={100} />)}
         </div>
       )}
       <div className="cols-2 dash-charts">

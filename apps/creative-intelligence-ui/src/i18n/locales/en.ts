@@ -615,7 +615,7 @@ export const en = {
     workbook: "Blank Workbook",
     ask: "Ask The Data",
     analyst: "AI Analyst",
-    providers: "Providers",
+    providers: "AI Providers",
     admin: "Admin",
     settings: "Settings",
     searchPlaceholder: "Search for campaigns, creatives, or insights…",
@@ -760,7 +760,7 @@ export const en = {
     demoToolsSub: "Synthetic dataset controls for demo environments — not production access management.",
   },
   providers: {
-    title: "Providers",
+    title: "AI Providers",
     sub: "One active AI provider serves Ask The Data and AI Analyst. Save a key, test it, refresh the catalog, then activate.",
     loading: "Loading providers…",
     bannerActiveTitle: "Active Provider: {provider} · {model}",

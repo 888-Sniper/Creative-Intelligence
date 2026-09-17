@@ -18,10 +18,10 @@ const NAV = [
   { to: "/workbook", key: "nav.workbook", icon: "workbook" },
   { to: "/ask", key: "nav.ask", icon: "chat" },
   { to: "/analyst", key: "nav.analyst", icon: "spark" },
+  { to: "/providers", key: "nav.providers", icon: "grid", admin: true },
 ] as const;
 
 const NAV_ACCOUNT = [
-  { to: "/providers", key: "nav.providers", icon: "spark", admin: true },
   { to: "/admin", key: "nav.admin", icon: "users", admin: true },
   { to: "/settings", key: "nav.settings", icon: "gear" },
 ] as const;
@@ -72,7 +72,7 @@ export function AppShell() {
           <img className="brand-mark" src="/foap-mark.png" alt="" aria-hidden="true" />
         </Link>
         <nav className="side-nav">
-          {NAV.map((n) => {
+          {NAV.filter((n) => !("admin" in n && n.admin) || me?.is_admin).map((n) => {
             const label = t(n.key);
             return (
               <NavLink key={n.to} to={n.to} end={"end" in n && n.end}

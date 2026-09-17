@@ -2,21 +2,24 @@ import { expect, test } from "@playwright/test";
 import { loginAs, readSeeds } from "./helpers";
 
 test.describe("providers admin page", () => {
-  test("admin sees Providers above Admin/Settings with logos and no unavailable cards", async ({
+  test("admin sees AI Providers below AI Analyst with logos and no unavailable cards", async ({
     page,
     context,
   }) => {
     const seeds = readSeeds();
     await loginAs(context, page, seeds.admin, "/providers");
-    await expect(page.getByRole("heading", { name: "Providers", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "AI Providers", exact: true })).toBeVisible();
 
     const names = await page.locator(".side-nav a").allTextContents();
-    const providersAt = names.indexOf("Providers");
+    const analystAt = names.indexOf("AI Analyst");
+    const providersAt = names.indexOf("AI Providers");
     const adminAt = names.indexOf("Admin");
     const settingsAt = names.indexOf("Settings");
+    expect(analystAt).toBeGreaterThanOrEqual(0);
     expect(providersAt).toBeGreaterThanOrEqual(0);
     expect(adminAt).toBeGreaterThanOrEqual(0);
     expect(settingsAt).toBeGreaterThanOrEqual(0);
+    expect(analystAt).toBeLessThan(providersAt);
     expect(providersAt).toBeLessThan(adminAt);
     expect(adminAt).toBeLessThan(settingsAt);
 
@@ -40,7 +43,7 @@ test.describe("providers admin page", () => {
     const seeds = readSeeds();
     await loginAs(context, page, seeds.employee, "/");
     await expect(page.getByRole("link", { name: "Settings" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Providers" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "AI Providers" })).toHaveCount(0);
     await expect(page.getByRole("link", { name: "Admin" })).toHaveCount(0);
     await page.goto("/providers");
     await expect(page.getByText("Admin Access Required.")).toBeVisible();

@@ -629,7 +629,7 @@ export const pl = {
     workbook: "Pusty skoroszyt",
     ask: "Zapytaj dane",
     analyst: "Analityk AI",
-    providers: "Dostawcy",
+    providers: "Dostawcy AI",
     admin: "Administracja",
     settings: "Ustawienia",
     searchPlaceholder: "Szukaj kampanii, kreacji lub insightów…",
@@ -774,7 +774,7 @@ export const pl = {
     demoToolsSub: "Sterowanie zbiorem syntetycznym dla środowisk demo — nie zarządzanie dostępem produkcyjnym.",
   },
   providers: {
-    title: "Dostawcy",
+    title: "Dostawcy AI",
     sub: "Jeden aktywny dostawca AI obsługuje Zapytaj dane i Analityka AI. Zapisz klucz, przetestuj go, odśwież katalog, a potem aktywuj.",
     loading: "Wczytywanie dostawców…",
     bannerActiveTitle: "Aktywny dostawca: {provider} · {model}",

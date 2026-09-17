@@ -615,7 +615,7 @@ export const es = {
     workbook: "Libro en blanco",
     ask: "Preguntar a los datos",
     analyst: "Analista de IA",
-    providers: "Proveedores",
+    providers: "Proveedores de IA",
     admin: "Administración",
     settings: "Ajustes",
     searchPlaceholder: "Buscar campañas, creatividades o ideas…",
@@ -760,7 +760,7 @@ export const es = {
     demoToolsSub: "Controles de datos sintéticos para entornos de demo, no gestión de acceso de producción.",
   },
   providers: {
-    title: "Proveedores",
+    title: "Proveedores de IA",
     sub: "Un único proveedor de IA activo atiende a Preguntar a los datos y al Analista de IA. Guarda una clave, pruébala, actualiza el catálogo y actívala.",
     loading: "Cargando proveedores…",
     bannerActiveTitle: "Proveedor activo: {provider} · {model}",

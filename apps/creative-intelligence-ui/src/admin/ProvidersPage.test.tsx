@@ -451,24 +451,25 @@ describe("ProvidersPage", () => {
 });
 
 describe("providers navigation guard", () => {
-  it("shows Providers above Admin and Settings for admins", async () => {
+  it("shows AI Providers below AI Analyst and above Admin and Settings for admins", async () => {
     setupFetch(freshState(true));
     renderShell();
-    const link = await screen.findByRole("link", { name: "Providers" });
+    const link = await screen.findByRole("link", { name: "AI Providers" });
     expect(link).toBeTruthy();
     expect(link.getAttribute("href")).toBe("/providers");
     const names = screen.getAllByRole("link").map((a) => a.textContent);
-    const order = ["Providers", "Admin", "Settings"].map((n) => names.indexOf(n));
+    const order = ["AI Analyst", "AI Providers", "Admin", "Settings"].map((n) => names.indexOf(n));
     expect(order.every((i) => i >= 0)).toBe(true);
     expect(order[0]).toBeLessThan(order[1]);
     expect(order[1]).toBeLessThan(order[2]);
+    expect(order[2]).toBeLessThan(order[3]);
   });
 
-  it("hides Providers and Admin for employees", async () => {
+  it("hides AI Providers and Admin for employees", async () => {
     setupFetch(freshState(false));
     renderShell();
     await screen.findByRole("link", { name: "Settings" });
-    expect(screen.queryByRole("link", { name: "Providers" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "AI Providers" })).toBeNull();
     expect(screen.queryByRole("link", { name: "Admin" })).toBeNull();
   });
 

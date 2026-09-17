@@ -30,6 +30,7 @@ import {
 import type { PublicEmployee } from "@/types/auth";
 import metaLogo from "@/assets/meta.svg";
 import tiktokLogo from "@/assets/tiktok.svg";
+import ga4Logo from "@/assets/ga4.svg";
 
 const ACCENTS: Record<string, { teal: string; dark: string; ink: string }> = {
   "Teal (Default)": { teal: "#00C7B2", dark: "#08786E", ink: "#182536" },
@@ -955,8 +956,8 @@ export function SettingsPage() {
             <span className="pill pill-ok">{t("settings.connections.unavailable")}</span>
           </div>
           <div className="insight">
-            <span className="insight-ico" aria-hidden="true">
-              <Icon name="report" size={18} />
+            <span className="insight-ico svc-tile" aria-hidden="true">
+              <img className="svc-logo" src={ga4Logo} alt="" />
             </span>
             <div style={{ flex: 1 }}>
               <h4>Google Analytics 4</h4>

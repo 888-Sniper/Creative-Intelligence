@@ -292,7 +292,7 @@ export function InsightsPage() {
                   icon="spark"
                   title={t("pageInsights.noPinnedTitle")}
                   text={t("pageInsights.noPinnedBody")}
-                  action={<Link className="btn-soft" to="/analyst">{t("pageInsights.openAnalyst")}</Link>}
+                  action={<Link className="btn-primary" to="/analyst">{t("pageInsights.openAnalyst")}</Link>}
                 />
               )
             ) : <Skeleton height={120} />}
@@ -331,7 +331,7 @@ export function InsightsPage() {
                   icon="bookmark"
                   title={t("pageInsights.noPinnedTitle")}
                   text={t("pageInsights.noPinnedBody")}
-                  action={<Link className="btn-soft" to="/analyst">{t("pageInsights.openAnalyst")}</Link>}
+                  action={<Link className="btn-primary" to="/analyst">{t("pageInsights.openAnalyst")}</Link>}
                 />
               )
             )}

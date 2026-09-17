@@ -1724,8 +1724,10 @@ def serve_media(media_id: str, request: Request,
 
 _ALLOWED_ASSET_EXTS = (".png", ".svg", ".ico", ".webp")
 # Hashed Vite build assets: safe to cache immutably, served from the
-# React dist directory only (never from the legacy tree).
-_ALLOWED_DIST_EXTS = (".js", ".css", ".woff2")
+# React dist directory only (never from the legacy tree). Image
+# extensions cover hashed `import` assets (e.g. provider logos).
+_ALLOWED_DIST_EXTS = (".js", ".css", ".woff2", ".png", ".svg", ".webp",
+                      ".jpg", ".jpeg", ".gif")
 
 
 _INLINE_SCRIPT_RE = re.compile(rb"<script>(.*?)</script>", re.DOTALL)

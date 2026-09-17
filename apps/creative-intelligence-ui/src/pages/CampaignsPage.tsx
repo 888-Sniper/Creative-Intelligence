@@ -418,6 +418,50 @@ export function CampaignsPage() {
               {metaClients.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
           </div>
+          <DateRangeField id="c-date" />
+          <div className="field">
+            <label htmlFor="c-spend">{t("campaigns.spendLabel")}</label>
+            <select id="c-spend" value={spendBand} onChange={(e) => setSpendBand(e.target.value)}>
+              <option value="all">{t("campaigns.spendAll")}</option>
+              <option value="under">{t("campaigns.spendUnder")}</option>
+              <option value="mid">{t("campaigns.spendMid")}</option>
+              <option value="over">{t("campaigns.spendOver")}</option>
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="c-kpi">{t("campaigns.kpiFocus")}</label>
+            <select id="c-kpi" {...selectProps("kpi")} value={filters.kpi === "all" ? "" : filters.kpi}>
+              <option value="">{t("filters.allKpis")}</option>
+              <option value="impressions">{kpiName("impressions")}</option>
+              <option value="clicks">{kpiName("clicks")}</option>
+              <option value="spend">{kpiName("spend")}</option>
+              <option value="conversions">{kpiName("conversions")}</option>
+              <option value="ctr">{kpiName("ctr")}</option>
+              <option value="cpa">{kpiName("cpa")}</option>
+              <option value="roas">{kpiName("roas")}</option>
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="c-objective">{t("filters.objective")}</label>
+            <select id="c-objective" {...selectProps("objective")}>
+              <option value="">{t("filters.allObjectives")}</option>
+              {metaObjectives.map((o) => <option key={o} value={o}>{o}</option>)}
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="c-team">{t("filters.team")}</label>
+            <select id="c-team" {...selectProps("team")}>
+              <option value="">{t("filters.allTeams")}</option>
+              {metaTeams.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="c-market">{t("filters.market")}</label>
+            <select id="c-market" {...selectProps("market")}>
+              <option value="">{t("filters.allMarkets")}</option>
+              {metaMarkets.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </div>
           <div className="field">
             {/* Status stays activity-derived (not the ad platform's own
               status); the explainer lives on an info icon beside the
@@ -443,50 +487,6 @@ export function CampaignsPage() {
               <option value="">{t("filters.allPlatforms")}</option>
               <option value="meta">Meta</option>
               <option value="tiktok">TikTok</option>
-            </select>
-          </div>
-          <div className="field">
-            <label htmlFor="c-objective">{t("filters.objective")}</label>
-            <select id="c-objective" {...selectProps("objective")}>
-              <option value="">{t("filters.allObjectives")}</option>
-              {metaObjectives.map((o) => <option key={o} value={o}>{o}</option>)}
-            </select>
-          </div>
-          <div className="field">
-            <label htmlFor="c-team">{t("filters.team")}</label>
-            <select id="c-team" {...selectProps("team")}>
-              <option value="">{t("filters.allTeams")}</option>
-              {metaTeams.map((t) => <option key={t} value={t}>{t}</option>)}
-            </select>
-          </div>
-          <div className="field">
-            <label htmlFor="c-market">{t("filters.market")}</label>
-            <select id="c-market" {...selectProps("market")}>
-              <option value="">{t("filters.allMarkets")}</option>
-              {metaMarkets.map((m) => <option key={m} value={m}>{m}</option>)}
-            </select>
-          </div>
-          <DateRangeField id="c-date" />
-          <div className="field">
-            <label htmlFor="c-spend">{t("campaigns.spendLabel")}</label>
-            <select id="c-spend" value={spendBand} onChange={(e) => setSpendBand(e.target.value)}>
-              <option value="all">{t("campaigns.spendAll")}</option>
-              <option value="under">{t("campaigns.spendUnder")}</option>
-              <option value="mid">{t("campaigns.spendMid")}</option>
-              <option value="over">{t("campaigns.spendOver")}</option>
-            </select>
-          </div>
-          <div className="field">
-            <label htmlFor="c-kpi">{t("campaigns.kpiFocus")}</label>
-            <select id="c-kpi" {...selectProps("kpi")} value={filters.kpi === "all" ? "" : filters.kpi}>
-              <option value="">{t("filters.allKpis")}</option>
-              <option value="impressions">{kpiName("impressions")}</option>
-              <option value="clicks">{kpiName("clicks")}</option>
-              <option value="spend">{kpiName("spend")}</option>
-              <option value="conversions">{kpiName("conversions")}</option>
-              <option value="ctr">{kpiName("ctr")}</option>
-              <option value="cpa">{kpiName("cpa")}</option>
-              <option value="roas">{kpiName("roas")}</option>
             </select>
           </div>
           <div className="field">

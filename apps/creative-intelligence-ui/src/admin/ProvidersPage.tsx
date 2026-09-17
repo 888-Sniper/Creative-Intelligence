@@ -132,17 +132,17 @@ function FocusTip({ label, children }: { label: string; children: React.ReactNod
 }
 
 function Badge({ tone, children }: { tone: "active" | "muted" | "warn"; children: React.ReactNode }) {
-  /* Status badges (Configured / Active) share the Apply Filters
-   * teal family with white text; the Stale Catalog warning keeps
-   * its amber semantics. Unconfigured cards show no badge — the
-   * header toggle carries activation instead. */
+  /* Status badges (Configured / Active) share the solid button teal
+   * with its dark ink label (the .btn-primary pairing); the Stale
+   * Catalog warning keeps its amber semantics. Unconfigured cards
+   * show no badge — the header toggle carries activation instead. */
   const status = tone !== "warn";
-  const bg = status ? "var(--shell-teal-dark)" : "var(--shell-amber-soft)";
+  const bg = status ? "var(--brand-teal)" : "var(--shell-amber-soft)";
   return (
     <span style={{
       display: "inline-flex", alignItems: "center", gap: 6,
       fontSize: 11.5, fontWeight: 700, letterSpacing: ".03em",
-      background: bg, color: status ? "#fff" : "var(--shell-navy)",
+      background: bg, color: status ? "var(--brand-teal-ink)" : "var(--shell-navy)",
       border: "1px solid var(--shell-line)", borderRadius: 999,
       padding: "3px 10px", whiteSpace: "nowrap",
     }}>

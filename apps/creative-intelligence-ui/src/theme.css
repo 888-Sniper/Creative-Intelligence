@@ -449,9 +449,10 @@ select:not([multiple]):not([size]){appearance:none;background-image:url("data:im
 @media (min-width:561px){
   .hide-desktop{display:none!important}
 }
-/* KPI trend slot: a card with no comparison keeps the same body height
- * as one with a trend row, so value baselines align across the row. */
-.kpi-trend-slot{display:block;min-height:22px}
+/* KPI trend slot: a card with no comparison keeps nearly the same body
+ * height as one with a trend row, so value baselines align across the
+ * row without a tall empty gap under trend-less values. */
+.kpi-trend-slot{display:block;min-height:12px}
 
 .cols-2-even{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:4px}
 .cols-3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:4px}
@@ -852,10 +853,10 @@ button.cell-main{background:none;border:0;padding:0;cursor:pointer;text-align:le
 .tnum{font-variant-numeric:tabular-nums}
 /* ============ Foap teal interaction states + status badges (§3/§4/§5) ============
  * Reference bright teal: --brand-teal (#00C7B2, the enabled-toggle teal).
- * Contrast audit (white text): #00C7B2 2.14:1 FAIL, #0A9183 3.9:1,
- * #08786E (--shell-teal-dark) 5.35:1 PASS. Dark-mode badges therefore use
- * --shell-teal-dark (same hue family, smallest adequate adjustment);
- * danger badges (.pill-bad) intentionally keep their red error semantics. */
+ * Status badges pair it with the dark ink label (7.2:1, the same
+ * pairing as .btn-primary and selected nav) so badges match the
+ * primary buttons in both themes; danger badges (.pill-bad)
+ * intentionally keep their red error semantics. */
 .side-nav a{transition:background .15s ease,color .15s ease}
 [data-theme="dark"] .side-nav a:hover{background:color-mix(in srgb,var(--brand-teal) 16%,transparent)}
 [data-theme="dark"] .side-nav a.active{background:var(--brand-teal);color:var(--brand-teal-ink);font-weight:600}
@@ -870,7 +871,7 @@ button.cell-main{background:none;border:0;padding:0;cursor:pointer;text-align:le
  * border/text shift above carries the affordance, never a tint fill. */
 .btn-outline:hover:not(:disabled){background:transparent}
 .pill{min-height:30px;box-sizing:border-box;padding:6px 14px;font-size:12.5px}
-[data-theme="dark"] .pill-ok,[data-theme="dark"] .pill-info{background:var(--shell-teal-dark);color:#fff}
+[data-theme="dark"] .pill-ok,[data-theme="dark"] .pill-info{background:var(--brand-teal);color:var(--brand-teal-ink)}
 /* List/Grid view toggle (§5): teal selected, subdued unselected in dark. */
 .view-btn{transition:background .15s ease,color .15s ease}
 .view-btn[aria-pressed="true"]{background:var(--shell-teal);color:#fff}
@@ -898,13 +899,11 @@ button.cell-main{background:none;border:0;padding:0;cursor:pointer;text-align:le
 .side-nav a.active svg{opacity:1}
 .side-nav a.active:hover{background:var(--brand-teal-hover)}
 
-/* (8) Status badges (Connected, Not Connected, Unavailable and
- * equivalents): Apply Filters teal family with white text. The solid
- * logo teal (#00C7B2) is 2.1:1 with white, so — like the existing
- * dark-mode rule — badges use the darker same-hue step
- * (--shell-teal-dark, 5.35:1 with white) with zero hue shift.
- * Danger/error badges keep their red semantics. */
-.pill-ok,.pill-info{background:var(--shell-teal-dark);color:#fff}
+/* (8) Status badges (Admin, Active, Connected and equivalents): the
+ * solid button teal with its dark ink label (7.2:1, the same pairing
+ * as .btn-primary and selected nav) so badges match the primary
+ * buttons. Danger/error badges keep their red semantics. */
+.pill-ok,.pill-info{background:var(--brand-teal);color:var(--brand-teal-ink)}
 .badge.good{background:var(--shell-teal-dark);color:#fff}
 
 /* (9) Secondary buttons a touch darker (bg + border) site-wide, with

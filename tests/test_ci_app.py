@@ -818,6 +818,10 @@ def test_react_build_served_when_present(client, tmp_path, monkeypatch):
     (dist / "index.html").write_text(
         "<html><head><title>Foap Creative Intelligence</title></head></html>")
     (assets / "app-abc123.js").write_text("console.log(1)")
+    (assets / "logo-xyz789.png").write_bytes(bytes.fromhex(
+        "89504e470d0a1a0a0000000d4948445200000001000000010806000000"
+        "1f15c4890000000d49444154789c626001000000ffff030000060005"
+        "57bfabd40000000049454e44ae426082"))
     monkeypatch.setattr(actions_mod, "REACT_INDEX", str(dist / "index.html"))
     monkeypatch.setattr(actions_mod, "REACT_ASSETS_DIR", str(assets))
     orig = actions_mod.react_index
@@ -834,6 +838,11 @@ def test_react_build_served_when_present(client, tmp_path, monkeypatch):
     assert r.status_code == 200
     assert "immutable" in r.headers.get("cache-control", "")
     assert client.get("/foap-logo.png").status_code == 200
+    # Hashed image imports (e.g. provider logos) serve from dist too.
+    r = client.get("/assets/logo-xyz789.png")
+    assert r.status_code == 200
+    assert r.headers.get("content-type", "").startswith("image/png")
+    assert "immutable" in r.headers.get("cache-control", "")
     r = client.get("/foap-mark.png")
     assert r.status_code == 200
     assert r.headers.get("content-type", "").startswith("image/png")

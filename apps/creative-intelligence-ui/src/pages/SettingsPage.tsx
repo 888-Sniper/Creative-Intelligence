@@ -1001,14 +1001,21 @@ export function SettingsPage() {
       </div>
 
       <div className="section-gap" />
-      <Panel title={t("settings.advanced.title")} sub={t("settings.advanced.sub")} icon="flask">
-        <div style={{ marginTop: 12 }}>
-          <RetentionPatterns />
+      <details className="adv-disclosure disclosure">
+        <summary>
+          <span className="adv-title">{t("settings.advanced.title")}</span>
+          <span className="panel-sub">{t("settings.advanced.sub")}</span>
+          <span className="disc-chev" aria-hidden="true"><Icon name="chev" size={15} /></span>
+        </summary>
+        <div style={{ marginTop: 10 }}>
+          <div style={{ marginTop: 12 }}>
+            <RetentionPatterns />
+          </div>
+          <div style={{ marginTop: 16 }}>
+            <CohortBuilder />
+          </div>
         </div>
-        <div style={{ marginTop: 16 }}>
-          <CohortBuilder />
-        </div>
-      </Panel>
+      </details>
 
       {toast ? <Toast message={toast} onClose={closeToast} /> : null}
     </div>

@@ -861,7 +861,8 @@ button.cell-main{background:none;border:0;padding:0;cursor:pointer;text-align:le
 [data-theme="dark"] .side-nav a.active{background:var(--brand-teal);color:var(--brand-teal-ink);font-weight:600}
 [data-theme="dark"] .side-nav a.active svg{opacity:1}
 [data-theme="dark"] .side-nav a.active:hover{background:color-mix(in srgb,var(--brand-teal) 86%,white)}
-#account-menu .menu-toggle:hover,.user-chip:hover{background:var(--shell-teal-soft)}
+#account-menu .menu-toggle:hover{background:transparent}
+.user-chip:hover{background:var(--shell-teal-soft)}
 [data-theme="dark"] .link-teal{color:var(--brand-teal)}
 [data-theme="dark"] .btn-outline:hover:not(:disabled){border-color:var(--brand-teal);color:var(--brand-teal)}
 .btn-outline{transition:background .15s ease,color .15s ease,border-color .15s ease}

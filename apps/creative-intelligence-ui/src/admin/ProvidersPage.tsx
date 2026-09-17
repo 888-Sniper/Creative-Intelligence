@@ -352,8 +352,8 @@ export function ProvidersPage() {
         </Panel>
       ) : (
         <Panel
-          icon="info"
-          tint="var(--shell-amber-soft)"
+          logo={<span style={{ display: "inline-flex", color: "#C3443D" }}><Icon name="info" size={20} /></span>}
+          tint="#FCECEA"
           title={t("providers.bannerPausedTitle")}
           sub={t("providers.bannerPausedBody")}
         >{null}</Panel>

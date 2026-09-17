@@ -229,7 +229,8 @@ describe("ProvidersPage", () => {
     setupFetch(state);
     renderPage();
     await screen.findByText("AI Is Paused");
-    expect(screen.getByText(/AI is not configured\. Contact your administrator\./)).toBeTruthy();
+    expect(screen.getByText(/No AI provider is active/)).toBeTruthy();
+    expect(screen.queryByText(/AI is not configured/)).toBeNull();
   });
 
   it("hides unsupported entries instead of listing them", async () => {

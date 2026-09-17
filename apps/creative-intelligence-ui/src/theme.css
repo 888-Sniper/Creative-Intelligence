@@ -698,7 +698,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13.5px}
 .panel-head.dialog-head{align-items:flex-start}
 .panel-head.dialog-head .panel-title{padding-top:6px}
 .icon-btn{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;flex:0 0 auto;background:transparent;border:1px solid transparent;border-radius:9px;color:var(--shell-muted);cursor:pointer;font-family:inherit}
-.icon-btn:hover:not(:disabled){background:var(--shell-teal-soft);color:var(--shell-navy);border-color:var(--shell-line)}
+.icon-btn:hover:not(:disabled){background:var(--shell-bg);color:var(--shell-navy);border-color:var(--shell-line)}
 .icon-btn:focus-visible{outline:2px solid var(--shell-teal);outline-offset:2px}
 /* Reset Defaults (§8): constant 2px outline (box-sizing keeps the
  * footprint identical across states — no layout jump), stronger

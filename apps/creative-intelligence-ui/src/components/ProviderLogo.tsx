@@ -40,8 +40,17 @@ export function hasProviderLogo(id: string): boolean {
   return Boolean(LOGOS[id]);
 }
 
+/** Per-id presentation tweaks. OpenRouter ships a lime-on-dark mark;
+ *  flattening it to black keeps the shape legible on the fixed light
+ *  tile, matching the monochrome sibling marks. */
+const FILTERS: Record<string, string> = {
+  openrouter: "brightness(0)",
+};
+
 export function ProviderLogo({ id, size = 22 }: { id: string; size?: number }) {
   const src = LOGOS[id];
   if (!src) return null;
-  return <img className="provider-logo" src={src} width={size} height={size} alt="" draggable={false} />;
+  const filter = FILTERS[id];
+  return <img className="provider-logo" src={src} width={size} height={size} alt="" draggable={false}
+    style={filter ? { filter } : undefined} />;
 }

@@ -713,9 +713,9 @@ export function DashboardPage() {
           </Panel>
           <Panel title={t("dashboard.retention.title")}>
             <div className="field" style={{ margin: "0 0 12px" }}>
-              <label htmlFor="dash-insight-type">{t("dashboard.retention.insightType")}</label>
               <select
                 id="dash-insight-type"
+                aria-label={t("dashboard.retention.insightType")}
                 value={tab}
                 onChange={(e) => setTab(e.target.value)}
                 style={{ width: "100%" }}

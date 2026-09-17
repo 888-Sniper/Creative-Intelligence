@@ -366,7 +366,7 @@ export function ProvidersPage() {
         />
       ) : (
         <div role="radiogroup" aria-label={t("providers.title")}
-          style={{ display: "grid", gap: 12 }}>
+          style={{ display: "grid", gap: 12, marginTop: 12 }}>
           {data.providers.filter((entry) => entry.supported).map((entry) => (
             <ProviderCard
               key={entry.provider_id}

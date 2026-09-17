@@ -132,7 +132,7 @@ export function EmailSignIn() {
             </LoadingButton>
           </>
         )}
-        <button type="button" className="login-link" onClick={() => switchMode("password")}>
+        <button type="button" className="login-link login-mode" onClick={() => switchMode("password")}>
           {t("auth.login.backToPassword")}
         </button>
         <p className="muted login-status" role="status">{message}</p>

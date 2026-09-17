@@ -18,7 +18,7 @@ const NAV = [
   { to: "/workbook", key: "nav.workbook", icon: "workbook" },
   { to: "/ask", key: "nav.ask", icon: "chat" },
   { to: "/analyst", key: "nav.analyst", icon: "spark" },
-  { to: "/providers", key: "nav.providers", icon: "grid", admin: true },
+  { to: "/providers", key: "nav.providers", icon: "lock", admin: true },
 ] as const;
 
 const NAV_ACCOUNT = [

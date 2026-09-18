@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "@/auth/AuthProvider";
 import { useLocale } from "@/i18n";
 import { Icon } from "@/components/icons";
@@ -50,7 +50,6 @@ export function VideoUploadCard() {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [busyDelete, setBusyDelete] = useState(false);
   const [busyCancel, setBusyCancel] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
 
   const statusName = (status: string): string => {
     const key = `dashboard.videoUpload.statusNames.${status}`;
@@ -169,20 +168,9 @@ export function VideoUploadCard() {
             <p className="panel-sub">{vu("dropHint")}</p>
           </div>
           <div className="vu-actions">
-            <button type="button" className="btn-primary" onClick={() => fileRef.current?.click()}>
+            <button type="button" className="btn-primary" onClick={() => setPanel({})}>
               <Icon name="plus" size={16} /> {vu("uploadButton")}
             </button>
-            <input
-              ref={fileRef}
-              type="file"
-              accept="video/mp4,video/quicktime,.mp4,.mov"
-              hidden
-              aria-label={vu("browseLabel")}
-              onChange={(e) => {
-                openForFile(e.target.files?.[0] ?? null);
-                e.target.value = "";
-              }}
-            />
           </div>
         </div>
         {cardMsg ? <p role="status" className="muted" style={{ marginBottom: 0 }}>{cardMsg}</p> : null}
@@ -292,7 +280,7 @@ export function VideoUploadCard() {
             })}
           </ul>
         ) : (
-          <EmptyState compact verbatim icon="play" title={vu("recentTitle")} text={vu("recentEmpty")} />
+          <EmptyState compact verbatim icon="play" text={vu("recentEmpty")} />
         )}
       </section>
 

@@ -533,6 +533,47 @@ class MediaUploadJSONBody(BaseModel):
     mime: str | None = Field(default=None, max_length=127)
 
 
+class VideoValidateBody(BaseModel):
+    media_id: int = Field(gt=0, le=2 ** 31)
+    draft_id: str | None = Field(default=None, max_length=64)
+
+
+class DraftCreateBody(BaseModel):
+    draft_id: str | None = Field(default=None, max_length=64)
+    creative_key: str = Field(default="", max_length=200)
+    media_id: int | None = Field(default=None, gt=0, le=2 ** 31)
+    dataset_id: str | None = Field(default=None, max_length=64)
+    spec: dict = Field(default_factory=dict)
+
+
+class DraftPatchBody(BaseModel):
+    status: str | None = Field(default=None, max_length=40)
+    spec: dict | None = None
+    dataset_version: str | None = Field(default=None, max_length=64)
+
+
+class DatasetImportBody(BaseModel):
+    draft_id: str = Field(min_length=1, max_length=64)
+    platform: str = Field(min_length=1, max_length=120)
+    filename: str = Field(default="", max_length=255)
+    csv: str | None = None
+    xlsx_b64: str | None = None
+    sheet: str | int | None = None
+
+    @model_validator(mode="after")
+    def _need_payload_body(self):
+        if not self.csv and not self.xlsx_b64:
+            raise ValueError(
+                "dataset import needs csv text or xlsx_b64 plus platform")
+        return self
+
+
+class MatchBody(BaseModel):
+    creative_key: str = Field(min_length=1, max_length=200)
+    method: str = Field(default="manual", max_length=40)
+    ad_rowids: list[int] = Field(default_factory=list, max_length=500)
+
+
 class ConnectorSheetsBody(BaseModel):
     platform: str = Field(min_length=1, max_length=120)
     url: str = Field(default="", max_length=2000)
@@ -1448,6 +1489,346 @@ async def creative_annotate(key: str, request: Request,
                              {"creative_key": unquote(key),
                               "annotation": body.annotation},
                              actor=who.id, request=request)
+
+
+# ---------------------------------------------------------------------------
+# Guided video-upload flow: drafts, validation, datasets, matches
+# ---------------------------------------------------------------------------
+#
+# Writes are owner-or-admin (mirrors the sync-job guard: without it
+# any active employee could rewrite another owner's draft, dataset
+# link, or confirmed match). Reads follow the media convention (any
+# active employee). Draft creation is idempotent on client-supplied
+# draft_id so retries and double clicks never duplicate drafts.
+
+
+def _draft_or_404(conn, draft_id: str) -> dict:
+    from creative_intel import drafts as drafts_mod
+    draft = drafts_mod.get_draft(conn, draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404,
+                            detail={"error": "Unknown upload draft."})
+    return draft
+
+
+def _draft_owner_or_403(conn, draft_id: str, who) -> dict:
+    draft = _draft_or_404(conn, draft_id)
+    if who.id != (draft.get("owner_employee_id") or "") \
+            and (who.role or "") != "admin":
+        raise HTTPException(status_code=403, detail={
+            "error": "Only the draft owner or an administrator can"
+                     " change this upload draft.",
+            "gate": "forbidden"})
+    return draft
+
+
+def _draft_view(conn, draft: dict) -> dict:
+    from creative_intel import drafts as drafts_mod
+    import json as _json
+    out = dict(draft)
+    try:
+        out["spec"] = _json.loads(draft.get("spec_json") or "{}")
+    except ValueError:
+        out["spec"] = {}
+    out.pop("spec_json", None)
+    out["videos"] = drafts_mod.list_videos(conn, draft["id"])
+    out["datasets"] = drafts_mod.list_datasets(conn, draft["id"])
+    return out
+
+
+@router.get("/api/videos/limits")
+def video_limits(_emp=Depends(get_current_employee)):
+    from creative_intel import video_validate
+    return video_validate.limits()
+
+
+@router.post("/api/videos/validate")
+async def video_validate(request: Request,
+                         conn=Depends(get_product_conn),
+                         who=Depends(get_current_employee)):
+    from creative_intel import drafts as drafts_mod
+    from creative_intel import video_validate
+    from ci_backend import actions as legacy
+    check_user_limit(request, who.id, *UPLOAD_RATE_LIMIT, "upload")
+    try:
+        body = VideoValidateBody.model_validate(await json_payload(request))
+    except Exception as exc:
+        raise HTTPException(status_code=409,
+                            detail={"error": "Invalid validation: %s" % exc})
+    try:
+        info = media.describe(conn, legacy._media_dir(), body.media_id)
+        path = media.file_path(conn, legacy._media_dir(), body.media_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail={"error": str(exc)})
+    loop = asyncio.get_running_loop()
+    verdict = await loop.run_in_executor(
+        _WORKERS, functools.partial(video_validate.validate, path,
+                                    info.get("filename", "")))
+    creative_key = ""
+    if body.draft_id:
+        _draft_owner_or_403(conn, body.draft_id, who)
+    if verdict["status"] == "valid":
+        try:
+            row = conn.execute(
+                "SELECT creative_key, sha256 FROM media WHERE id = ?",
+                (body.media_id,)).fetchone()
+            creative_key = row[0] if row else ""
+            vid = drafts_mod.add_video(
+                conn, body.draft_id or "", creative_key,
+                media_id=body.media_id, duration_s=verdict["duration_s"],
+                width=verdict["width"], height=verdict["height"],
+                sha256=row[1] if row else "",
+                validation=verdict)
+        except ValueError as exc:
+            raise _conflict(exc)
+    else:
+        vid = ""
+    paudit.audit_request(request, conn, employee_id=who.id,
+                         action="video_validated",
+                         target=creative_key or str(body.media_id),
+                         result="ok" if vid else "error")
+    return {"video_id": vid, "media_id": body.media_id,
+            "creative_key": creative_key,
+            "duration_s": verdict["duration_s"],
+            "width": verdict["width"], "height": verdict["height"],
+            "validation": verdict}
+
+
+@router.post("/api/drafts")
+async def draft_create(request: Request, conn=Depends(get_product_conn),
+                       who=Depends(get_current_employee)):
+    from creative_intel import drafts as drafts_mod
+    try:
+        body = DraftCreateBody.model_validate(await json_payload(request))
+    except Exception as exc:
+        raise HTTPException(status_code=409,
+                            detail={"error": "Invalid draft: %s" % exc})
+    try:
+        did = drafts_mod.create_draft(conn, who.id,
+                                      draft_id=body.draft_id or None,
+                                      spec=body.spec)
+    except ValueError as exc:
+        raise _conflict(exc)
+    draft = _draft_or_404(conn, did)
+    paudit.audit_request(request, conn, employee_id=who.id,
+                         action="draft_created", target=did)
+    return {"draft": _draft_view(conn, draft)}
+
+
+@router.get("/api/drafts")
+def draft_list(request: Request, conn=Depends(get_product_conn),
+               who=Depends(get_current_employee)):
+    from creative_intel import drafts as drafts_mod
+    _ = request
+    return {"drafts": [_draft_view(conn, d) for d in
+                       drafts_mod.list_drafts(conn, who.id)]}
+
+
+@router.get("/api/drafts/{draft_id}")
+def draft_get(draft_id: str, request: Request,
+              conn=Depends(get_product_conn),
+              _emp=Depends(get_current_employee)):
+    from urllib.parse import unquote
+    _ = request
+    return {"draft": _draft_view(conn, _draft_or_404(conn,
+                                                     unquote(draft_id)))}
+
+
+@router.patch("/api/drafts/{draft_id}")
+async def draft_patch(draft_id: str, request: Request,
+                      conn=Depends(get_product_conn),
+                      who=Depends(get_current_employee)):
+    from urllib.parse import unquote
+    from creative_intel import drafts as drafts_mod
+    did = unquote(draft_id)
+    _draft_owner_or_403(conn, did, who)
+    try:
+        body = DraftPatchBody.model_validate(await json_payload(request))
+    except Exception as exc:
+        raise HTTPException(status_code=409,
+                            detail={"error": "Invalid draft: %s" % exc})
+    try:
+        ok = drafts_mod.update_draft(conn, did, status=body.status,
+                                     spec=body.spec,
+                                     dataset_version=body.dataset_version)
+    except ValueError as exc:
+        raise _conflict(exc)
+    if not ok:
+        raise HTTPException(status_code=404,
+                            detail={"error": "Unknown upload draft."})
+    if body.spec is not None or body.dataset_version is not None:
+        # Material input change invalidates any prior confirmation
+        # and its dependent review (caller re-confirms afterwards).
+        drafts_mod.clear_matches(conn, did)
+    paudit.audit_request(request, conn, employee_id=who.id,
+                         action="draft_updated", target=did)
+    return {"draft": _draft_view(conn, _draft_or_404(conn, did))}
+
+
+@router.delete("/api/drafts/{draft_id}")
+def draft_delete(draft_id: str, request: Request,
+                 conn=Depends(get_product_conn),
+                 who=Depends(get_current_employee)):
+    from urllib.parse import unquote
+    did = unquote(draft_id)
+    _draft_owner_or_403(conn, did, who)
+    for table in ("matches", "videos", "datasets"):
+        conn.execute("DELETE FROM %s WHERE draft_id = ?" % table, (did,))
+    conn.execute("DELETE FROM drafts WHERE id = ?", (did,))
+    conn.commit()
+    paudit.audit_request(request, conn, employee_id=who.id,
+                         action="draft_deleted", target=did)
+    return {"ok": True}
+
+
+@router.post("/api/datasets/import")
+async def dataset_import(request: Request, conn=Depends(get_product_conn),
+                         who=Depends(get_current_employee)):
+    from creative_intel import drafts as drafts_mod
+    from creative_intel import ingest
+    check_user_limit(request, who.id, *UPLOAD_RATE_LIMIT, "upload")
+    try:
+        body = DatasetImportBody.model_validate(await json_payload(request))
+    except Exception as exc:
+        raise HTTPException(status_code=409,
+                            detail={"error": "Invalid dataset: %s" % exc})
+    _draft_owner_or_403(conn, body.draft_id, who)
+    try:
+        if body.xlsx_b64:
+            import base64
+            try:
+                blob = base64.b64decode(body.xlsx_b64, validate=True)
+            except Exception:
+                raise ValueError("xlsx_b64 is not valid base64")
+            result = ingest.import_xlsx_report(
+                conn, blob, body.platform, source="upload",
+                filename=body.filename or "", imported_by=who.id,
+                sheet=body.sheet)
+        else:
+            result = ingest.import_report(
+                conn, body.csv or "", body.platform, source="upload",
+                filename=body.filename or "", imported_by=who.id)
+    except ingest.AmbiguousSheet as exc:
+        raise HTTPException(status_code=409, detail={
+            "error": str(exc), "sheets": exc.sheets})
+    except ValueError as exc:
+        paudit.audit_request(request, conn, employee_id=who.id,
+                             action="dataset_imported",
+                             target=body.draft_id, result="error")
+        raise _conflict(exc)
+    dsid = drafts_mod.add_dataset(
+        conn, body.draft_id, body.filename or "",
+        rows=result["inserted"] + result["updated"],
+        version=result["import_id"])
+    drafts_mod.update_draft(conn, body.draft_id,
+                            dataset_version=result["import_id"])
+    # New input invalidates any prior confirmation.
+    drafts_mod.clear_matches(conn, body.draft_id)
+    paudit.audit_request(request, conn, employee_id=who.id,
+                         action="dataset_imported", target=dsid)
+    return {"dataset_id": dsid, "draft_id": body.draft_id,
+            "rows": result["inserted"] + result["updated"],
+            "version": result["import_id"],
+            "inserted": result["inserted"], "updated": result["updated"],
+            "quarantined": result["quarantined"],
+            "quarantine": result["quarantine"],
+            "sheet": result.get("sheet", ""),
+            "sheets": result.get("sheets", [])}
+
+
+_MATCH_COLUMNS = ("id", "import_id", "platform", "campaign", "adset",
+                  "ad_name", "creative_key", "spend", "impressions",
+                  "clicks", "link_clicks", "conversions", "video_views",
+                  "views_25", "views_50", "views_75", "views_100",
+                  "currency", "date", "client", "placement")
+
+
+def _match_records(conn, draft: dict, ad_rowids) -> list:
+    """Load frozen snapshots of the submitted ads rows, verifying
+    each one belongs to the draft's imported dataset version.
+    Browser-submitted identifiers are never trusted on their own."""
+    import json as _json
+    try:
+        wanted = [int(r) for r in (ad_rowids or [])]
+    except (TypeError, ValueError):
+        raise ValueError("ad_rowids must be ads row ids")
+    if not wanted:
+        raise ValueError("confirm at least one performance record")
+    version = draft.get("dataset_version") or ""
+    if not version:
+        raise ValueError("import performance data before matching")
+    cols = ", ".join(_MATCH_COLUMNS)
+    found = conn.execute(
+        "SELECT %s FROM ads WHERE id IN (%s)"
+        % (cols, ",".join("?" * len(wanted))), wanted).fetchall()
+    by_id = {row[0]: dict(zip(_MATCH_COLUMNS, row)) for row in found}
+    missing = [r for r in wanted if r not in by_id]
+    if missing:
+        raise ValueError("unknown performance records: %s" % missing[:5])
+    foreign = [r for r, snap in by_id.items()
+               if (snap.get("import_id") or "") != version]
+    if foreign:
+        raise ValueError("records %s are not from this draft's dataset"
+                         % foreign[:5])
+    return [_json.loads(_json.dumps(by_id[r], default=str))
+            for r in wanted]
+
+
+@router.post("/api/drafts/{draft_id}/matches/propose")
+async def match_propose(draft_id: str, request: Request,
+                        conn=Depends(get_product_conn),
+                        who=Depends(get_current_employee)):
+    from urllib.parse import unquote
+    from creative_intel import drafts as drafts_mod
+    did = unquote(draft_id)
+    _draft_owner_or_403(conn, did, who)
+    try:
+        body = MatchBody.model_validate(await json_payload(request))
+        records = _match_records(conn, _draft_or_404(conn, did),
+                                 body.ad_rowids)
+        drafts_mod.propose_match(conn, did, body.creative_key,
+                                 body.method, records)
+    except ValueError as exc:
+        raise _conflict(exc)
+    paudit.audit_request(request, conn, employee_id=who.id,
+                         action="match_proposed", target=did)
+    return {"match": drafts_mod.get_match(conn, did, body.creative_key)}
+
+
+@router.post("/api/drafts/{draft_id}/matches/confirm")
+async def match_confirm(draft_id: str, request: Request,
+                        conn=Depends(get_product_conn),
+                        who=Depends(get_current_employee)):
+    from urllib.parse import unquote
+    from creative_intel import drafts as drafts_mod
+    did = unquote(draft_id)
+    draft = _draft_owner_or_403(conn, did, who)
+    try:
+        body = MatchBody.model_validate(await json_payload(request))
+        records = _match_records(conn, draft, body.ad_rowids)
+        videos = drafts_mod.list_videos(conn, did)
+        import json as _json
+        valid = False
+        for video in videos:
+            try:
+                verdict = _json.loads(video.get("validation_json") or "{}")
+            except ValueError:
+                continue
+            if verdict.get("status") == "valid":
+                valid = True
+                break
+        if not valid:
+            raise ValueError("validate the video before confirming")
+        drafts_mod.confirm_match(conn, did, body.creative_key, who.id,
+                                 method=body.method, records=records)
+    except ValueError as exc:
+        paudit.audit_request(request, conn, employee_id=who.id,
+                             action="match_confirmed", target=did,
+                             result="error")
+        raise _conflict(exc)
+    paudit.audit_request(request, conn, employee_id=who.id,
+                         action="match_confirmed", target=did)
+    return {"match": drafts_mod.get_match(conn, did, body.creative_key)}
 
 
 @router.post("/api/{action:path}")

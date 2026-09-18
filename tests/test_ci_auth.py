@@ -141,6 +141,10 @@ def test_seed_admins_created_active_and_idempotent(session):
     assert dayana is not None
     assert (dayana.role, dayana.status) == ("admin", "active")
     assert (dayana.first_name, dayana.last_name) == ("Dayana", "Plaz")
+    simran = emp.find_employee(session, "", "888.sdhillon@gmail.com")
+    assert simran is not None
+    assert (simran.role, simran.status) == ("admin", "active")
+    assert (simran.first_name, simran.last_name) == ("Simran", "Dhillon")
     # Second boot changes nothing: no duplicates, no rewrites.
     assert emp.ensure_seed_admins(session) == 0
     assert dayana.id == emp.find_employee(

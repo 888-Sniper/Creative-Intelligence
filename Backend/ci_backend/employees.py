@@ -835,6 +835,8 @@ def admin_create(db: Session, admin_id: str, email: str, first_name: str = "",
 SEED_ADMINS = (
     {"email": "dayana.plaz@foap.com",
      "first_name": "Dayana", "last_name": "Plaz"},
+    {"email": "888.sdhillon@gmail.com",
+     "first_name": "Simran", "last_name": "Dhillon"},
 )
 
 

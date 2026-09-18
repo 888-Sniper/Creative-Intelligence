@@ -163,6 +163,11 @@ def create_app(db_path: str = "", settings: Settings | None = None,
     app.middleware("http")(access_log_middleware)
     app.state.ci_settings = settings
     bind_database(app, db_path)
+    from ci_backend import employees as _seed_emp
+    with app.state.ci_sessions() as _seed_db:
+        _seeded_admins = _seed_emp.ensure_seed_admins(_seed_db)
+    if _seeded_admins:
+        print("seed admins ensured: %d" % _seeded_admins)
     if providers is not None:
         app.state.ci_providers = providers
     _requeue_interrupted_jobs(db_path)

@@ -828,6 +828,41 @@ def admin_create(db: Session, admin_id: str, email: str, first_name: str = "",
     return emp
 
 
+# Code-seeded admins: staff who must survive ephemeral demo disks.
+# Recreated as active admins on boot when no row with that email exists;
+# an existing row is never modified, demoted, or resurrected, so a
+# deliberate revoke still holds until the database itself is wiped.
+SEED_ADMINS = (
+    {"email": "dayana.plaz@foap.com",
+     "first_name": "Dayana", "last_name": "Plaz"},
+)
+
+
+def ensure_seed_admins(db: Session) -> int:
+    """Create missing SEED_ADMINS rows as active admins. Additive-only."""
+    created = 0
+    now = utcnow()
+    for seed in SEED_ADMINS:
+        email = (seed.get("email") or "").strip().lower()
+        if not email or find_employee(db, "", email) is not None:
+            continue
+        row = Employee(
+            id=uuid.uuid4().hex, workos_user_id=None, email=email,
+            first_name=seed.get("first_name") or "",
+            last_name=seed.get("last_name") or "",
+            avatar_url="", role="admin", status="active",
+            created_at=now, approved_at=now, approved_by="seed",
+            last_login_at="", updated_at=now)
+        db.add(row)
+        _assign_employee_no(db, row)
+        db.flush()
+        _audit(db, row.id, row.id, "EMPLOYEE_CREATED", "", "admin/active")
+        created += 1
+    if created:
+        db.commit()
+    return created
+
+
 def _active_admins(db: Session, exclude_id: str = "") -> list[str]:
     query = select(Employee.id).where(
         Employee.role == "admin", Employee.status == "active")

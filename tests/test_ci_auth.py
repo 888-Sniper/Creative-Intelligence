@@ -135,6 +135,30 @@ def test_bootstrap_first_admin(session):
     assert (emp2.role, emp2.status) == ("employee", "pending")
 
 
+def test_seed_admins_created_active_and_idempotent(session):
+    assert emp.ensure_seed_admins(session) == len(emp.SEED_ADMINS)
+    dayana = emp.find_employee(session, "", "dayana.plaz@foap.com")
+    assert dayana is not None
+    assert (dayana.role, dayana.status) == ("admin", "active")
+    assert (dayana.first_name, dayana.last_name) == ("Dayana", "Plaz")
+    # Second boot changes nothing: no duplicates, no rewrites.
+    assert emp.ensure_seed_admins(session) == 0
+    assert dayana.id == emp.find_employee(
+        session, "", "dayana.plaz@foap.com").id
+
+
+def test_seed_admins_never_touch_existing_rows(session):
+    assert emp.ensure_seed_admins(session) == len(emp.SEED_ADMINS)
+    other = emp.admin_create(session, "root", "ada@foap.test", role="admin")
+    dayana = emp.find_employee(session, "", "dayana.plaz@foap.com")
+    # A deliberate revoke holds: ensure will not resurrect her.
+    emp.admin_set_status(session, other.id, dayana.id, "revoked",
+                         "EMPLOYEE_REVOKED")
+    assert emp.ensure_seed_admins(session) == 0
+    assert emp.find_employee(
+        session, "", "dayana.plaz@foap.com").status == "revoked"
+
+
 def test_preadded_email_links(session):
     admin = emp.admin_create(session, "root", "ada@foap.test")
     assert admin.status == "active" and admin.workos_user_id is None

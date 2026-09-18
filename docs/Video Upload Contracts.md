@@ -26,7 +26,13 @@ Fixtures: `fixtures/Video Upload Sample 720p.mp4` + `fixtures/Video Upload Sampl
 - `POST /api/videos/validate` (auth) -> `{video_id, duration_s, width, height, validation_json}`
 - `POST /api/datasets/import` (auth) -> `{dataset_id, rows, version}`
 - `POST /api/drafts` (auth, `{creative_key, media_id?, dataset_id?, spec}`) -> `{id, status}`
-- `POST /api/jobs/pipeline` (auth, `{draft_id, model_id}`) -> `{job_id, status}`
+- `POST /api/drafts/{id}/analyze` (auth, `{brand_terms?}`, AI-rate-limited)
+  -> `{job_id, status, model, provider, sends, storage, poll}`
+  (`poll` is the existing `/api/pipeline/jobs/{job_id}` status route —
+  no second job API; 409 when preconditions, readiness, or a live job
+  for the draft fail, with an honest reason);
+- `GET /api/drafts/{id}/analysis` (auth)
+  -> `{draft_id, status, creative_key, annotation|null, transcript}`
 - `GET /api/drafts/:id` -> `{id, status, progress, spec_json, result_json, error}`
 - `GET /media/by-creative/:key`, `GET /api/campaigns/meta`, `POST /api/reviews/mark`
 

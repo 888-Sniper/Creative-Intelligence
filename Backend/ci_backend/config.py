@@ -80,6 +80,15 @@ class Settings(BaseSettings):
     the production scheduler switch (e.g. 3600 for hourly).
     """
 
+    seed_admins: bool = False
+    """Recreate code-seeded staff admins (SEED_ADMINS) on every boot.
+
+    Intended for ephemeral demo hosting (Render Free): the database file
+    is wiped on each redeploy, so seeded admins would otherwise vanish.
+    Additive-only (missing rows are created, existing rows untouched).
+    Local and Oracle deployments keep this false (default).
+    """
+
     demo_seed: bool = False
     """Load the fixture/demo dataset on first boot of a fresh database.
 

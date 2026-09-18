@@ -27,6 +27,12 @@ services:
         value: /app/data
       - key: CREATIVE_INTEL_DEMO_SEED
         value: "false"
+      # Recreate code-seeded staff admins on every boot: the Free plan
+      # has no persistent disk, so the sqlite file (and any admin added
+      # through the UI) is wiped on each redeploy. Retire this when a
+      # persistent disk lands.
+      - key: CREATIVE_INTEL_SEED_ADMINS
+        value: "true"
       # Secrets below are placeholders: fill them in the Render
       # dashboard AFTER creating the service (never commit values).
       # The service stays unhealthy until the required ones are set.

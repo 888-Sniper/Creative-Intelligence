@@ -73,8 +73,8 @@ test("dashboard video upload: real file, data, match, honest analyze", async ({
   // file's real uploaded name).
   await page.keyboard.press("Escape");
   await expect(page.getByRole("heading", { name: "Recent uploads" })).toBeVisible();
-  await expect(page.getByText("Video Upload Sample 720p.mp4")).toBeVisible();
-  await expect(page.getByText("Draft")).toBeVisible();
+  await expect(page.getByText("Video Upload Sample 720p.mp4", { exact: true })).toBeVisible();
+  await expect(page.getByText("Draft", { exact: true })).toBeVisible();
 });
 
 test("video upload card stacks on a narrow viewport", async ({

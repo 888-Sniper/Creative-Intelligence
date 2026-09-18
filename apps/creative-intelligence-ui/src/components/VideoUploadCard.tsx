@@ -49,7 +49,7 @@ export function VideoUploadCard() {
   const [dragOver, setDragOver] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [busyDelete, setBusyDelete] = useState(false);
-  const [busyCancel, setBusyCancel] = useState(false);
+  const [busyCancelId, setBusyCancelId] = useState<string | null>(null);
 
   const statusName = (status: string): string => {
     const key = `dashboard.videoUpload.statusNames.${status}`;
@@ -103,11 +103,20 @@ export function VideoUploadCard() {
   // the list every few seconds so queued -> analyzing ->
   // ready_for_review transitions appear without a manual refresh.
   // The timer exists only while a live job is present.
-  const hasLiveJob = (drafts ?? []).some((d) => Boolean(d.live_job_id));
+  // A draft mid-pipeline polls even when its job row is momentarily
+  // unlisted (submit without a visible live_job_id yet): status is
+  // the backstop so queued/analyzing never goes stale on screen.
+  const hasLiveJob = (drafts ?? []).some((d) => Boolean(d.live_job_id)
+    || d.status === "queued" || d.status === "analyzing");
+  const reloadingRef = useRef(false);
   useEffect(() => {
     if (!hasLiveJob) return;
     const timer = window.setInterval(() => {
-      void reload();
+      if (reloadingRef.current) return;
+      reloadingRef.current = true;
+      void reload().finally(() => {
+        reloadingRef.current = false;
+      });
     }, 5000);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -153,8 +162,8 @@ export function VideoUploadCard() {
   /** Cancel a running analysis job, then return the draft to
    *  needs_confirmation so it never strands in "analyzing". */
   const cancelAnalysis = async (d: DraftView): Promise<void> => {
-    if (!d.live_job_id || busyCancel) return;
-    setBusyCancel(true);
+    if (!d.live_job_id || busyCancelId) return;
+    setBusyCancelId(d.id);
     try {
       await cancelAnalysisJob(d.live_job_id);
       await patchDraft(d.id, { status: "needs_confirmation" });
@@ -163,7 +172,7 @@ export function VideoUploadCard() {
     } catch (e) {
       setCardMsg(vu("errorGeneric", { error: e instanceof Error ? e.message : String(e) }));
     } finally {
-      setBusyCancel(false);
+      setBusyCancelId(null);
     }
   };
 
@@ -260,7 +269,7 @@ export function VideoUploadCard() {
                   <span className="pill pill-info">{statusName(d.status)}</span>
                   {d.live_job_id ? (
                     <button
-                      type="button" className="btn-outline btn-compact" disabled={busyCancel}
+                      type="button" className="btn-outline btn-compact" disabled={busyCancelId === d.id}
                       onClick={() => void cancelAnalysis(d)}
                     >
                       {vu("cancelAnalysisBtn")}

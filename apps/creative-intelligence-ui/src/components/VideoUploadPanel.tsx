@@ -138,24 +138,26 @@ export function FindingsView({
           version: String(block["version"] || "—"),
         })}
       </p>
-      <dl className="detail-list" style={{ marginTop: 8 }}>
+      <div className="detail-list" style={{ marginTop: 8 }}>
         <div>
-          <dt>{vu("measuredTitle")}</dt>
-          <dd>
+          <p className="panel-sub" style={{ fontWeight: 700 }}>{vu("measuredTitle")}</p>
+          <p className="panel-sub" style={{ marginTop: 0 }}>
             {vu("measuredSummary", {
               impressions: num(totals["impressions"]),
               clicks: num(totals["link_clicks"]),
               ctr: typeof ctr === "number" ? ctr : "—",
             })}
-          </dd>
+          </p>
         </div>
         {analysis.transcript ? (
           <div>
-            <dt>{vu("transcriptTitle")}</dt>
-            <dd>{analysis.transcript.slice(0, 280)}</dd>
+            <p className="panel-sub" style={{ fontWeight: 700 }}>{vu("transcriptTitle")}</p>
+            <p className="panel-sub" style={{ marginTop: 0, whiteSpace: "pre-wrap" }}>
+              {analysis.transcript}
+            </p>
           </div>
         ) : null}
-      </dl>
+      </div>
       {tests.length ? (
         <>
           <h4 className="panel-title" style={{ fontSize: 13, marginTop: 10 }}>
@@ -273,8 +275,11 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
     }
   };
 
-  // Bootstrap the draft on open: reuse the requested draft, else create
-  // one (idempotent on a recovered id) and pin it for recovery.
+  // Bootstrap the draft on open: reuse the requested draft, else the
+  // pinned in-progress draft for this account, else create one — so a
+  // new upload never orphans the draft the user was already filling.
+  // A pin is reused only when it still exists, belongs to this
+  // account, and is still in progress (finished drafts stay frozen).
   useEffect(() => {
     if (!open) return;
     openerRef.current = document.activeElement;
@@ -297,7 +302,28 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
     setStagedName("");
     const boot = async () => {
       try {
-        const existing = open.draftId ? await getDraft(open.draftId) : null;
+        let existing = open.draftId ? await getDraft(open.draftId) : null;
+        if (!existing && !open.draftId) {
+          try {
+            const pinned = window.localStorage.getItem(draftKey(employeeId));
+            if (pinned) {
+              const recovered = await getDraft(pinned);
+              const resumable = recovered.owner_employee_id === employeeId
+                && recovered.status !== "ready_for_review"
+                && recovered.status !== "reviewed";
+              existing = resumable ? recovered : null;
+            }
+          } catch {
+            existing = null;
+          }
+          if (!existing) {
+            try {
+              window.localStorage.removeItem(draftKey(employeeId));
+            } catch {
+              /* recovery pin is best-effort */
+            }
+          }
+        }
         const created = existing ?? await createDraft({});
         if (!live) return;
         try {
@@ -347,7 +373,7 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
       live = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, employeeId]);
 
   // Focus trap + Escape close; focus returns to the opener on unmount.
   useEffect(() => {
@@ -441,6 +467,22 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
       } catch (e) {
         setStatus(vu("errorGeneric", { error: e instanceof Error ? e.message : String(e) }));
       }
+    }
+  };
+
+  /** Creative-key edit writes through to the working spec and drops
+   *  any confirmed/proposed match: the server binds confirmations to
+   *  validated video keys, so a stale confirmation under the old key
+   *  must never reach Analyze (same pattern as client/campaign). */
+  const pickCreativeKey = (v: string): void => {
+    setCreativeKey(v);
+    const prevKey = (specRef.current.creative_key || "").trim();
+    if (prevKey && v.trim() !== prevKey && match) {
+      setMatch(null);
+      setSpec((prev) => ({ ...prev, creative_key: v.trim() || undefined, match: undefined }));
+      setStatus(vu("keyClearsMatchNote"));
+    } else if (v.trim() !== prevKey) {
+      setSpec((prev) => ({ ...prev, creative_key: v.trim() || undefined }));
     }
   };
 
@@ -810,7 +852,7 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
               <label htmlFor="vu-creative-key">{vu("creativeKeyLabel")}</label>
               <input
                 id="vu-creative-key" type="text" value={creativeKey}
-                onChange={(e) => setCreativeKey(e.target.value)}
+                onChange={(e) => pickCreativeKey(e.target.value)}
                 placeholder="video-upload-sample"
               />
               <p className="panel-sub">{vu("creativeKeyHint")}</p>
@@ -1031,7 +1073,10 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
               <p className="muted">{vu("errorGeneric", { error: rowsError })}</p>
             ) : candidates.length ? (
               <div style={{ marginTop: 10 }}>
-                <h4 className="panel-title" style={{ fontSize: 13 }}>{vu("candidatesTitle")}</h4>
+                <h4 className="panel-title" style={{ fontSize: 13 }}>
+                  {vu("candidatesTitle")} · {vu("candidatesCount", { count: candidates.length })}
+                </h4>
+                <p className="panel-sub">{vu("candidatesVisibleNote", { count: knownRowIds.length })}</p>
                 <div className="tbl-wrap">
                   <table className="tbl">
                     <thead>
@@ -1047,9 +1092,13 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
                       </tr>
                     </thead>
                     <tbody>
-                      {candidates.slice(0, 8).map((c, i) => {
+                      {candidates.map((c, i) => {
                         const id = (rows.length ? rows : snapshots)[i]?.id;
-                        const checked = id == null || knownRowIds.includes(id);
+                        // Every default-selected id is rendered: no slice,
+                        // so propose/confirm can never bind rows the user
+                        // never saw. Rows without an id cannot be proposed
+                        // and render unchecked, never silently selected.
+                        const checked = id != null && knownRowIds.includes(id);
                         return (
                           <tr key={`${c.ad_name}-${i}`}>
                             {rows.length ? (

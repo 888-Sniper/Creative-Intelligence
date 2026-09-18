@@ -513,7 +513,8 @@ def run_pipeline(conn, creative_key, providers, media=None, brand_terms=None,
                        if prior_row else None)
     except (ValueError, TypeError):
         prior_block = None
-    if isinstance(prior_block, dict) and "analysis" not in ann:
+    if isinstance(prior_block, dict) \
+            and not isinstance(ann.get("analysis"), dict):
         ann["analysis"] = prior_block
     save_annotation(conn, creative_key, ann)
     mean_conf = (ann["hook_confidence"] + ann["creator_confidence"]) / 2

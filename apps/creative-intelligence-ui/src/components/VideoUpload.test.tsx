@@ -267,6 +267,22 @@ describe("VideoUpload dashboard card", () => {
     expect(screen.getByText(/3 records|No match confirmed yet/)).toBeDefined();
   });
 
+  it("renders failed and cancelled drafts with text status", async () => {
+    dashboardBackend([
+      baseDraft({ id: "d-f", status: "failed" }),
+      baseDraft({ id: "d-c", status: "cancelled" }),
+    ]);
+    render(
+      <MemoryRouter>
+        <VideoUploadCard />
+      </MemoryRouter>,
+    );
+    await waitFor(() => {
+      expect(screen.getByText("Failed")).toBeDefined();
+    });
+    expect(screen.getByText("Cancelled")).toBeDefined();
+  });
+
   it("renders the same card copy under light and dark themes", async () => {
     for (const theme of ["light", "dark"]) {
       document.documentElement.setAttribute("data-theme", theme);
@@ -507,5 +523,66 @@ describe("VideoUpload guided panel", () => {
     expect(screen.getByText("6000 impressions · 150 link clicks · pooled CTR 2.5%.")).toBeDefined();
     expect(screen.getByText("Test an explicit CTA.")).toBeDefined();
     expect(screen.getByText("watch this")).toBeDefined();
+  });
+
+  it("reuses the pinned in-progress draft instead of minting a new one", async () => {
+    window.localStorage.setItem("ci-video-draft:e7", "d1");
+    const { calls } = panelBackend([
+      (m, u) => (u === "/api/drafts/d1/candidates" && m === "GET"
+        ? { version: "v1", candidates: [] }
+        : undefined),
+    ]);
+    render(
+      <MemoryRouter>
+        <VideoUploadPanel open={{}} employeeId="e7" onClose={() => undefined} />
+      </MemoryRouter>,
+    );
+    await waitFor(() => {
+      // The pinned draft resumes at its furthest stage (review here).
+      expect(screen.getByRole("heading", { name: "Review and analyze" })).toBeDefined();
+    });
+    // No new draft created: the pinned draft is resumed in place.
+    expect(calls.some((c) => c.method === "POST" && c.url === "/api/drafts")).toBe(false);
+    expect(window.localStorage.getItem("ci-video-draft:e7")).toBe("d1");
+  });
+
+  it("editing the creative key clears the confirmed match", async () => {
+    panelBackend([
+      (m, u) => (u === "/api/drafts/d1/candidates" && m === "GET"
+        ? {
+          version: "v1",
+          candidates: [
+            { id: 11, import_id: "v1", ad_name: "Sample Story V1", campaign: "Sample Launch" },
+            { id: 12, import_id: "v1", ad_name: "Sample Story V1", campaign: "Sample Launch" },
+          ],
+        }
+        : undefined),
+    ]);
+    render(
+      <MemoryRouter>
+        <VideoUploadPanel open={{ draftId: "d1", stage: "review" }} employeeId="e7" onClose={() => undefined} />
+      </MemoryRouter>,
+    );
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Confirm match" })).toBeDefined();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm match" }));
+    await waitFor(() => {
+      expect(screen.getByText("Match confirmed.")).toBeDefined();
+    });
+    // Back to the video stage and rename the key.
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    fireEvent.change(screen.getByLabelText("Creative key"), { target: { value: "renamed-key" } });
+    expect(screen.getByText("Changing the creative key clears the confirmed match.")).toBeDefined();
+    // Forward to review: the stale confirmation is gone, Analyze blocked.
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await waitFor(() => {
+      expect(screen.getByText("No match confirmed yet.")).toBeDefined();
+    });
+    expect(screen.getByRole("button", { name: "Analyze" }).hasAttribute("disabled")).toBe(true);
   });
 });

@@ -426,3 +426,69 @@ def test_concurrent_finisher_aborts_mid_run(tmp_path, monkeypatch):
         va.run(conn, snap, owner="emp-1", media_dir=store,
                providers=StubProviders(), queued_at="2000-01-01T00:00:00")
     conn.close()
+
+
+def test_check_snapshot_rejects_identity_swap(tmp_path):
+    """Recheck minor: swapping the video/media/key under a bound
+    snapshot aborts even when hashes and versions still match."""
+    conn, _store, did = bound_db(tmp_path)
+    snap = va.bind_snapshot(conn, did)
+    va.check_snapshot(conn, snap)  # unmodified baseline passes
+    for key, evil in (("video_id", "deadbeef"), ("media_id", 424242),
+                      ("creative_key", "someone-else")):
+        tampered = dict(snap)
+        tampered[key] = evil
+        with pytest.raises(va.AnalysisUnavailable):
+            va.check_snapshot(conn, tampered)
+    conn.close()
+
+
+def test_guard_not_stale_parses_mixed_offsets(tmp_path):
+    """Recheck minor: the late-result guard compares instants, not
+    raw strings, so mixed +00:00/Z stamps still order correctly."""
+    conn, _store, _did = bound_db(tmp_path)
+    key = "video-upload-sample"
+    conn.execute(
+        "INSERT INTO annotations (creative_key, schema_version,"
+        " annotation_json, updated_at) VALUES (?, 'v0', ?, '')",
+        (key, json.dumps(
+            {"analysis": {"at": "2026-03-01T12:00:00+00:00"}})))
+    conn.commit()
+    with pytest.raises(va.AnalysisUnavailable):
+        va._guard_not_stale(conn, key, "2026-03-01T11:00:00Z")
+    # The same instant is not newer: passes quietly.
+    va._guard_not_stale(conn, key, "2026-03-01T12:00:00+00:00")
+    conn.close()
+
+
+def test_intermediate_save_restores_null_analysis(tmp_path):
+    """Recheck minor: a structurer returning an explicit null
+    analysis block still keeps the prior stamp across the
+    intermediate save (not only a missing key)."""
+    conn, _store, _did = bound_db(tmp_path)
+    key = "video-upload-sample"
+    prior = {"version": "v1", "at": "2026-01-01T00:00:00+00:00",
+             "model": "test/test-frames"}
+    seed = creative_mod.blank_annotation()
+    seed["analysis"] = dict(prior)
+    conn.execute(
+        "INSERT INTO annotations (creative_key, schema_version,"
+        " annotation_json, updated_at) VALUES (?, 'v0', ?, '')",
+        (key, json.dumps(seed)))
+    conn.commit()
+
+    class NullLlm:
+        def structure(self, transcript, labels):
+            ann = creative_mod.blank_annotation()
+            ann["hook_type"] = "question"
+            ann["analysis"] = None
+            return ann
+
+    class NullProviders(StubProviders):
+        llm = NullLlm()
+
+    out = creative_mod.run_pipeline(
+        conn, key, NullProviders(),
+        media={"images": [b"fake-jpeg"], "image_times": [1.0]})
+    assert out["annotation"]["analysis"] == prior
+    conn.close()

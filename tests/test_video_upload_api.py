@@ -492,3 +492,69 @@ def test_validate_unit_rejections(tmp_path):
     with open(bad, "wb") as fh:
         fh.write(b"\x00\x00\x00\x18ftyp" + b"not a video" * 64)
     assert video_validate.validate(bad)["reason"] == "corrupt"
+
+
+def test_patch_rejects_worker_mirrored_status(tmp_path, monkeypatch):
+    """Recheck M1: queued/analyzing/failed are worker-mirrored; a
+    client PATCH claiming them is a 409, and the draft is untouched."""
+    db, http = make_app(tmp_path, monkeypatch)
+    authed(http, db, "owner@foap.test", role="employee")
+    did = http.post("/api/drafts", json={}).json()["draft"]["id"]
+    for forged in ("queued", "analyzing", "failed"):
+        resp = http.patch("/api/drafts/%s" % did,
+                          json={"status": forged})
+        assert resp.status_code == 409, (forged, resp.text)
+    draft = http.get("/api/drafts/%s" % did).json()["draft"]
+    assert draft["status"] == "draft"
+    ok = http.patch("/api/drafts/%s" % did, json={"status": "reviewed"})
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["draft"]["status"] == "reviewed"
+
+
+def test_validate_without_draft_mints_owned_draft(tmp_path, monkeypatch):
+    """Recheck M2/M6: draft-less validation binds the video to a new
+    caller-owned draft instead of 409ing on an orphan row."""
+    db, http = make_app(tmp_path, monkeypatch)
+    authed(http, db, "owner@foap.test", role="employee")
+    rec = upload_fixture_video(http)
+    resp = http.post("/api/videos/validate",
+                     json={"media_id": rec["id"]})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["video_id"] != ""
+    assert body["draft_id"] != ""
+    draft = http.get("/api/drafts/%s" % body["draft_id"]).json()["draft"]
+    assert [v["id"] for v in draft["videos"]] == [body["video_id"]]
+    # The minted draft is owned: a stranger cannot touch it.
+    http.headers.clear()
+    authed(http, db, "stranger@foap.test", role="employee")
+    assert http.patch("/api/drafts/%s" % body["draft_id"],
+                      json={"status": "cancelled"}).status_code == 403
+
+
+def test_delete_draft_cancels_bound_jobs(tmp_path, monkeypatch):
+    """Deleting a draft cancels its queued/running analysis jobs so
+    no orphan job lingers or mirrors onto a gone draft."""
+    import sqlite3
+    from creative_intel import jobs as jobs_mod
+    db, http = make_app(tmp_path, monkeypatch)
+    authed(http, db)
+    did = http.post("/api/drafts", json={}).json()["draft"]["id"]
+    conn = sqlite3.connect(db)
+    try:
+        jobs_mod.ensure(conn)
+        job = jobs_mod.enqueue(conn, "video_analysis",
+                               {"snapshot": {"draft_id": did}}, owner="")
+        conn.commit()
+        jid = job["id"]
+    finally:
+        conn.close()
+    assert http.delete("/api/drafts/%s" % did).status_code == 200
+    conn = sqlite3.connect(db)
+    try:
+        status = conn.execute(
+            "SELECT status FROM worker_jobs WHERE id=?",
+            (jid,)).fetchone()[0]
+    finally:
+        conn.close()
+    assert status == "cancelled"

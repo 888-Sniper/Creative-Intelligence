@@ -1591,9 +1591,17 @@ async def video_validate(request: Request,
     verdict = await loop.run_in_executor(
         _WORKERS, functools.partial(video_validate.validate, path,
                                     info.get("filename", "")))
+    # The media library is tenant-shared (reads are open to any
+    # active employee, same as GET /media/{id}): attribution lives
+    # on the draft, so every validated video is bound to a draft
+    # the caller owns. Without a draft_id we mint a caller-owned
+    # draft instead of leaving an orphan video row.
+    draft_id = body.draft_id
+    if draft_id:
+        _draft_owner_or_403(conn, draft_id, who)
+    elif verdict["status"] == "valid":
+        draft_id = drafts_mod.create_draft(conn, who.id)
     creative_key = ""
-    if body.draft_id:
-        _draft_owner_or_403(conn, body.draft_id, who)
     if verdict["status"] == "valid":
         try:
             row = conn.execute(
@@ -1601,15 +1609,14 @@ async def video_validate(request: Request,
                 (body.media_id,)).fetchone()
             creative_key = row[0] if row else ""
             vid = drafts_mod.add_video(
-                conn, body.draft_id or "", creative_key,
+                conn, draft_id, creative_key,
                 media_id=body.media_id, duration_s=verdict["duration_s"],
                 width=verdict["width"], height=verdict["height"],
                 sha256=row[1] if row else "",
                 validation=verdict)
             # A new video version invalidates any prior confirmation,
             # same as a spec or dataset edit.
-            if body.draft_id:
-                drafts_mod.clear_matches(conn, body.draft_id)
+            drafts_mod.clear_matches(conn, draft_id)
         except ValueError as exc:
             raise _conflict(exc)
     else:
@@ -1619,6 +1626,7 @@ async def video_validate(request: Request,
                          target=creative_key or str(body.media_id),
                          result="ok" if vid else "error")
     return {"video_id": vid, "media_id": body.media_id,
+            "draft_id": draft_id,
             "creative_key": creative_key,
             "duration_s": verdict["duration_s"],
             "width": verdict["width"], "height": verdict["height"],
@@ -1678,6 +1686,14 @@ async def draft_patch(draft_id: str, request: Request,
     except Exception as exc:
         raise HTTPException(status_code=409,
                             detail={"error": "Invalid draft: %s" % exc})
+    if body.status in drafts_mod.WORKER_MIRRORED_STATUSES:
+        # Pipeline state is worker-mirrored: a client setting it
+        # would forge analysis progress around the worker and its
+        # staleness guard. Submit/cancel flow through /analyze and
+        # the job-cancel endpoint instead.
+        raise HTTPException(status_code=409, detail={
+            "error": "Draft status %r is set by the analysis pipeline,"
+                     " not by clients." % body.status})
     try:
         ok = drafts_mod.update_draft(conn, did, status=body.status,
                                      spec=body.spec,
@@ -1701,8 +1717,29 @@ def draft_delete(draft_id: str, request: Request,
                  conn=Depends(get_product_conn),
                  who=Depends(get_current_employee)):
     from urllib.parse import unquote
+    from creative_intel import jobs as jobs_mod
     did = unquote(draft_id)
     _draft_owner_or_403(conn, did, who)
+    # Cancel every queued/running analysis bound to this draft
+    # first so no orphan worker job later mirrors status onto a
+    # gone draft (its staleness guard would drop the write, but
+    # the job row would linger as queued/running forever).
+    import json as _json
+    owner = "" if (who.role or "") == "admin" else who.id
+    try:
+        bound = conn.execute(
+            "SELECT id, payload_json FROM worker_jobs WHERE kind = ?"
+            " AND status IN ('queued', 'running')",
+            ("video_analysis",)).fetchall()
+    except Exception:
+        bound = []
+    for job_id, payload_json in bound:
+        try:
+            payload = _json.loads(payload_json or "{}")
+        except ValueError:
+            continue
+        if (payload.get("snapshot") or {}).get("draft_id") == did:
+            jobs_mod.cancel(conn, job_id, owner=owner)
     for table in ("matches", "videos", "datasets"):
         conn.execute("DELETE FROM %s WHERE draft_id = ?" % table, (did,))
     conn.execute("DELETE FROM drafts WHERE id = ?", (did,))

@@ -128,7 +128,8 @@ def _all_matches(conn, draft_id):
 def check_snapshot(conn, snapshot):
     """Re-resolve at job time: inputs must equal the bound snapshot."""
     fresh = bind_snapshot(conn, snapshot["draft_id"])
-    for key in ("video_sha256", "dataset_version", "match_confirmed_at"):
+    for key in ("video_id", "media_id", "creative_key", "video_sha256",
+                "dataset_version", "match_confirmed_at"):
         if (fresh.get(key) or "") != (snapshot.get(key) or ""):
             raise AnalysisUnavailable(
                 "inputs changed since Analyse was pressed (%s): "
@@ -162,8 +163,11 @@ def prepare_media(src_path, duration_s, want_audio=True):
             except Exception as exc:
                 raise AnalysisUnavailable("frame extraction failed at "
                                           "%ss: %s" % (t, exc))
-            images.append(blob if isinstance(blob, (bytes, bytearray))
-                          else open(dst, "rb").read())
+            if isinstance(blob, (bytes, bytearray)):
+                images.append(blob)
+            else:
+                with open(dst, "rb") as fh:
+                    images.append(fh.read())
         audio = None
         if want_audio:
             try:
@@ -438,6 +442,18 @@ def _analysis_at(conn, creative_key):
         return ""
 
 
+def _parse_stamp(value):
+    """Parsed datetime for an ISO analysis stamp, else None."""
+    try:
+        text = str(value or "").strip().replace("Z", "+00:00")
+        moment = datetime.datetime.fromisoformat(text)
+    except (ValueError, TypeError):
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=datetime.timezone.utc)
+    return moment
+
+
 def _guard_not_stale(conn, creative_key, queued_at):
     """A late result never overwrites a newer analysis."""
     if not queued_at:
@@ -450,7 +466,17 @@ def _guard_not_stale(conn, creative_key, queued_at):
         prior = (json.loads(row[0]).get("analysis") or {}).get("at", "")
     except ValueError:
         return
-    if prior and prior > queued_at:
+    if not prior:
+        return
+    queued_moment, prior_moment = _parse_stamp(queued_at), _parse_stamp(prior)
+    if queued_moment is not None and prior_moment is not None:
+        newer = prior_moment > queued_moment
+    else:
+        # Unparseable stamps: fail closed on string inequality only
+        # when the raw values differ and look ordered.
+        newer = prior > queued_at if isinstance(prior, str) \
+            and isinstance(queued_at, str) else False
+    if newer:
         raise AnalysisUnavailable(
             "a newer analysis already exists: discarding this late result")
 

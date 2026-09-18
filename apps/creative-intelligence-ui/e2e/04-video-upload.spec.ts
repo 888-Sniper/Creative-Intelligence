@@ -67,7 +67,10 @@ test("dashboard video upload: real file, data, match, honest analyze", async ({
   const analyze = page.getByRole("button", { name: "Analyze" });
   await expect(analyze).toBeEnabled();
   await analyze.click();
-  await expect(page.getByText(/Something went wrong/i)).toBeVisible();
+  // The endpoint's exact refusal reason (mock-mode gating from
+  // readiness()), not just the generic error wrapper: proves the
+  // refusal is honest.
+  await expect(page.getByText(/mock is active/i)).toBeVisible();
 
   // Recent uploads lists the draft with its real status (under the
   // file's real uploaded name).

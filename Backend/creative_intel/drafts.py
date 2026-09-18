@@ -29,6 +29,13 @@ DRAFT_STATUSES = (
     "expired",
 )
 
+# Statuses mirrored by the video_analysis worker itself (submit ->
+# queued -> analyzing -> ready_for_review/failed/cancelled). The
+# PATCH /api/drafts/{id} endpoint rejects these so a client can
+# never forge pipeline state around the worker and its staleness
+# guard; the worker keeps writing them via update_draft directly.
+WORKER_MIRRORED_STATUSES = frozenset({"queued", "analyzing", "failed"})
+
 # Match proposal methods, most reliable first. Fuzzy filename
 # suggestions may propose candidates but must never auto-confirm:
 # only confirm_match() with an explicit human action sets confirmed.

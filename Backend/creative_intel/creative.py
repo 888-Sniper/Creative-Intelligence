@@ -502,6 +502,20 @@ def run_pipeline(conn, creative_key, providers, media=None, brand_terms=None,
     errors = validate(ann)
     if errors:
         raise ValueError("structurer produced invalid v0: " + "; ".join(errors))
+    # Preserve a prior analysis stamp across the intermediate save:
+    # without this, job A finishing its pipeline would wipe job B's
+    # newer stamped result before A's own staleness check runs.
+    try:
+        prior_row = conn.execute(
+            "SELECT annotation_json FROM annotations WHERE creative_key=?",
+            (creative_key,)).fetchone()
+        prior_block = (json.loads(prior_row[0]).get("analysis")
+                       if prior_row else None)
+    except (ValueError, TypeError):
+        prior_block = None
+    if isinstance(prior_block, dict) \
+            and not isinstance(ann.get("analysis"), dict):
+        ann["analysis"] = prior_block
     save_annotation(conn, creative_key, ann)
     mean_conf = (ann["hook_confidence"] + ann["creator_confidence"]) / 2
     stages.append({"stage": "llm-structure", "confidence": round(mean_conf, 3),
@@ -509,4 +523,6 @@ def run_pipeline(conn, creative_key, providers, media=None, brand_terms=None,
     conn.execute("UPDATE creatives SET pipeline_json=? WHERE creative_key=?",
                  (json.dumps(stages), creative_key))
     conn.commit()
-    return {"creative_key": creative_key, "stages": stages, "annotation": ann}
+    return {"creative_key": creative_key, "stages": stages,
+            "annotation": ann, "frame_labels": labels,
+            "transcript": transcript}

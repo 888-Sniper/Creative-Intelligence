@@ -151,10 +151,83 @@ def run_analyst(conn, payload, owner, ctx, job_id=None):
     return out
 
 
+def run_video_analysis(conn, payload, owner, ctx, job_id=None):
+    """Guided-upload analysis off the event loop.
+
+    The payload snapshot (bound at Analyse-press time) is re-checked
+    inside: changed inputs abort honestly, and a late result never
+    overwrites a newer analysis. Draft status mirrors the lifecycle
+    (queued at submit, analyzing at start, ready_for_review / failed
+    / cancelled on the way out); cancellation flows through the
+    standard job path.
+    """
+    from creative_intel import drafts as drafts_mod
+    from creative_intel import video_analysis
+    payload = dict(payload or {})
+    # Resolve the snapshot first so even a cancel-before-start lands
+    # the draft in cancelled instead of stranding it in queued.
+    snapshot = payload.get("snapshot") or {}
+    if not snapshot:
+        raise ValueError("video_analysis needs a bound snapshot")
+    did = snapshot.get("draft_id") or ""
+    progress, cancelled = (None, None)
+    if job_id:
+        progress, cancelled = _control(conn, job_id)
+        progress(5, "start")
+        try:
+            _raise_if_cancelled(cancelled)
+        except jobs_mod.JobCancelled:
+            if did:
+                try:
+                    drafts_mod.update_draft(conn, did, status="cancelled")
+                except Exception:
+                    pass
+            raise
+    queued_at = ""
+    if job_id:
+        try:
+            row = jobs_mod.get(conn, job_id) or {}
+            queued_at = row.get("created_at") or ""
+        except Exception:
+            queued_at = ""
+    media_dir = (ctx or {}).get("media_dir")
+    try:
+        # The endpoint submits as queued; the worker owns the
+        # queued -> analyzing transition when work actually starts.
+        if did:
+            try:
+                drafts_mod.update_draft(conn, did, status="analyzing")
+            except Exception:
+                pass
+        return video_analysis.run(
+            conn, snapshot, owner=owner or "", media_dir=media_dir or "",
+            progress=progress, cancelled=cancelled, queued_at=queued_at)
+    except jobs_mod.JobCancelled:
+        # Owner cancel: the draft returns to cancelled (re-analysable),
+        # never strands in analyzing.
+        if did:
+            try:
+                drafts_mod.update_draft(conn, did, status="cancelled")
+            except Exception:
+                pass
+        raise
+    except Exception:
+        # ProviderUnavailable, timeouts, corrupt media, stale inputs:
+        # every failure path lands the draft in failed with the job
+        # error preserved on the job row. Never strand in analyzing.
+        if did:
+            try:
+                drafts_mod.update_draft(conn, did, status="failed")
+            except Exception:
+                pass
+        raise
+
+
 HANDLERS = {
     "pipeline": run_pipeline,
     "ask": run_ask,
     "analyst": run_analyst,
+    "video_analysis": run_video_analysis,
 }
 
 

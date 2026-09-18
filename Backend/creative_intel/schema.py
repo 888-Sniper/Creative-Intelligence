@@ -353,6 +353,57 @@ CREATE TABLE IF NOT EXISTS sample_files (
 );
 CREATE INDEX IF NOT EXISTS sample_files_batch
     ON sample_files (batch_id);
+-- Guided video-upload flow: owner-scoped drafts, validated videos,
+-- imported datasets, and confirmed video-to-record matches. The API
+-- layer enforces owner-or-admin writes; reads follow the media
+-- convention (any active employee). Draft status lifecycle lives in
+-- creative_intel.drafts (DRAFT_STATUSES); job execution lifecycle
+-- stays in worker_jobs.
+CREATE TABLE IF NOT EXISTS drafts (
+    id TEXT PRIMARY KEY,
+    owner_employee_id TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'draft',
+    spec_json TEXT NOT NULL DEFAULT '{}',
+    dataset_version TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS drafts_owner
+    ON drafts (owner_employee_id);
+CREATE TABLE IF NOT EXISTS videos (
+    id TEXT PRIMARY KEY,
+    draft_id TEXT NOT NULL DEFAULT '',
+    creative_key TEXT NOT NULL DEFAULT '',
+    media_id INTEGER NOT NULL DEFAULT 0,
+    duration_s REAL NOT NULL DEFAULT 0,
+    width INTEGER NOT NULL DEFAULT 0,
+    height INTEGER NOT NULL DEFAULT 0,
+    sha256 TEXT NOT NULL DEFAULT '',
+    validation_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS videos_draft ON videos (draft_id);
+CREATE INDEX IF NOT EXISTS videos_creative ON videos (creative_key);
+CREATE TABLE IF NOT EXISTS datasets (
+    id TEXT PRIMARY KEY,
+    draft_id TEXT NOT NULL DEFAULT '',
+    filename TEXT NOT NULL DEFAULT '',
+    rows INTEGER NOT NULL DEFAULT 0,
+    version TEXT NOT NULL DEFAULT '',
+    sha256 TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS datasets_draft ON datasets (draft_id);
+CREATE TABLE IF NOT EXISTS matches (
+    draft_id TEXT NOT NULL DEFAULT '',
+    creative_key TEXT NOT NULL DEFAULT '',
+    method TEXT NOT NULL DEFAULT '',
+    record_json TEXT NOT NULL DEFAULT '[]',
+    confirmed INTEGER NOT NULL DEFAULT 0,
+    confirmed_by TEXT NOT NULL DEFAULT '',
+    confirmed_at TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (draft_id, creative_key)
+);
 """
 
 # Natural dedup key for re-imports: the same fact from the same origin
@@ -576,6 +627,56 @@ def migrate(conn):
         " created_at TEXT NOT NULL DEFAULT '')")
     conn.execute("CREATE INDEX IF NOT EXISTS sample_files_batch"
                  " ON sample_files (batch_id)")
+    # Guided video-upload flow (see DDL above). CREATE IF NOT EXISTS:
+    # safe on every open; old databases gain empty tables, never rows.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS drafts ("
+        "id TEXT PRIMARY KEY,"
+        " owner_employee_id TEXT NOT NULL DEFAULT '',"
+        " status TEXT NOT NULL DEFAULT 'draft',"
+        " spec_json TEXT NOT NULL DEFAULT '{}',"
+        " dataset_version TEXT NOT NULL DEFAULT '',"
+        " created_at TEXT NOT NULL DEFAULT '',"
+        " updated_at TEXT NOT NULL DEFAULT '')")
+    conn.execute("CREATE INDEX IF NOT EXISTS drafts_owner"
+                 " ON drafts (owner_employee_id)")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS videos ("
+        "id TEXT PRIMARY KEY,"
+        " draft_id TEXT NOT NULL DEFAULT '',"
+        " creative_key TEXT NOT NULL DEFAULT '',"
+        " media_id INTEGER NOT NULL DEFAULT 0,"
+        " duration_s REAL NOT NULL DEFAULT 0,"
+        " width INTEGER NOT NULL DEFAULT 0,"
+        " height INTEGER NOT NULL DEFAULT 0,"
+        " sha256 TEXT NOT NULL DEFAULT '',"
+        " validation_json TEXT NOT NULL DEFAULT '{}',"
+        " created_at TEXT NOT NULL DEFAULT '')")
+    conn.execute("CREATE INDEX IF NOT EXISTS videos_draft"
+                 " ON videos (draft_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS videos_creative"
+                 " ON videos (creative_key)")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS datasets ("
+        "id TEXT PRIMARY KEY,"
+        " draft_id TEXT NOT NULL DEFAULT '',"
+        " filename TEXT NOT NULL DEFAULT '',"
+        " rows INTEGER NOT NULL DEFAULT 0,"
+        " version TEXT NOT NULL DEFAULT '',"
+        " sha256 TEXT NOT NULL DEFAULT '',"
+        " created_at TEXT NOT NULL DEFAULT '')")
+    conn.execute("CREATE INDEX IF NOT EXISTS datasets_draft"
+                 " ON datasets (draft_id)")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS matches ("
+        "draft_id TEXT NOT NULL DEFAULT '',"
+        " creative_key TEXT NOT NULL DEFAULT '',"
+        " method TEXT NOT NULL DEFAULT '',"
+        " record_json TEXT NOT NULL DEFAULT '[]',"
+        " confirmed INTEGER NOT NULL DEFAULT 0,"
+        " confirmed_by TEXT NOT NULL DEFAULT '',"
+        " confirmed_at TEXT NOT NULL DEFAULT '',"
+        " PRIMARY KEY (draft_id, creative_key))")
     ensure_sync_key(conn)
     conn.execute(
         "CREATE TABLE IF NOT EXISTS sync_runs ("

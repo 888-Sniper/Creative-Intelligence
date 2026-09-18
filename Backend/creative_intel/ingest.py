@@ -620,6 +620,73 @@ def record_import(conn, meta, platform, source="upload", filename="",
     return import_id
 
 
+class AmbiguousSheet(ValueError):
+    """Workbook holds several sheets and no explicit choice arrived."""
+
+    def __init__(self, sheets):
+        super().__init__("workbook has %d sheets; choose one: %s"
+                         % (len(sheets), ", ".join(sheets)))
+        self.sheets = list(sheets)
+
+
+def import_xlsx_report(conn, blob, platform, source="upload", filename="",
+                       imported_by="", sheet=None):
+    """Full xlsx path: sheet gate -> parse -> provenance -> upsert.
+
+    Same return contract as import_report, plus "sheet" (name) and
+    "sheets" (catalogue). A multi-sheet workbook without an explicit
+    sheet raises AmbiguousSheet instead of silently taking sheet 1.
+    """
+    from creative_intel import ooxml
+    blob = check_xlsx_blob(blob)
+    names = ooxml.sheet_names(blob)
+    if sheet is None:
+        if len(names) > 1:
+            raise AmbiguousSheet(names)
+        index = 0
+    else:
+        if isinstance(sheet, str) and sheet in names:
+            index = names.index(sheet)
+        else:
+            try:
+                index = int(sheet)
+            except (TypeError, ValueError):
+                raise ValueError("unknown workbook sheet %r" % (sheet,))
+            if not 0 <= index < len(names):
+                raise ValueError("unknown workbook sheet %r" % (sheet,))
+    dicts = ooxml.parse_xlsx(blob, sheet=index)
+    if not dicts:
+        raise ValueError("empty workbook: no data rows found")
+    headers = list(dicts[0].keys())
+    if not any(str(h or "").strip() for h in headers):
+        raise ValueError("empty workbook: no header row found")
+    locale, _ = detect_locale(headers, dicts)
+    rows, quarantined, meta = _rows_from_dicts(
+        headers, dicts, platform, source, locale)
+    meta["sheet"] = names[index]
+    counts = {"imported": 0, "quarantined": len(quarantined)}
+    import_id = record_import(conn, meta, platform, source, filename,
+                              imported_by, counts)
+    for row in rows:
+        row["import_id"] = import_id
+    stored = upsert_rows(conn, rows)
+    counts["imported"] = stored["inserted"] + stored["updated"]
+    conn.execute("UPDATE analyst_imports SET rows_imported=?,"
+                 " rows_quarantined=? WHERE id=?",
+                 (counts["imported"], counts["quarantined"], import_id))
+    conn.commit()
+    return {"import_id": import_id, "inserted": stored["inserted"],
+            "updated": stored["updated"], "quarantined": len(quarantined),
+            "quarantine": quarantined, "locale": meta["locale"],
+            "mapping": meta["mapping"], "unmapped": meta["unmapped"],
+            "sheet": names[index], "sheets": names}
+
+
+#: Largest accepted CSV payload (characters), mirroring the xlsx
+#: byte cap so a JSON-envelope-sized text cannot exhaust memory.
+MAX_CSV_CHARS = 20 * 1024 * 1024
+
+
 def import_report(conn, csv_text, platform, source="upload", filename="",
                   imported_by=""):
     """Full path: parse (locale-aware) -> provenance -> upsert.
@@ -628,6 +695,9 @@ def import_report(conn, csv_text, platform, source="upload", filename="",
     "quarantine", "locale", "mapping", "unmapped"}. Re-imports update
     facts instead of duplicating them; quarantined rows never load.
     """
+    if len(csv_text or "") > MAX_CSV_CHARS:
+        raise ValueError("csv too large: limit is %d MB"
+                         % (MAX_CSV_CHARS // (1024 * 1024)))
     rows, quarantined, meta = parse_csv_report_ex(
         csv_text, platform, source)
     counts = {"imported": 0, "quarantined": len(quarantined)}

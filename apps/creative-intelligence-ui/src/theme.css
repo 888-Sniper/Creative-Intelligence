@@ -1014,3 +1014,13 @@ button.secondary:disabled{opacity:.6;cursor:default}
  * roughly twice a standard filter column; span two tracks on wide
  * screens only so mobile stacking is untouched. */
 @media (min-width:1181px){.filter-grid>.field-date{grid-column:span 2}}
+/* Dashboard video upload (WP4): compact card head, drag-over state
+ * and step chips. Token-only surfaces; mobile stacks via the existing
+ * 640px breakpoint. Status is always text, never color-only. */
+.vu-head{display:flex;align-items:center;gap:14px}
+.vu-head>div:first-child{flex:1 1 auto;min-width:0}
+.vu-actions{flex:0 0 auto;display:flex;gap:8px;align-items:center}
+.vu-card.vu-drop-over{outline:2px dashed var(--shell-teal);outline-offset:-2px;background:var(--shell-teal-soft)}
+.vu-steps{flex-wrap:wrap}
+.vu-steps .chip-static[aria-current="step"]{font-weight:700}
+@media (max-width:640px){.vu-head{flex-direction:column;align-items:stretch}.vu-actions .btn-primary{width:100%}}

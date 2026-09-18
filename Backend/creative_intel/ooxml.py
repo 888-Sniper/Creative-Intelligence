@@ -499,8 +499,32 @@ def _text_of(node_xml):
     return re.sub(r"<[^>]+>", "", node_xml or "")
 
 
-def parse_xlsx(blob):
-    """Parse the first worksheet: first row -> headers, rest -> dicts."""
+def sheet_names(blob):
+    """Workbook sheet names in order (stdlib zip + regex)."""
+    try:
+        zf = zipfile.ZipFile(BytesIO(bytes(blob)))
+    except zipfile.BadZipFile:
+        raise ValueError("not an xlsx file (bad zip)")
+    try:
+        try:
+            book = zf.read("xl/workbook.xml").decode("utf-8")
+        except KeyError:
+            raise ValueError("xlsx has no workbook catalogue")
+        names = re.findall(r"<sheet\b[^>]*\bname=\"([^\"]+)\"", book)
+        if not names:
+            raise ValueError("xlsx has no worksheets")
+        return names
+    finally:
+        zf.close()
+
+
+def parse_xlsx(blob, sheet=0):
+    """Parse one worksheet: first row -> headers, rest -> dicts.
+
+    sheet selects the worksheet by 0-based index (default: first).
+    Callers must refuse an ambiguous multi-sheet workbook without an
+    explicit choice instead of silently taking the first sheet.
+    """
     try:
         zf = zipfile.ZipFile(BytesIO(bytes(blob)))
     except zipfile.BadZipFile:
@@ -517,7 +541,10 @@ def parse_xlsx(blob):
                  if re.fullmatch(r"xl/worksheets/sheet\d+\.xml", n)]
         if not names:
             raise ValueError("xlsx has no worksheets")
-        sheet = zf.read(sorted(names)[0]).decode("utf-8")
+        ordered = sorted(names)
+        if not isinstance(sheet, int) or not 0 <= sheet < len(ordered):
+            raise ValueError("xlsx sheet %r out of range" % (sheet,))
+        sheet = zf.read(ordered[sheet]).decode("utf-8")
     finally:
         zf.close()
     grid = {}

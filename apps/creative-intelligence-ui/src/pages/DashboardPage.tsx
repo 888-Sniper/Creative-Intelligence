@@ -4,6 +4,7 @@ import { api } from "@/api/client";
 import { useAuth } from "@/auth/AuthProvider";
 import { useFilters } from "@/state/FilterContext";
 import { useLocale } from "@/i18n";
+import { VideoUploadCard } from "@/components/VideoUploadCard";
 import { monthName } from "@/components/KpiTrend";
 import { GroupBars, RetentionCurve, TrendChart } from "@/components/charts";
 import { Icon } from "@/components/icons";
@@ -543,6 +544,10 @@ export function DashboardPage() {
           </>
         )}
       />
+      {/* Guided video upload: compact card plus recent uploads, below
+        the greeting and above the filters. Never touches Apply/Reset,
+        the greeting, KPIs, charts or layout. */}
+      <VideoUploadCard />
       {/* Team stays in the global scope but hides on Dashboard only.
         A hidden-yet-active scope is never silent: the chip below names
         it and clears it deliberately. */}

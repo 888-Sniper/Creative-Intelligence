@@ -69,9 +69,11 @@ test.describe("employee journey", () => {
 
   test("signed out sees login, employee sees dashboard, profile, logout", async ({ page, context }) => {
     await page.goto("/");
-    // Dark default with no saved choice: the pre-render script sets it
-    // before first paint (no white flash), React keeps it.
-    expect(await page.evaluate(() => document.documentElement.dataset["theme"] ?? "")).toBe("dark");
+    // Light default with no saved choice: the pre-render script leaves
+    // the theme unset before first paint (no dark flash), React keeps
+    // it. (Approved default flipped dark -> light; a stored "dark"
+    // still wins.)
+    expect(await page.evaluate(() => document.documentElement.dataset["theme"] ?? "")).toBe("");
     await expect(page.getByRole("heading", { name: "Welcome Back" })).toBeVisible();
     // No dashboard behind the gate.
     await expect(page.getByRole("link", { name: "Dashboard" })).toHaveCount(0);

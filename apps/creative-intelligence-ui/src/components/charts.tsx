@@ -35,9 +35,14 @@ export function TrendChart({ series, labels, height = 240, ticks = 5 }: {
   series: TrendSeries[]; labels: string[]; height?: number; ticks?: number;
 }) {
   const { t, locale } = useLocale();
-  const W = 640, H = 240, PL = 40, PB = 24, PT = 8, PR = 40;
+  // Full-bleed plot: gridlines start at the panel's left edge (aligned
+  // with the card title) instead of behind a label gutter. Tick values
+  // float just inside the plot area; the right gutter exists only when
+  // a right-axis series is actually drawn.
+  const W = 640, H = 240, PL = 4, PB = 24, PT = 14;
   const leftMax = Math.max(1, ...series.filter((s) => (s.axis ?? "left") === "left").flatMap((s) => s.points));
   const rightValues = series.filter((s) => s.axis === "right").flatMap((s) => s.points);
+  const PR = rightValues.length ? 40 : 4;
   const rightMax = rightValues.length ? Math.max(1, ...rightValues) : 1;
   const top = niceMax(leftMax);
   const rightTop = niceMax(rightMax);
@@ -60,7 +65,7 @@ export function TrendChart({ series, labels, height = 240, ticks = 5 }: {
       {grid.map((g) => (
         <g key={g}>
           <line x1={PL} x2={W - PR} y1={y(g)} y2={y(g)} stroke="#E5EAF1" strokeWidth={1} />
-          <text x={PL - 7} y={y(g) + 4} textAnchor="end" fontSize={10.5} fill="#8CA0B5">
+          <text x={PL + 5} y={y(g) - 4} textAnchor="start" fontSize={10.5} fill="#8CA0B5">
             {fmtAxis(g, locale)}
           </text>
         </g>

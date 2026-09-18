@@ -94,6 +94,29 @@ def run_once(db_path, settings, media_dir=None):
         conn.close()
 
 
+def daemon(db_path, settings, poll=5.0, stop=None):
+    """Run the claim-and-dispatch loop until stop is set. Lets a host
+    process (e.g. the web app on single-service deploys) run the
+    worker in-process instead of provisioning a second service."""
+    import threading as _threading
+    halt = stop or _threading.Event()
+    conn = _connect(db_path)
+    try:
+        revived = jobs.requeue_interrupted(conn)
+    finally:
+        conn.close()
+    if revived:
+        print("requeued %d interrupted job(s)" % revived, flush=True)
+    while not halt.is_set():
+        try:
+            did_work = run_once(db_path, settings)
+        except Exception as exc:  # noqa: BLE001 - worker must not die
+            print("worker loop error: %s" % exc, flush=True)
+            did_work = False
+        if not did_work:
+            halt.wait(max(0.5, poll))
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--db", default="")

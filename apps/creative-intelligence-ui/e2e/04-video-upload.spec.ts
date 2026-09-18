@@ -80,6 +80,37 @@ test("dashboard video upload: real file, data, match, honest analyze", async ({
   await expect(page.getByText("Draft", { exact: true })).toBeVisible();
 });
 
+test("video remove drops the binding and never resurrects", async ({
+  page, context,
+}) => {
+  const seeds = readSeeds();
+  await loginAs(context, page, seeds.employee, "/");
+  await page.getByRole("button", { name: /Upload video/ }).click();
+  await expect(
+    page.getByRole("heading", { name: "Upload your video" }),
+  ).toBeVisible();
+  await page.getByLabel("Creative key").fill("video-upload-sample");
+  await page.locator("#vu-file").setInputFiles(MP4);
+  await page.getByRole("dialog").getByRole("button", { name: "Upload video" }).click();
+  await expect(page.getByText(/Video valid — 1280×720, 15s/)).toBeVisible();
+  // Explicit backend removal: the preview and stored binding go.
+  await page.getByRole("button", { name: "Remove", exact: true }).click();
+  await expect(page.getByTestId("vu-video-preview")).toBeHidden();
+  // Reopen the pinned draft: the video stays gone (no resurrection
+  // from the stored relationship), and re-upload works on the draft.
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("heading", { name: "Recent uploads" })).toBeVisible();
+  await page.getByRole("button", { name: "Resume" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Upload your video" }),
+  ).toBeVisible();
+  await expect(page.getByTestId("vu-video-preview")).toBeHidden();
+  await page.locator("#vu-file").setInputFiles(MP4);
+  await page.getByRole("dialog").getByRole("button", { name: "Upload video" }).click();
+  await expect(page.getByText(/Video valid — 1280×720, 15s/)).toBeVisible();
+  await expect(page.getByTestId("vu-video-preview")).toBeVisible();
+});
+
 test("video upload card stacks on a narrow viewport", async ({
   page, context,
 }) => {

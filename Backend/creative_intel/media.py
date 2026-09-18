@@ -276,6 +276,31 @@ def _link_source_url(conn, creative_key, rid):
     creative_mod.save_annotation(conn, creative_key, ann)
 
 
+def delete_media(conn, store, rid):
+    """Delete a media row and its stored file. Returns True when a
+    row was removed. Callers must first establish the row is
+    unreferenced (shared assets are never deleted blindly); a
+    missing file does not fail the row delete."""
+    try:
+        rid = int(rid)
+    except (TypeError, ValueError):
+        raise ValueError("bad media id")
+    ensure_schema(conn)
+    row = conn.execute("SELECT stored_name FROM media WHERE id=?",
+                       (rid,)).fetchone()
+    if not row:
+        return False
+    stored = row[0] or ""
+    conn.execute("DELETE FROM media WHERE id=?", (rid,))
+    conn.commit()
+    if stored and os.path.basename(stored) == stored:
+        try:
+            os.unlink(os.path.join(store, stored))
+        except OSError:
+            pass
+    return True
+
+
 def _locate(conn, store, rid):
     """(path, mime, filename) for GET /media/<id>; 404-style ValueError."""
     try:

@@ -461,6 +461,103 @@ def test_guard_not_stale_parses_mixed_offsets(tmp_path):
     conn.close()
 
 
+def test_missing_metrics_not_zero_and_currency_split(tmp_path):
+    """Audit A4: blank-at-import metrics never read as zero, and
+    mixed-currency spend is kept per-currency, never summed."""
+    _conn, _store, _did = bound_db(tmp_path)
+    records = [
+        {"id": 1, "impressions": 6000, "link_clicks": 150,
+         "spend": 100.0, "currency": "USD", "missing_json": "[]"},
+        {"id": 2, "impressions": 4000, "link_clicks": 0,
+         "spend": 50.0, "currency": "USD",
+         "missing_json": "[\"link_clicks\"]"},
+        {"id": 3, "impressions": 2000, "link_clicks": 40,
+         "spend": 100.0, "currency": "MYR", "missing_json": "[]"},
+    ]
+    measured = va.measured_from_records(records)
+    # Record 2's unknown clicks are excluded: 190/8000 = 2.38%.
+    assert measured["pooled_link_ctr_pct"] == 2.38
+    assert measured["totals"]["impressions"] == 8000
+    assert measured["totals"]["link_clicks"] == 190
+    # Incompatible spend is not combined.
+    assert measured["totals"]["spend"] == 0.0
+    assert measured["coverage"]["spend_by_currency"] == {
+        "USD": 150.0, "MYR": 100.0}
+    assert any("per-currency" in w for w in measured["warnings"])
+    # The control case is untouched: complete data still pools.
+    control = va.measured_from_records([
+        {"id": 1, "impressions": 6000, "link_clicks": 150,
+         "spend": 60.0, "missing_json": "[]"}])
+    assert control["pooled_link_ctr_pct"] == 2.5
+    assert control["totals"]["spend"] == 60.0
+    _conn.close()
+
+
+def test_worker_daemon_stops_and_flags(tmp_path, monkeypatch):
+    """Audit A8: the in-proc worker loop honours stop, and the web
+    entrypoint enables it on hosted deploys (or explicit flag) only."""
+    import threading
+    from ci_backend import main as main_mod
+    from ci_backend import worker as worker_mod
+    db = str(tmp_path / "w.db")
+    conn = sqlite3.connect(db)
+    schema.init_db(conn)
+    conn.close()
+    stop = threading.Event()
+    stop.set()
+    worker_mod.daemon(db, Settings(), poll=0.1, stop=stop)
+    monkeypatch.delenv("CREATIVE_INTEL_RUN_WORKER", raising=False)
+    monkeypatch.delenv("PORT", raising=False)
+    assert main_mod._worker_enabled() is False
+    monkeypatch.setenv("PORT", "8080")
+    assert main_mod._worker_enabled() is True
+    monkeypatch.setenv("CREATIVE_INTEL_RUN_WORKER", "0")
+    assert main_mod._worker_enabled() is False
+    monkeypatch.setenv("CREATIVE_INTEL_RUN_WORKER", "true")
+    assert main_mod._worker_enabled() is True
+
+
+@NEEDS_FFMPEG
+def test_stale_abort_restores_prior_rows(tmp_path, monkeypatch):
+    """Audit A6: a job aborted as stale leaves the pre-run
+    transcript and annotation behind — never partial output."""
+    conn, store, did = bound_db(tmp_path)
+    snap = va.bind_snapshot(conn, did)
+    key = "video-upload-sample"
+    conn.execute("INSERT INTO creatives (creative_key, transcript)"
+                 " VALUES (?, ?) ON CONFLICT (creative_key) DO UPDATE"
+                 " SET transcript = excluded.transcript",
+                 (key, "prior words"))
+    conn.execute("INSERT INTO annotations (creative_key, schema_version,"
+                 " annotation_json, updated_at) VALUES (?, 'v0', ?, '')"
+                 " ON CONFLICT (creative_key) DO UPDATE SET"
+                 " annotation_json = excluded.annotation_json",
+                 (key, json.dumps({"status": "auto",
+                                   "analysis": {"version": "v0"}})))
+    conn.commit()
+    real_at = va._analysis_at
+    calls = {"n": 0}
+
+    def fake_at(conn, key):
+        calls["n"] += 1
+        if calls["n"] > 1:
+            return "2999-01-01T00:00:00"  # B finished mid-run
+        return real_at(conn, key)
+
+    monkeypatch.setattr(va, "_analysis_at", fake_at)
+    with pytest.raises(va.AnalysisUnavailable):
+        va.run(conn, snap, owner="emp-1", media_dir=store,
+               providers=StubProviders(), queued_at="2000-01-01T00:00:00")
+    assert conn.execute("SELECT transcript FROM creatives"
+                        " WHERE creative_key=?", (key,)).fetchone()[0] \
+        == "prior words"
+    assert json.loads(conn.execute(
+        "SELECT annotation_json FROM annotations WHERE creative_key=?",
+        (key,)).fetchone()[0]) == {
+            "status": "auto", "analysis": {"version": "v0"}}
+    conn.close()
+
+
 def test_intermediate_save_restores_null_analysis(tmp_path):
     """Recheck minor: a structurer returning an explicit null
     analysis block still keeps the prior stamp across the

@@ -25,9 +25,10 @@ Fixtures: `fixtures/Video Upload Sample 720p.mp4` + `fixtures/Video Upload Sampl
 - `POST /api/media/upload` (auth, multipart) -> media record
   `{id, creative_key, filename, mime, bytes, sha256, url}`
 - `POST /api/videos/validate` (auth, `{media_id, draft_id?}`)
-  -> `{video_id, media_id, creative_key, duration_s, width, height,
-  validation}` (`validation` verdict object; `video_id` is "" when
-  invalid and no row is stored; a draft link is required for a row)
+  -> `{video_id, media_id, draft_id, creative_key, duration_s, width,
+  height, validation}` (`validation` verdict object; `video_id` is ""
+  when invalid and no row is stored; without a draft_id a
+  caller-owned draft is minted so every video row is owned)
 - `POST /api/datasets/import` (auth,
   `{draft_id, platform, filename?, csv?|xlsx_b64?, sheet?}`)
   -> `{dataset_id, draft_id, rows, version(import_id), inserted,
@@ -37,30 +38,50 @@ Fixtures: `fixtures/Video Upload Sample 720p.mp4` + `fixtures/Video Upload Sampl
   -> `{draft: view}` (idempotent on client-supplied `draft_id`;
   a colliding id owned by someone else is rejected, never served)
 - `GET /api/drafts` (auth) -> `{drafts: view[]}` (owner-scoped)
-- `GET /api/drafts/{id}` (auth) -> `{draft: view}` where view =
-  `{id, owner_employee_id, status, dataset_version, created_at,
-  updated_at, spec, videos[], datasets[], matches[],
-  live_job_id}` (`live_job_id` is "" when no job runs)
+- `GET /api/drafts/{id}` (owner-or-admin) -> `{draft: view}` where
+  view = `{id, owner_employee_id, status, dataset_version,
+  created_at, updated_at, spec, videos[], datasets[], matches[],
+  live_job_id, review}` (`live_job_id` is "" when no job runs;
+  `review` is the recorded human review or {}). Reads are
+  owner-or-admin like writes: views carry matched records and
+  analysis. Only the shared media library stays open-tenant.
 - `PATCH /api/drafts/{id}` (owner-or-admin, `{status?, spec?,
   dataset_version?}`) -> `{draft: view}`; spec/dataset edits clear
   matches server-side
 - `DELETE /api/drafts/{id}` (owner-or-admin) removes the draft and
-  its videos/datasets/matches rows
-- `GET /api/drafts/{id}/candidates` (auth)
+  its videos/datasets/matches rows, cancels bound jobs, and erases
+  content no other draft references (media row + stored file,
+  annotation). Shared assets are kept; transcripts stay on the
+  shared creatives rows.
+- `DELETE /api/drafts/{id}/videos` (owner-or-admin) removes the
+  draft's bound video row(s) so removal is explicit, never form-only.
+- `POST /api/videos/validate` with a draft replaces prior video rows:
+  a draft has exactly one active video version (newest valid wins).
+- `GET /api/drafts/{id}/candidates` (owner-or-admin)
   -> `{candidates[], version}` (rows of the draft's dataset_version
-  only, capped at 200; [] before any import)
+  only, capped at 200; [] before any import; snapshots carry
+  `missing_json`)
 - `POST /api/drafts/{id}/matches/propose|confirm` (owner-or-admin,
   `{creative_key, method, ad_rowids[]}`) -> `{match}`; confirm
   requires a valid video and row ids from the draft's dataset version,
-  and the key must be one of the draft's validated videos.
+  and the key must be one of the draft's validated videos. With a
+  confirmed client/campaign selection, records must belong to that
+  campaign (the report carries no client grain, so client scoping is
+  documented, not faked).
   Validating a replacement video clears matches like any other
   material input change.
+- `POST /api/drafts/{id}/review` (owner-or-admin,
+  `{analysis_version, note?}`) records a version-bound human review
+  (reviewer + timestamp + note); 409 unless ready_for_review and the
+  version is current. PATCH can never set `reviewed`. Material input
+  changes invalidate the review (status back to needs_confirmation,
+  bound keys back to auto).
 - `POST /api/drafts/{id}/analyze` (auth, `{brand_terms?}`, AI-rate-limited)
   -> `{job_id, status, model, provider, sends, storage, poll}`
   (`poll` is the existing `/api/pipeline/jobs/{job_id}` status route —
   no second job API; 409 when preconditions, readiness, or a live job
   for the draft fail, with an honest reason);
-- `GET /api/drafts/{id}/analysis` (auth)
+- `GET /api/drafts/{id}/analysis` (owner-or-admin)
   -> `{draft_id, status, creative_key, annotation|null, transcript}`
 - `GET /media/by-creative/:key`, `GET /api/campaigns/meta`, `POST /api/reviews/mark`
 
@@ -69,7 +90,7 @@ alembic stays auth-only by design)
 
 - Reuse `media`, `worker_jobs`.
 - New: `drafts(id PK, owner_employee_id, status, spec_json, dataset_version,
-  created_at, updated_at)`,
+  review_json, created_at, updated_at)`,
   `videos(id PK, draft_id FK, creative_key, media_id FK, duration_s, width,
   height, sha256, validation_json, created_at)`,
   `datasets(id PK, draft_id FK, filename, rows, version, sha256, created_at)`
@@ -97,8 +118,11 @@ alembic stays auth-only by design)
 
 - Pooled CTR = total clicks / total impressions x 100 for display only,
   over comparable records with the same click definition.
-- Link clicks stay distinct from all clicks. Missing is not zero; a zero
-  denominator produces no rate. Campaign-only totals are labelled as such
+- Link clicks stay distinct from all clicks. Missing is not zero: metrics
+  listed in a record's `missing_json` contribute nothing to their pool
+  (unknown clicks can never drag a CTR to 0%); a zero denominator
+  produces no rate. Mixed-currency spend is kept per-currency and never
+  summed. Campaign-only totals are labelled as such
   and never presented as creative-level metrics.
 
 ## Analysis pipeline
@@ -109,11 +133,17 @@ alembic stays auth-only by design)
 - Findings split: Observed in the video / Measured from the dataset /
   Suggested test-hypothesis. Schema-validated before persistence, with
   sampling method, coverage, provider/model, analysis version, timestamp.
-- Snapshot binding: Analyse freezes video sha + dataset version +
-  match confirmation time. The worker re-binds before provider work
-  AND after the pipeline (inputs may change mid-run); a newer
-  stamped analysis aborts the late result instead of being
+- Snapshot binding: Analyse freezes video id/media/key/sha + dataset
+  version + match confirmation time. The worker re-binds before
+  provider work AND after the pipeline (inputs may change mid-run);
+  a newer stamped analysis aborts the late result instead of being
   overwritten (the intermediate save preserves the prior stamp).
+  A job that never publishes leaves no trace: stale aborts,
+  cancellations, and failures roll the transcript and annotation
+  back to the pre-run rows.
+- Worker startup: the web process runs the queue worker in-process on
+  hosted single-service deploys (PORT set) or CREATIVE_INTEL_RUN_WORKER=true;
+  standalone `worker.py` (Oracle systemd, local dev) is unchanged.
   Residual note: two jobs on the same creative started in the same
   second could still interleave at commit time — prevented in
   practice by the per-draft live-job guard; cross-draft same-key

@@ -346,8 +346,14 @@ def test_stranger_write_matrix_all_403(tmp_path, monkeypatch):
                      json=match).status_code == 403
     assert http.post("/api/drafts/%s/analyze" % did,
                      json={}).status_code == 403
-    # Reads stay open (media convention): the draft is visible.
-    assert http.get("/api/drafts/%s" % did).status_code == 200
+    # Reads are owner-or-admin like writes: matched records and
+    # analysis must not leak across employees (only the shared
+    # media library stays open).
+    assert http.get("/api/drafts/%s" % did).status_code == 403
+    assert http.get(
+        "/api/drafts/%s/candidates" % did).status_code == 403
+    assert http.get(
+        "/api/drafts/%s/analysis" % did).status_code == 403
 
 
 def test_cross_draft_rowids_rejected(tmp_path, monkeypatch):
@@ -506,9 +512,15 @@ def test_patch_rejects_worker_mirrored_status(tmp_path, monkeypatch):
         assert resp.status_code == 409, (forged, resp.text)
     draft = http.get("/api/drafts/%s" % did).json()["draft"]
     assert draft["status"] == "draft"
-    ok = http.patch("/api/drafts/%s" % did, json={"status": "reviewed"})
+    # Reviewed is a recorded verdict, never a free flip: even the
+    # owner gets a 409 pointing at the review operation.
+    no_free = http.patch("/api/drafts/%s" % did,
+                         json={"status": "reviewed"})
+    assert no_free.status_code == 409, no_free.text
+    assert "/review" in no_free.json()["error"]
+    ok = http.patch("/api/drafts/%s" % did,
+                    json={"status": "needs_confirmation"})
     assert ok.status_code == 200, ok.text
-    assert ok.json()["draft"]["status"] == "reviewed"
 
 
 def test_validate_without_draft_mints_owned_draft(tmp_path, monkeypatch):
@@ -530,6 +542,210 @@ def test_validate_without_draft_mints_owned_draft(tmp_path, monkeypatch):
     authed(http, db, "stranger@foap.test", role="employee")
     assert http.patch("/api/drafts/%s" % body["draft_id"],
                       json={"status": "cancelled"}).status_code == 403
+
+
+def test_replace_video_supersedes(tmp_path, monkeypatch):
+    """Audit A2: re-validating replaces the draft's video rows — one
+    active version, and the binder resolves the latest one."""
+    db, http = make_app(tmp_path, monkeypatch)
+    authed(http, db)
+    rec = upload_fixture_video(http)
+    did = http.post("/api/drafts", json={}).json()["draft"]["id"]
+    first = http.post("/api/videos/validate",
+                      json={"media_id": rec["id"],
+                            "draft_id": did}).json()
+    rec2 = upload_fixture_video(http)
+    second = http.post("/api/videos/validate",
+                       json={"media_id": rec2["id"],
+                             "draft_id": did}).json()
+    assert second["video_id"] != first["video_id"]
+    videos = http.get("/api/drafts/%s" % did).json()["draft"]["videos"]
+    assert [v["id"] for v in videos] == [second["video_id"]]
+
+
+def test_delete_videos_endpoint(tmp_path, monkeypatch):
+    """Audit A2: explicit removal drops the stored relationship, so a
+    removed video cannot resurrect on reopen."""
+    db, http = make_app(tmp_path, monkeypatch)
+    authed(http, db, "owner@foap.test", role="employee")
+    rec = upload_fixture_video(http)
+    did = http.post("/api/drafts", json={}).json()["draft"]["id"]
+    assert http.post("/api/videos/validate",
+                     json={"media_id": rec["id"],
+                           "draft_id": did}).status_code == 200
+    gone = http.delete("/api/drafts/%s/videos" % did)
+    assert gone.status_code == 200, gone.text
+    assert gone.json()["removed"] == 1
+    assert http.get("/api/drafts/%s" % did).json()["draft"][
+        "videos"] == []
+    http.headers.clear()
+    authed(http, db, "stranger@foap.test", role="employee")
+    assert http.delete(
+        "/api/drafts/%s/videos" % did).status_code == 403
+
+
+def test_campaign_scope_enforced(tmp_path, monkeypatch):
+    """Audit A3: with a confirmed campaign, propose/confirm accept
+    only rows of that campaign; unconfirmed drafts stay permissive."""
+    import sqlite3
+    db, http = make_app(tmp_path, monkeypatch)
+    authed(http, db)
+    did = http.post("/api/drafts", json={}).json()["draft"]["id"]
+    imp = import_fixture_csv(http, did)
+    conn = sqlite3.connect(db)
+    try:
+        rowids = [r[0] for r in conn.execute(
+            "SELECT id FROM ads WHERE import_id=? ORDER BY id",
+            (imp["version"],))]
+    finally:
+        conn.close()
+    rec = upload_fixture_video(http)
+    assert http.post("/api/videos/validate",
+                     json={"media_id": rec["id"],
+                           "draft_id": did}).status_code == 200
+    # Confirmed campaign "Sample Launch": its own rows pass...
+    assert http.patch(
+        "/api/drafts/%s" % did,
+        json={"spec": {"client": "Foap", "campaign": "Sample Launch",
+                       "clientConfirmed": True}}).status_code == 200
+    good = {"creative_key": "video-upload-sample", "method": "manual",
+            "ad_rowids": rowids}
+    assert http.post("/api/drafts/%s/matches/confirm" % did,
+                     json=good).status_code == 200
+    # ...while foreign-campaign rows are refused at propose and
+    # confirm alike.
+    other_csv = ("Campaign Name,Ad Set Name,Ad Name,Creative Name,"
+                 "Amount Spent,Impressions,Link Clicks\n"
+                 "Other Campaign,Prospecting,Other Ad,"
+                 "video-upload-sample,5.00,500,10\n")
+    other = http.post("/api/datasets/import",
+                      json={"draft_id": did, "platform": "meta",
+                            "filename": "other.csv",
+                            "csv": other_csv}).json()
+    conn = sqlite3.connect(db)
+    try:
+        foreign = [r[0] for r in conn.execute(
+            "SELECT id FROM ads WHERE import_id=?", (other["version"],))]
+    finally:
+        conn.close()
+    assert len(foreign) == 1
+    evil = {"creative_key": "video-upload-sample", "method": "manual",
+            "ad_rowids": foreign}
+    assert http.post("/api/drafts/%s/matches/propose" % did,
+                     json=evil).status_code == 409
+    assert http.post("/api/drafts/%s/matches/confirm" % did,
+                     json=evil).status_code == 409
+
+
+def test_review_op_and_invalidation(tmp_path, monkeypatch):
+    """Audit A7: review is version-bound with reviewer identity, and
+    a later material input change invalidates it."""
+    import json as _json
+    import sqlite3
+    db, http = make_app(tmp_path, monkeypatch)
+    authed(http, db, "owner@foap.test", role="employee")
+    rec = upload_fixture_video(http)
+    did = http.post("/api/drafts", json={}).json()["draft"]["id"]
+    assert http.post("/api/videos/validate",
+                     json={"media_id": rec["id"],
+                           "draft_id": did}).status_code == 200
+    conn = sqlite3.connect(db)
+    try:
+        conn.execute(
+            "INSERT INTO annotations (creative_key, schema_version,"
+            " annotation_json, updated_at) VALUES ("
+            "'video-upload-sample', 'v0', ?, '')",
+            (_json.dumps({"status": "auto",
+                           "analysis": {"version": "v1"}}),))
+        conn.commit()
+    finally:
+        conn.close()
+    # Empty draft cannot be reviewed; wrong version cannot either.
+    assert http.post("/api/drafts/%s/review" % did,
+                     json={"analysis_version": "v1"}).status_code == 409
+    assert http.patch("/api/drafts/%s" % did,
+                      json={"status": "ready_for_review"}).status_code == 200
+    stale = http.post("/api/drafts/%s/review" % did,
+                      json={"analysis_version": "v0"})
+    assert stale.status_code == 409, stale.text
+    done = http.post("/api/drafts/%s/review" % did,
+                     json={"analysis_version": "v1",
+                           "note": "checked totals"})
+    assert done.status_code == 200, done.text
+    assert done.json()["draft"]["status"] == "reviewed"
+    assert done.json()["review"]["analysis_version"] == "v1"
+    assert done.json()["review"]["note"] == "checked totals"
+    # A material input change invalidates the approval.
+    assert http.post("/api/videos/validate",
+                     json={"media_id": rec["id"],
+                           "draft_id": did}).status_code == 200
+    draft = http.get("/api/drafts/%s" % did).json()["draft"]
+    assert draft["status"] == "needs_confirmation"
+    assert draft["review"] == {}
+    # Strangers cannot review someone else's draft.
+    http.headers.clear()
+    authed(http, db, "stranger@foap.test", role="employee")
+    assert http.post("/api/drafts/%s/review" % did,
+                     json={"analysis_version": "v1"}).status_code == 403
+
+
+def test_delete_draft_erases_unreferenced_content(tmp_path, monkeypatch):
+    """Audit A9: deleting a draft erases its unreferenced media file,
+    media row, and annotation — but keeps assets another draft still
+    references."""
+    import json as _json
+    import os
+    import sqlite3
+    db, http = make_app(tmp_path, monkeypatch)
+    authed(http, db)
+    rec = upload_fixture_video(http)
+    did = http.post("/api/drafts", json={}).json()["draft"]["id"]
+    assert http.post("/api/videos/validate",
+                     json={"media_id": rec["id"],
+                           "draft_id": did}).status_code == 200
+    did2 = http.post("/api/drafts", json={}).json()["draft"]["id"]
+    assert http.post("/api/videos/validate",
+                     json={"media_id": rec["id"],
+                           "draft_id": did2}).status_code == 200
+    conn = sqlite3.connect(db)
+    try:
+        path = conn.execute(
+            "SELECT stored_name FROM media WHERE id=?",
+            (rec["id"],)).fetchone()[0]
+        conn.execute(
+            "INSERT INTO annotations (creative_key, schema_version,"
+            " annotation_json, updated_at) VALUES ("
+            "'video-upload-sample', 'v0', ?, '')",
+            (_json.dumps({"status": "auto"}),))
+        conn.commit()
+    finally:
+        conn.close()
+    media_dir = os.environ["CREATIVE_INTEL_MEDIA_DIR"]
+    assert os.path.isfile(os.path.join(media_dir, path))
+    # Shared by did2: the first delete keeps everything.
+    assert http.delete("/api/drafts/%s" % did).status_code == 200
+    conn = sqlite3.connect(db)
+    try:
+        kept = conn.execute("SELECT COUNT(*) FROM media WHERE id=?",
+                            (rec["id"],)).fetchone()[0]
+    finally:
+        conn.close()
+    assert kept == 1
+    assert os.path.isfile(os.path.join(media_dir, path))
+    # Last reference gone: row, file, and annotation are erased.
+    assert http.delete("/api/drafts/%s" % did2).status_code == 200
+    conn = sqlite3.connect(db)
+    try:
+        kept = conn.execute("SELECT COUNT(*) FROM media WHERE id=?",
+                            (rec["id"],)).fetchone()[0]
+        ann = conn.execute(
+            "SELECT COUNT(*) FROM annotations WHERE creative_key=?",
+            ("video-upload-sample",)).fetchone()[0]
+    finally:
+        conn.close()
+    assert kept == 0
+    assert ann == 0
+    assert not os.path.isfile(os.path.join(media_dir, path))
 
 
 def test_delete_draft_cancels_bound_jobs(tmp_path, monkeypatch):

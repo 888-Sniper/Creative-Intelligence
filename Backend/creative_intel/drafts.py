@@ -165,6 +165,18 @@ def list_videos(conn, draft_id):
                  (_require(draft_id, "draft_id"),))
 
 
+def clear_videos(conn, draft_id):
+    """Remove every video row bound to a draft. Replacement and
+    removal are explicit backend operations: a draft has exactly
+    one active video version, never an ambiguous history where the
+    analysis could bind the oldest row while the form shows the
+    newest. Returns the removed row count."""
+    did = _require(draft_id, "draft_id")
+    cur = conn.execute("DELETE FROM videos WHERE draft_id = ?", (did,))
+    conn.commit()
+    return cur.rowcount
+
+
 def add_dataset(conn, draft_id, filename, rows=0, version=None,
                 sha256=""):
     did = _require(draft_id, "draft_id")
@@ -247,4 +259,47 @@ def clear_matches(conn, draft_id):
     invalidated by the caller alongside this."""
     conn.execute("DELETE FROM matches WHERE draft_id = ?",
                  (_require(draft_id, "draft_id"),))
+    conn.commit()
+
+
+def get_review(conn, draft_id):
+    """The recorded human review ({by, at, analysis_version, note}),
+    or {} when the draft was never reviewed via the review op."""
+    row = _row(conn, "SELECT review_json FROM drafts WHERE id = ?",
+               (_require(draft_id, "draft_id"),))
+    if not row:
+        return {}
+    try:
+        review = json.loads(row.get("review_json") or "{}")
+    except ValueError:
+        return {}
+    return review if isinstance(review, dict) else {}
+
+
+def set_review(conn, draft_id, reviewer, analysis_version, note=""):
+    """Record a version-bound human review. The caller must have
+    verified the draft is ready and the version is current."""
+    did = _require(draft_id, "draft_id")
+    review = {"by": _require(reviewer, "reviewer"),
+              "at": utcnow(),
+              "analysis_version": _require(analysis_version,
+                                           "analysis_version"),
+              "note": note or ""}
+    conn.execute("UPDATE drafts SET review_json = ?, status = 'reviewed',"
+                 " updated_at = ? WHERE id = ?",
+                 (_dump(review), utcnow(), did))
+    conn.commit()
+    return review
+
+
+def clear_review(conn, draft_id):
+    """Invalidate a recorded review after a material input change. A
+    reviewed draft falls back to needs_confirmation: the approval
+    belonged to the old inputs, never to the new ones."""
+    did = _require(draft_id, "draft_id")
+    conn.execute("UPDATE drafts SET review_json = '{}',"
+                 " status = CASE WHEN status = 'reviewed'"
+                 " THEN 'needs_confirmation' ELSE status END,"
+                 " updated_at = ? WHERE id = ?",
+                 (utcnow(), did))
     conn.commit()

@@ -8,6 +8,7 @@ import {
   analyzeDraft,
   confirmMatch,
   createDraft,
+  deleteDraftVideos,
   draftKey,
   formatBytes,
   getAnalysis,
@@ -19,6 +20,7 @@ import {
   parseSnapshots,
   patchDraft,
   proposeMatch,
+  reviewDraft,
   SheetConflictError,
   uploadMedia,
   validateVideo,
@@ -112,13 +114,21 @@ function specFromDraft(draft: DraftView): VideoUploadSpec {
   return spec;
 }
 
+interface FrameMoment {
+  t: number;
+  label: string;
+  flags: string[];
+}
+
 /** Read-only rendering of a finished analysis: observed structure,
- *  measured dataset numbers, and suggested (never proven) tests. */
+ *  measured dataset numbers, timestamped key moments with playback
+ *  seeking, and suggested (never proven) tests. */
 export function FindingsView({
-  analysis, vu,
+  analysis, vu, onSeek,
 }: {
   analysis: DraftAnalysis;
   vu: (key: string, vars?: Record<string, string | number>) => string;
+  onSeek?: (t: number) => void;
 }) {
   const ann = (analysis.annotation ?? {}) as Record<string, unknown>;
   const block = (ann["analysis"] ?? {}) as Record<string, unknown>;
@@ -126,6 +136,23 @@ export function FindingsView({
   const totals = (measured["totals"] ?? {}) as Record<string, unknown>;
   const tests = Array.isArray(block["suggested_tests"])
     ? (block["suggested_tests"] as Array<Record<string, unknown>>) : [];
+  const moments: FrameMoment[] = Array.isArray(ann["frame_labels"])
+    ? (ann["frame_labels"] as Array<Record<string, unknown>>)
+      .filter((f) => typeof f["t_sec"] === "number")
+      .map((f) => {
+        const flags: string[] = [];
+        if (f["brand_visible"]) flags.push("brand");
+        if (f["product_visible"]) flags.push("product");
+        if (f["logo_visible"]) flags.push("logo");
+        if (f["cta_visible"]) flags.push("CTA");
+        if (f["end_frame"]) flags.push("end");
+        return {
+          t: Number(f["t_sec"]),
+          label: String(f["label"] ?? ""),
+          flags,
+        };
+      })
+    : [];
   const num = (v: unknown): string =>
     typeof v === "number" && Number.isFinite(v) ? String(v) : "—";
   const ctr = measured["pooled_link_ctr_pct"];
@@ -158,6 +185,38 @@ export function FindingsView({
           </div>
         ) : null}
       </div>
+      {moments.length ? (
+        <>
+          <h4 className="panel-title" style={{ fontSize: 13, marginTop: 10 }}>
+            {vu("momentsTitle")}
+          </h4>
+          <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+            {moments.map((m, i) => (
+              <li key={`${m.t}-${i}`} className="panel-sub">
+                {onSeek ? (
+                  <button
+                    type="button" className="link-teal"
+                    onClick={() => onSeek(m.t)}
+                    aria-label={vu("seekBtn", { t: m.t })}
+                  >
+                    {vu("momentLabel", {
+                      t: Math.round(m.t * 10) / 10,
+                      label: m.label || "—",
+                      flags: m.flags.length ? ` (${m.flags.join(", ")})` : "",
+                    })}
+                  </button>
+                ) : (
+                  vu("momentLabel", {
+                    t: Math.round(m.t * 10) / 10,
+                    label: m.label || "—",
+                    flags: m.flags.length ? ` (${m.flags.join(", ")})` : "",
+                  })
+                )}
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
       {tests.length ? (
         <>
           <h4 className="panel-title" style={{ fontSize: 13, marginTop: 10 }}>
@@ -215,6 +274,11 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
   const [findings, setFindings] = useState<DraftAnalysis | null>(null);
   const [saving, setSaving] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
+  const [switchingDataset, setSwitchingDataset] = useState(false);
+  const [customClient, setCustomClient] = useState(false);
+  const [reviewNote, setReviewNote] = useState("");
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const reviewVideoRef = useRef<HTMLVideoElement | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const openerRef = useRef<Element | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -254,7 +318,7 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
   };
 
   /** (Re)load matchable rows for the draft's dataset version. */
-  const loadRows = async (draftId: string, selectAll: boolean): Promise<void> => {
+  const loadRows = async (draftId: string, selectAll: boolean): Promise<MatchSnapshot[]> => {
     setRowsBusy(true);
     setRowsError("");
     try {
@@ -266,12 +330,77 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
       } else {
         setPicked((prev) => prev.filter((id) => listed.some((r) => r.id === id)));
       }
+      return listed;
     } catch (e) {
       setRowsError(e instanceof Error ? e.message : String(e));
       setRows([]);
       setPicked([]);
+      return [];
     } finally {
       setRowsBusy(false);
+    }
+  };
+
+  /** Switch back to an already-imported dataset version. A version
+   *  superseded by a later import may hold no rows: the server is
+   *  the source of truth and the row count shown comes from it. */
+  const switchDatasetVersion = async (version: string): Promise<void> => {
+    const current = draftRef.current;
+    if (!current || !version || switchingDataset) return;
+    setSwitchingDataset(true);
+    setStatus("");
+    try {
+      const updated = await patchDraft(current.id, { dataset_version: version });
+      setDraft(updated);
+      const row = (updated.datasets ?? []).find((d) => d.version === version);
+      const listed = await loadRows(current.id, true);
+      setSpec((prev) => ({
+        ...prev,
+        dataset: row
+          ? {
+            dataset_id: row.id, version: row.version, rows: listed.length,
+            inserted: 0, updated: 0, quarantined: 0, filename: row.filename,
+          }
+          : undefined,
+        match: undefined,
+      }));
+      setMatch(null);
+      setStatus(vu("datasetSwitchedMsg", {
+        filename: row?.filename || version, count: listed.length,
+      }));
+    } catch (e) {
+      setStatus(vu("errorGeneric", { error: e instanceof Error ? e.message : String(e) }));
+    } finally {
+      setSwitchingDataset(false);
+    }
+  };
+
+  /** Version-bound human review of the findings on screen. */
+  const runReview = async (version: string): Promise<void> => {
+    const current = draftRef.current;
+    if (!current || !version || reviewBusy) return;
+    setReviewBusy(true);
+    try {
+      const res = await reviewDraft(current.id, version, reviewNote.trim());
+      setDraft(res.draft);
+      setReviewNote("");
+      setToast(vu("reviewedMsg"));
+      setStatus(vu("reviewedMsg"));
+    } catch (e) {
+      setStatus(vu("errorGeneric", { error: e instanceof Error ? e.message : String(e) }));
+    } finally {
+      setReviewBusy(false);
+    }
+  };
+
+  const seekMoment = (t: number): void => {
+    const video = reviewVideoRef.current;
+    if (!video || !Number.isFinite(t)) return;
+    try {
+      video.currentTime = Math.max(0, t);
+      void video.play().catch(() => undefined);
+    } catch {
+      /* seeking is best-effort */
     }
   };
 
@@ -550,9 +679,22 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
   };
 
   const removeVideo = async (): Promise<void> => {
+    // Explicit backend removal first: clearing the form alone would
+    // leave the stored relationship, resurrecting the video on
+    // reopen. Only then is the working spec cleared.
+    const current = draftRef.current;
+    if (current) {
+      try {
+        await deleteDraftVideos(current.id);
+      } catch (e) {
+        setStatus(vu("errorGeneric", { error: e instanceof Error ? e.message : String(e) }));
+        return;
+      }
+    }
     const next: VideoUploadSpec = { ...specRef.current, media: undefined, video: undefined, match: undefined };
     stagedFileRef.current = null;
     setStagedName("");
+    setMatch(null);
     await persistSpec(next, { silent: true });
     setStatus("");
   };
@@ -867,7 +1009,7 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
                 }}
               />
             </div>
-            {stagedName && !spec.media ? (
+            {stagedName ? (
               <div className="chip-row" style={{ marginTop: 8 }}>
                 <span className="chip-static">{stagedName}</span>
                 <LoadingButton
@@ -875,7 +1017,7 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
                   loadingLabel={vu("uploadingLabel")} disabled={!creativeKey.trim()}
                   onClick={() => void uploadStaged()}
                 >
-                  {vu("uploadButton")}
+                  {spec.media ? vu("replaceBtn") : vu("uploadButton")}
                 </LoadingButton>
               </div>
             ) : null}
@@ -943,6 +1085,32 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
               ) : null}
             </div>
             <p className="panel-sub">{vu("clearsMatchNote")}</p>
+            {!customClient ? (
+              <p className="panel-sub">
+                <button type="button" className="link-teal" onClick={() => setCustomClient(true)}>
+                  {vu("customClientBtn")}
+                </button>
+              </p>
+            ) : (
+              <div className="detail-cols-2" style={{ marginTop: 8 }}>
+                <div className="field">
+                  <label htmlFor="vu-client-custom">{vu("clientLabel")}</label>
+                  <input
+                    id="vu-client-custom" type="text" value={client}
+                    onChange={(e) => pickClient(e.target.value)}
+                    placeholder={vu("customClientPlaceholder")}
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="vu-campaign-custom">{vu("campaignLabel")}</label>
+                  <input
+                    id="vu-campaign-custom" type="text" value={campaign}
+                    onChange={(e) => pickCampaign(e.target.value)}
+                    placeholder={vu("customCampaignPlaceholder")}
+                  />
+                </div>
+              </div>
+            )}
           </section>
         ) : null}
 
@@ -1000,6 +1168,24 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
                 {vu("importBtn")}
               </LoadingButton>
             </div>
+            {(draft?.datasets ?? []).length > 1 ? (
+              <div className="field" style={{ marginTop: 10 }}>
+                <label htmlFor="vu-dataset-version">{vu("datasetVersionLabel")}</label>
+                <select
+                  id="vu-dataset-version"
+                  value={spec.dataset?.version || draft?.dataset_version || ""}
+                  disabled={switchingDataset}
+                  onChange={(e) => void switchDatasetVersion(e.target.value)}
+                >
+                  {(draft?.datasets ?? []).map((d) => (
+                    <option key={d.id} value={d.version}>
+                      {d.filename || d.version} · {d.rows}
+                    </option>
+                  ))}
+                </select>
+                <p className="panel-sub">{vu("datasetSwitchNote")}</p>
+              </div>
+            ) : null}
             {spec.dataset ? (
               <div style={{ marginTop: 10 }}>
                 <p className="panel-sub" style={{ fontWeight: 700, color: "var(--shell-navy)" }}>
@@ -1029,6 +1215,7 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
                 src={spec.media.url}
                 creativeKey={spec.creative_key || creativeKey}
                 testId="vu-review-preview"
+                videoRef={reviewVideoRef}
                 mutedPreview
               />
             ) : null}
@@ -1130,7 +1317,53 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
               </div>
             ) : null}
             {findings?.annotation ? (
-              <FindingsView analysis={findings} vu={vu} />
+              <FindingsView analysis={findings} vu={vu} onSeek={seekMoment} />
+            ) : null}
+            {draft?.status === "ready_for_review" && findings?.annotation ? (
+              <div style={{ marginTop: 10 }}>
+                <h4 className="panel-title" style={{ fontSize: 13 }}>{vu("reviewTitle")}</h4>
+                <p className="panel-sub">
+                  {vu("reviewVersionLabel", {
+                    version: String(
+                      ((findings.annotation as Record<string, unknown>)["analysis"] as
+                        Record<string, unknown> | undefined)?.["version"] ?? "—"),
+                  })}
+                </p>
+                {draft?.review?.by ? (
+                  <p className="panel-sub">
+                    {vu("reviewedByMsg", {
+                      by: draft.review.by, at: draft.review.at,
+                      version: draft.review.analysis_version,
+                    })}
+                    {draft.review.note ? ` — ${draft.review.note}` : ""}
+                  </p>
+                ) : (
+                  <>
+                    <div className="field" style={{ marginTop: 8 }}>
+                      <label htmlFor="vu-review-note">{vu("reviewNoteLabel")}</label>
+                      <input
+                        id="vu-review-note" type="text" value={reviewNote}
+                        onChange={(e) => setReviewNote(e.target.value)}
+                        placeholder={vu("reviewNotePlaceholder")}
+                      />
+                    </div>
+                    <div className="chip-row" style={{ marginTop: 8 }}>
+                      <LoadingButton
+                        type="button" className="btn-primary" loading={reviewBusy}
+                        loadingLabel={vu("reviewingLabel")}
+                        disabled={!String(
+                          ((findings.annotation as Record<string, unknown>)["analysis"] as
+                            Record<string, unknown> | undefined)?.["version"] ?? "")}
+                        onClick={() => void runReview(String(
+                          ((findings.annotation as Record<string, unknown>)["analysis"] as
+                            Record<string, unknown> | undefined)?.["version"] ?? ""))}
+                      >
+                        {vu("markReviewedBtn")}
+                      </LoadingButton>
+                    </div>
+                  </>
+                )}
+              </div>
             ) : null}
             <div className="field" style={{ marginTop: 10, maxWidth: 320 }}>
               <label htmlFor="vu-method">{vu("methodLabel")}</label>

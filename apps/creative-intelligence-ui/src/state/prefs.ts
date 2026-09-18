@@ -38,6 +38,7 @@ export const TIMEZONES: Array<{ id: string; label: string }> = [
   { id: "America/New_York", label: "(GMT-05:00) Eastern Time (US & Canada)" },
   { id: "Europe/London", label: "(GMT+00:00) London" },
   { id: "Europe/Warsaw", label: "(GMT+01:00) Warsaw, Poland" },
+  { id: "Europe/Madrid", label: "(GMT+01:00) Madrid" },
   { id: "Australia/Sydney", label: "(GMT+10:00) Sydney" },
 ];
 
@@ -73,6 +74,7 @@ export function guessTimezone(): string {
   if (tz && isTimezone(tz)) return tz;
   if (/Australia|Pacific\/Auckland|Pacific\/Fiji/i.test(tz)) return "Australia/Sydney";
   if (/Europe\/London|Europe\/Dublin|Europe\/Lisbon/i.test(tz)) return "Europe/London";
+  if (/Europe\/Madrid/i.test(tz)) return "Europe/Madrid";
   if (/Europe\//i.test(tz)) return "Europe/London";
   if (/America\/Los_Angeles|America\/Vancouver|America\/Tijuana|US\/Pacific/i.test(tz)) {
     return "America/Los_Angeles";

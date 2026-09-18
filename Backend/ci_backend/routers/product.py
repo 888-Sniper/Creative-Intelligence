@@ -52,7 +52,7 @@ from creative_intel import (
 )
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse, Response  # noqa: E402
-from pydantic import BaseModel, Field, field_validator, model_validator  # noqa: E402
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator  # noqa: E402
 
 from ci_backend import actions as legacy  # noqa: E402
 from ci_backend import employees as emp  # noqa: E402
@@ -553,6 +553,29 @@ class DraftReviewBody(BaseModel):
     analysis_version: str = Field(min_length=1, max_length=40)
     revision: str = Field(default="", max_length=64)
     note: str = Field(default="", max_length=2000)
+
+
+class DraftCorrectionBody(BaseModel):
+    """Human corrections to a finished analysis. Every field is
+    optional, but at least one correctable field must be present —
+    unknown fields 409 via apply_corrections (extra="allow" carries
+    them through instead of silently dropping them)."""
+
+    model_config = ConfigDict(extra="allow")
+
+    transcript: str | None = Field(default=None, max_length=20000)
+    hook_type: str | None = None
+    hook_confidence: float | None = None
+    hook_modality: str | None = None
+    opening_delivery: str | None = None
+    narrative: str | None = None
+    message_class: str | None = None
+    promotion_kind: str | None = None
+    format_kind: str | None = None
+    creator_vs_branded: str | None = None
+    edit_style: str | None = None
+    frame_labels: list | None = None
+    tests: list | None = None
 
 
 class DatasetImportBody(BaseModel):
@@ -1505,8 +1528,9 @@ async def creative_annotate(key: str, request: Request,
 # Reads and writes are owner-or-admin (mirrors the sync-job guard:
 # without it any active employee could rewrite another owner's
 # draft, dataset link, or confirmed match — or read their matched
-# records and analysis). Only the shared media library stays
-# open-tenant. Draft creation is idempotent on client-supplied
+# records and analysis). Raw media bytes are entitlement-gated
+# (uploader, draft-bound owner, or admin); only derived board
+# thumbnails stay tenant-visible. Draft creation is idempotent on client-supplied
 # draft_id so retries and double clicks never duplicate drafts.
 # Draft listing stays owner-scoped (admins read any draft by id).
 
@@ -1554,11 +1578,14 @@ def _draft_live_job_id(conn, draft_id: str):
 
 def _reap_unreferenced(conn, store, media_ids, keys) -> None:
     """Erase assets no draft references anymore (media row + stored
-    file, annotation). Called whenever a binding is dropped — replace,
-    remove, or draft delete — so displaced assets cannot strand.
-    Shared (still-referenced) assets are kept; transcripts stay on
-    the shared creatives rows, which are reporting facts, and the
-    media helper keeps the row when the file cannot be removed."""
+    file, annotation, generated transcript and pipeline record).
+    Called whenever a binding is dropped — replace, remove, or draft
+    delete — so displaced assets cannot strand. Shared
+    (still-referenced) assets are kept; the creatives row itself stays
+    (it may carry imported reporting identity), but the generated
+    derivatives of the removed upload — transcript and pipeline_json —
+    are cleared with the annotation, and the media helper keeps the
+    row when the file cannot be removed."""
     from creative_intel import media as media_mod
     for mid in sorted(media_ids):
         still = conn.execute(
@@ -1575,6 +1602,9 @@ def _reap_unreferenced(conn, store, media_ids, keys) -> None:
             (key,)).fetchone()[0]
         if not still:
             conn.execute("DELETE FROM annotations WHERE creative_key=?",
+                         (key,))
+            conn.execute("UPDATE creatives SET transcript='',"
+                         " pipeline_json='{}' WHERE creative_key=?",
                          (key,))
     conn.commit()
 
@@ -1659,6 +1689,16 @@ async def video_validate(request: Request,
     # 403s here, before media lookup and ffprobe run.
     if body.draft_id:
         _draft_owner_or_403(conn, body.draft_id, who)
+    # Entitlement is established independently of draft connections:
+    # attaching a known media id to one's own draft must never launder
+    # access to another employee's upload. Uploader, draft-bound owner,
+    # or admin — anyone else 403s before decode or binding.
+    if not media.entitled(conn, body.media_id, who.id,
+                          is_admin=(who.role or "") == "admin"):
+        raise HTTPException(status_code=403, detail={
+            "error": "Only the uploader, a draft owner bound to this"
+                     " media (or an administrator) can use it.",
+            "gate": "forbidden"})
     try:
         info = media.describe(conn, legacy._media_dir(), body.media_id)
         path = media.file_path(conn, legacy._media_dir(), body.media_id)
@@ -1668,11 +1708,10 @@ async def video_validate(request: Request,
     verdict = await loop.run_in_executor(
         _WORKERS, functools.partial(video_validate.validate, path,
                                     info.get("filename", "")))
-    # The media library is tenant-shared (reads are open to any
-    # active employee, same as GET /media/{id}): attribution lives
-    # on the draft, so every validated video is bound to a draft
-    # the caller owns. Without a draft_id we mint a caller-owned
-    # draft instead of leaving an orphan video row.
+    # Attribution lives on the draft, so every validated video is
+    # bound to a draft the caller owns (entitlement was established
+    # above, before any byte was decoded). Without a draft_id we mint
+    # a caller-owned draft instead of leaving an orphan video row.
     draft_id = body.draft_id
     if not draft_id and verdict["status"] == "valid":
         draft_id = drafts_mod.create_draft(conn, who.id)
@@ -1762,8 +1801,8 @@ def draft_get(draft_id: str, request: Request,
     _ = request
     # Owner-or-admin like writes: the view carries matched
     # performance records and analysis, which must not leak across
-    # employees (the media library stays shared-tenant; attribution
-    # lives on the draft).
+    # employees (attribution lives on the draft; raw media bytes are
+    # entitlement-gated separately).
     return {"draft": _draft_view(
         conn, _draft_owner_or_403(conn, unquote(draft_id), who))}
 
@@ -1838,9 +1877,9 @@ def draft_delete(draft_id: str, request: Request,
     _draft_owner_or_403(conn, did, who)
     # Content lifecycle: collect this draft's media/keys first. After
     # the workflow rows go, unreferenced assets are erased (media row
-    # + stored file, annotation); anything still referenced by
-    # another draft's videos is kept. Transcripts stay on the shared
-    # creatives rows, which are reporting facts, not draft content.
+    # + stored file, annotation, generated transcript and pipeline
+    # record); anything still referenced by another draft's videos is
+    # kept, and the creatives row itself stays as reporting identity.
     doomed_media = {v.get("media_id") for v in
                     drafts_mod.list_videos(conn, did)
                     if v.get("media_id")}
@@ -2185,7 +2224,7 @@ async def draft_review(draft_id: str, request: Request,
             "error": "Inputs changed since this analysis ran: %s" % exc})
     stored_snap = block.get("snapshot") or {}
     for snap_key in ("video_sha256", "dataset_version",
-                     "match_confirmed_at"):
+                     "match_confirmed_at", "client", "campaign"):
         if (live.get(snap_key) or "") != (stored_snap.get(snap_key) or ""):
             raise HTTPException(status_code=409, detail={
                 "error": "Inputs changed since this analysis ran (%s): "
@@ -2208,6 +2247,54 @@ async def draft_review(draft_id: str, request: Request,
                          action="draft_reviewed", target=did)
     return {"draft": _draft_view(conn, _draft_or_404(conn, did)),
             "review": review}
+
+
+@router.post("/api/drafts/{draft_id}/corrections")
+async def draft_correct(draft_id: str, request: Request,
+                        conn=Depends(get_product_conn),
+                        who=Depends(get_current_employee)):
+    """Correct the stored findings behind the on-screen analysis.
+
+    A review note cannot rewrite the underlying finding, so each
+    correctable field — transcript text, hook/category values and
+    confidence, frame-label timestamps, and per-test accept/reject —
+    is validated and applied to the stored annotation (dimension
+    corrections lock like analyst confirmations). Every call mints a
+    fresh analysis revision with a {by, at, fields} log entry, and any
+    recorded review is invalidated: the correction supersedes the
+    approval and must be re-reviewed.
+    """
+    from urllib.parse import unquote
+    from creative_intel import drafts as drafts_mod
+    from creative_intel import video_analysis as video_analysis_mod
+    did = unquote(draft_id)
+    _draft_owner_or_403(conn, did, who)
+    try:
+        body = DraftCorrectionBody.model_validate(await json_payload(request))
+    except Exception as exc:
+        raise HTTPException(status_code=409,
+                            detail={"error": "Invalid corrections: %s" % exc})
+    videos = drafts_mod.list_videos(conn, did)
+    key = videos[-1]["creative_key"] if videos else ""
+    if not key:
+        raise HTTPException(status_code=409, detail={
+            "error": "Nothing to correct yet: validate the video and"
+                     " analyse first."})
+    corrections = {k: v for k, v in body.model_dump().items()
+                   if v is not None}
+    try:
+        ann = video_analysis_mod.apply_corrections(
+            conn, key, corrections, by=who.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail={"error": str(exc)})
+    # Corrected findings supersede any approval of the old content.
+    _invalidate_draft_review(conn, did)
+    paudit.audit_request(request, conn, employee_id=who.id,
+                         action="draft_corrected", target=did)
+    return {"draft": _draft_view(conn, _draft_or_404(conn, did)),
+            "annotation": ann,
+            "revision": (ann.get("analysis") or {}).get("revision", "")}
 
 
 def _draft_live_job(conn, draft_id: str):
@@ -2413,7 +2500,8 @@ async def _media_upload_multipart(request: Request, conn, who):
         out = media.save_media_file(
             conn, store, creative_key, filename, tmp_path, total,
             digest.hexdigest(),
-            getattr(upload, "content_type", None) or None)
+            getattr(upload, "content_type", None) or None,
+            uploaded_by=who.id)
     except HTTPException:
         paudit.audit_request(request, conn, employee_id=who.id,
                              action="creative_uploaded", target=target,
@@ -2593,29 +2681,23 @@ def creative_thumbnail(key: str, request: Request,
 def serve_media(media_id: str, request: Request,
                 conn=Depends(get_product_conn),
                 who=Depends(get_current_employee)):
-    # Owner-or-admin via draft reference: the file is served only when
-    # the caller owns (or administers) a draft whose videos bind this
-    # media row. Authenticated-but-unrelated employees get a 403 —
-    # there is no cross-employee media browsing. FileResponse serves
-    # byte ranges so video/audio seek instead of downloading whole
-    # files; private cache, never shared-cacheable.
+    # Entitlement-gated: the file is served only to the uploader, to
+    # an owner (or admin) of a draft whose videos bind this media row,
+    # or to an administrator. Authenticated-but-unrelated employees get
+    # a 403 — there is no cross-employee media browsing. FileResponse
+    # serves byte ranges so video/audio seek instead of downloading
+    # whole files; private cache, never shared-cacheable.
     try:
         mid = int(media_id)
     except (TypeError, ValueError):
         raise HTTPException(status_code=404,
                             detail={"error": "Unknown media."})
-    if (who.role or "") != "admin":
-        bound = conn.execute(
-            "SELECT COUNT(*) FROM videos JOIN drafts"
-            " ON drafts.id = videos.draft_id"
-            " WHERE videos.media_id = ?"
-            " AND drafts.owner_employee_id = ?",
-            (mid, who.id)).fetchone()[0]
-        if not bound:
-            raise HTTPException(status_code=403, detail={
-                "error": "Only a draft owner bound to this media (or an"
-                         " administrator) can fetch it.",
-                "gate": "forbidden"})
+    if not media.entitled(conn, mid, who.id,
+                          is_admin=(who.role or "") == "admin"):
+        raise HTTPException(status_code=403, detail={
+            "error": "Only the uploader, a draft owner bound to this"
+                     " media (or an administrator) can fetch it.",
+            "gate": "forbidden"})
     try:
         info = media.describe(conn, legacy._media_dir(), mid)
         path = media.file_path(conn, legacy._media_dir(), mid)

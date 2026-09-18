@@ -42,7 +42,8 @@ CREATE TABLE IF NOT EXISTS media (
     mime TEXT NOT NULL DEFAULT '',
     bytes INTEGER NOT NULL DEFAULT 0,
     sha256 TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL DEFAULT ''
+    created_at TEXT NOT NULL DEFAULT '',
+    uploaded_by TEXT NOT NULL DEFAULT ''
 );
 """
 
@@ -50,11 +51,14 @@ CREATE TABLE IF NOT EXISTS media (
 def ensure_schema(conn):
     conn.executescript(DDL)
     cols = [r[1] for r in conn.execute("PRAGMA table_info(media)")]
-    for name in ("width", "height"):
+    _ADDED = {"width": "INTEGER NOT NULL DEFAULT 0",
+              "height": "INTEGER NOT NULL DEFAULT 0",
+              "uploaded_by": "TEXT NOT NULL DEFAULT ''"}
+    for name, decl in _ADDED.items():
         if name in cols:
             continue
         try:
-            conn.execute("ALTER TABLE media ADD COLUMN %s INTEGER NOT NULL DEFAULT 0" % name)
+            conn.execute("ALTER TABLE media ADD COLUMN %s %s" % (name, decl))
         except sqlite3.OperationalError as exc:
             # Concurrent first-touch race: another request added the
             # column between our PRAGMA check and this ALTER. Only a
@@ -121,7 +125,7 @@ def check_upload_path(filename, path):
 
 
 def save_media_file(conn, store, creative_key, filename, tmp_path, total,
-                    digest, mime=None):
+                    digest, mime=None, uploaded_by=""):
     """Persist a streamed upload: validate, atomically rename, record.
 
     tmp_path is a complete temp file on the same filesystem as store
@@ -139,27 +143,38 @@ def save_media_file(conn, store, creative_key, filename, tmp_path, total,
             raise ValueError("mime %r does not match %s content"
                              % (mime, ext))
         ensure_schema(conn)
-        dupe = conn.execute(
-            "SELECT id, stored_name, mime, bytes, sha256, created_at"
-            " FROM media WHERE creative_key=? AND sha256=?",
-            (creative_key, digest)).fetchone()
-        if dupe:
-            return _record(creative_key, filename, dupe)
+        dupes = conn.execute(
+            "SELECT id, stored_name, mime, bytes, sha256, created_at,"
+            " uploaded_by FROM media WHERE creative_key=? AND sha256=?"
+            " ORDER BY id",
+            (creative_key, digest)).fetchall()
+        for dupe in dupes:
+            if (dupe[6] if len(dupe) > 6 else "") == (uploaded_by or ""):
+                return _record(creative_key, filename, dupe)
+        if dupes:
+            # Same bytes, different attribution: adopt the stored file
+            # under a separately attributable row. Aliasing the other
+            # employee's row would inherit (or be denied) their
+            # entitlement; a re-upload proves possession of the bytes,
+            # so it earns its own record.
+            return _adopt_shared(conn, creative_key, filename, dupes[0],
+                                 uploaded_by)
         stored = "%s_%s%s" % (creative_key, digest[:12], ext)
         dest = os.path.join(store, stored)
         if os.path.basename(stored) != stored:
             raise ValueError("bad creative_key %r" % (creative_key,))
         if os.path.isfile(dest):
             return _existing(conn, creative_key, filename, stored,
-                             sniffed, total, digest)
+                             sniffed, total, digest, uploaded_by)
         os.replace(tmp_path, dest)
         tmp_path = None
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
         cur = conn.execute(
             "INSERT INTO media (creative_key, filename, stored_name, mime,"
-            " bytes, sha256, created_at) VALUES (?,?,?,?,?,?,?)",
+            " bytes, sha256, created_at, uploaded_by)"
+            " VALUES (?,?,?,?,?,?,?,?)",
             (creative_key, os.path.basename(filename), stored, sniffed,
-             total, digest, now))
+             total, digest, now, uploaded_by or ""))
         conn.commit()
         row = (cur.lastrowid, stored, sniffed, total, digest, now)
         _link_source_url(conn, creative_key, cur.lastrowid)
@@ -169,15 +184,38 @@ def save_media_file(conn, store, creative_key, filename, tmp_path, total,
             os.unlink(tmp_path)
 
 
+def _adopt_shared(conn, creative_key, filename, source, uploaded_by):
+    """New attributable row over an identical stored file.
+
+    source is a (id, stored_name, mime, bytes, sha256, created_at,
+    uploaded_by) row for the same key+digest. No bytes are rewritten;
+    the file is shared until no referencing row remains (see
+    delete_media's refcount).
+    """
+    _sid, stored, mime, nbytes, digest, _created, _by = source[:7]
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    cur = conn.execute(
+        "INSERT INTO media (creative_key, filename, stored_name, mime,"
+        " bytes, sha256, created_at, uploaded_by)"
+        " VALUES (?,?,?,?,?,?,?,?)",
+        (creative_key, os.path.basename(filename), stored, mime,
+         nbytes, digest, now, uploaded_by or ""))
+    conn.commit()
+    row = (cur.lastrowid, stored, mime, nbytes, digest, now)
+    _link_source_url(conn, creative_key, cur.lastrowid)
+    return _record(creative_key, filename, row)
+
+
 def _existing(conn, creative_key, filename, stored, sniffed, total,
-              digest):
+              digest, uploaded_by=""):
     """Adopt an identical stored file (same name <=> same content)."""
     now = datetime.datetime.now(datetime.timezone.utc).isoformat()
     cur = conn.execute(
         "INSERT INTO media (creative_key, filename, stored_name, mime,"
-        " bytes, sha256, created_at) VALUES (?,?,?,?,?,?,?)",
+        " bytes, sha256, created_at, uploaded_by)"
+        " VALUES (?,?,?,?,?,?,?,?)",
         (creative_key, os.path.basename(filename), stored, sniffed,
-         total, digest, now))
+         total, digest, now, uploaded_by or ""))
     conn.commit()
     row = (cur.lastrowid, stored, sniffed, total, digest, now)
     _link_source_url(conn, creative_key, cur.lastrowid)
@@ -190,18 +228,19 @@ def media_dir(base_dir):
     return path
 
 
-def save_media(conn, store, creative_key, filename, content_b64, mime=None):
+def save_media(conn, store, creative_key, filename, content_b64, mime=None,
+               uploaded_by=""):
     """Persist a base64 upload (legacy JSON transport); returns metadata."""
     try:
         content = base64.b64decode(content_b64 or "", validate=True)
     except Exception:
         raise ValueError("content_b64 is not valid base64")
     return save_media_bytes(conn, store, creative_key, filename,
-                            bytes(content), mime)
+                            bytes(content), mime, uploaded_by=uploaded_by)
 
 
 def save_media_bytes(conn, store, creative_key, filename, content, mime=None,
-                     width=0, height=0):
+                     width=0, height=0, uploaded_by=""):
     """Persist raw upload bytes; returns the metadata record (no bytes).
 
     The multipart path: bytes ride outside JSON so the real 100 MB
@@ -218,12 +257,32 @@ def save_media_bytes(conn, store, creative_key, filename, content, mime=None,
         raise ValueError("mime %r does not match %s content" % (mime, ext))
     ensure_schema(conn)
     digest = hashlib.sha256(bytes(content)).hexdigest()
-    dupe = conn.execute(
+    dupes = conn.execute(
         "SELECT id, stored_name, mime, bytes, sha256, created_at, width,"
-        " height FROM media"
-        " WHERE creative_key=? AND sha256=?", (creative_key, digest)).fetchone()
-    if dupe:
-        return _record(creative_key, filename, dupe)
+        " height, uploaded_by FROM media"
+        " WHERE creative_key=? AND sha256=? ORDER BY id",
+        (creative_key, digest)).fetchall()
+    for dupe in dupes:
+        if (dupe[8] if len(dupe) > 8 else "") == (uploaded_by or ""):
+            return _record(creative_key, filename, dupe)
+    if dupes:
+        # Same bytes, different attribution: adopt the stored file
+        # under a separately attributable row (see save_media_file).
+        first = dupes[0]
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        width, height = (first[6], first[7]) if len(first) > 7 else (0, 0)
+        cur = conn.execute(
+            "INSERT INTO media (creative_key, filename, stored_name, mime,"
+            " bytes, sha256, created_at, width, height, uploaded_by)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (creative_key, os.path.basename(filename), first[1], first[2],
+             first[3], first[4], now, int(width or 0), int(height or 0),
+             uploaded_by or ""))
+        conn.commit()
+        row = (cur.lastrowid, first[1], first[2], first[3], first[4],
+               now, int(width or 0), int(height or 0))
+        _link_source_url(conn, creative_key, cur.lastrowid)
+        return _record(creative_key, filename, row)
     stored = "%s_%s%s" % (creative_key, digest[:12], ext)
     dest = os.path.join(store, stored)
     if os.path.basename(stored) != stored or not os.path.isfile(dest):
@@ -234,10 +293,11 @@ def save_media_bytes(conn, store, creative_key, filename, content, mime=None,
         width, height = png_dimensions(content)
     cur = conn.execute(
         "INSERT INTO media (creative_key, filename, stored_name, mime,"
-        " bytes, sha256, created_at, width, height)"
-        " VALUES (?,?,?,?,?,?,?,?,?)",
+        " bytes, sha256, created_at, width, height, uploaded_by)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?)",
         (creative_key, os.path.basename(filename), stored, sniffed,
-         len(content), digest, now, int(width or 0), int(height or 0)))
+         len(content), digest, now, int(width or 0), int(height or 0),
+         uploaded_by or ""))
     conn.commit()
     row = (cur.lastrowid, stored, sniffed, len(content), digest, now,
            int(width or 0), int(height or 0))
@@ -280,7 +340,10 @@ def delete_media(conn, store, rid):
     """Delete a media row and its stored file. Returns True when a
     row was removed. Callers must first establish the row is
     unreferenced (shared assets are never deleted blindly); a
-    missing file does not fail the row delete."""
+    missing file does not fail the row delete. Identical bytes
+    re-uploaded by another employee share one stored file across
+    separately attributable rows: the file goes only when its last
+    referencing row does."""
     try:
         rid = int(rid)
     except (TypeError, ValueError):
@@ -291,7 +354,10 @@ def delete_media(conn, store, rid):
     if not row:
         return False
     stored = row[0] or ""
-    if stored and os.path.basename(stored) == stored:
+    shared = conn.execute("SELECT COUNT(*) FROM media WHERE stored_name=?"
+                          " AND id<>?", (stored, rid)).fetchone()[0] \
+        if stored else 0
+    if stored and not shared and os.path.basename(stored) == stored:
         # File first: if the filesystem delete fails, the row stays
         # as the recovery record (retryable) instead of pointing at
         # nothing. A file that is already gone is not a failure.
@@ -346,6 +412,41 @@ def describe(conn, store, rid):
                        (int(rid),)).fetchone()
     return {"mime": mime, "filename": filename,
             "bytes": row[0] if row else 0}
+
+
+def entitled(conn, rid, employee_id, is_admin=False):
+    """Whether an employee may use a media asset.
+
+    Permission is established independently of draft connections:
+    administrators, the original uploader, and owners of a draft
+    already bound to the asset are entitled. Anyone else — even
+    with a guessed media id — is not, so attaching an id to one's
+    own draft can never launder access to another's upload.
+    """
+    if is_admin:
+        return True
+    try:
+        rid = int(rid)
+    except (TypeError, ValueError):
+        return False
+    ensure_schema(conn)
+    try:
+        row = conn.execute("SELECT uploaded_by FROM media WHERE id=?",
+                           (rid,)).fetchone()
+    except sqlite3.OperationalError:
+        row = None
+    if row and row[0] and row[0] == (employee_id or ""):
+        return True
+    try:
+        bound = conn.execute(
+            "SELECT COUNT(*) FROM videos JOIN drafts"
+            " ON drafts.id = videos.draft_id"
+            " WHERE videos.media_id = ?"
+            " AND drafts.owner_employee_id = ?",
+            (rid, employee_id or "")).fetchone()[0]
+    except sqlite3.OperationalError:
+        bound = 0
+    return bool(bound)
 
 
 def list_for_creative(conn, creative_key):

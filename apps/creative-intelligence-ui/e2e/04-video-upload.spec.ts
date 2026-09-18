@@ -35,12 +35,18 @@ test("dashboard video upload: real file, data, match, honest analyze", async ({
   await expect(page.getByText(/Video valid — 1280×720, 15s/)).toBeVisible();
   await expect(page.getByTestId("vu-video-preview")).toBeVisible();
 
-  // Client/campaign: seeded meta may be empty; confirm only when the
-  // seeded catalogue offers options.
+  // Client/campaign: confirm the destination through the custom
+  // names (seeded meta may be empty). Analysis requires this
+  // confirmation; the campaign must match the fixture CSV grain.
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(
     page.getByRole("heading", { name: "Client and campaign" }),
   ).toBeVisible();
+  await page.getByRole("button", { name: /not in the catalogue/ }).click();
+  await page.locator("#vu-client-custom").fill("E2E Client");
+  await page.locator("#vu-campaign-custom").fill("Sample Launch");
+  await page.getByRole("button", { name: "Confirm selection" }).click();
+  await expect(page.getByText(/Selection confirmed/).first()).toBeVisible();
 
   // Dataset: paste the real fixture CSV and import through the
   // ingestion pipeline (dedup, provenance, quarantine).

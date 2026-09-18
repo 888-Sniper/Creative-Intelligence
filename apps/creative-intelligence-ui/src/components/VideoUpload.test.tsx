@@ -817,4 +817,125 @@ describe("VideoUpload guided panel", () => {
     });
     expect(screen.getByRole("button", { name: "Analyze" }).hasAttribute("disabled")).toBe(true);
   });
+
+  it("keeps Analyze disabled with a confirmed match but no confirmed client", async () => {
+    const unconfirmed = baseDraft({
+      id: "d3",
+      dataset_version: "v1",
+      spec: {
+        client: "Foap",
+        campaign: "Sample Launch",
+        clientConfirmed: false,
+        creative_key: "video-upload-sample",
+        video: { video_id: "vid1", duration_s: 15, width: 1280, height: 720, status: "valid" },
+      },
+      matches: [
+        {
+          draft_id: "d3", creative_key: "video-upload-sample", method: "manual",
+          record_json: JSON.stringify([{ id: 11 }]),
+          confirmed: 1, confirmed_by: "e7", confirmed_at: "2026-09-10T11:00:00Z",
+        },
+      ],
+    });
+    panelBackend([
+      (m, u) => (u === "/api/drafts/d3" && m === "GET" ? { draft: unconfirmed } : undefined),
+      (m, u) => (u === "/api/drafts/d3/candidates" && m === "GET"
+        ? { version: "v1", candidates: [] }
+        : undefined),
+    ]);
+    render(
+      <MemoryRouter>
+        <VideoUploadPanel open={{ draftId: "d3", stage: "review" }} employeeId="e7" onClose={() => undefined} />
+      </MemoryRouter>,
+    );
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Review and analyze" })).toBeDefined();
+    });
+    const analyze = screen.getByRole("button", { name: "Analyze" });
+    expect(analyze.hasAttribute("disabled")).toBe(true);
+    expect(screen.getByText("Confirm the client and campaign to enable analysis.")).toBeDefined();
+  });
+
+  it("corrects transcript, hook, moments and test verdicts on the findings", async () => {
+    const reviewed = baseDraft({
+      id: "d4", status: "ready_for_review", dataset_version: "v1",
+      spec: {
+        client: "Foap",
+        campaign: "Sample Launch",
+        clientConfirmed: true,
+        creative_key: "video-upload-sample",
+        video: { video_id: "vid1", duration_s: 15, width: 1280, height: 720, status: "valid" },
+      },
+    });
+    const annotation = {
+      status: "auto",
+      hook_type: "question",
+      hook_confidence: 0.4,
+      frame_labels: [{ t_sec: 1.0, label: "opening", cta_visible: false }],
+      analysis: {
+        version: "v1", revision: "rev-0", at: "2026-09-10T12:00:00Z",
+        model: "gemini/gemini-2.5-flash",
+        measured: {
+          totals: { impressions: 6000, link_clicks: 150 },
+          pooled_link_ctr_pct: 2.5, warnings: [],
+        },
+        suggested_tests: [
+          { id: "hook-clarity", hypothesis: "Try a clearer hook.", why: "uncertain hook", status: "suggested" },
+        ],
+      },
+    };
+    const { calls } = panelBackend([
+      (m, u) => (u === "/api/drafts/d4" && m === "GET" ? { draft: reviewed } : undefined),
+      (m, u) => (u === "/api/drafts/d4/candidates" && m === "GET"
+        ? { version: "v1", candidates: [] }
+        : undefined),
+      (m, u) => (u === "/api/drafts/d4/analysis" && m === "GET"
+        ? {
+          draft_id: "d4", status: "ready_for_review",
+          creative_key: "video-upload-sample", transcript: "raw words",
+          annotation,
+        }
+        : undefined),
+      (m, u) => (u === "/api/drafts/d4/corrections" && m === "POST"
+        ? {
+          draft: reviewed,
+          annotation: {
+            ...annotation,
+            analysis: { ...annotation.analysis, revision: "rev-1" },
+          },
+          revision: "rev-1",
+        }
+        : undefined),
+    ]);
+    render(
+      <MemoryRouter>
+        <VideoUploadPanel open={{ draftId: "d4", stage: "review" }} employeeId="e7" onClose={() => undefined} />
+      </MemoryRouter>,
+    );
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Findings" })).toBeDefined();
+    });
+    // Accepting a suggested test posts the verdict, not a note.
+    fireEvent.click(screen.getByRole("button", { name: "Accept" }));
+    await waitFor(() => {
+      const posted = calls.find((c) => c.url === "/api/drafts/d4/corrections");
+      expect(posted).toBeDefined();
+      expect((posted?.body as Record<string, unknown>)?.["tests"]).toEqual([
+        { id: "hook-clarity", status: "accepted" },
+      ]);
+    });
+    // Transcript + hook + moment corrections ride the same endpoint.
+    fireEvent.click(screen.getByRole("button", { name: "Correct findings" }));
+    fireEvent.change(screen.getByLabelText("Transcript text"), { target: { value: "fixed words" } });
+    fireEvent.click(screen.getAllByRole("button", { name: "Save correction" })[0]);
+    await waitFor(() => {
+      const posted = calls.filter((c) => c.url === "/api/drafts/d4/corrections");
+      expect(posted.some((c) => (c.body as Record<string, unknown>)?.["transcript"] === "fixed words")).toBe(true);
+    });
+    await waitFor(() => {
+      expect(
+        screen.getAllByText("Correction saved — the findings need re-review.").length,
+      ).toBeGreaterThanOrEqual(1);
+    });
+  });
 });

@@ -394,7 +394,7 @@ def mark_verified(conn, creative_key):
 
 
 def run_pipeline(conn, creative_key, providers, media=None, brand_terms=None,
-                 progress=None, cancelled=None):
+                 progress=None, cancelled=None, persist=True):
     """Run all five stages with the given provider bundle; returns stage report.
 
     media is optional: {"audio": (bytes, mime), "images": [jpeg bytes]}.
@@ -407,6 +407,13 @@ def run_pipeline(conn, creative_key, providers, media=None, brand_terms=None,
     job stops chaining provider work. A single in-flight subprocess or
     HTTP call still runs to its own timeout — cancellation is honored
     between stages, which is where bills and minutes accumulate.
+
+    persist=False generates the full report without touching the
+    published creative record (no transcript, annotation, duration, or
+    pipeline writes): the caller verifies freshness first and then
+    publishes the complete result in one step, so a concurrent
+    finisher can never be clobbered by an in-flight job's
+    intermediate save.
     """
     from creative_intel.jobs import JobCancelled
 
@@ -441,8 +448,9 @@ def run_pipeline(conn, creative_key, providers, media=None, brand_terms=None,
             timings_out=timings)
         stages.append({"stage": "transcribe", "confidence": conf})
         checkpoint(40, "transcribe")
-    conn.execute("UPDATE creatives SET transcript=? WHERE creative_key=?",
-                 (transcript, creative_key))
+    if persist:
+        conn.execute("UPDATE creatives SET transcript=? WHERE creative_key=?",
+                     (transcript, creative_key))
 
     times = media.get("image_times")
     if times:
@@ -475,7 +483,7 @@ def run_pipeline(conn, creative_key, providers, media=None, brand_terms=None,
 
     checkpoint(55, "frame-sample")
     labels = providers.vision.annotate(frames, images=media.get("images"))
-    if media.get("duration_s"):
+    if persist and media.get("duration_s"):
         conn.execute("UPDATE creatives SET duration_s=? WHERE creative_key=?",
                      (media["duration_s"], creative_key))
     stages.append({"stage": "vision-annotate", "labels": len(labels),
@@ -504,25 +512,30 @@ def run_pipeline(conn, creative_key, providers, media=None, brand_terms=None,
         raise ValueError("structurer produced invalid v0: " + "; ".join(errors))
     # Preserve a prior analysis stamp across the intermediate save:
     # without this, job A finishing its pipeline would wipe job B's
-    # newer stamped result before A's own staleness check runs.
-    try:
-        prior_row = conn.execute(
-            "SELECT annotation_json FROM annotations WHERE creative_key=?",
-            (creative_key,)).fetchone()
-        prior_block = (json.loads(prior_row[0]).get("analysis")
-                       if prior_row else None)
-    except (ValueError, TypeError):
-        prior_block = None
-    if isinstance(prior_block, dict) \
-            and not isinstance(ann.get("analysis"), dict):
-        ann["analysis"] = prior_block
-    save_annotation(conn, creative_key, ann)
+    # newer stamped result before A's own staleness check runs. (The
+    # guided video-analysis path avoids the hazard entirely with
+    # persist=False: nothing below runs, and the caller publishes the
+    # complete result only after its freshness checks pass.)
+    if persist:
+        try:
+            prior_row = conn.execute(
+                "SELECT annotation_json FROM annotations WHERE creative_key=?",
+                (creative_key,)).fetchone()
+            prior_block = (json.loads(prior_row[0]).get("analysis")
+                           if prior_row else None)
+        except (ValueError, TypeError):
+            prior_block = None
+        if isinstance(prior_block, dict) \
+                and not isinstance(ann.get("analysis"), dict):
+            ann["analysis"] = prior_block
+        save_annotation(conn, creative_key, ann)
     mean_conf = (ann["hook_confidence"] + ann["creator_confidence"]) / 2
     stages.append({"stage": "llm-structure", "confidence": round(mean_conf, 3),
                    "gate": "needs HUMAN-VERIFIED before export"})
-    conn.execute("UPDATE creatives SET pipeline_json=? WHERE creative_key=?",
-                 (json.dumps(stages), creative_key))
-    conn.commit()
+    if persist:
+        conn.execute("UPDATE creatives SET pipeline_json=? WHERE creative_key=?",
+                     (json.dumps(stages), creative_key))
+        conn.commit()
     return {"creative_key": creative_key, "stages": stages,
             "annotation": ann, "frame_labels": labels,
             "transcript": transcript}

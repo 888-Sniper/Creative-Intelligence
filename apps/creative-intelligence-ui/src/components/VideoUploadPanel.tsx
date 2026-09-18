@@ -7,6 +7,7 @@ import { MetaSelect, Toast, useCampaignMeta } from "@/components/product";
 import {
   analyzeDraft,
   confirmMatch,
+  correctDraft,
   createDraft,
   deleteDraftVideos,
   draftKey,
@@ -15,6 +16,7 @@ import {
   getCandidates,
   getDraft,
   getVideoLimits,
+  HOOK_TYPE_OPTIONS,
   importDataset,
   MATCH_METHODS,
   parseSnapshots,
@@ -26,6 +28,7 @@ import {
   validateVideo,
   type DatasetCandidate,
   type DraftAnalysis,
+  type DraftCorrections,
   type DraftMatch,
   type DraftView,
   type MatchSnapshot,
@@ -120,15 +123,20 @@ interface FrameMoment {
   flags: string[];
 }
 
-/** Read-only rendering of a finished analysis: observed structure,
- *  measured dataset numbers, timestamped key moments with playback
- *  seeking, and suggested (never proven) tests. */
+/** Rendering of a finished analysis: observed structure, measured
+ *  dataset numbers, timestamped key moments with playback seeking,
+ *  and suggested (never proven) tests — plus human correction
+ *  controls. A review note cannot rewrite the underlying finding, so
+ *  transcript text, hook values, frame moments, and per-test verdicts
+ *  each save back to the stored annotation (with a fresh revision);
+ *  pass `correction` to enable them. */
 export function FindingsView({
-  analysis, vu, onSeek,
+  analysis, vu, onSeek, correction,
 }: {
   analysis: DraftAnalysis;
   vu: (key: string, vars?: Record<string, string | number>) => string;
   onSeek?: (t: number) => void;
+  correction?: { onCorrect: (c: DraftCorrections) => Promise<void> };
 }) {
   const ann = (analysis.annotation ?? {}) as Record<string, unknown>;
   const block = (ann["analysis"] ?? {}) as Record<string, unknown>;
@@ -136,23 +144,41 @@ export function FindingsView({
   const totals = (measured["totals"] ?? {}) as Record<string, unknown>;
   const tests = Array.isArray(block["suggested_tests"])
     ? (block["suggested_tests"] as Array<Record<string, unknown>>) : [];
-  const moments: FrameMoment[] = Array.isArray(ann["frame_labels"])
+  const rawMoments: Array<Record<string, unknown>> = Array.isArray(ann["frame_labels"])
     ? (ann["frame_labels"] as Array<Record<string, unknown>>)
       .filter((f) => typeof f["t_sec"] === "number")
-      .map((f) => {
-        const flags: string[] = [];
-        if (f["brand_visible"]) flags.push("brand");
-        if (f["product_visible"]) flags.push("product");
-        if (f["logo_visible"]) flags.push("logo");
-        if (f["cta_visible"]) flags.push("CTA");
-        if (f["end_frame"]) flags.push("end");
-        return {
-          t: Number(f["t_sec"]),
-          label: String(f["label"] ?? ""),
-          flags,
-        };
-      })
     : [];
+  const moments: FrameMoment[] = rawMoments.map((f) => {
+    const flags: string[] = [];
+    if (f["brand_visible"]) flags.push("brand");
+    if (f["product_visible"]) flags.push("product");
+    if (f["logo_visible"]) flags.push("logo");
+    if (f["cta_visible"]) flags.push("CTA");
+    if (f["end_frame"]) flags.push("end");
+    return {
+      t: Number(f["t_sec"]),
+      label: String(f["label"] ?? ""),
+      flags,
+    };
+  });
+  const hookType = typeof ann["hook_type"] === "string" ? String(ann["hook_type"]) : "other";
+  const hookConf = typeof ann["hook_confidence"] === "number"
+    && Number.isFinite(ann["hook_confidence"]) ? Number(ann["hook_confidence"]) : 0;
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [correctError, setCorrectError] = useState("");
+  const submitCorrection = async (section: string, c: DraftCorrections): Promise<void> => {
+    if (!correction || busy) return;
+    setBusy(section);
+    setCorrectError("");
+    try {
+      await correction.onCorrect(c);
+    } catch (e) {
+      setCorrectError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
   const num = (v: unknown): string =>
     typeof v === "number" && Number.isFinite(v) ? String(v) : "—";
   const ctr = measured["pooled_link_ctr_pct"];
@@ -247,14 +273,183 @@ export function FindingsView({
             {vu("suggestedTitle")}
           </h4>
           <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
-            {tests.map((suggestion, i) => (
-              <li key={String(suggestion["id"] ?? i)} className="panel-sub">
-                <strong>{String(suggestion["hypothesis"] ?? "")}</strong>
-                {suggestion["why"] ? ` — ${String(suggestion["why"])}` : ""}
-              </li>
-            ))}
+            {tests.map((suggestion, i) => {
+              const testId = String(suggestion["id"] ?? i);
+              const testStatus = String(suggestion["status"] ?? "suggested");
+              return (
+                <li key={testId} className="panel-sub">
+                  <strong>{String(suggestion["hypothesis"] ?? "")}</strong>
+                  {suggestion["why"] ? ` — ${String(suggestion["why"])}` : ""}
+                  {testStatus !== "suggested" ? ` [${testStatus}]` : ""}
+                  {correction && suggestion["id"] ? (
+                    <span className="chip-row" style={{ marginTop: 4 }}>
+                      <button
+                        type="button" className="btn-outline"
+                        disabled={busy !== null || testStatus === "accepted"}
+                        onClick={() => void submitCorrection(`test-${testId}`, {
+                          tests: [{ id: testId, status: "accepted" }],
+                        })}
+                      >
+                        {vu("acceptTestBtn")}
+                      </button>
+                      <button
+                        type="button" className="btn-outline"
+                        disabled={busy !== null || testStatus === "rejected"}
+                        onClick={() => void submitCorrection(`test-${testId}`, {
+                          tests: [{ id: testId, status: "rejected" }],
+                        })}
+                      >
+                        {vu("rejectTestBtn")}
+                      </button>
+                    </span>
+                  ) : null}
+                </li>
+              );
+            })}
           </ul>
         </>
+      ) : null}
+      {correction ? (
+        <div style={{ marginTop: 10 }}>
+          <button
+            type="button" className="btn-outline"
+            onClick={() => { setEditing((v) => !v); setCorrectError(""); }}
+            aria-expanded={editing}
+          >
+            {vu("correctBtn")}
+          </button>
+          {editing ? (
+            <>
+              <p className="panel-sub">{vu("correctHint")}</p>
+              {correctError ? <p role="alert" className="muted">{correctError}</p> : null}
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const data = new FormData(e.currentTarget);
+                  void submitCorrection("transcript", {
+                    transcript: String(data.get("transcript") ?? ""),
+                  });
+                }}
+              >
+                <div className="field" style={{ marginTop: 8 }}>
+                  <label htmlFor="vu-correct-transcript">{vu("transcriptEditLabel")}</label>
+                  <textarea
+                    id="vu-correct-transcript" name="transcript" rows={3}
+                    defaultValue={analysis.transcript || ""}
+                  />
+                </div>
+                <div className="chip-row" style={{ marginTop: 8 }}>
+                  <LoadingButton
+                    type="submit" className="btn-outline"
+                    loading={busy === "transcript"}
+                    loadingLabel={vu("savingLabel")}
+                    disabled={busy !== null}
+                  >
+                    {vu("saveCorrectionBtn")}
+                  </LoadingButton>
+                </div>
+              </form>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const data = new FormData(e.currentTarget);
+                  const conf = Number(data.get("hook_confidence"));
+                  void submitCorrection("hook", {
+                    hook_type: String(data.get("hook_type") || hookType),
+                    hook_confidence: Number.isFinite(conf) ? conf : hookConf,
+                  });
+                }}
+              >
+                <div className="detail-cols-2" style={{ marginTop: 8 }}>
+                  <div className="field">
+                    <label htmlFor="vu-correct-hook">{vu("hookTypeEditLabel")}</label>
+                    <select id="vu-correct-hook" name="hook_type" defaultValue={hookType}>
+                      {HOOK_TYPE_OPTIONS.map((h) => (
+                        <option key={h} value={h}>{h}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label htmlFor="vu-correct-hook-conf">{vu("hookConfEditLabel")}</label>
+                    <input
+                      id="vu-correct-hook-conf" name="hook_confidence" type="number"
+                      min={0} max={1} step={0.05} defaultValue={hookConf}
+                    />
+                  </div>
+                </div>
+                <div className="chip-row" style={{ marginTop: 8 }}>
+                  <LoadingButton
+                    type="submit" className="btn-outline"
+                    loading={busy === "hook"}
+                    loadingLabel={vu("savingLabel")}
+                    disabled={busy !== null}
+                  >
+                    {vu("saveCorrectionBtn")}
+                  </LoadingButton>
+                </div>
+              </form>
+              {rawMoments.length ? (
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const data = new FormData(e.currentTarget);
+                    const frame_labels = rawMoments.map((f, i) => {
+                      const t = Number(data.get(`moment-t-${i}`));
+                      return {
+                        t_sec: Number.isFinite(t) ? t : Number(f["t_sec"]),
+                        label: String(data.get(`moment-label-${i}`) ?? f["label"] ?? ""),
+                        brand_visible: Boolean(f["brand_visible"]),
+                        product_visible: Boolean(f["product_visible"]),
+                        logo_visible: Boolean(f["logo_visible"]),
+                        text_overlay: typeof f["text_overlay"] === "string"
+                          ? String(f["text_overlay"]) : "",
+                        cta_visible: Boolean(f["cta_visible"]),
+                        end_frame: Boolean(f["end_frame"]),
+                      };
+                    });
+                    void submitCorrection("moments", { frame_labels });
+                  }}
+                >
+                  <h4 className="panel-title" style={{ fontSize: 13, marginTop: 10 }}>
+                    {vu("momentsTitle")}
+                  </h4>
+                  {rawMoments.map((f, i) => (
+                    <div className="detail-cols-2" key={`correct-moment-${i}`} style={{ marginTop: 6 }}>
+                      <div className="field">
+                        <label htmlFor={`vu-moment-t-${i}`}>
+                          {vu("momentTimeEditLabel", { n: i + 1 })}
+                        </label>
+                        <input
+                          id={`vu-moment-t-${i}`} name={`moment-t-${i}`} type="number"
+                          min={0} step={0.1} defaultValue={Number(f["t_sec"])}
+                        />
+                      </div>
+                      <div className="field">
+                        <label htmlFor={`vu-moment-label-${i}`}>
+                          {vu("momentLabelEditLabel", { n: i + 1 })}
+                        </label>
+                        <input
+                          id={`vu-moment-label-${i}`} name={`moment-label-${i}`} type="text"
+                          defaultValue={String(f["label"] ?? "")} maxLength={200}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                  <div className="chip-row" style={{ marginTop: 8 }}>
+                    <LoadingButton
+                      type="submit" className="btn-outline"
+                      loading={busy === "moments"}
+                      loadingLabel={vu("savingLabel")}
+                      disabled={busy !== null}
+                    >
+                      {vu("saveCorrectionBtn")}
+                    </LoadingButton>
+                  </div>
+                </form>
+              ) : null}
+            </>
+          ) : null}
+        </div>
       ) : null}
     </div>
   );
@@ -402,6 +597,21 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
   /** The stored analysis block behind the on-screen findings. */
   const findingsBlock = ((findings?.annotation ?? {}) as Record<string, unknown>)["analysis"] as
     Record<string, unknown> | undefined;
+
+  /** Human corrections to the stored findings. The server applies
+   *  them to the annotation (fresh revision, locked dimensions) and
+   *  invalidates any prior review, so the screen reloads the analysis
+   *  and the corrected content must be re-reviewed. */
+  const runCorrection = async (corrections: DraftCorrections): Promise<void> => {
+    const current = draftRef.current;
+    if (!current) return;
+    const res = await correctDraft(current.id, corrections);
+    setDraft(res.draft);
+    const reading = await getAnalysis(current.id).catch(() => null);
+    if (reading) setFindings(reading);
+    setToast(vu("correctDoneMsg"));
+    setStatus(vu("correctDoneMsg"));
+  };
 
   /** Version-bound human review of the findings on screen. */
   const runReview = async (version: string, revision: string): Promise<void> => {
@@ -915,14 +1125,22 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
     }));
   }, [rows, snapshots]);
   const canMatch = videoValid && Boolean(datasetVersion) && knownRowIds.length > 0;
-  const canAnalyze = videoValid && matchConfirmed && draft?.status !== "queued" && draft?.status !== "analyzing";
+  const grantConfirmed =
+    spec.clientConfirmed && spec.client === client.trim() && spec.campaign === campaign.trim()
+    && client.trim() !== "" && campaign.trim() !== "";
+  // Guided order: video, then confirmed client/campaign destination,
+  // then dataset match — the server binds in the same order.
+  const canAnalyze = videoValid && grantConfirmed && matchConfirmed
+    && draft?.status !== "queued" && draft?.status !== "analyzing";
   const analyzeReason = !videoValid
     ? vu("blockedNoVideo")
-    : !matchConfirmed
-      ? vu("blockedNoMatch")
-      : draft?.status === "queued" || draft?.status === "analyzing"
-        ? vu("queuedMsg")
-        : "";
+    : !grantConfirmed
+      ? vu("blockedNoClient")
+      : !matchConfirmed
+        ? vu("blockedNoMatch")
+        : draft?.status === "queued" || draft?.status === "analyzing"
+          ? vu("queuedMsg")
+          : "";
   const limitsText = limits
     ? vu("limitsNote", {
       containers: limits.containers.join(" / ").toUpperCase(),
@@ -936,9 +1154,7 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
   if (!spec.clientConfirmed) warnings.push(vu("warnNoClient"));
   if (!spec.dataset) warnings.push(vu("warnNoDataset"));
 
-  const clientCampaignConfirmed =
-    spec.clientConfirmed && spec.client === client.trim() && spec.campaign === campaign.trim()
-    && client.trim() !== "" && campaign.trim() !== "";
+  const clientCampaignConfirmed = grantConfirmed;
 
   const runAnalyze = async (): Promise<void> => {
     const current = draftRef.current;
@@ -1366,7 +1582,14 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
               </div>
             ) : null}
             {findings?.annotation ? (
-              <FindingsView analysis={findings} vu={vu} onSeek={seekMoment} />
+              <FindingsView
+                key={String(
+                  ((findings.annotation as Record<string, unknown>)["analysis"] as
+                    Record<string, unknown> | undefined)?.["revision"] ?? "norev",
+                )}
+                analysis={findings} vu={vu} onSeek={seekMoment}
+                correction={{ onCorrect: runCorrection }}
+              />
             ) : null}
             {draft?.status === "ready_for_review" && findings?.annotation ? (
               <div style={{ marginTop: 10 }}>

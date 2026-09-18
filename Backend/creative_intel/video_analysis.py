@@ -83,7 +83,16 @@ def readiness():
 
 
 def bind_snapshot(conn, draft_id):
-    """Verify preconditions and freeze the analysis snapshot."""
+    """Verify preconditions and freeze the analysis snapshot.
+
+    An incomplete draft may be saved at any time, but combined
+    analysis requires an authorised, confirmed campaign destination:
+    the draft's own spec must carry clientConfirmed with a named
+    client and campaign (owner-or-admin writes only, like every other
+    draft mutation). Reports without a client column inherit the
+    confirmed destination explicitly in the snapshot — the
+    association is never left ambiguous.
+    """
     from creative_intel import drafts as drafts_mod
     draft = drafts_mod.get_draft(conn, draft_id)
     if draft is None:
@@ -103,6 +112,18 @@ def bind_snapshot(conn, draft_id):
             break
     if video is None:
         raise AnalysisUnavailable("validate the video before analysing")
+    try:
+        spec = json.loads(draft.get("spec_json") or "{}")
+    except ValueError:
+        spec = {}
+    if not isinstance(spec, dict):
+        spec = {}
+    client = str(spec.get("client") or "").strip()
+    campaign = str(spec.get("campaign") or "").strip()
+    if not spec.get("clientConfirmed") or not client or not campaign:
+        raise AnalysisUnavailable(
+            "confirm the client and campaign before analysing: "
+            "combined analysis needs a confirmed destination")
     version = draft.get("dataset_version") or ""
     if not version:
         raise AnalysisUnavailable("import performance data before analysing")
@@ -118,6 +139,7 @@ def bind_snapshot(conn, draft_id):
             "dataset_version": version,
             "match_confirmed_at": match.get("confirmed_at") or "",
             "match_method": match.get("method") or "",
+            "client": client, "campaign": campaign,
             "records": json.loads(match.get("record_json") or "[]"),
             "analysis_version": ANALYSIS_VERSION}
 
@@ -133,7 +155,8 @@ def check_snapshot(conn, snapshot):
     """Re-resolve at job time: inputs must equal the bound snapshot."""
     fresh = bind_snapshot(conn, snapshot["draft_id"])
     for key in ("video_id", "media_id", "creative_key", "video_sha256",
-                "dataset_version", "match_confirmed_at"):
+                "dataset_version", "match_confirmed_at",
+                "client", "campaign"):
         if (fresh.get(key) or "") != (snapshot.get(key) or ""):
             raise AnalysisUnavailable(
                 "inputs changed since Analyse was pressed (%s): "
@@ -205,9 +228,11 @@ def measured_from_records(records):
     Pooled totals only (sum then divide, never average row rates).
     Returns {totals, pooled_link_ctr_pct|null, coverage, warnings}.
     """
-    # Overall known totals stay separate from metric-specific
-    # coverage: known impressions are preserved even when link clicks
-    # are unknown (CTR then reports unavailable, never zero).
+    # Every known total is accumulated independently: a missing CTR
+    # denominator (or any other unknown metric) prevents only its own
+    # ratio — never erases other known measurements. Only records with
+    # BOTH impressions and link clicks known enter the CTR pool;
+    # unavailable totals stay out, genuine zeros stay in.
     totals = {"records": 0, "impressions": 0, "link_clicks": 0,
               "clicks_all": 0, "spend": 0.0, "conversions": 0.0,
               "video_views": 0, "views_25": 0, "views_50": 0,
@@ -250,26 +275,25 @@ def measured_from_records(records):
             else _num(rec.get("impressions"))
         lnk = None if "link_clicks" in missing \
             else _num(rec.get("link_clicks"))
-        if imp is None and lnk is None:
-            # Nothing usable for any pool: warn only when the values
-            # were supplied but unparseable (marked-missing rows are
-            # already covered by the coverage warning below).
-            if "impressions" not in missing \
-                    or "link_clicks" not in missing:
-                warnings.append(
-                    "record %s has non-numeric counts: excluded from "
-                    "pooled totals" % rec.get("id"))
-            continue
+        # Supplied-but-unparseable counts are unknown, not zero: warn
+        # once per record (marked-missing rows are already covered by
+        # the coverage warning below).
+        if ("impressions" not in missing and imp is None) or \
+                ("link_clicks" not in missing and lnk is None):
+            warnings.append(
+                "record %s has non-numeric counts: excluded from "
+                "pooled totals" % rec.get("id"))
         if imp is not None:
             totals["impressions"] += imp
+        if lnk is not None:
+            totals["link_clicks"] += lnk
         # The CTR pool needs BOTH sides known: unknown clicks can
-        # never drag a rate to 0%, and known impressions are still
-        # preserved above when clicks are missing.
+        # never drag a rate to 0%, and each known total above is still
+        # preserved when the other side is missing.
         if imp is not None and lnk is not None:
             pool_records += 1
             pool_impressions += imp
             pool_clicks += lnk
-            totals["link_clicks"] += lnk
         for key, num in (("clicks", "clicks_all"), ("video_views", None),
                          ("views_25", None), ("views_50", None),
                          ("views_75", None), ("views_100", None)):
@@ -390,10 +414,10 @@ def run(conn, snapshot, owner="", media_dir="", providers=None,
     fresh = check_snapshot(conn, snapshot)
     checkpoint(5, "snapshot")
     key = fresh["creative_key"]
-    # Before any provider work or persistence: run_pipeline saves
-    # the annotation itself, so a staleness check placed after it
-    # would always see its own fresh row. A late result must never
-    # overwrite a newer analysis.
+    # Before any provider work: a late result must never overwrite a
+    # newer analysis. (The pipeline itself no longer writes — see
+    # persist=False below — so this guard only ever sees other jobs'
+    # rows, never this job's own partial output.)
     _guard_not_stale(conn, key, queued_at)
     pre_at = _analysis_at(conn, key)
     conn.execute(
@@ -430,92 +454,254 @@ def run(conn, snapshot, owner="", media_dir="", providers=None,
                        if prep["audio"] else (None, None)),
              "images": prep["images"], "image_times": prep["image_times"],
              "duration_s": fresh["duration_s"]}
-    # The pipeline below saves transcript + annotation as it goes, so
-    # capture the pre-run rows now: if the post-pipeline checks abort
-    # this job as stale, its partial output is rolled back instead of
-    # silently overwriting the stored creative data.
-    prior_ann_row = conn.execute(
-        "SELECT annotation_json FROM annotations WHERE creative_key=?",
-        (key,)).fetchone()
-    prior_ann = prior_ann_row[0] if prior_ann_row else None
-    prior_transcript_row = conn.execute(
-        "SELECT transcript FROM creatives WHERE creative_key=?",
-        (key,)).fetchone()
-    prior_transcript = prior_transcript_row[0] \
-        if prior_transcript_row else None
-    def _restore_prior():
-        if prior_ann is None:
-            conn.execute("DELETE FROM annotations WHERE creative_key=?",
-                         (key,))
-        else:
-            conn.execute("UPDATE annotations SET annotation_json=? "
-                         "WHERE creative_key=?", (prior_ann, key))
-        if prior_transcript is not None:
-            conn.execute("UPDATE creatives SET transcript=? "
-                         "WHERE creative_key=?", (prior_transcript, key))
-        conn.commit()
-
-    try:
-        report = creative_mod.run_pipeline(
-            conn, key, prov, media=media, progress=progress,
-            cancelled=cancelled)
-        # Post-pipeline re-verification (M2): provider calls take
-        # minutes, during which inputs may have changed or a concurrent
-        # job may have finished. Re-bind the snapshot, re-run the
-        # queued-at guard, and abort if another analysis landed while
-        # this one was running. The intermediate save preserves the
-        # prior stamp (see run_pipeline), so a changed stamp here
-        # proves a concurrent finisher — never overwrite it.
-        fresh = check_snapshot(conn, snapshot)
-        _guard_not_stale(conn, key, queued_at)
-        if _analysis_at(conn, key) != pre_at:
-            raise AnalysisUnavailable(
-                "another analysis finished while this one was running: "
-                "discarding this result")
-        checkpoint(90, "measured")
-        measured = measured_from_records(fresh["records"])
-        ann = report["annotation"]
-        transcript = report.get("transcript") or ""
-        ann["frame_labels"] = [
-            {"t_sec": l.get("t_sec"), "label": l.get("label"),
-             "brand_visible": l.get("brand_visible"),
-             "product_visible": l.get("product_visible"),
-             "logo_visible": l.get("logo_visible"),
-             "text_overlay": l.get("text_overlay"),
-             "cta_visible": l.get("cta_visible"),
-             "end_frame": l.get("end_frame")}
-            for l in (report.get("frame_labels") or [])]
-        ann["analysis"] = {
-            "version": ANALYSIS_VERSION,
-            "revision": uuid.uuid4().hex,
-            "at": utcnow(),
-            "model": _vision_model(prov),
-            "sampling": prep["sampling"],
-            "coverage": {"frames": len(prep["images"]),
-                         "clip_s": fresh["duration_s"]},
-            "snapshot": {k: fresh[k] for k in
-                         ("video_sha256", "dataset_version",
-                          "match_confirmed_at", "match_method")},
-            "measured": measured,
-            "suggested_tests": suggest_tests(ann, measured, transcript)}
-        creative_mod.save_annotation(conn, key, ann)
-        drafts_mod.update_draft(conn, fresh["draft_id"],
-                                status="ready_for_review")
-        conn.commit()
-    except Exception:
-        # A job that never publishes leaves no trace — but only when
-        # nothing newer published meanwhile: if a concurrent finisher
-        # landed (its stamp differs from the pre-run one), its result
-        # stands and this rollback stands down. This covers stale
-        # aborts, cancellations at any checkpoint (including after the
-        # pipeline), and provider failures.
-        if _analysis_at(conn, key) == pre_at:
-            _restore_prior()
-        raise
+    # Deferred publish: the pipeline below generates the full report
+    # WITHOUT writing to the published creative record (persist=False),
+    # so an in-flight job can never clobber a concurrent finisher's
+    # rows — not even briefly. Freshness is verified first; only then
+    # is the complete result published in one step. An abort anywhere
+    # before publish leaves no trace and needs no repair.
+    report = creative_mod.run_pipeline(
+        conn, key, prov, media=media, progress=progress,
+        cancelled=cancelled, persist=False)
+    # Post-pipeline re-verification (M2): provider calls take
+    # minutes, during which inputs may have changed or a concurrent
+    # job may have finished. Re-bind the snapshot, re-run the
+    # queued-at guard, and abort if another analysis landed while
+    # this one was running. A changed stamp here proves a concurrent
+    # finisher — never overwrite it.
+    fresh = check_snapshot(conn, snapshot)
+    _guard_not_stale(conn, key, queued_at)
+    if _analysis_at(conn, key) != pre_at:
+        raise AnalysisUnavailable(
+            "another analysis finished while this one was running: "
+            "discarding this result")
+    checkpoint(90, "measured")
+    measured = measured_from_records(fresh["records"])
+    ann = report["annotation"]
+    transcript = report.get("transcript") or ""
+    ann["frame_labels"] = [
+        {"t_sec": l.get("t_sec"), "label": l.get("label"),
+         "brand_visible": l.get("brand_visible"),
+         "product_visible": l.get("product_visible"),
+         "logo_visible": l.get("logo_visible"),
+         "text_overlay": l.get("text_overlay"),
+         "cta_visible": l.get("cta_visible"),
+         "end_frame": l.get("end_frame")}
+        for l in (report.get("frame_labels") or [])]
+    ann["analysis"] = {
+        "version": ANALYSIS_VERSION,
+        "revision": uuid.uuid4().hex,
+        "at": utcnow(),
+        "model": _vision_model(prov),
+        "sampling": prep["sampling"],
+        "coverage": {"frames": len(prep["images"]),
+                     "clip_s": fresh["duration_s"]},
+        "snapshot": {k: fresh[k] for k in
+                     ("video_sha256", "dataset_version",
+                      "match_confirmed_at", "match_method",
+                      "client", "campaign")},
+        "measured": measured,
+        "suggested_tests": suggest_tests(ann, measured, transcript)}
+    # Final gate immediately before publish: cancellation and
+    # freshness are re-checked after the last provider-derived
+    # computation, while still nothing has been written.
+    checkpoint(95, "publish")
+    _guard_not_stale(conn, key, queued_at)
+    if _analysis_at(conn, key) != pre_at:
+        raise AnalysisUnavailable(
+            "another analysis finished while this one was running: "
+            "discarding this result")
+    # Publish the complete result in one step: generated derivatives
+    # first, then the annotation carrying the new unique revision,
+    # then the draft status. No publish-then-repair: a failure here
+    # raises before any dependent step, never after a partial write.
+    conn.execute("UPDATE creatives SET transcript=?, pipeline_json=?"
+                 " WHERE creative_key=?",
+                 (transcript, json.dumps(report["stages"]), key))
+    creative_mod.save_annotation(conn, key, ann)
+    drafts_mod.update_draft(conn, fresh["draft_id"],
+                            status="ready_for_review")
+    conn.commit()
     return {"creative_key": key, "draft_id": fresh["draft_id"],
             "stages": report["stages"], "measured": measured,
             "analysis_version": ANALYSIS_VERSION,
             "revision": ann["analysis"]["revision"]}
+
+
+# Fields a human reviewer may correct on a finished analysis.
+# Classification dimensions reuse the locked-confirmation path (a
+# corrected value is preserved over later auto saves, like any
+# analyst judgement); transcript text, frame moments, and test
+# verdicts are stored directly. Anything else is rejected — a review
+# note alone never rewrites the underlying finding.
+CORRECTION_TEST_STATUSES = ("suggested", "accepted", "rejected")
+
+CORRECTION_FRAME_FLAGS = ("brand_visible", "product_visible",
+                          "logo_visible", "cta_visible", "end_frame")
+
+MAX_CORRECTION_TRANSCRIPT = 20000
+MAX_CORRECTION_LABEL = 200
+MAX_CORRECTION_FRAMES = 512
+
+
+def _correction_dims():
+    from creative_intel import creative as creative_mod
+    return {
+        "hook_type": creative_mod.HOOK_TYPES,
+        "hook_modality": creative_mod.HOOK_MODALITIES,
+        "opening_delivery": creative_mod.OPENING_DELIVERY,
+        "narrative": creative_mod.NARRATIVES,
+        "message_class": creative_mod.MESSAGE_CLASSES,
+        "promotion_kind": creative_mod.PROMOTION_KINDS,
+        "format_kind": creative_mod.FORMAT_KINDS,
+        "creator_vs_branded": creative_mod.CREATOR_MODES,
+        "edit_style": creative_mod.EDIT_STYLES,
+    }
+
+
+def apply_corrections(conn, creative_key, corrections, by=""):
+    """Apply human corrections to a stored analysis; returns the updated
+    annotation.
+
+    Only the correctable fields are accepted; unknown fields, illegal
+    enum values, out-of-range confidences/timestamps, and verdicts for
+    unknown test ids raise ValueError. Dimension corrections lock like
+    analyst confirmations. Every call mints a fresh analysis revision
+    and appends a {by, at, fields} log entry, so an approval granted
+    before the correction can never silently cover the new content —
+    the caller invalidates any recorded review.
+    """
+    from creative_intel import creative as creative_mod
+    if not isinstance(corrections, dict) or not corrections:
+        raise ValueError("corrections need at least one field")
+    dims = _correction_dims()
+    known = set(dims) | {"hook_confidence", "transcript",
+                         "frame_labels", "tests"}
+    unknown = [k for k in corrections if k not in known]
+    if unknown:
+        raise ValueError("uncorrectable field(s): %s"
+                         % ", ".join(sorted(unknown)[:5]))
+    row = conn.execute("SELECT annotation_json FROM annotations"
+                       " WHERE creative_key=?", (creative_key,)).fetchone()
+    if not row:
+        raise ValueError("no stored analysis to correct")
+    try:
+        ann = json.loads(row[0])
+    except ValueError:
+        raise ValueError("no stored analysis to correct")
+    if not isinstance(ann, dict) \
+            or not isinstance(ann.get("analysis"), dict):
+        raise ValueError("no finished analysis to correct yet")
+    touched = []
+
+    def _confirm(dim, value):
+        ann[dim] = value
+        confirmed = ann.get("confirmed")
+        confirmed = dict(confirmed) if isinstance(confirmed, dict) \
+            else {}
+        confirmed[dim] = value
+        ann["confirmed"] = confirmed
+        entry = {"dimension": dim, "value": value, "by": by or "human"}
+        evidence = ann.get("evidence")
+        if not isinstance(evidence, list):
+            evidence = []
+            ann["evidence"] = evidence
+        evidence.append(entry)
+
+    for dim, allowed in dims.items():
+        if dim in corrections and corrections[dim] is not None:
+            if corrections[dim] not in allowed:
+                raise ValueError("%s must be one of %s"
+                                 % (dim, list(allowed)))
+            _confirm(dim, corrections[dim])
+            touched.append(dim)
+    if "hook_confidence" in corrections \
+            and corrections["hook_confidence"] is not None:
+        try:
+            conf = float(corrections["hook_confidence"])
+        except (TypeError, ValueError):
+            raise ValueError("hook_confidence must be 0..1")
+        if not 0.0 <= conf <= 1.0:
+            raise ValueError("hook_confidence must be 0..1")
+        ann["hook_confidence"] = conf
+        touched.append("hook_confidence")
+    if "frame_labels" in corrections \
+            and corrections["frame_labels"] is not None:
+        labels = corrections["frame_labels"]
+        if not isinstance(labels, list) \
+                or len(labels) > MAX_CORRECTION_FRAMES:
+            raise ValueError("frame_labels must be a list of at most %d"
+                             % MAX_CORRECTION_FRAMES)
+        normalised = []
+        for item in labels:
+            if not isinstance(item, dict):
+                raise ValueError("frame_labels entries must be objects")
+            try:
+                moment = float(item.get("t_sec"))
+            except (TypeError, ValueError):
+                raise ValueError("frame moment t_sec must be numeric")
+            if moment < 0:
+                raise ValueError("frame moment t_sec cannot be negative")
+            label = item.get("label", "")
+            if not isinstance(label, str) \
+                    or len(label) > MAX_CORRECTION_LABEL:
+                raise ValueError("frame moment label must be text of at"
+                                 " most %d chars" % MAX_CORRECTION_LABEL)
+            entry = {"t_sec": moment, "label": label}
+            for flag in CORRECTION_FRAME_FLAGS:
+                if flag in item and item[flag] is not None:
+                    entry[flag] = bool(item[flag])
+            overlay = item.get("text_overlay", "")
+            if overlay is not None:
+                if not isinstance(overlay, str) or len(overlay) > 500:
+                    raise ValueError("text_overlay must be text of at"
+                                     " most 500 chars")
+                entry["text_overlay"] = overlay
+            normalised.append(entry)
+        ann["frame_labels"] = normalised
+        touched.append("frame_labels")
+    if "tests" in corrections and corrections["tests"] is not None:
+        ops = corrections["tests"]
+        if not isinstance(ops, list) or not ops:
+            raise ValueError("tests must be a non-empty list")
+        stored = ann["analysis"].get("suggested_tests")
+        if not isinstance(stored, list):
+            raise ValueError("stored analysis has no suggested tests")
+        by_id = {t.get("id"): t for t in stored
+                 if isinstance(t, dict) and t.get("id")}
+        for op in ops:
+            if not isinstance(op, dict) or not op.get("id"):
+                raise ValueError("test verdicts need an id")
+            if op.get("id") not in by_id:
+                raise ValueError("unknown suggested test %r"
+                                 % (op.get("id"),))
+            if op.get("status") not in CORRECTION_TEST_STATUSES:
+                raise ValueError("test status must be one of %s"
+                                 % list(CORRECTION_TEST_STATUSES))
+            by_id[op["id"]]["status"] = op["status"]
+        touched.append("tests")
+    if "transcript" in corrections \
+            and corrections["transcript"] is not None:
+        text = corrections["transcript"]
+        if not isinstance(text, str) \
+                or len(text) > MAX_CORRECTION_TRANSCRIPT:
+            raise ValueError("transcript must be text of at most %d chars"
+                             % MAX_CORRECTION_TRANSCRIPT)
+        conn.execute("UPDATE creatives SET transcript=? WHERE creative_key=?",
+                     (text, creative_key))
+        touched.append("transcript")
+    if not touched:
+        raise ValueError("corrections need at least one field")
+    log = ann["analysis"].get("corrections")
+    if not isinstance(log, list):
+        log = []
+        ann["analysis"]["corrections"] = log
+    log.append({"by": by or "human", "at": utcnow(),
+                "fields": sorted(touched)})
+    ann["analysis"]["revision"] = uuid.uuid4().hex
+    creative_mod.save_annotation(conn, creative_key, ann)
+    conn.commit()
+    return ann
 
 
 def _vision_model(prov):

@@ -428,7 +428,7 @@ def apply_action(conn, action, payload, prov, media_dir=None, actor="",
         return media.save_media(
             conn, _media_dir(media_dir), payload["creative_key"],
             payload.get("filename", ""), payload.get("content_b64", ""),
-            payload.get("mime"))
+            payload.get("mime"), uploaded_by=actor or "")
     if action == "connect-sheets":
         if not payload.get("platform"):
             raise ValueError("sheets import needs a platform")

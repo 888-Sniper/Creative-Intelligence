@@ -116,6 +116,11 @@ def bound_db(tmp_path):
     if os.path.exists(tmp):
         os.unlink(tmp)
     did = drafts.create_draft(conn, "emp-1")
+    # Combined analysis needs the authorised, confirmed campaign
+    # destination on the draft's own spec.
+    drafts.update_draft(conn, did, spec={"client": "Foap",
+                                         "campaign": "Sample Launch",
+                                         "clientConfirmed": True})
     drafts.add_video(conn, did, "video-upload-sample",
                      media_id=rec["id"], duration_s=15.0, width=1280,
                      height=720, sha256=rec["sha256"],
@@ -250,12 +255,20 @@ def test_analyze_honest_without_live_provider(tmp_path, monkeypatch):
                     files={"file": ("sample.mp4", blob,
                                     "video/mp4")}).json()
     did = http.post("/api/drafts", json={}).json()["draft"]["id"]
-    # Preconditions enforced in order before provider readiness.
+    # Preconditions enforced in guided order before provider readiness:
+    # video, then confirmed client/campaign, then dataset, then match.
     resp = http.post("/api/drafts/%s/analyze" % did, json={})
     assert resp.status_code == 409
     assert "validate the video" in resp.json()["error"]
     http.post("/api/videos/validate",
               json={"media_id": rec["id"], "draft_id": did})
+    resp = http.post("/api/drafts/%s/analyze" % did, json={})
+    assert resp.status_code == 409
+    assert "confirm the client and campaign" in resp.json()["error"]
+    assert http.patch(
+        "/api/drafts/%s" % did,
+        json={"spec": {"client": "Foap", "campaign": "Sample Launch",
+                       "clientConfirmed": True}}).status_code == 200
     resp = http.post("/api/drafts/%s/analyze" % did, json={})
     assert resp.status_code == 409
     assert "import performance data" in resp.json()["error"]
@@ -777,4 +790,143 @@ def test_intermediate_save_restores_null_analysis(tmp_path):
         conn, key, NullProviders(),
         media={"images": [b"fake-jpeg"], "image_times": [1.0]})
     assert out["annotation"]["analysis"] == prior
+    conn.close()
+
+
+def test_independent_totals_survive_missing_pairs():
+    """Recheck round 4: a missing CTR denominator erases nothing —
+    spend, conversions, and views accumulate on their own."""
+    recs = [
+        {"id": 1, "spend": 100.0, "currency": "USD", "conversions": 5,
+         "video_views": 500, "impressions": None, "link_clicks": None,
+         "missing_json": "[\"impressions\", \"link_clicks\"]"},
+        {"id": 2, "spend": 0.0, "currency": "USD", "conversions": 0,
+         "video_views": 0, "impressions": 0, "link_clicks": 0,
+         "missing_json": "[\"impressions\", \"link_clicks\"]"},
+    ]
+    measured = va.measured_from_records(recs)
+    assert measured["totals"]["spend"] == 100.0
+    assert measured["totals"]["conversions"] == 5.0
+    assert measured["totals"]["video_views"] == 500
+    assert measured["pooled_link_ctr_pct"] is None
+    # Known clicks with missing impressions: total kept, rate withheld.
+    clicks = va.measured_from_records([
+        {"id": 3, "impressions": None, "link_clicks": 25,
+         "missing_json": "[\"impressions\"]"}])
+    assert clicks["totals"]["link_clicks"] == 25
+    assert clicks["totals"]["impressions"] == 0
+    assert clicks["pooled_link_ctr_pct"] is None
+
+
+def test_bind_snapshot_needs_confirmed_destination(tmp_path):
+    """Recheck round 4: combined analysis binds only with a confirmed
+    client/campaign destination, which the snapshot then inherits."""
+    conn, _store, did = bound_db(tmp_path)
+    snap = va.bind_snapshot(conn, did)
+    assert snap["client"] == "Foap"
+    assert snap["campaign"] == "Sample Launch"
+    drafts.update_draft(conn, did, spec={"client": "Foap",
+                                         "campaign": "Sample Launch",
+                                         "clientConfirmed": False})
+    with pytest.raises(va.AnalysisUnavailable):
+        va.bind_snapshot(conn, did)
+    drafts.update_draft(conn, did, spec={"client": "", "campaign": "",
+                                         "clientConfirmed": True})
+    with pytest.raises(va.AnalysisUnavailable):
+        va.bind_snapshot(conn, did)
+    conn.close()
+
+
+@NEEDS_FFMPEG
+def test_stale_job_never_relabels_newer_findings(tmp_path, monkeypatch):
+    """Recheck round 4 (the interleaving): B publishes hook=bold_claim
+    under revision newer-B; the older job A then aborts as stale. Its
+    generated classification (question) must never land under B's
+    revision — the final stored annotation is byte-identical to B's."""
+    conn, store, did = bound_db(tmp_path)
+    snap = va.bind_snapshot(conn, did)
+    key = "video-upload-sample"
+    real_at = va._analysis_at
+    calls = {"n": 0}
+
+    def fake_at(conn, key):
+        calls["n"] += 1
+        if calls["n"] > 1:
+            # B finishes while A is still running: bold_claim under
+            # revision newer-B.
+            newer = creative_mod.blank_annotation()
+            newer["hook_type"] = "bold_claim"
+            newer["analysis"] = {
+                "version": "v1", "revision": "newer-B",
+                "at": "2026-05-01T00:00:00+00:00",
+                "model": "test/test-frames",
+                "snapshot": dict(snap, records=[]),
+                "measured": {}, "suggested_tests": []}
+            creative_mod.save_annotation(conn, key, newer)
+            return "2026-05-01T00:00:00+00:00"
+        return real_at(conn, key)
+
+    monkeypatch.setattr(va, "_analysis_at", fake_at)
+    with pytest.raises(va.AnalysisUnavailable):
+        va.run(conn, snap, owner="emp-1", media_dir=store,
+               providers=StubProviders(), queued_at="")
+    after = conn.execute("SELECT annotation_json FROM annotations"
+                         " WHERE creative_key=?", (key,)).fetchone()[0]
+    final = json.loads(after)
+    assert final["hook_type"] == "bold_claim"
+    assert final["analysis"]["revision"] == "newer-B"
+    conn.close()
+
+
+def test_apply_corrections_rewrites_findings(tmp_path):
+    """Recheck round 4: corrections land on the stored finding, lock
+    dimensions, mint a fresh revision with a log entry — and reject
+    unknown fields, bad enums, and unknown test ids."""
+    conn, _store, _did = bound_db(tmp_path)
+    key = "video-upload-sample"
+    seed = creative_mod.blank_annotation()
+    seed["analysis"] = {"version": "v1", "revision": "rev-0",
+                        "at": "2026-01-01T00:00:00+00:00",
+                        "model": "test/test-frames",
+                        "snapshot": {}, "measured": {},
+                        "suggested_tests": [
+                            {"id": "hook-clarity",
+                             "hypothesis": "Try a clearer hook.",
+                             "why": "uncertain hook", "evidence": [],
+                             "status": "suggested"}]}
+    creative_mod.save_annotation(conn, key, seed)
+    conn.execute("INSERT INTO creatives (creative_key, transcript)"
+                 " VALUES (?, ?) ON CONFLICT (creative_key) DO UPDATE"
+                 " SET transcript = excluded.transcript",
+                 (key, "raw words"))
+    conn.commit()
+    ann = va.apply_corrections(
+        conn, key,
+        {"transcript": "fixed words", "hook_type": "bold_claim",
+         "hook_confidence": 0.7,
+         "frame_labels": [{"t_sec": 2.5, "label": "opening",
+                           "cta_visible": True}],
+         "tests": [{"id": "hook-clarity", "status": "rejected"}]},
+        by="emp-1")
+    assert ann["hook_type"] == "bold_claim"
+    assert ann["confirmed"]["hook_type"] == "bold_claim"
+    assert ann["frame_labels"][0]["t_sec"] == 2.5
+    assert ann["analysis"]["suggested_tests"][0]["status"] == "rejected"
+    assert ann["analysis"]["revision"] != "rev-0"
+    assert ann["analysis"]["corrections"][0]["by"] == "emp-1"
+    assert conn.execute("SELECT transcript FROM creatives"
+                        " WHERE creative_key=?", (key,)).fetchone()[0] \
+        == "fixed words"
+    with pytest.raises(ValueError):
+        va.apply_corrections(conn, key, {"hook_type": "nope"}, by="emp-1")
+    with pytest.raises(ValueError):
+        va.apply_corrections(conn, key, {"tests": [{"id": "ghost",
+                                                   "status": "accepted"}]},
+                             by="emp-1")
+    with pytest.raises(ValueError):
+        va.apply_corrections(conn, key, {"colour": "teal"}, by="emp-1")
+    with pytest.raises(ValueError):
+        va.apply_corrections(conn, key, {}, by="emp-1")
+    with pytest.raises(ValueError):
+        va.apply_corrections(conn, "missing-key", {"hook_type": "other"})
     conn.close()

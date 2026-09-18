@@ -286,6 +286,54 @@ export function reviewDraft(
   );
 }
 
+export interface DraftCorrections {
+  transcript?: string;
+  hook_type?: string;
+  hook_confidence?: number;
+  hook_modality?: string;
+  opening_delivery?: string;
+  narrative?: string;
+  message_class?: string;
+  promotion_kind?: string;
+  format_kind?: string;
+  creator_vs_branded?: string;
+  edit_style?: string;
+  frame_labels?: Array<{
+    t_sec: number; label?: string; brand_visible?: boolean;
+    product_visible?: boolean; logo_visible?: boolean;
+    text_overlay?: string; cta_visible?: boolean; end_frame?: boolean;
+  }>;
+  tests?: Array<{ id: string; status: string }>;
+}
+
+export interface DraftCorrectionResp {
+  draft: DraftView;
+  annotation: Record<string, unknown>;
+  revision: string;
+}
+
+/** Correctable hook taxonomy (mirrors the server's HOOK_TYPES). */
+export const HOOK_TYPE_OPTIONS = [
+  "question", "bold_claim", "demo_open", "social_proof",
+  "offer", "story", "pattern_interrupt", "other",
+];
+
+/** Correctable per-test verdicts (mirrors the server). */
+export const TEST_STATUS_OPTIONS = ["suggested", "accepted", "rejected"];
+
+/** Human corrections to the stored findings: transcript text,
+ *  hook/category values, frame moments, per-test accept/reject.
+ *  The server validates, locks corrected dimensions, mints a fresh
+ *  revision, and invalidates any prior review of the old content. */
+export function correctDraft(
+  draftId: string, corrections: DraftCorrections,
+): Promise<DraftCorrectionResp> {
+  return api<DraftCorrectionResp>(
+    "POST", `/api/drafts/${encodeURIComponent(draftId)}/corrections`,
+    corrections,
+  );
+}
+
 export interface DatasetImportResp {
   dataset_id: string;
   draft_id: string;

@@ -43,8 +43,11 @@ alembic stays auth-only by design)
 
 ## State machines
 
-- `draft.status`: `queued -> running -> completed | failed | cancelled`
-  (cancel is owner-or-admin; worker restart requeues interrupted).
+- `draft.status` (`DRAFT_STATUSES` in `creative_intel/drafts.py`):
+  `draft -> validating -> needs_confirmation -> queued -> analyzing ->`
+  `ready_for_review -> reviewed`, with `failed | cancelled | expired`
+  off-ramps (cancel is owner-or-admin; worker restart requeues
+  interrupted jobs, never silently).
 - `video.validation`: `pending -> valid | invalid`
   (reasons: mime / size / duration / dims / sha-mismatch).
 - `job.status` mirrors the draft while running, progress 0-1 measured only.

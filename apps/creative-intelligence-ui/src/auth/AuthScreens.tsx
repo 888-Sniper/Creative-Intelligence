@@ -60,7 +60,7 @@ function GateScreen({ gate }: { gate: "pending" | "suspended" | "revoked" }) {
     <AuthShell>
       <div className="auth-card" role="alert">
         <h1>{titles[gate]}</h1>
-        <p className="muted">{who}</p>
+        <p>{who}</p>
         <p>{notes[gate]}</p>
         <button type="button" className="auth-btn" onClick={() => void refresh()}>
           {t("auth.gate.refresh")}

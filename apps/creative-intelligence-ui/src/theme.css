@@ -153,6 +153,11 @@ video{max-width:100%;width:100%;border:1px solid var(--line);border-radius:var(-
 .login-footer svg{vertical-align:-2px;color:var(--foap-primary)}
 .auth-card{max-width:480px;width:100%;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:32px}
 .auth-card h1{margin:0 0 8px;font-size:24px}
+/* Gate screens (pending/suspended/revoked): one uniform 16px rhythm
+ * from name through body to the buttons — UA paragraph margins
+ * collapse unevenly against the buttons otherwise. */
+.auth-card[role="alert"] p{margin:0 0 16px}
+.auth-card[role="alert"] .auth-btn{margin:16px 0 0}
 .auth-btn{display:block;width:100%;margin:8px 0;padding:12px;text-align:center;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:8px;cursor:pointer;font-size:15px;font-weight:600;font-family:inherit}
 .auth-btn:hover{filter:brightness(1.1)}
 .auth-card input{width:100%;box-sizing:border-box;margin:4px 0}

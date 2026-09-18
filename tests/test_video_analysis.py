@@ -326,3 +326,103 @@ def test_analyze_rejects_double_submit(tmp_path, monkeypatch):
     resp = http.post("/api/drafts/%s/analyze" % did, json={})
     assert resp.status_code == 409
     assert resp.json()["job_id"] != ""
+
+
+def test_handler_cancel_before_start_marks_cancelled(tmp_path):
+    """A revoked job lands the draft in cancelled, never stranded
+    in queued/analyzing (M5/M12)."""
+    from ci_backend import worker_handlers
+    conn, _store, did = bound_db(tmp_path)
+    snap = va.bind_snapshot(conn, did)
+    jobs_mod.ensure(conn)
+    job = jobs_mod.enqueue(conn, "video_analysis", {"snapshot": snap},
+                           owner="emp-1")
+    jobs_mod.cancel(conn, job["id"], owner="emp-1")
+    with pytest.raises(jobs_mod.JobCancelled):
+        worker_handlers.run_video_analysis(
+            conn, {"snapshot": snap}, "emp-1", {"media_dir": _store},
+            job["id"])
+    assert drafts.get_draft(conn, did)["status"] == "cancelled"
+    conn.close()
+
+
+def test_handler_unexpected_error_marks_failed(tmp_path, monkeypatch):
+    """Provider blowups (not just AnalysisUnavailable) fail the
+    draft instead of stranding it in analyzing (M1)."""
+    from ci_backend import worker_handlers
+    conn, store, did = bound_db(tmp_path)
+    snap = va.bind_snapshot(conn, did)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("provider exploded")
+
+    monkeypatch.setattr(va, "run", boom)
+    with pytest.raises(RuntimeError):
+        worker_handlers.run_video_analysis(
+            conn, {"snapshot": snap}, "emp-1", {"media_dir": store})
+    assert drafts.get_draft(conn, did)["status"] == "failed"
+    conn.close()
+
+
+def test_requeue_interrupted_recovers_stale_running(tmp_path):
+    """Worker restart requeues only expired-lease running jobs (M5)."""
+    conn, _store, did = bound_db(tmp_path)
+    jobs_mod.ensure(conn)
+    job = jobs_mod.enqueue(conn, "video_analysis",
+                           {"snapshot": {"draft_id": did}}, owner="emp-1")
+    assert jobs_mod.claim(conn, job["id"], lease_owner="w1") is not None
+    # Simulate a crash an hour ago: backdate the lease expiry.
+    conn.execute("UPDATE worker_jobs SET lease_expires_at='2000-01-01T00:00:00'"
+                 " WHERE id=?", (job["id"],))
+    conn.commit()
+    assert jobs_mod.requeue_interrupted(conn) == 1
+    assert jobs_mod.get(conn, job["id"])["status"] == "queued"
+    # A fresh lease belongs to a live worker: left alone.
+    job2 = jobs_mod.enqueue(conn, "video_analysis",
+                            {"snapshot": {"draft_id": did}}, owner="emp-1")
+    assert jobs_mod.claim(conn, job2["id"], lease_owner="w1") is not None
+    assert jobs_mod.requeue_interrupted(conn) == 0
+    assert jobs_mod.get(conn, job2["id"])["status"] == "running"
+    conn.close()
+
+
+def test_pipeline_preserves_prior_analysis_stamp(tmp_path):
+    """The intermediate pipeline save must not wipe a concurrent
+    finisher's stamped block (M2)."""
+    conn, _store, _did = bound_db(tmp_path)
+    conn.execute(
+        "INSERT OR IGNORE INTO creatives (creative_key, platform,"
+        " name, status) VALUES ('video-upload-sample', 'meta',"
+        " 'video-upload-sample', 'auto')")
+    ann = creative_mod.blank_annotation()
+    ann["analysis"] = {"version": "v1", "at": "2026-01-01T00:00:00",
+                       "model": "test/stub"}
+    creative_mod.save_annotation(conn, "video-upload-sample", ann)
+    media = {"audio": (None, None), "images": [b"fake"],
+             "image_times": [1.0], "duration_s": 15.0}
+    creative_mod.run_pipeline(conn, "video-upload-sample",
+                              StubProviders(), media=media)
+    assert va._analysis_at(conn,
+                           "video-upload-sample") == "2026-01-01T00:00:00"
+    conn.close()
+
+
+@NEEDS_FFMPEG
+def test_concurrent_finisher_aborts_mid_run(tmp_path, monkeypatch):
+    """A newer stamp landing mid-run aborts before persistence (M2)."""
+    conn, store, did = bound_db(tmp_path)
+    snap = va.bind_snapshot(conn, did)
+    real_at = va._analysis_at
+    calls = {"n": 0}
+
+    def fake_at(conn, key):
+        calls["n"] += 1
+        if calls["n"] > 1:
+            return "2999-01-01T00:00:00"  # B finished mid-run
+        return real_at(conn, key)
+
+    monkeypatch.setattr(va, "_analysis_at", fake_at)
+    with pytest.raises(va.AnalysisUnavailable):
+        va.run(conn, snap, owner="emp-1", media_dir=store,
+               providers=StubProviders(), queued_at="2000-01-01T00:00:00")
+    conn.close()

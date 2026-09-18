@@ -333,6 +333,7 @@ def run(conn, snapshot, owner="", media_dir="", providers=None,
     # would always see its own fresh row. A late result must never
     # overwrite a newer analysis.
     _guard_not_stale(conn, key, queued_at)
+    pre_at = _analysis_at(conn, key)
     conn.execute(
         "INSERT OR IGNORE INTO creatives (creative_key, platform, name,"
         " status) VALUES (?, ?, ?, 'auto')",
@@ -370,6 +371,19 @@ def run(conn, snapshot, owner="", media_dir="", providers=None,
     report = creative_mod.run_pipeline(
         conn, key, prov, media=media, progress=progress,
         cancelled=cancelled)
+    # Post-pipeline re-verification (M2): provider calls take
+    # minutes, during which inputs may have changed or a concurrent
+    # job may have finished. Re-bind the snapshot, re-run the
+    # queued-at guard, and abort if another analysis landed while
+    # this one was running. The intermediate save preserves the
+    # prior stamp (see run_pipeline), so a changed stamp here
+    # proves a concurrent finisher — never overwrite it.
+    fresh = check_snapshot(conn, snapshot)
+    _guard_not_stale(conn, key, queued_at)
+    if _analysis_at(conn, key) != pre_at:
+        raise AnalysisUnavailable(
+            "another analysis finished while this one was running: "
+            "discarding this result")
     checkpoint(90, "measured")
     measured = measured_from_records(fresh["records"])
     ann = report["annotation"]
@@ -409,6 +423,18 @@ def _vision_model(prov):
         provider, model, _tier = prov.vision.roster[0]
         return "%s/%s" % (provider, model)
     except (AttributeError, IndexError, TypeError, ValueError):
+        return ""
+
+
+def _analysis_at(conn, creative_key):
+    """Stamp of the currently stored analysis block, or ''."""
+    row = conn.execute("SELECT annotation_json FROM annotations"
+                       " WHERE creative_key=?", (creative_key,)).fetchone()
+    if not row:
+        return ""
+    try:
+        return (json.loads(row[0]).get("analysis") or {}).get("at", "")
+    except ValueError:
         return ""
 
 

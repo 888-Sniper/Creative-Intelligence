@@ -297,3 +297,198 @@ def test_xlsx_sheet_gate(tmp_path, monkeypatch):
     assert resp.status_code == 200, resp.text
     assert resp.json()["sheet"] == "Meta"
     assert resp.json()["rows"] == 1
+
+
+def _rowids(db, version):
+    import sqlite3
+    conn = sqlite3.connect(db)
+    try:
+        return [r[0] for r in conn.execute(
+            "SELECT id FROM ads WHERE import_id=? ORDER BY id", (version,))]
+    finally:
+        conn.close()
+
+
+def _confirmed_setup(http, db, email="owner@foap.test"):
+    """Owner draft with validated video + imported dataset; returns
+    (draft_id, import_version, rowids)."""
+    authed(http, db, email)
+    did = http.post("/api/drafts", json={}).json()["draft"]["id"]
+    rec = upload_fixture_video(http)
+    assert http.post("/api/videos/validate",
+                     json={"media_id": rec["id"],
+                           "draft_id": did}).status_code == 200
+    imp = import_fixture_csv(http, did)
+    return did, imp["version"], _rowids(db, imp["version"])
+
+
+def test_stranger_write_matrix_all_403(tmp_path, monkeypatch):
+    """Every mutating draft endpoint enforces owner-or-admin, not
+    just PATCH/DELETE: validate, import, propose, confirm, analyze."""
+    db, http = make_app(tmp_path, monkeypatch)
+    did, _version, rowids = _confirmed_setup(http, db)
+    rec = upload_fixture_video(http)
+    http.headers.clear()
+    authed(http, db, "stranger@foap.test", role="employee")
+    assert http.post("/api/videos/validate",
+                     json={"media_id": rec["id"],
+                           "draft_id": did}).status_code == 403
+    with open(CSV_PATH) as fh:
+        csv_text = fh.read()
+    assert http.post("/api/datasets/import",
+                     json={"draft_id": did, "platform": "meta",
+                           "csv": csv_text}).status_code == 403
+    match = {"creative_key": "video-upload-sample",
+             "method": "platform_id", "ad_rowids": rowids}
+    assert http.post("/api/drafts/%s/matches/propose" % did,
+                     json=match).status_code == 403
+    assert http.post("/api/drafts/%s/matches/confirm" % did,
+                     json=match).status_code == 403
+    assert http.post("/api/drafts/%s/analyze" % did,
+                     json={}).status_code == 403
+    # Reads stay open (media convention): the draft is visible.
+    assert http.get("/api/drafts/%s" % did).status_code == 200
+
+
+def test_cross_draft_rowids_rejected(tmp_path, monkeypatch):
+    """Row ids from another draft's dataset version never confirm."""
+    db, http = make_app(tmp_path, monkeypatch)
+    did1, _v1, r1 = _confirmed_setup(http, db, "owner@foap.test")
+    http.headers.clear()
+    authed(http, db, "owner2@foap.test")
+    did2 = http.post("/api/drafts", json={}).json()["draft"]["id"]
+    # Distinct campaign grain so the second import does not upsert
+    # the first draft's rows (sync key excludes creative_key).
+    with open(CSV_PATH) as fh:
+        other_csv = fh.read().replace("Sample Launch", "Other Launch")
+    imp2 = http.post("/api/datasets/import",
+                     json={"draft_id": did2, "platform": "meta",
+                           "csv": other_csv}).json()
+    r2 = _rowids(db, imp2["version"])
+    assert len(r2) == 3
+    http.headers.clear()
+    authed(http, db, "owner@foap.test")
+    resp = http.post("/api/drafts/%s/matches/confirm" % did1,
+                     json={"creative_key": "video-upload-sample",
+                           "method": "platform_id", "ad_rowids": r2})
+    assert resp.status_code == 409, resp.text
+    # Same-draft ids still confirm fine.
+    resp = http.post("/api/drafts/%s/matches/confirm" % did1,
+                     json={"creative_key": "video-upload-sample",
+                           "method": "platform_id", "ad_rowids": r1})
+    assert resp.status_code == 200, resp.text
+
+
+def test_video_swap_clears_confirmation(tmp_path, monkeypatch):
+    """Validating a replacement video invalidates the old match."""
+    db, http = make_app(tmp_path, monkeypatch)
+    did, _version, rowids = _confirmed_setup(http, db)
+    assert http.post("/api/drafts/%s/matches/confirm" % did,
+                     json={"creative_key": "video-upload-sample",
+                           "method": "platform_id",
+                           "ad_rowids": rowids}).status_code == 200
+    assert len(http.get("/api/drafts/%s" % did).json()["draft"][
+        "matches"]) == 1
+    rec = upload_fixture_video(http)
+    assert http.post("/api/videos/validate",
+                     json={"media_id": rec["id"],
+                           "draft_id": did}).status_code == 200
+    assert http.get("/api/drafts/%s" % did).json()["draft"][
+        "matches"] == []
+
+
+def test_evil_match_key_rejected(tmp_path, monkeypatch):
+    """Confirm/propose with an unvalidated key fails, even with real
+    row ids: the key must be a validated video on this draft."""
+    db, http = make_app(tmp_path, monkeypatch)
+    did, _version, rowids = _confirmed_setup(http, db)
+    evil = {"creative_key": "../../etc/passwd",
+            "method": "platform_id", "ad_rowids": rowids}
+    assert http.post("/api/drafts/%s/matches/propose" % did,
+                     json=evil).status_code == 409
+    resp = http.post("/api/drafts/%s/matches/confirm" % did,
+                     json=evil)
+    assert resp.status_code == 409, resp.text
+    assert "validated video" in resp.json()["error"]
+
+
+def test_draft_id_collision_across_owners(tmp_path, monkeypatch):
+    """A colliding client draft id from another owner is rejected,
+    not served as the foreign draft; same-owner retry stays put."""
+    db, http = make_app(tmp_path, monkeypatch)
+    authed(http, db, "owner@foap.test")
+    mine = http.post("/api/drafts",
+                     json={"draft_id": "shared-id"}).json()["draft"]
+    assert mine["owner_employee_id"] != ""
+    http.headers.clear()
+    authed(http, db, "stranger@foap.test", role="employee")
+    resp = http.post("/api/drafts", json={"draft_id": "shared-id"})
+    assert resp.status_code == 409, resp.text
+    http.headers.clear()
+    authed(http, db, "owner@foap.test")
+    again = http.post("/api/drafts",
+                      json={"draft_id": "shared-id"}).json()["draft"]
+    assert again["id"] == mine["id"]
+
+
+def test_candidates_carry_hand_verifiable_totals(tmp_path, monkeypatch):
+    """The HTTP chain (CSV -> DB -> candidates) preserves exact
+    counts: 6000 impressions, 150 link clicks, pooled CTR 2.50%."""
+    db, http = make_app(tmp_path, monkeypatch)
+    authed(http, db)
+    did = http.post("/api/drafts", json={}).json()["draft"]["id"]
+    imp = import_fixture_csv(http, did)
+    rows = http.get("/api/drafts/%s/candidates" % did).json()["candidates"]
+    assert len(rows) == 3
+    total_imp = sum(r["impressions"] for r in rows)
+    total_clk = sum(r["link_clicks"] for r in rows)
+    assert (total_imp, total_clk) == (6000, 150)
+    assert round(total_clk / total_imp * 100, 2) == 2.50
+    assert imp["rows"] == 3
+
+
+def test_oversize_csv_rejected(tmp_path, monkeypatch):
+    """CSV payloads past the ingest cap fail closed (M9)."""
+    from creative_intel import ingest
+    db, http = make_app(tmp_path, monkeypatch)
+    authed(http, db)
+    did = http.post("/api/drafts", json={}).json()["draft"]["id"]
+    monkeypatch.setattr(ingest, "MAX_CSV_CHARS", 64)
+    with open(CSV_PATH) as fh:
+        csv_text = fh.read()
+    assert len(csv_text) > 64
+    resp = http.post("/api/datasets/import",
+                     json={"draft_id": did, "platform": "meta",
+                           "csv": csv_text})
+    assert resp.status_code == 409, resp.text
+    assert "too large" in resp.json()["error"]
+
+
+def test_validate_probe_unavailable(tmp_path, monkeypatch):
+    """No ffprobe on PATH is an honest verdict, not a crash (M4)."""
+    from creative_intel import video_validate
+    monkeypatch.setenv("PATH", str(tmp_path))
+    assert video_validate.validate(
+        MP4_PATH, filename="sample.mp4")["reason"] == "probe_unavailable"
+
+
+def test_validate_unit_rejections(tmp_path):
+    """ffprobe verdict codes without HTTP: oversize, too long,
+    empty, bad container, corrupt (M4)."""
+    from creative_intel import video_validate
+    empty = str(tmp_path / "empty.mp4")
+    open(empty, "wb").close()
+    assert video_validate.validate(empty)["reason"] == "empty"
+    assert video_validate.validate(
+        MP4_PATH, filename="clip.avi")["reason"] == "unsupported_container"
+    assert video_validate.validate(
+        MP4_PATH, max_bytes=10)["reason"] == "oversize"
+    assert video_validate.validate(
+        MP4_PATH, max_duration_s=1.0)["reason"] == "too_long"
+    assert video_validate.validate(
+        MP4_PATH, filename="sample.mp4")["status"] == "valid"
+    # Garbage that passes the magic prefix fails at ffprobe.
+    bad = str(tmp_path / "bad.mp4")
+    with open(bad, "wb") as fh:
+        fh.write(b"\x00\x00\x00\x18ftyp" + b"not a video" * 64)
+    assert video_validate.validate(bad)["reason"] == "corrupt"

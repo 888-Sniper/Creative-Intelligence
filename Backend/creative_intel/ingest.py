@@ -682,6 +682,11 @@ def import_xlsx_report(conn, blob, platform, source="upload", filename="",
             "sheet": names[index], "sheets": names}
 
 
+#: Largest accepted CSV payload (characters), mirroring the xlsx
+#: byte cap so a JSON-envelope-sized text cannot exhaust memory.
+MAX_CSV_CHARS = 20 * 1024 * 1024
+
+
 def import_report(conn, csv_text, platform, source="upload", filename="",
                   imported_by=""):
     """Full path: parse (locale-aware) -> provenance -> upsert.
@@ -690,6 +695,9 @@ def import_report(conn, csv_text, platform, source="upload", filename="",
     "quarantine", "locale", "mapping", "unmapped"}. Re-imports update
     facts instead of duplicating them; quarantined rows never load.
     """
+    if len(csv_text or "") > MAX_CSV_CHARS:
+        raise ValueError("csv too large: limit is %d MB"
+                         % (MAX_CSV_CHARS // (1024 * 1024)))
     rows, quarantined, meta = parse_csv_report_ex(
         csv_text, platform, source)
     counts = {"imported": 0, "quarantined": len(quarantined)}

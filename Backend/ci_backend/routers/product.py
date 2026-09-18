@@ -540,7 +540,6 @@ class VideoValidateBody(BaseModel):
 
 class DraftCreateBody(BaseModel):
     draft_id: str | None = Field(default=None, max_length=64)
-    creative_key: str = Field(default="", max_length=200)
     spec: dict = Field(default_factory=dict)
 
 
@@ -1607,6 +1606,10 @@ async def video_validate(request: Request,
                 width=verdict["width"], height=verdict["height"],
                 sha256=row[1] if row else "",
                 validation=verdict)
+            # A new video version invalidates any prior confirmation,
+            # same as a spec or dataset edit.
+            if body.draft_id:
+                drafts_mod.clear_matches(conn, body.draft_id)
         except ValueError as exc:
             raise _conflict(exc)
     else:
@@ -1802,6 +1805,23 @@ def _match_records(conn, draft: dict, ad_rowids) -> list:
             for r in wanted]
 
 
+def _valid_video_keys(conn, draft_id: str) -> set:
+    """Creative keys of this draft's validated videos. Match keys
+    must come from this set: it binds a confirmation to the video
+    the user actually uploaded, not an arbitrary string."""
+    from creative_intel import drafts as drafts_mod
+    import json as _json
+    keys = set()
+    for video in drafts_mod.list_videos(conn, draft_id):
+        try:
+            verdict = _json.loads(video.get("validation_json") or "{}")
+        except ValueError:
+            continue
+        if verdict.get("status") == "valid" and video.get("creative_key"):
+            keys.add(video["creative_key"])
+    return keys
+
+
 @router.post("/api/drafts/{draft_id}/matches/propose")
 async def match_propose(draft_id: str, request: Request,
                         conn=Depends(get_product_conn),
@@ -1812,6 +1832,8 @@ async def match_propose(draft_id: str, request: Request,
     _draft_owner_or_403(conn, did, who)
     try:
         body = MatchBody.model_validate(await json_payload(request))
+        if body.creative_key not in _valid_video_keys(conn, did):
+            raise ValueError("match key must be a validated video on this draft")
         records = _match_records(conn, _draft_or_404(conn, did),
                                  body.ad_rowids)
         drafts_mod.propose_match(conn, did, body.creative_key,
@@ -1834,19 +1856,11 @@ async def match_confirm(draft_id: str, request: Request,
     try:
         body = MatchBody.model_validate(await json_payload(request))
         records = _match_records(conn, draft, body.ad_rowids)
-        videos = drafts_mod.list_videos(conn, did)
-        import json as _json
-        valid = False
-        for video in videos:
-            try:
-                verdict = _json.loads(video.get("validation_json") or "{}")
-            except ValueError:
-                continue
-            if verdict.get("status") == "valid":
-                valid = True
-                break
-        if not valid:
+        valid_keys = _valid_video_keys(conn, did)
+        if not valid_keys:
             raise ValueError("validate the video before confirming")
+        if body.creative_key not in valid_keys:
+            raise ValueError("match key must be a validated video on this draft")
         drafts_mod.confirm_match(conn, did, body.creative_key, who.id,
                                  method=body.method, records=records)
     except ValueError as exc:
@@ -1904,7 +1918,10 @@ async def draft_analyze(draft_id: str, request: Request,
          "brand_terms": [t for t in body.brand_terms
                          if isinstance(t, str)][:20]},
         owner=who.id)
-    drafts_mod.update_draft(conn, did, status="analyzing")
+    # Submitted as queued; the worker flips to analyzing when work
+    # actually starts (and to ready_for_review / failed / cancelled
+    # on the way out), so the status is never a lie.
+    drafts_mod.update_draft(conn, did, status="queued")
     paudit.audit_request(request, conn, employee_id=who.id,
                          action="draft_analyzed", target=job["id"])
     return {"job_id": job["id"], "status": job["status"],

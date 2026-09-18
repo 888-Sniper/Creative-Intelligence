@@ -66,6 +66,17 @@ def test_draft_roundtrip_and_owner_scope(tmp_path):
     conn.close()
 
 
+def test_create_draft_id_collision_across_owners(tmp_path):
+    """A colliding client id from another owner is rejected, never
+    served as the foreign draft (M11)."""
+    conn = fresh_db(tmp_path)
+    drafts.create_draft(conn, "emp-1", draft_id="shared")
+    with pytest.raises(ValueError):
+        drafts.create_draft(conn, "emp-2", draft_id="shared")
+    assert drafts.get_draft(conn, "shared")["owner_employee_id"] == "emp-1"
+    conn.close()
+
+
 def test_create_draft_idempotent_on_retry(tmp_path):
     """Repeated POSTs (double click, network retry) return the same
     row untouched instead of duplicating drafts."""

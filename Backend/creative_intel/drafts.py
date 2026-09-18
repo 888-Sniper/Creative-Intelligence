@@ -76,7 +76,8 @@ def _rows(conn, sql, args=()):
 def create_draft(conn, owner_employee_id, draft_id=None, spec=None):
     """Create a draft. Idempotent: a repeated call with the same
     draft_id returns the existing row untouched (safe for retries
-    and double clicks)."""
+    and double clicks). A colliding id owned by someone else is
+    rejected instead of leaking the foreign draft."""
     owner = _require(owner_employee_id, "owner_employee_id")
     did = (draft_id or "").strip() or new_id()
     now = utcnow()
@@ -86,6 +87,9 @@ def create_draft(conn, owner_employee_id, draft_id=None, spec=None):
         " VALUES (?, ?, 'draft', ?, '', ?, ?)",
         (did, owner, _dump(spec), now, now))
     conn.commit()
+    row = get_draft(conn, did)
+    if row is not None and (row.get("owner_employee_id") or "") != owner:
+        raise ValueError("draft id is already in use")
     return did
 
 

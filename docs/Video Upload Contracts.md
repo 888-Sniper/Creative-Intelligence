@@ -33,8 +33,9 @@ Fixtures: `fixtures/Video Upload Sample 720p.mp4` + `fixtures/Video Upload Sampl
   -> `{dataset_id, draft_id, rows, version(import_id), inserted,
   updated, quarantined, quarantine, sheet, sheets}`
   (multi-sheet workbooks without `sheet` get 409 + `sheets` catalogue)
-- `POST /api/drafts` (auth, `{draft_id?, creative_key?, spec?}`)
-  -> `{draft: view}` (idempotent on client-supplied `draft_id`)
+- `POST /api/drafts` (auth, `{draft_id?, spec?}`)
+  -> `{draft: view}` (idempotent on client-supplied `draft_id`;
+  a colliding id owned by someone else is rejected, never served)
 - `GET /api/drafts` (auth) -> `{drafts: view[]}` (owner-scoped)
 - `GET /api/drafts/{id}` (auth) -> `{draft: view}` where view =
   `{id, owner_employee_id, status, dataset_version, created_at,
@@ -50,7 +51,10 @@ Fixtures: `fixtures/Video Upload Sample 720p.mp4` + `fixtures/Video Upload Sampl
   only, capped at 200; [] before any import)
 - `POST /api/drafts/{id}/matches/propose|confirm` (owner-or-admin,
   `{creative_key, method, ad_rowids[]}`) -> `{match}`; confirm
-  requires a valid video and row ids from the draft's dataset version
+  requires a valid video and row ids from the draft's dataset version,
+  and the key must be one of the draft's validated videos.
+  Validating a replacement video clears matches like any other
+  material input change.
 - `POST /api/drafts/{id}/analyze` (auth, `{brand_terms?}`, AI-rate-limited)
   -> `{job_id, status, model, provider, sends, storage, poll}`
   (`poll` is the existing `/api/pipeline/jobs/{job_id}` status route —
@@ -76,8 +80,12 @@ alembic stays auth-only by design)
 - `draft.status` (`DRAFT_STATUSES` in `creative_intel/drafts.py`):
   `draft -> validating -> needs_confirmation -> queued -> analyzing ->`
   `ready_for_review -> reviewed`, with `failed | cancelled | expired`
-  off-ramps (cancel is owner-or-admin; worker restart requeues
-  interrupted jobs, never silently).
+  off-ramps. The endpoint submits as `queued`; the worker owns the
+  `queued -> analyzing` flip at start and every exit path
+  (`ready_for_review` / `failed` / `cancelled`), so no failure,
+  cancel, or timeout strands a draft in `queued`/`analyzing`.
+  Worker restart requeues only expired-lease running jobs, never live
+  ones. CSV imports are capped at 20M chars like xlsx at 20MB.
 - `video.validation`: `pending -> valid | invalid`
   (reasons: mime / size / duration / dims / sha-mismatch).
 - `job.status` mirrors the draft while running, progress 0-1 measured only.
@@ -101,3 +109,12 @@ alembic stays auth-only by design)
 - Findings split: Observed in the video / Measured from the dataset /
   Suggested test-hypothesis. Schema-validated before persistence, with
   sampling method, coverage, provider/model, analysis version, timestamp.
+- Snapshot binding: Analyse freezes video sha + dataset version +
+  match confirmation time. The worker re-binds before provider work
+  AND after the pipeline (inputs may change mid-run); a newer
+  stamped analysis aborts the late result instead of being
+  overwritten (the intermediate save preserves the prior stamp).
+  Residual note: two jobs on the same creative started in the same
+  second could still interleave at commit time — prevented in
+  practice by the per-draft live-job guard; cross-draft same-key
+  concurrency is out of scope for this release.

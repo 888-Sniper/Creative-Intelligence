@@ -99,6 +99,20 @@ export function VideoUploadCard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [employeeId]);
 
+  // Live status: while any listed draft has a running job, re-read
+  // the list every few seconds so queued -> analyzing ->
+  // ready_for_review transitions appear without a manual refresh.
+  // The timer exists only while a live job is present.
+  const hasLiveJob = (drafts ?? []).some((d) => Boolean(d.live_job_id));
+  useEffect(() => {
+    if (!hasLiveJob) return;
+    const timer = window.setInterval(() => {
+      void reload();
+    }, 5000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasLiveJob]);
+
   const openForFile = (file: File | null): void => {
     if (!file) return;
     if (!isVideoFile(file)) {

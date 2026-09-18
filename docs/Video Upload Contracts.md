@@ -22,10 +22,35 @@ Fixtures: `fixtures/Video Upload Sample 720p.mp4` + `fixtures/Video Upload Sampl
 
 ## API shapes (backend is source of truth; TS types must mirror these)
 
-- `POST /api/media/upload` (auth) -> `{media_id, creative_key, sha256, bytes, mime}`
-- `POST /api/videos/validate` (auth) -> `{video_id, duration_s, width, height, validation_json}`
-- `POST /api/datasets/import` (auth) -> `{dataset_id, rows, version}`
-- `POST /api/drafts` (auth, `{creative_key, media_id?, dataset_id?, spec}`) -> `{id, status}`
+- `POST /api/media/upload` (auth, multipart) -> media record
+  `{id, creative_key, filename, mime, bytes, sha256, url}`
+- `POST /api/videos/validate` (auth, `{media_id, draft_id?}`)
+  -> `{video_id, media_id, creative_key, duration_s, width, height,
+  validation}` (`validation` verdict object; `video_id` is "" when
+  invalid and no row is stored; a draft link is required for a row)
+- `POST /api/datasets/import` (auth,
+  `{draft_id, platform, filename?, csv?|xlsx_b64?, sheet?}`)
+  -> `{dataset_id, draft_id, rows, version(import_id), inserted,
+  updated, quarantined, quarantine, sheet, sheets}`
+  (multi-sheet workbooks without `sheet` get 409 + `sheets` catalogue)
+- `POST /api/drafts` (auth, `{draft_id?, creative_key?, spec?}`)
+  -> `{draft: view}` (idempotent on client-supplied `draft_id`)
+- `GET /api/drafts` (auth) -> `{drafts: view[]}` (owner-scoped)
+- `GET /api/drafts/{id}` (auth) -> `{draft: view}` where view =
+  `{id, owner_employee_id, status, dataset_version, created_at,
+  updated_at, spec, videos[], datasets[], matches[],
+  live_job_id}` (`live_job_id` is "" when no job runs)
+- `PATCH /api/drafts/{id}` (owner-or-admin, `{status?, spec?,
+  dataset_version?}`) -> `{draft: view}`; spec/dataset edits clear
+  matches server-side
+- `DELETE /api/drafts/{id}` (owner-or-admin) removes the draft and
+  its videos/datasets/matches rows
+- `GET /api/drafts/{id}/candidates` (auth)
+  -> `{candidates[], version}` (rows of the draft's dataset_version
+  only, capped at 200; [] before any import)
+- `POST /api/drafts/{id}/matches/propose|confirm` (owner-or-admin,
+  `{creative_key, method, ad_rowids[]}`) -> `{match}`; confirm
+  requires a valid video and row ids from the draft's dataset version
 - `POST /api/drafts/{id}/analyze` (auth, `{brand_terms?}`, AI-rate-limited)
   -> `{job_id, status, model, provider, sends, storage, poll}`
   (`poll` is the existing `/api/pipeline/jobs/{job_id}` status route —
@@ -33,7 +58,6 @@ Fixtures: `fixtures/Video Upload Sample 720p.mp4` + `fixtures/Video Upload Sampl
   for the draft fail, with an honest reason);
 - `GET /api/drafts/{id}/analysis` (auth)
   -> `{draft_id, status, creative_key, annotation|null, transcript}`
-- `GET /api/drafts/:id` -> `{id, status, progress, spec_json, result_json, error}`
 - `GET /media/by-creative/:key`, `GET /api/campaigns/meta`, `POST /api/reviews/mark`
 
 ## DB tables (in `Backend/creative_intel/schema.py` DDL + `migrate()` only;

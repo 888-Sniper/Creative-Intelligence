@@ -1,0 +1,1153 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useLocale } from "@/i18n";
+import { Icon } from "@/components/icons";
+import { LoadingButton } from "@/components/LoadingButton";
+import { MediaPreview } from "@/components/MediaPreview";
+import { MetaSelect, Toast, useCampaignMeta } from "@/components/product";
+import {
+  analyzeDraft,
+  confirmMatch,
+  createDraft,
+  draftKey,
+  formatBytes,
+  getAnalysis,
+  getCandidates,
+  getDraft,
+  getVideoLimits,
+  importDataset,
+  MATCH_METHODS,
+  parseSnapshots,
+  patchDraft,
+  proposeMatch,
+  SheetConflictError,
+  uploadMedia,
+  validateVideo,
+  type DatasetCandidate,
+  type DraftAnalysis,
+  type DraftMatch,
+  type DraftView,
+  type MatchSnapshot,
+  type VideoLimits,
+  type VideoUploadSpec,
+} from "@/components/videoUploadApi";
+
+export type UploadStage = "video" | "client" | "dataset" | "review";
+
+export interface PanelOpen {
+  draftId?: string;
+  file?: File | null;
+  stage?: UploadStage;
+}
+
+interface PanelProps {
+  open: PanelOpen | null;
+  employeeId: string;
+  onClose: (refresh: boolean) => void;
+}
+
+const STAGES: UploadStage[] = ["video", "client", "dataset", "review"];
+
+function stageForSpec(spec: VideoUploadSpec): UploadStage {
+  if (spec.video?.status !== "valid") return "video";
+  if (!spec.clientConfirmed) return "client";
+  if (!spec.dataset) return "dataset";
+  return "review";
+}
+
+function slugKey(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/\.[a-z0-9]+$/, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+}
+
+export function isVideoFile(file: File): boolean {
+  const type = (file.type || "").toLowerCase();
+  if (type === "video/mp4" || type === "video/quicktime") return true;
+  return /\.(mp4|mov)$/i.test(file.name || "");
+}
+
+/** Server match rows are the source of truth (see boot hydration);
+ *  no localStorage mirror is kept, so a cleared server confirmation
+ *  can never be resurrected by stale browser state. */
+
+/** Merge server rows back into the working spec so a reopened draft
+ *  recovers its video/dataset even if it was closed before saving. */
+function specFromDraft(draft: DraftView): VideoUploadSpec {
+  const spec: VideoUploadSpec = { ...(draft.spec ?? {}) };
+  const video = draft.videos?.[0];
+  if (video && !spec.video) {
+    let verdict: { status?: string; reason?: string } = {};
+    try {
+      verdict = JSON.parse(video.validation_json || "{}") as { status?: string; reason?: string };
+    } catch {
+      verdict = {};
+    }
+    spec.video = {
+      video_id: video.id,
+      duration_s: Number(video.duration_s) || 0,
+      width: Number(video.width) || 0,
+      height: Number(video.height) || 0,
+      status: verdict.status === "valid" ? "valid" : "invalid",
+      reason: typeof verdict.reason === "string" ? verdict.reason : undefined,
+    };
+    spec.creative_key = spec.creative_key || video.creative_key || undefined;
+    if (video.media_id && !spec.media) {
+      spec.media = {
+        id: video.media_id, filename: "", bytes: 0, sha256: video.sha256 || "",
+        url: `/media/${video.media_id}`,
+      };
+    }
+  }
+  const dataset = draft.datasets?.[0];
+  if (dataset && !spec.dataset) {
+    spec.dataset = {
+      dataset_id: dataset.id, version: dataset.version || draft.dataset_version || "",
+      rows: Number(dataset.rows) || 0, inserted: 0, updated: 0, quarantined: 0,
+      filename: dataset.filename || "",
+    };
+  }
+  return spec;
+}
+
+/** Read-only rendering of a finished analysis: observed structure,
+ *  measured dataset numbers, and suggested (never proven) tests. */
+export function FindingsView({
+  analysis, vu,
+}: {
+  analysis: DraftAnalysis;
+  vu: (key: string, vars?: Record<string, string | number>) => string;
+}) {
+  const ann = (analysis.annotation ?? {}) as Record<string, unknown>;
+  const block = (ann["analysis"] ?? {}) as Record<string, unknown>;
+  const measured = (block["measured"] ?? {}) as Record<string, unknown>;
+  const totals = (measured["totals"] ?? {}) as Record<string, unknown>;
+  const tests = Array.isArray(block["suggested_tests"])
+    ? (block["suggested_tests"] as Array<Record<string, unknown>>) : [];
+  const num = (v: unknown): string =>
+    typeof v === "number" && Number.isFinite(v) ? String(v) : "—";
+  const ctr = measured["pooled_link_ctr_pct"];
+  return (
+    <div style={{ marginTop: 12 }}>
+      <h4 className="panel-title" style={{ fontSize: 13 }}>{vu("findingsTitle")}</h4>
+      <p className="panel-sub">
+        {vu("analyzedWith", {
+          model: String(block["model"] || "—"),
+          version: String(block["version"] || "—"),
+        })}
+      </p>
+      <dl className="detail-list" style={{ marginTop: 8 }}>
+        <div>
+          <dt>{vu("measuredTitle")}</dt>
+          <dd>
+            {vu("measuredSummary", {
+              impressions: num(totals["impressions"]),
+              clicks: num(totals["link_clicks"]),
+              ctr: typeof ctr === "number" ? ctr : "—",
+            })}
+          </dd>
+        </div>
+        {analysis.transcript ? (
+          <div>
+            <dt>{vu("transcriptTitle")}</dt>
+            <dd>{analysis.transcript.slice(0, 280)}</dd>
+          </div>
+        ) : null}
+      </dl>
+      {tests.length ? (
+        <>
+          <h4 className="panel-title" style={{ fontSize: 13, marginTop: 10 }}>
+            {vu("suggestedTitle")}
+          </h4>
+          <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+            {tests.map((suggestion, i) => (
+              <li key={String(suggestion["id"] ?? i)} className="panel-sub">
+                <strong>{String(suggestion["hypothesis"] ?? "")}</strong>
+                {suggestion["why"] ? ` — ${String(suggestion["why"])}` : ""}
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
+  const { t, locale } = useLocale();
+  const vu = (key: string, vars?: Record<string, string | number>): string =>
+    t(`dashboard.videoUpload.${key}`, vars);
+  const [draft, setDraft] = useState<DraftView | null>(null);
+  const [spec, setSpec] = useState<VideoUploadSpec>({});
+  const [bootError, setBootError] = useState("");
+  const [stage, setStage] = useState<UploadStage>("video");
+  const [status, setStatus] = useState("");
+  const [toast, setToast] = useState("");
+  const [limits, setLimits] = useState<VideoLimits | null>(null);
+  const [limitsError, setLimitsError] = useState("");
+  // Stage A state
+  const [creativeKey, setCreativeKey] = useState("");
+  const [stagedName, setStagedName] = useState("");
+  const [videoBusy, setVideoBusy] = useState(false);
+  // Stage B state
+  const [client, setClient] = useState("");
+  const [campaign, setCampaign] = useState("");
+  // Stage C state
+  const [platform, setPlatform] = useState("meta");
+  const [csvText, setCsvText] = useState("");
+  const [xlsxB64, setXlsxB64] = useState("");
+  const [datasetFile, setDatasetFile] = useState("");
+  const [sheets, setSheets] = useState<string[]>([]);
+  const [sheet, setSheet] = useState("");
+  const [importBusy, setImportBusy] = useState(false);
+  // Stage D state
+  const [method, setMethod] = useState<string>("manual");
+  const [match, setMatch] = useState<DraftMatch | null>(null);
+  const [matchBusy, setMatchBusy] = useState<"propose" | "confirm" | null>(null);
+  const [rows, setRows] = useState<MatchSnapshot[]>([]);
+  const [picked, setPicked] = useState<number[]>([]);
+  const [rowsBusy, setRowsBusy] = useState(false);
+  const [rowsError, setRowsError] = useState("");
+  const [findings, setFindings] = useState<DraftAnalysis | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const openerRef = useRef<Element | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const datasetInputRef = useRef<HTMLInputElement>(null);
+  const stagedFileRef = useRef<File | null>(null);
+  const draftRef = useRef<DraftView | null>(null);
+  const specRef = useRef<VideoUploadSpec>({});
+  draftRef.current = draft;
+  specRef.current = spec;
+  const meta = useCampaignMeta();
+
+  const snapshots: MatchSnapshot[] = useMemo(() => parseSnapshots(match), [match]);
+  /** Row ids backing propose/confirm: the explicit checkbox selection
+   *  (default: every candidate row). Ids always come from the server's
+   *  candidates listing for this draft's dataset version — never typed
+   *  in, never cached across versions. */
+  const knownRowIds: number[] = picked;
+
+  /** Mirror a server match row into working state. */
+  const applyServerMatch = (server: DraftMatch | null | undefined): void => {
+    if (!server) {
+      setMatch(null);
+      return;
+    }
+    setMatch(server);
+    if (server.method) setMethod(server.method);
+    const rows = parseSnapshots(server);
+    setSpec((prev) => ({
+      ...prev,
+      match: {
+        method: server.method || "manual",
+        adRowIds: rows.map((r) => r.id).filter((n) => Number.isInteger(n)),
+        matchedCount: rows.length,
+        confirmed: server.confirmed === 1,
+      },
+    }));
+  };
+
+  /** (Re)load matchable rows for the draft's dataset version. */
+  const loadRows = async (draftId: string, selectAll: boolean): Promise<void> => {
+    setRowsBusy(true);
+    setRowsError("");
+    try {
+      const res = await getCandidates(draftId);
+      const listed = Array.isArray(res.candidates) ? res.candidates : [];
+      setRows(listed);
+      if (selectAll) {
+        setPicked(listed.map((r) => r.id).filter((n) => Number.isInteger(n)));
+      } else {
+        setPicked((prev) => prev.filter((id) => listed.some((r) => r.id === id)));
+      }
+    } catch (e) {
+      setRowsError(e instanceof Error ? e.message : String(e));
+      setRows([]);
+      setPicked([]);
+    } finally {
+      setRowsBusy(false);
+    }
+  };
+
+  // Bootstrap the draft on open: reuse the requested draft, else create
+  // one (idempotent on a recovered id) and pin it for recovery.
+  useEffect(() => {
+    if (!open) return;
+    openerRef.current = document.activeElement;
+    let live = true;
+    setDraft(null);
+    setSpec({});
+    setMatch(null);
+    setStatus("");
+    setBootError("");
+    setCsvText("");
+    setXlsxB64("");
+    setDatasetFile("");
+    setSheets([]);
+    setSheet("");
+    setRows([]);
+    setPicked([]);
+    setRowsError("");
+    setFindings(null);
+    stagedFileRef.current = null;
+    setStagedName("");
+    const boot = async () => {
+      try {
+        const existing = open.draftId ? await getDraft(open.draftId) : null;
+        const created = existing ?? await createDraft({});
+        if (!live) return;
+        try {
+          window.localStorage.setItem(draftKey(employeeId), created.id);
+        } catch {
+          /* recovery pin is best-effort */
+        }
+        const next = specFromDraft(created);
+        setDraft(created);
+        setSpec(next);
+        // Hydrate the server's match rows (proposed or confirmed) so a
+        // reopened draft recovers without re-doing the match.
+        const serverMatch = created.matches?.[0] ?? null;
+        applyServerMatch(serverMatch);
+        const serverIds = parseSnapshots(serverMatch)
+          .map((r) => r.id).filter((n) => Number.isInteger(n));
+        if (created.dataset_version) {
+          await loadRows(created.id, !serverIds.length);
+          if (!live) return;
+          if (serverIds.length) setPicked(serverIds);
+        }
+        if (created.status === "ready_for_review" || created.status === "reviewed") {
+          const reading = await getAnalysis(created.id).catch(() => null);
+          if (live && reading) setFindings(reading);
+        }
+        setCreativeKey(next.creative_key || "");
+        setClient(next.client || "");
+        setCampaign(next.campaign || "");
+        setPlatform(next.platform || "meta");
+        setStage(open.stage ?? stageForSpec(next));
+        if (open.file) {
+          stagedFileRef.current = open.file;
+          setStagedName(open.file.name);
+          if (!next.creative_key) setCreativeKey(slugKey(open.file.name));
+        }
+      } catch (e) {
+        if (live) setBootError(e instanceof Error ? e.message : String(e));
+      }
+    };
+    void boot();
+    getVideoLimits()
+      .then((l) => live && setLimits(l))
+      .catch((e: unknown) => {
+        if (live) setLimitsError(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  // Focus trap + Escape close; focus returns to the opener on unmount.
+  useEffect(() => {
+    if (!open) return;
+    const card = cardRef.current;
+    const focusables = (): HTMLElement[] => {
+      if (!card) return [];
+      const nodes = card.querySelectorAll<HTMLElement>(
+        'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
+      );
+      return [...nodes].filter((el) => el.offsetParent !== null || el === document.activeElement);
+    };
+    const first = card?.querySelector<HTMLElement>("button");
+    if (first) first.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        onClose(true);
+        return;
+      }
+      if (e.key !== "Tab" || !card) return;
+      const items = focusables();
+      if (!items.length) return;
+      const firstItem = items[0];
+      const lastItem = items[items.length - 1];
+      if (e.shiftKey && document.activeElement === firstItem) {
+        e.preventDefault();
+        lastItem.focus();
+      } else if (!e.shiftKey && document.activeElement === lastItem) {
+        e.preventDefault();
+        firstItem.focus();
+      }
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("keydown", onKey, true);
+      if (openerRef.current instanceof HTMLElement) openerRef.current.focus();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  /** Persist the working spec. Any spec change clears confirmed matches
+   *  server-side, so the local match is dropped unless the caller is
+   *  saving the post-confirm state (no-op: callers never persist after
+   *  confirm — the status-only Analyze patch preserves it). */
+  const persistSpec = async (next: VideoUploadSpec, opts?: { silent?: boolean }): Promise<boolean> => {
+    const current = draftRef.current;
+    if (!current) return false;
+    // The server clears confirmed matches on any spec change, so the
+    // local mirror goes with it — otherwise the UI would offer Analyze
+    // on a confirmation the server just dropped.
+    const clean: VideoUploadSpec = { ...next, match: undefined };
+    setSaving(true);
+    try {
+      const updated = await patchDraft(current.id, { spec: clean });
+      setDraft(updated);
+      setSpec({ ...(updated.spec ?? clean) });
+      setMatch(null);
+      if (!opts?.silent) {
+        setToast(t("dashboard.videoUpload.savedMsg"));
+        setStatus(t("dashboard.videoUpload.savedMsg"));
+      }
+      return true;
+    } catch (e) {
+      setStatus(vu("errorGeneric", { error: e instanceof Error ? e.message : String(e) }));
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveDraft = async (): Promise<void> => {
+    // A spec PATCH clears the server confirmation, so a confirmed match
+    // is transparently re-confirmed on the unchanged record set instead
+    // of being silently dropped by an explicit Save.
+    const prior = match;
+    const priorIds = parseSnapshots(prior)
+      .map((r) => r.id).filter((n) => Number.isInteger(n));
+    const priorKey = (specRef.current.creative_key || "").trim();
+    const priorMethod = method;
+    const ok = await persistSpec({ ...specRef.current });
+    if (ok && prior?.confirmed === 1 && priorIds.length && priorKey) {
+      const current = draftRef.current;
+      if (!current) return;
+      try {
+        const restored = await confirmMatch(current.id, {
+          creative_key: priorKey, method: priorMethod, ad_rowids: priorIds,
+        });
+        applyServerMatch(restored);
+        setStatus(vu("savedMsg"));
+      } catch (e) {
+        setStatus(vu("errorGeneric", { error: e instanceof Error ? e.message : String(e) }));
+      }
+    }
+  };
+
+  const stageFile = (file: File | null): void => {
+    if (!file) return;
+    if (!isVideoFile(file)) {
+      setStatus(vu("wrongType"));
+      return;
+    }
+    stagedFileRef.current = file;
+    setStagedName(file.name);
+    if (!creativeKey.trim()) setCreativeKey(slugKey(file.name));
+    setStatus("");
+  };
+
+  const uploadStaged = async (): Promise<void> => {
+    const file = stagedFileRef.current;
+    const current = draftRef.current;
+    const key = creativeKey.trim();
+    if (!file || !current || !key) return;
+    setVideoBusy(true);
+    setStatus(vu("uploadingLabel"));
+    try {
+      const media = await uploadMedia(key, file);
+      setStatus(vu("validatingLabel"));
+      const verdict = await validateVideo(media.id, current.id);
+      const next: VideoUploadSpec = {
+        ...specRef.current,
+        creative_key: key,
+        media: {
+          id: media.id, filename: media.filename || file.name,
+          bytes: media.bytes ?? file.size, sha256: media.sha256 || "",
+          url: media.url || `/media/${media.id}`,
+        },
+        video: {
+          video_id: verdict.video_id,
+          duration_s: verdict.duration_s ?? 0,
+          width: verdict.width ?? 0,
+          height: verdict.height ?? 0,
+          status: verdict.validation?.status === "valid" ? "valid" : "invalid",
+          reason: verdict.validation?.reason,
+        },
+        match: undefined,
+      };
+      stagedFileRef.current = null;
+      setStagedName("");
+      const updated = await patchDraft(current.id, { spec: next });
+      setDraft(updated);
+      setSpec({ ...(updated.spec ?? next) });
+      setMatch(null);
+      const video = (updated.spec ?? next).video;
+      if (video?.status === "valid") {
+        setStatus(vu("validMsg", {
+          width: video.width, height: video.height,
+          duration: Math.round(video.duration_s * 10) / 10,
+        }));
+      } else {
+        setStatus(vu("invalidMsg", { reason: video?.reason || "unknown" }));
+      }
+    } catch (e) {
+      setStatus(vu("uploadFailed", { error: e instanceof Error ? e.message : String(e) }));
+    } finally {
+      setVideoBusy(false);
+    }
+  };
+
+  const removeVideo = async (): Promise<void> => {
+    const next: VideoUploadSpec = { ...specRef.current, media: undefined, video: undefined, match: undefined };
+    stagedFileRef.current = null;
+    setStagedName("");
+    await persistSpec(next, { silent: true });
+    setStatus("");
+  };
+
+  const confirmClientCampaign = async (): Promise<void> => {
+    const c = client.trim();
+    const camp = campaign.trim();
+    if (!c || !camp) return;
+    const next: VideoUploadSpec = {
+      ...specRef.current, client: c, campaign: camp, clientConfirmed: true, match: undefined,
+    };
+    const ok = await persistSpec(next, { silent: true });
+    if (ok) {
+      setSpec({ ...next });
+      setStatus(vu("confirmedMsg", { client: c, campaign: camp }));
+    }
+  };
+
+  const pickClient = (v: string): void => {
+    setClient(v);
+    if (specRef.current.clientConfirmed) {
+      const next: VideoUploadSpec = {
+        ...specRef.current, client: v, clientConfirmed: false, match: undefined,
+      };
+      setSpec(next);
+      setStatus(vu("clearsMatchNote"));
+    }
+  };
+
+  const pickCampaign = (v: string): void => {
+    setCampaign(v);
+    if (specRef.current.clientConfirmed) {
+      const next: VideoUploadSpec = {
+        ...specRef.current, campaign: v, clientConfirmed: false, match: undefined,
+      };
+      setSpec(next);
+      setStatus(vu("clearsMatchNote"));
+    }
+  };
+
+  const datasetFilePicked = async (file: File | null): Promise<void> => {
+    if (!file) return;
+    setDatasetFile(file.name);
+    setSheets([]);
+    setSheet("");
+    if (/\.xlsx$/i.test(file.name)) {
+      try {
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || ""));
+          reader.onerror = () => reject(new Error("read"));
+          reader.readAsDataURL(file);
+        });
+        const b64 = dataUrl.includes(",") ? dataUrl.slice(dataUrl.indexOf(",") + 1) : dataUrl;
+        setXlsxB64(b64);
+        setCsvText("");
+      } catch {
+        setStatus(vu("errorGeneric", { error: file.name }));
+      }
+    } else {
+      try {
+        const text = await file.text();
+        setCsvText(text);
+        setXlsxB64("");
+      } catch {
+        setStatus(vu("errorGeneric", { error: file.name }));
+      }
+    }
+  };
+
+  const runImport = async (): Promise<void> => {
+    const current = draftRef.current;
+    const payload = xlsxB64
+      ? { xlsx_b64: xlsxB64 }
+      : { csv: csvText };
+    if (!current || (!xlsxB64 && !csvText.trim())) return;
+    setImportBusy(true);
+    setStatus(vu("importingLabel"));
+    try {
+      const res = await importDataset({
+        draft_id: current.id,
+        platform: platform.trim() || "meta",
+        filename: datasetFile || (xlsxB64 ? "upload.xlsx" : "upload.csv"),
+        ...payload,
+        ...(sheet ? { sheet } : {}),
+      });
+      const next: VideoUploadSpec = {
+        ...specRef.current,
+        platform: platform.trim() || "meta",
+        dataset: {
+          dataset_id: res.dataset_id, version: res.version, rows: res.rows,
+          inserted: res.inserted, updated: res.updated,
+          quarantined: res.quarantined, sheet: res.sheet || undefined,
+          filename: datasetFile || "",
+        },
+        match: undefined,
+      };
+      const updated = await patchDraft(current.id, { spec: next });
+      setDraft(updated);
+      setSpec({ ...(updated.spec ?? next) });
+      setMatch(null);
+      // Fresh version, fresh row list: select everything by default.
+      await loadRows(current.id, true);
+      setSheets([]);
+      const summary = vu("rowsSummary", {
+        rows: res.rows, inserted: res.inserted, updated: res.updated,
+      });
+      setStatus(res.quarantined > 0
+        ? `${summary} · ${vu("quarantinedNote", { count: res.quarantined })}`
+        : summary);
+    } catch (e) {
+      if (e instanceof SheetConflictError) {
+        setSheets(e.sheets);
+        setStatus(vu("sheetConflict"));
+      } else {
+        setStatus(vu("errorGeneric", { error: e instanceof Error ? e.message : String(e) }));
+      }
+    } finally {
+      setImportBusy(false);
+    }
+  };
+
+  const runPropose = async (): Promise<void> => {
+    const current = draftRef.current;
+    const key = (specRef.current.creative_key || "").trim();
+    if (!current || !key || !knownRowIds.length || matchBusy) return;
+    setMatchBusy("propose");
+    setStatus(vu("proposingLabel"));
+    try {
+      const proposed = await proposeMatch(current.id, {
+        creative_key: key, method, ad_rowids: knownRowIds,
+      });
+      applyServerMatch(proposed);
+      const rows = parseSnapshots(proposed);
+      setStatus(vu("matchedMsg", { count: rows.length, method: proposed.method || method }));
+    } catch (e) {
+      setStatus(vu("errorGeneric", { error: e instanceof Error ? e.message : String(e) }));
+    } finally {
+      setMatchBusy(null);
+    }
+  };
+
+  const runConfirm = async (): Promise<void> => {
+    const current = draftRef.current;
+    const key = (specRef.current.creative_key || "").trim();
+    if (!current || !key || !knownRowIds.length || matchBusy) return;
+    setMatchBusy("confirm");
+    setStatus(vu("confirmingLabel"));
+    try {
+      const confirmed = await confirmMatch(current.id, {
+        creative_key: key, method, ad_rowids: knownRowIds,
+      });
+      // Local mirror only: persisting spec here would clear the
+      // just-made confirmation server-side (spec PATCH => clear_matches).
+      applyServerMatch(confirmed);
+      setStatus(vu("matchConfirmedMsg"));
+    } catch (e) {
+      setStatus(vu("errorGeneric", { error: e instanceof Error ? e.message : String(e) }));
+    } finally {
+      setMatchBusy(null);
+    }
+  };
+
+  const metaRows = meta.data?.campaigns ?? [];
+  const metaClients = useMemo(
+    () => [...new Set(metaRows.map((r) => (r.client || "").trim()).filter(Boolean))].sort(),
+    [metaRows],
+  );
+  const metaCampaigns = useMemo(() => {
+    const rows = client.trim()
+      ? metaRows.filter((r) => (r.client || "").trim() === client.trim())
+      : metaRows;
+    return [...new Set(rows.map((r) => (r.name || "").trim()).filter(Boolean))].sort();
+  }, [metaRows, client]);
+
+  const videoValid = spec.video?.status === "valid";
+  const matchConfirmed = (match?.confirmed === 1) || spec.match?.confirmed === true;
+  const matchedCount = snapshots.length || spec.match?.matchedCount || 0;
+  const matchedMethod = match?.method || spec.match?.method || method;
+  const datasetVersion = spec.dataset?.version || draft?.dataset_version || "";
+  /** Display rows: live server candidates when present, else the
+   *  frozen snapshots of a proposed/confirmed match. */
+  const candidates: DatasetCandidate[] = useMemo(() => {
+    const source: MatchSnapshot[] = rows.length ? rows : snapshots;
+    return source.map((s) => ({
+      ad_name: s.ad_name || "", campaign: s.campaign || "", adset: s.adset || "",
+      impressions: s.impressions != null ? String(s.impressions) : "",
+      clicks: s.link_clicks != null ? String(s.link_clicks) : s.clicks != null ? String(s.clicks) : "",
+      creative_key: s.creative_key || "",
+    }));
+  }, [rows, snapshots]);
+  const canMatch = videoValid && Boolean(datasetVersion) && knownRowIds.length > 0;
+  const canAnalyze = videoValid && matchConfirmed && draft?.status !== "queued" && draft?.status !== "analyzing";
+  const analyzeReason = !videoValid
+    ? vu("blockedNoVideo")
+    : !matchConfirmed
+      ? vu("blockedNoMatch")
+      : draft?.status === "queued" || draft?.status === "analyzing"
+        ? vu("queuedMsg")
+        : "";
+  const limitsText = limits
+    ? vu("limitsNote", {
+      containers: limits.containers.join(" / ").toUpperCase(),
+      size: formatBytes(limits.max_bytes, locale),
+      duration: limits.max_duration_s,
+    })
+    : limitsError
+      ? vu("errorGeneric", { error: limitsError })
+      : vu("limitsLoading");
+  const warnings: string[] = [];
+  if (!spec.clientConfirmed) warnings.push(vu("warnNoClient"));
+  if (!spec.dataset) warnings.push(vu("warnNoDataset"));
+
+  const clientCampaignConfirmed =
+    spec.clientConfirmed && spec.client === client.trim() && spec.campaign === campaign.trim()
+    && client.trim() !== "" && campaign.trim() !== "";
+
+  const runAnalyze = async (): Promise<void> => {
+    const current = draftRef.current;
+    if (!current || !canAnalyze) return;
+    setAnalyzing(true);
+    setStatus(vu("analyzingLabel"));
+    try {
+      // The real Analyze contract: bind the immutable snapshot and
+      // enqueue the worker job. 409 carries the honest reason
+      // (preconditions, provider readiness, duplicate submit).
+      const res = await analyzeDraft(current.id);
+      setDraft({ ...current, status: res.status || "analyzing", live_job_id: res.job_id });
+      try {
+        window.localStorage.removeItem(draftKey(employeeId));
+      } catch {
+        /* ignore */
+      }
+      setToast(vu("queuedWithModel", { model: res.model || res.provider || "…" }));
+      setStatus(vu("queuedMsg"));
+      onClose(true);
+    } catch (e) {
+      setStatus(vu("errorGeneric", { error: e instanceof Error ? e.message : String(e) }));
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  if (!open) return null;
+  const stageIndex = STAGES.indexOf(stage);
+  const stepName = (s: UploadStage): string =>
+    s === "video" ? vu("stepVideo")
+    : s === "client" ? vu("stepClient")
+    : s === "dataset" ? vu("stepDataset")
+    : vu("stepReview");
+
+  return (
+    <div className="modal-overlay" onClick={() => onClose(true)}>
+      <div
+        className="modal-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="vu-panel-title"
+        ref={cardRef}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="modal-head panel-head dialog-head">
+          <div style={{ flex: "1 1 auto", minWidth: 0 }}>
+            <h2 className="panel-title" id="vu-panel-title">{vu("panelTitle")}</h2>
+          </div>
+          <button type="button" className="icon-btn" aria-label={vu("closeBtn")} onClick={() => onClose(true)}>
+            <Icon name="x" size={18} />
+          </button>
+        </div>
+        <ol className="chip-row vu-steps" aria-label={vu("stepsLabel")}
+          style={{ listStyle: "none", margin: "0 0 14px", padding: 0 }}>
+          {STAGES.map((s, i) => (
+            <li key={s}>
+              <span
+                className="chip-static"
+                aria-current={s === stage ? "step" : undefined}
+                style={s === stage
+                  ? { background: "var(--shell-teal)", color: "#fff", borderColor: "var(--shell-teal)" }
+                  : undefined}
+              >
+                {`${i + 1}. ${stepName(s)}`}
+              </span>
+            </li>
+          ))}
+        </ol>
+        <div role="status" aria-live="polite" className="panel-sub" style={{ minHeight: status ? undefined : 0 }}>
+          {status || ""}
+        </div>
+        {bootError ? <p role="alert" className="muted">{vu("errorGeneric", { error: bootError })}</p> : null}
+        {!draft && !bootError ? <div className="skel" style={{ height: 220 }} aria-hidden="true" /> : null}
+
+        {draft && stage === "video" ? (
+          <section aria-labelledby="vu-stage-video">
+            <h3 id="vu-stage-video" className="panel-title" style={{ marginBottom: 10 }}>{vu("stageVideoTitle")}</h3>
+            <p className="panel-sub" style={{ marginTop: 0 }}>{limitsText}</p>
+            <div className="field" style={{ marginTop: 10 }}>
+              <label htmlFor="vu-creative-key">{vu("creativeKeyLabel")}</label>
+              <input
+                id="vu-creative-key" type="text" value={creativeKey}
+                onChange={(e) => setCreativeKey(e.target.value)}
+                placeholder="video-upload-sample"
+              />
+              <p className="panel-sub">{vu("creativeKeyHint")}</p>
+            </div>
+            <div className="field">
+              <label htmlFor="vu-file">{vu("fileLabel")}</label>
+              <input
+                id="vu-file" ref={fileInputRef} type="file" accept="video/mp4,video/quicktime,.mp4,.mov"
+                onChange={(e) => {
+                  stageFile(e.target.files?.[0] ?? null);
+                  e.target.value = "";
+                }}
+              />
+            </div>
+            {stagedName && !spec.media ? (
+              <div className="chip-row" style={{ marginTop: 8 }}>
+                <span className="chip-static">{stagedName}</span>
+                <LoadingButton
+                  type="button" className="btn-primary" loading={videoBusy}
+                  loadingLabel={vu("uploadingLabel")} disabled={!creativeKey.trim()}
+                  onClick={() => void uploadStaged()}
+                >
+                  {vu("uploadButton")}
+                </LoadingButton>
+              </div>
+            ) : null}
+            {spec.media ? (
+              <div className="vu-media" style={{ marginTop: 12 }}>
+                <MediaPreview
+                  src={spec.media.url}
+                  creativeKey={spec.creative_key || creativeKey}
+                  testId="vu-video-preview"
+                />
+                <dl className="detail-list" style={{ marginTop: 8 }}>
+                  <div>
+                    <dt>{vu("fileLabel")}</dt>
+                    <dd>{spec.media.filename || stagedName || spec.creative_key}</dd>
+                  </div>
+                  <div>
+                    <dt>{vu("durationLabel")}</dt>
+                    <dd>{spec.video ? `${Math.round(spec.video.duration_s * 10) / 10}s` : "—"}</dd>
+                  </div>
+                  <div>
+                    <dt>{vu("sizeLabel")}</dt>
+                    <dd>{spec.media.bytes ? formatBytes(spec.media.bytes, locale) : "—"}</dd>
+                  </div>
+                </dl>
+                <div className="chip-row" style={{ marginTop: 8 }}>
+                  <button type="button" className="btn-outline" onClick={() => fileInputRef.current?.click()}>
+                    {vu("replaceBtn")}
+                  </button>
+                  <button type="button" className="btn-outline" onClick={() => void removeVideo()}>
+                    {vu("removeBtn")}
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </section>
+        ) : null}
+
+        {draft && stage === "client" ? (
+          <section aria-labelledby="vu-stage-client">
+            <h3 id="vu-stage-client" className="panel-title" style={{ marginBottom: 10 }}>{vu("stageClientTitle")}</h3>
+            {meta.error ? <p className="muted">{vu("errorGeneric", { error: meta.error })}</p> : null}
+            <div className="detail-cols-2">
+              <MetaSelect
+                id="vu-client" label={vu("clientLabel")} allLabel={vu("allLabel")}
+                values={metaClients} value={client} onPick={pickClient}
+              />
+              <MetaSelect
+                id="vu-campaign" label={vu("campaignLabel")} allLabel={vu("allLabel")}
+                values={metaCampaigns} value={campaign} onPick={pickCampaign}
+              />
+            </div>
+            <div className="chip-row" style={{ marginTop: 10 }}>
+              <LoadingButton
+                type="button" className="btn-primary" loading={saving}
+                loadingLabel={vu("savingLabel")} disabled={!client.trim() || !campaign.trim()}
+                onClick={() => void confirmClientCampaign()}
+              >
+                {vu("confirmSelectionBtn")}
+              </LoadingButton>
+              {clientCampaignConfirmed ? (
+                <span className="pill pill-ok">
+                  <Icon name="check" size={14} />
+                  {vu("confirmedMsg", { client: client.trim(), campaign: campaign.trim() })}
+                </span>
+              ) : null}
+            </div>
+            <p className="panel-sub">{vu("clearsMatchNote")}</p>
+          </section>
+        ) : null}
+
+        {draft && stage === "dataset" ? (
+          <section aria-labelledby="vu-stage-dataset">
+            <h3 id="vu-stage-dataset" className="panel-title" style={{ marginBottom: 10 }}>{vu("stageDatasetTitle")}</h3>
+            <div className="detail-cols-2">
+              <div className="field">
+                <label htmlFor="vu-platform">{vu("platformLabel")}</label>
+                <select id="vu-platform" value={platform} onChange={(e) => setPlatform(e.target.value)}>
+                  <option value="meta">Meta</option>
+                  <option value="tiktok">TikTok</option>
+                </select>
+              </div>
+              <div className="field">
+                <span className="field-label" aria-hidden="true">&nbsp;</span>
+                <button type="button" className="btn-outline" onClick={() => datasetInputRef.current?.click()}>
+                  <Icon name="download" size={15} /> {vu("fileBtn")}
+                </button>
+                <input
+                  ref={datasetInputRef} type="file" accept=".csv,.xlsx,text/csv" hidden
+                  aria-label={vu("fileBtn")}
+                  onChange={(e) => {
+                    void datasetFilePicked(e.target.files?.[0] ?? null);
+                    e.target.value = "";
+                  }}
+                />
+              </div>
+            </div>
+            <div className="field" style={{ marginTop: 10 }}>
+              <label htmlFor="vu-csv">{vu("csvLabel")}</label>
+              <textarea
+                id="vu-csv" value={csvText} rows={6}
+                placeholder={vu("csvPlaceholder")}
+                onChange={(e) => { setCsvText(e.target.value); setXlsxB64(""); }}
+              />
+              {datasetFile ? <p className="panel-sub">{datasetFile}</p> : null}
+            </div>
+            {sheets.length ? (
+              <div className="field">
+                <label htmlFor="vu-sheet">{vu("sheetLabel")}</label>
+                <select id="vu-sheet" value={sheet} onChange={(e) => setSheet(e.target.value)}>
+                  <option value="">{vu("sheetPlaceholder")}</option>
+                  {sheets.map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+            ) : null}
+            <div className="chip-row" style={{ marginTop: 10 }}>
+              <LoadingButton
+                type="button" className="btn-primary" loading={importBusy}
+                loadingLabel={vu("importingLabel")}
+                disabled={(!xlsxB64 && !csvText.trim()) || (sheets.length > 0 && !sheet)}
+                onClick={() => void runImport()}
+              >
+                {vu("importBtn")}
+              </LoadingButton>
+            </div>
+            {spec.dataset ? (
+              <div style={{ marginTop: 10 }}>
+                <p className="panel-sub" style={{ fontWeight: 700, color: "var(--shell-navy)" }}>
+                  {vu("rowsSummary", {
+                    rows: spec.dataset.rows, inserted: spec.dataset.inserted,
+                    updated: spec.dataset.updated,
+                  })}
+                </p>
+                {spec.dataset.quarantined > 0 ? (
+                  <p className="panel-sub">{vu("quarantinedNote", { count: spec.dataset.quarantined })}</p>
+                ) : null}
+                {spec.dataset.sheet ? (
+                  <p className="panel-sub">{vu("sheetLabel")}: {spec.dataset.sheet}</p>
+                ) : null}
+              </div>
+            ) : (
+              <p className="panel-sub">{vu("noDatasetNote")}</p>
+            )}
+          </section>
+        ) : null}
+
+        {draft && stage === "review" ? (
+          <section aria-labelledby="vu-stage-review">
+            <h3 id="vu-stage-review" className="panel-title" style={{ marginBottom: 10 }}>{vu("stageReviewTitle")}</h3>
+            {spec.media ? (
+              <MediaPreview
+                src={spec.media.url}
+                creativeKey={spec.creative_key || creativeKey}
+                testId="vu-review-preview"
+                mutedPreview
+              />
+            ) : null}
+            <dl className="detail-list" style={{ marginTop: 8 }}>
+              <div>
+                <dt>{vu("clientLabel")} / {vu("campaignLabel")}</dt>
+                <dd>
+                  {spec.client || spec.campaign
+                    ? `${spec.client || "—"} / ${spec.campaign || "—"}`
+                    : "—"}
+                  {spec.clientConfirmed ? "" : ` (${vu("warnNoClient")})`}
+                </dd>
+              </div>
+              <div>
+                <dt>{vu("creativeKeyLabel")}</dt>
+                <dd>{spec.creative_key || creativeKey || "—"}</dd>
+              </div>
+              <div>
+                <dt>{vu("candidatesTitle")}</dt>
+                <dd>
+                  {matchConfirmed || snapshots.length
+                    ? vu("matchedMsg", { count: matchedCount, method: matchedMethod })
+                    : vu("noMatchNote")}
+                </dd>
+              </div>
+              <div>
+                <dt>{vu("methodLabel")}</dt>
+                <dd>{matchedMethod}</dd>
+              </div>
+            </dl>
+            {warnings.length ? (
+              <div style={{ marginTop: 10 }}>
+                <h4 className="panel-title" style={{ fontSize: 13 }}>{vu("reviewWarningsTitle")}</h4>
+                <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+                  {warnings.map((w) => <li key={w} className="panel-sub">{w}</li>)}
+                </ul>
+              </div>
+            ) : null}
+            {rowsBusy ? (
+              <p className="panel-sub">{vu("loadingRows")}</p>
+            ) : rowsError ? (
+              <p className="muted">{vu("errorGeneric", { error: rowsError })}</p>
+            ) : candidates.length ? (
+              <div style={{ marginTop: 10 }}>
+                <h4 className="panel-title" style={{ fontSize: 13 }}>{vu("candidatesTitle")}</h4>
+                <div className="tbl-wrap">
+                  <table className="tbl">
+                    <thead>
+                      <tr>
+                        {rows.length ? (
+                          <th scope="col">
+                            <span className="sr-only">{vu("selectRowsLabel")}</span>
+                          </th>
+                        ) : null}
+                        <th scope="col">{vu("campaignLabel")}</th>
+                        <th scope="col">{vu("adLabel")}</th>
+                        <th scope="col">{vu("impressionsLabel")}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {candidates.slice(0, 8).map((c, i) => {
+                        const id = (rows.length ? rows : snapshots)[i]?.id;
+                        const checked = id == null || knownRowIds.includes(id);
+                        return (
+                          <tr key={`${c.ad_name}-${i}`}>
+                            {rows.length ? (
+                              <td>
+                                <input
+                                  type="checkbox"
+                                  aria-label={vu("selectRowLabel", {
+                                    name: c.ad_name || c.creative_key || String(id ?? i),
+                                  })}
+                                  checked={checked}
+                                  onChange={() => {
+                                    if (id == null) return;
+                                    setPicked((prev) => checked
+                                      ? prev.filter((n) => n !== id)
+                                      : [...prev, id]);
+                                  }}
+                                />
+                              </td>
+                            ) : null}
+                            <td>{c.campaign || "—"}</td>
+                            <td>{c.ad_name || c.creative_key || "—"}</td>
+                            <td>{c.impressions || c.clicks || "—"}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : null}
+            {findings?.annotation ? (
+              <FindingsView analysis={findings} vu={vu} />
+            ) : null}
+            <div className="field" style={{ marginTop: 10, maxWidth: 320 }}>
+              <label htmlFor="vu-method">{vu("methodLabel")}</label>
+              <select id="vu-method" value={method} onChange={(e) => setMethod(e.target.value)}>
+                {MATCH_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </div>
+            <div className="chip-row" style={{ marginTop: 10 }}>
+              <LoadingButton
+                type="button" className="btn-outline" loading={matchBusy === "propose"}
+                loadingLabel={vu("proposingLabel")} disabled={!canMatch || matchBusy !== null}
+                onClick={() => void runPropose()}
+              >
+                {vu("proposeBtn")}
+              </LoadingButton>
+              <LoadingButton
+                type="button" className="btn-outline" loading={matchBusy === "confirm"}
+                loadingLabel={vu("confirmingLabel")} disabled={!canMatch || matchBusy !== null}
+                onClick={() => void runConfirm()}
+              >
+                {vu("confirmMatchBtn")}
+              </LoadingButton>
+            </div>
+            {!canMatch ? <p className="panel-sub">{vu("matchNeedsIds")}</p> : null}
+          </section>
+        ) : null}
+
+        {draft ? (
+          <div style={{
+            display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+            marginTop: 16, paddingTop: 12, borderTop: "1px solid var(--shell-line)",
+          }}>
+            <span style={{ flex: "1 1 auto" }} />
+            {stageIndex > 0 ? (
+              <button type="button" className="btn-outline" onClick={() => setStage(STAGES[stageIndex - 1])}>
+                {vu("backBtn")}
+              </button>
+            ) : null}
+            <LoadingButton
+              type="button" className="btn-outline" loading={saving}
+              loadingLabel={vu("savingLabel")} onClick={() => void saveDraft()}
+            >
+              {vu("saveDraftBtn")}
+            </LoadingButton>
+            {stageIndex < STAGES.length - 1 ? (
+              <button type="button" className="btn-primary" onClick={() => setStage(STAGES[stageIndex + 1])}>
+                {vu("continueStepBtn")}
+              </button>
+            ) : (
+              <span style={{ display: "inline-flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
+                <LoadingButton
+                  type="button" className="btn-primary" loading={analyzing}
+                  loadingLabel={vu("analyzingLabel")} disabled={!canAnalyze}
+                  onClick={() => void runAnalyze()}
+                >
+                  {vu("analyzeBtn")}
+                </LoadingButton>
+                {!canAnalyze && analyzeReason ? (
+                  <span className="panel-sub" role="note">{analyzeReason}</span>
+                ) : null}
+              </span>
+            )}
+          </div>
+        ) : null}
+        {toast ? <Toast message={toast} onClose={() => setToast("")} /> : null}
+      </div>
+    </div>
+  );
+}

@@ -541,8 +541,6 @@ class VideoValidateBody(BaseModel):
 class DraftCreateBody(BaseModel):
     draft_id: str | None = Field(default=None, max_length=64)
     creative_key: str = Field(default="", max_length=200)
-    media_id: int | None = Field(default=None, gt=0, le=2 ** 31)
-    dataset_id: str | None = Field(default=None, max_length=64)
     spec: dict = Field(default_factory=dict)
 
 
@@ -1526,6 +1524,27 @@ def _draft_owner_or_403(conn, draft_id: str, who) -> dict:
     return draft
 
 
+def _draft_live_job_id(conn, draft_id: str):
+    """Id of a queued/running video_analysis job bound to this draft,
+    if any (lets clients offer Cancel without a second lookup)."""
+    import json as _json
+    try:
+        rows = conn.execute(
+            "SELECT id, payload_json FROM worker_jobs WHERE kind = ?"
+            " AND status IN ('queued', 'running')",
+            ("video_analysis",)).fetchall()
+    except Exception:
+        return ""
+    for job_id, payload_json in rows:
+        try:
+            payload = _json.loads(payload_json or "{}")
+        except ValueError:
+            continue
+        if (payload.get("snapshot") or {}).get("draft_id") == draft_id:
+            return job_id
+    return ""
+
+
 def _draft_view(conn, draft: dict) -> dict:
     from creative_intel import drafts as drafts_mod
     import json as _json
@@ -1537,6 +1556,11 @@ def _draft_view(conn, draft: dict) -> dict:
     out.pop("spec_json", None)
     out["videos"] = drafts_mod.list_videos(conn, draft["id"])
     out["datasets"] = drafts_mod.list_datasets(conn, draft["id"])
+    cur = conn.execute("SELECT * FROM matches WHERE draft_id = ?",
+                       (draft["id"],))
+    cols = [d[0] for d in cur.description]
+    out["matches"] = [dict(zip(cols, row)) for row in cur.fetchall()]
+    out["live_job_id"] = _draft_live_job_id(conn, draft["id"])
     return out
 
 
@@ -1837,22 +1861,7 @@ async def match_confirm(draft_id: str, request: Request,
 
 def _draft_live_job(conn, draft_id: str):
     """A queued/running video_analysis job already bound to this draft."""
-    import json as _json
-    try:
-        rows = conn.execute(
-            "SELECT id, payload_json FROM worker_jobs WHERE kind = ?"
-            " AND status IN ('queued', 'running')",
-            ("video_analysis",)).fetchall()
-    except Exception:
-        return None
-    for job_id, payload_json in rows:
-        try:
-            payload = _json.loads(payload_json or "{}")
-        except ValueError:
-            continue
-        if (payload.get("snapshot") or {}).get("draft_id") == draft_id:
-            return job_id
-    return None
+    return _draft_live_job_id(conn, draft_id) or None
 
 
 @router.post("/api/drafts/{draft_id}/analyze")
@@ -1931,6 +1940,33 @@ def draft_analysis(draft_id: str, request: Request,
     return {"draft_id": draft["id"], "status": draft["status"],
             "creative_key": key, "annotation": annotation,
             "transcript": transcript}
+
+
+@router.get("/api/drafts/{draft_id}/candidates")
+def draft_candidates(draft_id: str, request: Request,
+                     conn=Depends(get_product_conn),
+                     _emp=Depends(get_current_employee)):
+    """Matchable performance rows for this draft's dataset version.
+
+    Read-only and scoped: only rows from the draft's imported
+    dataset_version are listed (capped), so the browser picks real
+    row ids instead of inventing them. Any active employee may read,
+    mirroring the other draft reads.
+    """
+    from urllib.parse import unquote
+    _ = request
+    draft = _draft_or_404(conn, unquote(draft_id))
+    version = draft.get("dataset_version") or ""
+    if not version:
+        return {"candidates": [], "version": ""}
+    cols = ", ".join(_MATCH_COLUMNS)
+    cur = conn.execute(
+        "SELECT %s FROM ads WHERE import_id = ? ORDER BY id LIMIT 200"
+        % cols, (version,))
+    names = [d[0] for d in cur.description]
+    return {"candidates": [dict(zip(names, row))
+                           for row in cur.fetchall()],
+            "version": version}
 
 
 @router.post("/api/{action:path}")

@@ -232,6 +232,49 @@ def test_match_confirm_guards(tmp_path, monkeypatch):
     assert cleared == 0
 
 
+def test_candidates_scoped_and_view_carries_match(tmp_path, monkeypatch):
+    import sqlite3
+    db, http = make_app(tmp_path, monkeypatch)
+    authed(http, db)
+    did = http.post("/api/drafts", json={}).json()["draft"]["id"]
+    # No dataset yet: empty, not an error.
+    assert http.get("/api/drafts/%s/candidates" % did).json() == {
+        "candidates": [], "version": ""}
+    imp = import_fixture_csv(http, did)
+    body = http.get("/api/drafts/%s/candidates" % did).json()
+    assert body["version"] == imp["version"]
+    assert [r["id"] for r in body["candidates"]] == sorted(
+        r["id"] for r in body["candidates"])
+    assert len(body["candidates"]) == 3
+    assert sum(r["impressions"] for r in body["candidates"]) == 6000
+    # A second, unrelated import is invisible to this draft.
+    did2 = http.post("/api/drafts", json={}).json()["draft"]["id"]
+    with open(CSV_PATH) as fh:
+        # Distinct campaign/adset/ad grain: the product sync key does
+        # not include creative_key, so same-named ads would update the
+        # first draft's facts instead (last write wins, by design).
+        other_csv = fh.read().replace("Sample Launch", "Other Launch")
+    resp = http.post("/api/datasets/import",
+                     json={"draft_id": did2, "platform": "meta",
+                           "csv": other_csv})
+    assert resp.status_code == 200, resp.text
+    assert len(http.get("/api/drafts/%s/candidates" % did).json()[
+        "candidates"]) == 3
+    # Confirm from the listed ids; the draft view carries the match.
+    rowids = [r["id"] for r in body["candidates"]]
+    rec = upload_fixture_video(http)
+    http.post("/api/videos/validate",
+              json={"media_id": rec["id"], "draft_id": did})
+    assert http.post("/api/drafts/%s/matches/confirm" % did,
+                     json={"creative_key": "video-upload-sample",
+                           "method": "platform_id",
+                           "ad_rowids": rowids}).status_code == 200
+    view = http.get("/api/drafts/%s" % did).json()["draft"]
+    assert len(view["matches"]) == 1
+    assert view["matches"][0]["confirmed"] == 1
+    assert view["live_job_id"] == ""
+
+
 def test_xlsx_sheet_gate(tmp_path, monkeypatch):
     db, http = make_app(tmp_path, monkeypatch)
     authed(http, db)

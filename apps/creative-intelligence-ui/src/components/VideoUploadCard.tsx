@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/auth/AuthProvider";
 import { useLocale } from "@/i18n";
 import { Icon } from "@/components/icons";
@@ -82,7 +82,19 @@ export function VideoUploadCard() {
     }
   };
 
+  const prevEmployee = useRef(employeeId);
   useEffect(() => {
+    // Account switch: drop the previous owner's recovery pin so a
+    // stale draft can never surface under a new account (pins are
+    // also keyed per employee, and server drafts stay owner-scoped).
+    if (prevEmployee.current && prevEmployee.current !== employeeId) {
+      try {
+        window.localStorage.removeItem(draftKey(prevEmployee.current));
+      } catch {
+        /* ignore */
+      }
+    }
+    prevEmployee.current = employeeId;
     void reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [employeeId]);

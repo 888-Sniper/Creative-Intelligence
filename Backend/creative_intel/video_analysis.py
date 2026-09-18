@@ -21,6 +21,7 @@ import datetime
 import json
 import os
 import tempfile
+import uuid
 
 ANALYSIS_VERSION = "v1"
 
@@ -204,12 +205,17 @@ def measured_from_records(records):
     Pooled totals only (sum then divide, never average row rates).
     Returns {totals, pooled_link_ctr_pct|null, coverage, warnings}.
     """
+    # Overall known totals stay separate from metric-specific
+    # coverage: known impressions are preserved even when link clicks
+    # are unknown (CTR then reports unavailable, never zero).
     totals = {"records": 0, "impressions": 0, "link_clicks": 0,
               "clicks_all": 0, "spend": 0.0, "conversions": 0.0,
               "video_views": 0, "views_25": 0, "views_50": 0,
               "views_75": 0, "views_100": 0}
     warnings = []
-    complete = 0
+    pool_impressions = 0
+    pool_clicks = 0
+    pool_records = 0
     currencies, dates, platforms = set(), set(), set()
     spend_by_currency: dict = {}
     for rec in records or []:
@@ -217,78 +223,100 @@ def measured_from_records(records):
             continue
         totals["records"] += 1
         try:
-            missing = set(json.loads(rec.get("missing_json") or "[]"))
-        except ValueError:
+            parsed = json.loads(rec.get("missing_json") or "[]")
+            missing = set(parsed) if isinstance(parsed, list) else set()
+        except (ValueError, TypeError):
             missing = set()
-        try:
-            imp = int(rec.get("impressions") or 0)
-            lnk = int(rec.get("link_clicks") or 0)
-        except (TypeError, ValueError):
-            warnings.append("record %s has non-numeric counts: excluded "
-                            "from pooled totals" % rec.get("id"))
+        # An explicit null is unknown, with or without a marker.
+        for num_key in ("impressions", "link_clicks", "clicks", "spend",
+                        "conversions", "video_views", "views_25",
+                        "views_50", "views_75", "views_100"):
+            if rec.get(num_key) is None:
+                missing.add(num_key)
+
+        def _num(value):
+            try:
+                return int(value or 0)
+            except (TypeError, ValueError):
+                return None
+
+        def _float(value):
+            try:
+                return float(value or 0)
+            except (TypeError, ValueError):
+                return None
+
+        imp = None if "impressions" in missing \
+            else _num(rec.get("impressions"))
+        lnk = None if "link_clicks" in missing \
+            else _num(rec.get("link_clicks"))
+        if imp is None and lnk is None:
+            # Nothing usable for any pool: warn only when the values
+            # were supplied but unparseable (marked-missing rows are
+            # already covered by the coverage warning below).
+            if "impressions" not in missing \
+                    or "link_clicks" not in missing:
+                warnings.append(
+                    "record %s has non-numeric counts: excluded from "
+                    "pooled totals" % rec.get("id"))
             continue
-        # Missing is not zero: a blank-at-import metric (stored 0 and
-        # listed in missing_json) contributes nothing to its pool, so
-        # unknown link clicks can never drag a CTR to 0%.
-        has_counts = ("impressions" in rec and "link_clicks" in rec
-                      and "impressions" not in missing
-                      and "link_clicks" not in missing)
-        if has_counts:
-            complete += 1
+        if imp is not None:
             totals["impressions"] += imp
+        # The CTR pool needs BOTH sides known: unknown clicks can
+        # never drag a rate to 0%, and known impressions are still
+        # preserved above when clicks are missing.
+        if imp is not None and lnk is not None:
+            pool_records += 1
+            pool_impressions += imp
+            pool_clicks += lnk
             totals["link_clicks"] += lnk
         for key, num in (("clicks", "clicks_all"), ("video_views", None),
                          ("views_25", None), ("views_50", None),
                          ("views_75", None), ("views_100", None)):
             if key in missing:
                 continue
-            try:
-                totals[num or key] += int(rec.get(key) or 0)
-            except (TypeError, ValueError):
-                pass
+            value = _num(rec.get(key))
+            if value is not None:
+                totals[num or key] += value
         if "conversions" not in missing:
-            try:
-                totals["conversions"] += float(rec.get("conversions") or 0)
-            except (TypeError, ValueError):
-                pass
+            value = _float(rec.get("conversions"))
+            if value is not None:
+                totals["conversions"] += value
         if "spend" not in missing:
-            try:
-                amount = float(rec.get("spend") or 0)
-            except (TypeError, ValueError):
-                amount = None
+            amount = _float(rec.get("spend"))
             if amount is not None:
                 totals["spend"] += amount
                 cur = str(rec.get("currency") or "").strip() or "unspecified"
                 spend_by_currency[cur] = spend_by_currency.get(cur, 0.0) \
                     + amount
-        if rec.get("currency"):
-            currencies.add(str(rec["currency"]))
+                currencies.add(cur)
         if rec.get("date"):
             dates.add(str(rec["date"]))
         if rec.get("platform"):
             platforms.add(str(rec["platform"]))
-    if totals["records"] and complete < totals["records"]:
+    if totals["records"] and pool_records < totals["records"]:
         warnings.append("%d of %d records lack impression/click counts: "
                         "pooled CTR covers %d"
-                        % (totals["records"] - complete,
-                           totals["records"], complete))
+                        % (totals["records"] - pool_records,
+                           totals["records"], pool_records))
     ctr = None
-    if totals["impressions"] > 0:
-        ctr = round(totals["link_clicks"] / totals["impressions"] * 100, 2)
+    if pool_impressions > 0:
+        ctr = round(pool_clicks / pool_impressions * 100, 2)
     elif totals["records"]:
-        warnings.append("no impressions supplied: no rate computed "
-                        "(missing is not zero)")
+        warnings.append("no comparable impression/click pairs: no rate "
+                        "computed (missing is not zero)")
     if len(currencies) > 1:
-        # A combined spend across currencies is meaningless: keep it
-        # per-currency and zero the combined total instead of summing
-        # incompatible figures.
-        totals["spend"] = 0.0
+        # A combined spend across currencies is meaningless: the
+        # combined total is unavailable (None, never a genuine zero)
+        # and spend is kept per-currency instead.
+        totals["spend"] = None
         warnings.append("mixed currencies %s: spend kept per-currency, "
                         "not combined" % sorted(currencies))
     coverage = {"platforms": sorted(platforms),
                 "currencies": sorted(currencies),
                 "date_range": [min(dates), max(dates)] if dates else [],
-                "spend_by_currency": spend_by_currency}
+                "spend_by_currency": spend_by_currency,
+                "ctr_records": pool_records}
     return {"totals": totals, "pooled_link_ctr_pct": ctr,
             "coverage": coverage, "warnings": warnings}
 
@@ -444,55 +472,50 @@ def run(conn, snapshot, owner="", media_dir="", providers=None,
             raise AnalysisUnavailable(
                 "another analysis finished while this one was running: "
                 "discarding this result")
-    except Exception:
-        # A job that never publishes leaves no trace: stale aborts,
-        # cancellations, and provider failures all roll back to the
-        # pre-run rows instead of leaving partial output behind.
-        _restore_prior()
-        raise
-        if prior_ann is None:
-            conn.execute("DELETE FROM annotations WHERE creative_key=?",
-                         (key,))
-        else:
-            conn.execute("UPDATE annotations SET annotation_json=? "
-                         "WHERE creative_key=?", (prior_ann, key))
-        if prior_transcript is not None:
-            conn.execute("UPDATE creatives SET transcript=? "
-                         "WHERE creative_key=?", (prior_transcript, key))
+        checkpoint(90, "measured")
+        measured = measured_from_records(fresh["records"])
+        ann = report["annotation"]
+        transcript = report.get("transcript") or ""
+        ann["frame_labels"] = [
+            {"t_sec": l.get("t_sec"), "label": l.get("label"),
+             "brand_visible": l.get("brand_visible"),
+             "product_visible": l.get("product_visible"),
+             "logo_visible": l.get("logo_visible"),
+             "text_overlay": l.get("text_overlay"),
+             "cta_visible": l.get("cta_visible"),
+             "end_frame": l.get("end_frame")}
+            for l in (report.get("frame_labels") or [])]
+        ann["analysis"] = {
+            "version": ANALYSIS_VERSION,
+            "revision": uuid.uuid4().hex,
+            "at": utcnow(),
+            "model": _vision_model(prov),
+            "sampling": prep["sampling"],
+            "coverage": {"frames": len(prep["images"]),
+                         "clip_s": fresh["duration_s"]},
+            "snapshot": {k: fresh[k] for k in
+                         ("video_sha256", "dataset_version",
+                          "match_confirmed_at", "match_method")},
+            "measured": measured,
+            "suggested_tests": suggest_tests(ann, measured, transcript)}
+        creative_mod.save_annotation(conn, key, ann)
+        drafts_mod.update_draft(conn, fresh["draft_id"],
+                                status="ready_for_review")
         conn.commit()
+    except Exception:
+        # A job that never publishes leaves no trace — but only when
+        # nothing newer published meanwhile: if a concurrent finisher
+        # landed (its stamp differs from the pre-run one), its result
+        # stands and this rollback stands down. This covers stale
+        # aborts, cancellations at any checkpoint (including after the
+        # pipeline), and provider failures.
+        if _analysis_at(conn, key) == pre_at:
+            _restore_prior()
         raise
-    checkpoint(90, "measured")
-    measured = measured_from_records(fresh["records"])
-    ann = report["annotation"]
-    transcript = report.get("transcript") or ""
-    ann["frame_labels"] = [
-        {"t_sec": l.get("t_sec"), "label": l.get("label"),
-         "brand_visible": l.get("brand_visible"),
-         "product_visible": l.get("product_visible"),
-         "logo_visible": l.get("logo_visible"),
-         "text_overlay": l.get("text_overlay"),
-         "cta_visible": l.get("cta_visible"),
-         "end_frame": l.get("end_frame")}
-        for l in (report.get("frame_labels") or [])]
-    ann["analysis"] = {
-        "version": ANALYSIS_VERSION,
-        "at": utcnow(),
-        "model": _vision_model(prov),
-        "sampling": prep["sampling"],
-        "coverage": {"frames": len(prep["images"]),
-                     "clip_s": fresh["duration_s"]},
-        "snapshot": {k: fresh[k] for k in
-                     ("video_sha256", "dataset_version",
-                      "match_confirmed_at", "match_method")},
-        "measured": measured,
-        "suggested_tests": suggest_tests(ann, measured, transcript)}
-    creative_mod.save_annotation(conn, key, ann)
-    drafts_mod.update_draft(conn, fresh["draft_id"],
-                            status="ready_for_review")
-    conn.commit()
     return {"creative_key": key, "draft_id": fresh["draft_id"],
             "stages": report["stages"], "measured": measured,
-            "analysis_version": ANALYSIS_VERSION}
+            "analysis_version": ANALYSIS_VERSION,
+            "revision": ann["analysis"]["revision"]}
 
 
 def _vision_model(prov):

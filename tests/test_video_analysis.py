@@ -475,12 +475,13 @@ def test_missing_metrics_not_zero_and_currency_split(tmp_path):
          "spend": 100.0, "currency": "MYR", "missing_json": "[]"},
     ]
     measured = va.measured_from_records(records)
-    # Record 2's unknown clicks are excluded: 190/8000 = 2.38%.
+    # Record 2's unknown clicks are excluded from the CTR pool
+    # (190/8000 = 2.38%), but its known impressions are preserved.
     assert measured["pooled_link_ctr_pct"] == 2.38
-    assert measured["totals"]["impressions"] == 8000
+    assert measured["totals"]["impressions"] == 12000
     assert measured["totals"]["link_clicks"] == 190
-    # Incompatible spend is not combined.
-    assert measured["totals"]["spend"] == 0.0
+    # Incompatible spend is not combined: unavailable, never zero.
+    assert measured["totals"]["spend"] is None
     assert measured["coverage"]["spend_by_currency"] == {
         "USD": 150.0, "MYR": 100.0}
     assert any("per-currency" in w for w in measured["warnings"])
@@ -491,6 +492,120 @@ def test_missing_metrics_not_zero_and_currency_split(tmp_path):
     assert control["pooled_link_ctr_pct"] == 2.5
     assert control["totals"]["spend"] == 60.0
     _conn.close()
+
+
+def test_known_totals_survive_missing_clicks(tmp_path):
+    """Recheck round 3: known impressions are preserved while CTR
+    reports unavailable, and a bare null reads as unknown."""
+    _conn, _store, _did = bound_db(tmp_path)
+    only = va.measured_from_records([
+        {"id": 1, "impressions": 1000, "link_clicks": 0,
+         "missing_json": "[\"link_clicks\"]"}])
+    assert only["totals"]["impressions"] == 1000
+    assert only["pooled_link_ctr_pct"] is None
+    bare_null = va.measured_from_records([
+        {"id": 1, "impressions": 1000, "link_clicks": None}])
+    assert bare_null["pooled_link_ctr_pct"] is None
+    assert bare_null["totals"]["link_clicks"] == 0
+    mixed_unspecified = va.measured_from_records([
+        {"id": 1, "impressions": 1000, "link_clicks": 25,
+         "spend": 100.0, "currency": "USD", "missing_json": "[]"},
+        {"id": 2, "impressions": 1000, "link_clicks": 25,
+         "spend": 100.0, "currency": "", "missing_json": "[]"},
+    ])
+    # Unspecified is its own bucket: never assumed to be USD.
+    assert mixed_unspecified["totals"]["spend"] is None
+    assert mixed_unspecified["pooled_link_ctr_pct"] == 2.5
+    _conn.close()
+
+
+@NEEDS_FFMPEG
+def test_restore_paths_cancel_and_provider_failure(tmp_path):
+    """Audit followup: cancellation and provider failure also roll
+    back to the pre-run rows."""
+    conn, _store, did = bound_db(tmp_path)
+    snap = va.bind_snapshot(conn, did)
+    key = "video-upload-sample"
+    conn.execute("INSERT INTO creatives (creative_key, transcript)"
+                 " VALUES (?, ?) ON CONFLICT (creative_key) DO UPDATE"
+                 " SET transcript = excluded.transcript",
+                 (key, "prior words"))
+    conn.execute("INSERT INTO annotations (creative_key, schema_version,"
+                 " annotation_json, updated_at) VALUES (?, 'v0', ?, '')"
+                 " ON CONFLICT (creative_key) DO UPDATE SET"
+                 " annotation_json = excluded.annotation_json",
+                 (key, json.dumps({"status": "auto",
+                                   "analysis": {"version": "v0"}})))
+    conn.commit()
+    media = {"images": [b"fake-jpeg"], "image_times": [1.0]}
+
+    calls = {"n": 0}
+
+    def cancel_late(stage=""):
+        # Trip inside the pipeline (after the transcript write), not
+        # at the pre-pipeline checkpoints.
+        calls["n"] += 1
+        return calls["n"] >= 6
+
+    with pytest.raises(jobs_mod.JobCancelled):
+        va.run(conn, snap, owner="emp-1", media_dir=_store,
+               providers=StubProviders(), cancelled=cancel_late,
+               queued_at="2000-01-01T00:00:00")
+    assert conn.execute("SELECT transcript FROM creatives"
+                        " WHERE creative_key=?", (key,)).fetchone()[0] \
+        == "prior words"
+
+    class BoomVision(StubVision):
+        def annotate(self, frames, images=None):
+            raise RuntimeError("provider down")
+
+    class BoomProviders(StubProviders):
+        vision = BoomVision()
+
+    with pytest.raises(RuntimeError):
+        va.run(conn, snap, owner="emp-1", media_dir=_store,
+               providers=BoomProviders(),
+               queued_at="2000-01-01T00:00:00")
+    assert json.loads(conn.execute(
+        "SELECT annotation_json FROM annotations WHERE creative_key=?",
+        (key,)).fetchone()[0])["analysis"] == {"version": "v0"}
+    conn.close()
+
+
+def test_worker_daemon_requeues_and_processes(tmp_path, capsys):
+    """Audit followup: the in-proc loop revives stale leases and
+    drives a queued job to a terminal state."""
+    import threading
+    from ci_backend import worker as worker_mod
+    db = str(tmp_path / "w2.db")
+    conn = sqlite3.connect(db)
+    schema.init_db(conn)
+    jobs_mod.ensure(conn)
+    job = jobs_mod.enqueue(conn, "video_analysis",
+                           {"snapshot": {"draft_id": "ghost"}},
+                           owner="emp-1")
+    claimed = jobs_mod.claim(conn, lease_owner="t")
+    assert claimed["id"] == job["id"]
+    conn.execute("UPDATE worker_jobs SET lease_expires_at="
+                 "'2000-01-01T00:00:00' WHERE id=?", (job["id"],))
+    conn.commit()
+    conn.close()
+    stop = threading.Event()
+    timer = threading.Timer(1.5, stop.set)
+    timer.start()
+    try:
+        worker_mod.daemon(db, Settings(), poll=0.2, stop=stop)
+    finally:
+        timer.cancel()
+    assert "requeued 1 interrupted" in capsys.readouterr().out
+    conn = sqlite3.connect(db)
+    try:
+        status = conn.execute("SELECT status FROM worker_jobs WHERE id=?",
+                              (job["id"],)).fetchone()[0]
+    finally:
+        conn.close()
+    # Unknown draft: the job ran and failed honestly, never stranded.
+    assert status == "failed"
 
 
 def test_worker_daemon_stops_and_flags(tmp_path, monkeypatch):
@@ -518,6 +633,74 @@ def test_worker_daemon_stops_and_flags(tmp_path, monkeypatch):
 
 
 @NEEDS_FFMPEG
+def test_newer_finisher_survives_abort(tmp_path, monkeypatch):
+    """Recheck round 3: when B publishes mid-run and A aborts as
+    stale, A's rollback stands down — B's newer result is intact."""
+    conn, store, did = bound_db(tmp_path)
+    snap = va.bind_snapshot(conn, did)
+    key = "video-upload-sample"
+    calls = {"n": 0}
+    real_at = va._analysis_at
+
+    def fake_at(conn, key):
+        calls["n"] += 1
+        if calls["n"] > 1:
+            # B finishes while A is still running.
+            conn.execute(
+                "INSERT INTO annotations (creative_key, schema_version,"
+                " annotation_json, updated_at) VALUES (?, 'v0', ?, '')"
+                " ON CONFLICT (creative_key) DO UPDATE SET"
+                " annotation_json = excluded.annotation_json",
+                (key, json.dumps({"status": "auto", "analysis": {
+                    "version": "v1", "at": "2026-05-01T00:00:00"}})))
+            conn.execute("UPDATE creatives SET transcript=?"
+                         " WHERE creative_key=?", ("B words", key))
+            conn.commit()
+            return "2026-05-01T00:00:00"
+        return real_at(conn, key)
+
+    monkeypatch.setattr(va, "_analysis_at", fake_at)
+    with pytest.raises(va.AnalysisUnavailable):
+        va.run(conn, snap, owner="emp-1", media_dir=store,
+               providers=StubProviders(), queued_at="")
+    assert conn.execute("SELECT transcript FROM creatives"
+                        " WHERE creative_key=?", (key,)).fetchone()[0] \
+        == "B words"
+    assert json.loads(conn.execute(
+        "SELECT annotation_json FROM annotations WHERE creative_key=?",
+        (key,)).fetchone()[0])["analysis"]["at"] == "2026-05-01T00:00:00"
+    conn.close()
+
+
+@NEEDS_FFMPEG
+def test_cancel_after_pipeline_restores(tmp_path, monkeypatch):
+    """Recheck round 3: cancellation detected after the pipeline
+    (post-publish checkpoints) still rolls back partial output."""
+    conn, store, did = bound_db(tmp_path)
+    snap = va.bind_snapshot(conn, did)
+    key = "video-upload-sample"
+    conn.execute("INSERT INTO creatives (creative_key, transcript)"
+                 " VALUES (?, ?) ON CONFLICT (creative_key) DO UPDATE"
+                 " SET transcript = excluded.transcript",
+                 (key, "prior words"))
+    conn.commit()
+    calls = {"n": 0}
+
+    def cancel_at_measured(stage=""):
+        calls["n"] += 1
+        return calls["n"] >= 8
+
+    with pytest.raises(jobs_mod.JobCancelled):
+        va.run(conn, snap, owner="emp-1", media_dir=store,
+               providers=StubProviders(), cancelled=cancel_at_measured,
+               queued_at="")
+    assert conn.execute("SELECT transcript FROM creatives"
+                        " WHERE creative_key=?", (key,)).fetchone()[0] \
+        == "prior words"
+    conn.close()
+
+
+@NEEDS_FFMPEG
 def test_stale_abort_restores_prior_rows(tmp_path, monkeypatch):
     """Audit A6: a job aborted as stale leaves the pre-run
     transcript and annotation behind — never partial output."""
@@ -540,17 +723,23 @@ def test_stale_abort_restores_prior_rows(tmp_path, monkeypatch):
 
     def fake_at(conn, key):
         calls["n"] += 1
-        if calls["n"] > 1:
+        if calls["n"] == 2:
             return "2999-01-01T00:00:00"  # B finished mid-run
+        # Later reads hit the real store: nobody else published, so
+        # the abort path must roll back to the pre-run rows.
         return real_at(conn, key)
 
     monkeypatch.setattr(va, "_analysis_at", fake_at)
+    drafts.update_draft(conn, did, status="analyzing")
     with pytest.raises(va.AnalysisUnavailable):
         va.run(conn, snap, owner="emp-1", media_dir=store,
                providers=StubProviders(), queued_at="2000-01-01T00:00:00")
     assert conn.execute("SELECT transcript FROM creatives"
                         " WHERE creative_key=?", (key,)).fetchone()[0] \
         == "prior words"
+    # Nothing published: the aborted run never flipped the draft to
+    # ready_for_review.
+    assert drafts.get_draft(conn, did)["status"] == "analyzing"
     assert json.loads(conn.execute(
         "SELECT annotation_json FROM annotations WHERE creative_key=?",
         (key,)).fetchone()[0]) == {

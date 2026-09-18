@@ -41,11 +41,11 @@ def test_thumbnail_endpoint_serves_seeded_art(tmp_path):
     r = http.post("/api/admin/demo/pack/import", headers=headers)
     assert r.status_code == 200, r.text
     assert r.json()["created"] is True
+    # Thumbnails serve preview bytes directly (no redirect): raw
+    # /media/{id} retrieval is draft-owner-gated, while board
+    # thumbnails stay tenant-visible.
     r = http.get("/api/creatives/smp-first-light-mirror-test/thumbnail",
                  headers=headers, follow_redirects=False)
-    assert r.status_code == 302, r.text
-    assert r.headers["location"].startswith("/media/")
-    r = http.get(r.headers["location"], headers=headers)
     assert r.status_code == 200, r.text
     assert r.headers["content-type"].startswith("image/png")
     assert r.content[:8] == b"\x89PNG\r\n\x1a\n"
@@ -116,10 +116,7 @@ def test_thumbnail_prefers_uploaded_media(tmp_path, monkeypatch):
         conn.close()
     r = http.get("/api/creatives/smp-first-light-mirror-test/thumbnail",
                  headers=headers, follow_redirects=False)
-    assert r.status_code == 302, r.text
-    assert r.headers["location"] == "/media/%s" % rec["id"]
-    # Follow explicitly (the test client drops per-request headers on
-    # redirect): the uploaded bytes serve through the media route.
-    r = http.get(r.headers["location"], headers=headers)
     assert r.status_code == 200, r.text
     assert r.headers["content-type"].startswith("image/png")
+    assert r.content == b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
+    assert rec["id"] > 0

@@ -11,7 +11,7 @@ export function errorMessage(body: unknown, fallback: string): string {
   return typeof src["error"] === "string" ? String(src["error"]) : fallback;
 }
 
-function errorSheets(body: unknown): string[] | null {
+export function errorSheets(body: unknown): string[] | null {
   const top = (body ?? {}) as Record<string, unknown>;
   const detail = top["detail"];
   const src = (typeof detail === "object" && detail !== null
@@ -278,11 +278,11 @@ export interface DraftReview {
 /** Version-bound human review: approves exactly the analysis
  *  version the reviewer saw (reviewer + timestamp recorded). */
 export function reviewDraft(
-  draftId: string, analysisVersion: string, note = "",
+  draftId: string, analysisVersion: string, note = "", revision = "",
 ): Promise<{ draft: DraftView; review: DraftReview }> {
   return api<{ draft: DraftView; review: DraftReview }>(
     "POST", `/api/drafts/${encodeURIComponent(draftId)}/review`,
-    { analysis_version: analysisVersion, note },
+    { analysis_version: analysisVersion, revision, note },
   );
 }
 

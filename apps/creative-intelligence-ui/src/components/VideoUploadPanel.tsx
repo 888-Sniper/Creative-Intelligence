@@ -156,6 +156,14 @@ export function FindingsView({
   const num = (v: unknown): string =>
     typeof v === "number" && Number.isFinite(v) ? String(v) : "—";
   const ctr = measured["pooled_link_ctr_pct"];
+  const measureWarnings: string[] = Array.isArray(measured["warnings"])
+    ? (measured["warnings"] as unknown[]).map(String) : [];
+  const coverage = (measured["coverage"] ?? {}) as Record<string, unknown>;
+  const coverageText = [
+    Array.isArray(coverage["platforms"]) ? (coverage["platforms"] as unknown[]).map(String).join(", ") : "",
+    Array.isArray(coverage["currencies"]) ? (coverage["currencies"] as unknown[]).map(String).join(", ") : "",
+    Array.isArray(coverage["date_range"]) ? (coverage["date_range"] as unknown[]).map(String).join(" – ") : "",
+  ].filter(Boolean).join(" · ");
   return (
     <div style={{ marginTop: 12 }}>
       <h4 className="panel-title" style={{ fontSize: 13 }}>{vu("findingsTitle")}</h4>
@@ -184,7 +192,23 @@ export function FindingsView({
             </p>
           </div>
         ) : null}
+        {coverageText ? (
+          <div>
+            <p className="panel-sub" style={{ fontWeight: 700 }}>{vu("coverageTitle")}</p>
+            <p className="panel-sub" style={{ marginTop: 0 }}>{coverageText}</p>
+          </div>
+        ) : null}
       </div>
+      {measureWarnings.length ? (
+        <div style={{ marginTop: 8 }}>
+          <h4 className="panel-title" style={{ fontSize: 13 }}>{vu("reviewWarningsTitle")}</h4>
+          <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+            {measureWarnings.map((w, i) => (
+              <li key={i} className="panel-sub">{w}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       {moments.length ? (
         <>
           <h4 className="panel-title" style={{ fontSize: 13, marginTop: 10 }}>
@@ -375,13 +399,17 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
     }
   };
 
+  /** The stored analysis block behind the on-screen findings. */
+  const findingsBlock = ((findings?.annotation ?? {}) as Record<string, unknown>)["analysis"] as
+    Record<string, unknown> | undefined;
+
   /** Version-bound human review of the findings on screen. */
-  const runReview = async (version: string): Promise<void> => {
+  const runReview = async (version: string, revision: string): Promise<void> => {
     const current = draftRef.current;
     if (!current || !version || reviewBusy) return;
     setReviewBusy(true);
     try {
-      const res = await reviewDraft(current.id, version, reviewNote.trim());
+      const res = await reviewDraft(current.id, version, reviewNote.trim(), revision);
       setDraft(res.draft);
       setReviewNote("");
       setToast(vu("reviewedMsg"));
@@ -1092,6 +1120,13 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
                 </button>
               </p>
             ) : (
+              <p className="panel-sub">
+                <button type="button" className="link-teal" onClick={() => setCustomClient(false)}>
+                  {vu("catalogueClientBtn")}
+                </button>
+              </p>
+            )}
+            {customClient ? (
               <div className="detail-cols-2" style={{ marginTop: 8 }}>
                 <div className="field">
                   <label htmlFor="vu-client-custom">{vu("clientLabel")}</label>
@@ -1110,7 +1145,7 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
                   />
                 </div>
               </div>
-            )}
+            ) : null}
           </section>
         ) : null}
 
@@ -1177,11 +1212,15 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
                   disabled={switchingDataset}
                   onChange={(e) => void switchDatasetVersion(e.target.value)}
                 >
-                  {(draft?.datasets ?? []).map((d) => (
-                    <option key={d.id} value={d.version}>
-                      {d.filename || d.version} · {d.rows}
-                    </option>
-                  ))}
+                  {(draft?.datasets ?? []).map((d) => {
+                    const active = d.version
+                      === (spec.dataset?.version || draft?.dataset_version || "");
+                    return (
+                      <option key={d.id} value={d.version}>
+                        {d.filename || d.version}{active ? " · current" : ""}
+                      </option>
+                    );
+                  })}
                 </select>
                 <p className="panel-sub">{vu("datasetSwitchNote")}</p>
               </div>
@@ -1298,6 +1337,16 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
                                   checked={checked}
                                   onChange={() => {
                                     if (id == null) return;
+                                    // The Analyze gate binds the confirmed
+                                    // set, not the checkboxes: changing the
+                                    // selection after confirmation drops the
+                                    // stale approval so the visible
+                                    // selection can never disagree with it.
+                                    if (match?.confirmed === 1) {
+                                      setMatch(null);
+                                      setSpec((prev) => ({ ...prev, match: undefined }));
+                                      setStatus(vu("selectionClearsMatchNote"));
+                                    }
                                     setPicked((prev) => checked
                                       ? prev.filter((n) => n !== id)
                                       : [...prev, id]);
@@ -1324,9 +1373,7 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
                 <h4 className="panel-title" style={{ fontSize: 13 }}>{vu("reviewTitle")}</h4>
                 <p className="panel-sub">
                   {vu("reviewVersionLabel", {
-                    version: String(
-                      ((findings.annotation as Record<string, unknown>)["analysis"] as
-                        Record<string, unknown> | undefined)?.["version"] ?? "—"),
+                    version: String(findingsBlock?.["version"] ?? "—"),
                   })}
                 </p>
                 {draft?.review?.by ? (
@@ -1351,12 +1398,10 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
                       <LoadingButton
                         type="button" className="btn-primary" loading={reviewBusy}
                         loadingLabel={vu("reviewingLabel")}
-                        disabled={!String(
-                          ((findings.annotation as Record<string, unknown>)["analysis"] as
-                            Record<string, unknown> | undefined)?.["version"] ?? "")}
-                        onClick={() => void runReview(String(
-                          ((findings.annotation as Record<string, unknown>)["analysis"] as
-                            Record<string, unknown> | undefined)?.["version"] ?? ""))}
+                        disabled={!String(findingsBlock?.["version"] ?? "")}
+                        onClick={() => void runReview(
+                          String(findingsBlock?.["version"] ?? ""),
+                          String(findingsBlock?.["revision"] ?? ""))}
                       >
                         {vu("markReviewedBtn")}
                       </LoadingButton>

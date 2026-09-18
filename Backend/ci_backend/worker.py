@@ -100,11 +100,15 @@ def daemon(db_path, settings, poll=5.0, stop=None):
     worker in-process instead of provisioning a second service."""
     import threading as _threading
     halt = stop or _threading.Event()
-    conn = _connect(db_path)
     try:
-        revived = jobs.requeue_interrupted(conn)
-    finally:
-        conn.close()
+        conn = _connect(db_path)
+        try:
+            revived = jobs.requeue_interrupted(conn)
+        finally:
+            conn.close()
+    except Exception as exc:  # noqa: BLE001 - requeue must not kill boot
+        print("worker requeue error: %s" % exc, flush=True)
+        revived = 0
     if revived:
         print("requeued %d interrupted job(s)" % revived, flush=True)
     while not halt.is_set():

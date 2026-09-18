@@ -28,7 +28,12 @@ Fixtures: `fixtures/Video Upload Sample 720p.mp4` + `fixtures/Video Upload Sampl
   -> `{video_id, media_id, draft_id, creative_key, duration_s, width,
   height, validation}` (`validation` verdict object; `video_id` is ""
   when invalid and no row is stored; without a draft_id a
-  caller-owned draft is minted so every video row is owned)
+  caller-owned draft is minted so every video row is owned; the
+  draft check runs before any media/ffprobe work)
+- `GET /media/{id}` serves the raw file only to an admin or to the
+  owner of a draft whose videos bind that media row. Board
+  thumbnails are served as preview bytes by the thumbnail route and
+  stay tenant-visible like the analytics surface around them.
 - `POST /api/datasets/import` (auth,
   `{draft_id, platform, filename?, csv?|xlsx_b64?, sheet?}`)
   -> `{dataset_id, draft_id, rows, version(import_id), inserted,
@@ -51,8 +56,10 @@ Fixtures: `fixtures/Video Upload Sample 720p.mp4` + `fixtures/Video Upload Sampl
 - `DELETE /api/drafts/{id}` (owner-or-admin) removes the draft and
   its videos/datasets/matches rows, cancels bound jobs, and erases
   content no other draft references (media row + stored file,
-  annotation). Shared assets are kept; transcripts stay on the
-  shared creatives rows.
+  annotation). Replace and Remove reap displaced assets the same way
+  at drop time. Shared assets are kept; transcripts stay on the
+  shared creatives rows. Media erase removes the file first so a
+  failed filesystem delete keeps the row as the recovery record.
 - `DELETE /api/drafts/{id}/videos` (owner-or-admin) removes the
   draft's bound video row(s) so removal is explicit, never form-only.
 - `POST /api/videos/validate` with a draft replaces prior video rows:
@@ -71,11 +78,18 @@ Fixtures: `fixtures/Video Upload Sample 720p.mp4` + `fixtures/Video Upload Sampl
   Validating a replacement video clears matches like any other
   material input change.
 - `POST /api/drafts/{id}/review` (owner-or-admin,
-  `{analysis_version, note?}`) records a version-bound human review
-  (reviewer + timestamp + note); 409 unless ready_for_review and the
-  version is current. PATCH can never set `reviewed`. Material input
-  changes invalidate the review (status back to needs_confirmation,
-  bound keys back to auto).
+  `{analysis_version, revision?, note?}`) records a human review of
+  one unique analysis result (reviewer + timestamp + note); 409
+  unless ready_for_review, the revision matches the stored block,
+  and the block's frozen input snapshot still matches live inputs.
+  Success marks the annotation human_verified so the export gate
+  recognises the approval. PATCH can never set `reviewed`. Material
+  input changes — including a fresh propose or confirm — invalidate
+  the review (status back to needs_confirmation, bound keys back to
+  auto). Campaign comparison is case-insensitive; client is enforced
+  only when both the selection and the record carry one.
+- PATCH `dataset_version` only accepts this draft's own import
+  versions (arbitrary import ids 409).
 - `POST /api/drafts/{id}/analyze` (auth, `{brand_terms?}`, AI-rate-limited)
   -> `{job_id, status, model, provider, sends, storage, poll}`
   (`poll` is the existing `/api/pipeline/jobs/{job_id}` status route —
@@ -119,11 +133,14 @@ alembic stays auth-only by design)
 - Pooled CTR = total clicks / total impressions x 100 for display only,
   over comparable records with the same click definition.
 - Link clicks stay distinct from all clicks. Missing is not zero: metrics
-  listed in a record's `missing_json` contribute nothing to their pool
-  (unknown clicks can never drag a CTR to 0%); a zero denominator
-  produces no rate. Mixed-currency spend is kept per-currency and never
-  summed. Campaign-only totals are labelled as such
-  and never presented as creative-level metrics.
+  listed in a record's `missing_json` — or explicitly null — contribute
+  nothing to their pool (unknown clicks can never drag a CTR to 0%),
+  while known impressions are still preserved in totals; a missing CTR
+  pair produces no rate. Mixed-currency spend is kept per-currency and
+  the combined total is unavailable (never a genuine zero); an
+  unspecified currency is its own bucket, never assumed. Campaign-only
+  totals are labelled as such and never presented as creative-level
+  metrics. Findings surface coverage and measurement warnings.
 
 ## Analysis pipeline
 
@@ -139,8 +156,10 @@ alembic stays auth-only by design)
   a newer stamped analysis aborts the late result instead of being
   overwritten (the intermediate save preserves the prior stamp).
   A job that never publishes leaves no trace: stale aborts,
-  cancellations, and failures roll the transcript and annotation
-  back to the pre-run rows.
+  cancellations (at any checkpoint), and failures roll the transcript
+  and annotation back to the pre-run rows — unless a concurrent
+  finisher published meanwhile, in which case its newer result stands
+  and the rollback stands down.
 - Worker startup: the web process runs the queue worker in-process on
   hosted single-service deploys (PORT set) or CREATIVE_INTEL_RUN_WORKER=true;
   standalone `worker.py` (Oracle systemd, local dev) is unchanged.

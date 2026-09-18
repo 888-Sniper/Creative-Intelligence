@@ -574,6 +574,10 @@ class MatchBody(BaseModel):
     ad_rowids: list[int] = Field(default_factory=list, max_length=500)
 
 
+class AnalyzeBody(BaseModel):
+    brand_terms: list[str] = Field(default_factory=list, max_length=20)
+
+
 class ConnectorSheetsBody(BaseModel):
     platform: str = Field(min_length=1, max_length=120)
     url: str = Field(default="", max_length=2000)
@@ -1829,6 +1833,104 @@ async def match_confirm(draft_id: str, request: Request,
     paudit.audit_request(request, conn, employee_id=who.id,
                          action="match_confirmed", target=did)
     return {"match": drafts_mod.get_match(conn, did, body.creative_key)}
+
+
+def _draft_live_job(conn, draft_id: str):
+    """A queued/running video_analysis job already bound to this draft."""
+    import json as _json
+    try:
+        rows = conn.execute(
+            "SELECT id, payload_json FROM worker_jobs WHERE kind = ?"
+            " AND status IN ('queued', 'running')",
+            ("video_analysis",)).fetchall()
+    except Exception:
+        return None
+    for job_id, payload_json in rows:
+        try:
+            payload = _json.loads(payload_json or "{}")
+        except ValueError:
+            continue
+        if (payload.get("snapshot") or {}).get("draft_id") == draft_id:
+            return job_id
+    return None
+
+
+@router.post("/api/drafts/{draft_id}/analyze")
+async def draft_analyze(draft_id: str, request: Request,
+                        conn=Depends(get_product_conn),
+                        who=Depends(get_current_employee),
+                        _limited=Depends(ai_rate_limit)):
+    from urllib.parse import unquote
+    from creative_intel import drafts as drafts_mod
+    from creative_intel import video_analysis
+    _ = _limited
+    did = unquote(draft_id)
+    _draft_owner_or_403(conn, did, who)
+    try:
+        body = AnalyzeBody.model_validate(await json_payload(request))
+    except Exception as exc:
+        raise HTTPException(status_code=409,
+                            detail={"error": "Invalid analyse: %s" % exc})
+    live = _draft_live_job(conn, did)
+    if live:
+        raise HTTPException(status_code=409, detail={
+            "error": "analysis already running for this draft",
+            "job_id": live})
+    try:
+        snapshot = video_analysis.bind_snapshot(conn, did)
+    except video_analysis.AnalysisUnavailable as exc:
+        raise HTTPException(status_code=409,
+                            detail={"error": str(exc)})
+    ready = video_analysis.readiness()
+    if not ready["ready"]:
+        paudit.audit_request(request, conn, employee_id=who.id,
+                             action="draft_analyzed", target=did,
+                             result="error")
+        raise HTTPException(status_code=409, detail={
+            "error": ready["reason"], "sends": ready["sends"],
+            "storage": ready["storage"]})
+    job = jobs_mod.enqueue(
+        conn, "video_analysis",
+        {"snapshot": snapshot,
+         "brand_terms": [t for t in body.brand_terms
+                         if isinstance(t, str)][:20]},
+        owner=who.id)
+    drafts_mod.update_draft(conn, did, status="analyzing")
+    paudit.audit_request(request, conn, employee_id=who.id,
+                         action="draft_analyzed", target=job["id"])
+    return {"job_id": job["id"], "status": job["status"],
+            "draft_id": did, "model": ready["model"],
+            "provider": ready["provider"], "sends": ready["sends"],
+            "storage": ready["storage"],
+            "poll": "/api/pipeline/jobs/%s" % job["id"]}
+
+
+@router.get("/api/drafts/{draft_id}/analysis")
+def draft_analysis(draft_id: str, request: Request,
+                   conn=Depends(get_product_conn),
+                   _emp=Depends(get_current_employee)):
+    from urllib.parse import unquote
+    import json as _json
+    _ = request
+    draft = _draft_or_404(conn, unquote(draft_id))
+    videos = _draft_view(conn, draft)["videos"]
+    key = videos[0]["creative_key"] if videos else ""
+    annotation, transcript = None, ""
+    if key:
+        row = conn.execute(
+            "SELECT annotation_json FROM annotations WHERE creative_key=?",
+            (key,)).fetchone()
+        if row:
+            try:
+                annotation = _json.loads(row[0])
+            except ValueError:
+                annotation = None
+        trow = conn.execute("SELECT transcript FROM creatives"
+                            " WHERE creative_key=?", (key,)).fetchone()
+        transcript = trow[0] if trow else ""
+    return {"draft_id": draft["id"], "status": draft["status"],
+            "creative_key": key, "annotation": annotation,
+            "transcript": transcript}
 
 
 @router.post("/api/{action:path}")

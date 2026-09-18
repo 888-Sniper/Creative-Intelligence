@@ -509,4 +509,6 @@ def run_pipeline(conn, creative_key, providers, media=None, brand_terms=None,
     conn.execute("UPDATE creatives SET pipeline_json=? WHERE creative_key=?",
                  (json.dumps(stages), creative_key))
     conn.commit()
-    return {"creative_key": creative_key, "stages": stages, "annotation": ann}
+    return {"creative_key": creative_key, "stages": stages,
+            "annotation": ann, "frame_labels": labels,
+            "transcript": transcript}

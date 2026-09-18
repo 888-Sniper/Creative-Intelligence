@@ -666,7 +666,7 @@ describe("VideoUpload guided panel", () => {
           creative_key: "video-upload-sample", transcript: "watch this",
           annotation: {
             status: "auto",
-            analysis: { version: "v1", at: "2026-09-10T12:00:00Z", model: "m", measured: { totals: {} }, suggested_tests: [] },
+            analysis: { version: "v1", revision: "r1", at: "2026-09-10T12:00:00Z", model: "m", measured: { totals: {} }, suggested_tests: [] },
             frame_labels: [{ t_sec: 1.0, label: "opening", brand_visible: true }],
           },
         }
@@ -692,6 +692,7 @@ describe("VideoUpload guided panel", () => {
     await waitFor(() => {
       const review = calls.find((c) => c.method === "POST" && c.url === "/api/drafts/d2/review");
       expect((review?.body as Record<string, unknown>)?.["analysis_version"]).toBe("v1");
+      expect((review?.body as Record<string, unknown>)?.["revision"]).toBe("r1");
     });
     await waitFor(() => {
       // Announced twice by design: the polite status region + the toast.
@@ -741,6 +742,40 @@ describe("VideoUpload guided panel", () => {
     await waitFor(() => {
       expect(screen.getByText("Switched to b.csv: 0 records.")).toBeDefined();
     });
+  });
+
+  it("changing the record selection clears the confirmed match", async () => {
+    panelBackend([
+      (m, u) => (u === "/api/drafts/d1/candidates" && m === "GET"
+        ? {
+          version: "v1",
+          candidates: [
+            { id: 11, import_id: "v1", ad_name: "Sample Story V1", campaign: "Sample Launch" },
+            { id: 12, import_id: "v1", ad_name: "Sample Story V1", campaign: "Sample Launch" },
+          ],
+        }
+        : undefined),
+    ]);
+    render(
+      <MemoryRouter>
+        <VideoUploadPanel open={{ draftId: "d1", stage: "review" }} employeeId="e7" onClose={() => undefined} />
+      </MemoryRouter>,
+    );
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Confirm match" })).toBeDefined();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm match" }));
+    await waitFor(() => {
+      expect(screen.getByText("Match confirmed.")).toBeDefined();
+    });
+    // Unticking a record drops the stale approval: Analyze blocks
+    // until the visible selection is re-confirmed.
+    fireEvent.click(screen.getAllByRole("checkbox", { name: "Select record Sample Story V1" })[0]);
+    await waitFor(() => {
+      expect(screen.getByText("Changing the record selection clears the confirmed match.")).toBeDefined();
+    });
+    expect(screen.getByText("No match confirmed yet.")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Analyze" }).hasAttribute("disabled")).toBe(true);
   });
 
   it("editing the creative key clears the confirmed match", async () => {

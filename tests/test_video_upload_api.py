@@ -637,6 +637,95 @@ def test_campaign_scope_enforced(tmp_path, monkeypatch):
                      json=evil).status_code == 409
 
 
+def _seed_reviewable(conn, draft_id, revision="r1"):
+    """Insert a fully valid stored analysis whose snapshot matches
+    the draft's live inputs (what a real pipeline run persists)."""
+    import json as _json
+    from creative_intel import creative as creative_mod
+    seed = creative_mod.blank_annotation()
+    seed["schema_version"] = "v0"
+    seed["status"] = "auto"
+    seed["analysis"] = {
+        "version": "v1", "revision": revision,
+        "snapshot": {
+            "video_sha256": conn.execute(
+                "SELECT sha256 FROM videos WHERE draft_id=?",
+                (draft_id,)).fetchone()[0],
+            "dataset_version": conn.execute(
+                "SELECT dataset_version FROM drafts WHERE id=?",
+                (draft_id,)).fetchone()[0],
+            "match_confirmed_at": conn.execute(
+                "SELECT confirmed_at FROM matches WHERE draft_id=?",
+                (draft_id,)).fetchone()[0],
+            "match_method": "manual"}}
+    conn.execute(
+        "INSERT INTO annotations (creative_key, schema_version,"
+        " annotation_json, updated_at) VALUES ("
+        "'video-upload-sample', 'v0', ?, '')",
+        (_json.dumps(seed),))
+    conn.commit()
+
+
+def test_reconfirm_invalidates_review(tmp_path, monkeypatch):
+    """Audit followup (major): a confirmation recorded after a review
+    supersedes the approval — the draft falls back out of reviewed."""
+    import json as _json
+    import sqlite3
+    db, http = make_app(tmp_path, monkeypatch)
+    did, _version, rowids = _confirmed_setup(http, db)
+    match = {"creative_key": "video-upload-sample", "method": "manual",
+             "ad_rowids": rowids}
+    assert http.post("/api/drafts/%s/matches/confirm" % did,
+                     json=match).status_code == 200
+    conn = sqlite3.connect(db)
+    try:
+        _seed_reviewable(conn, did, revision="r0")
+    finally:
+        conn.close()
+    assert http.patch("/api/drafts/%s" % did,
+                      json={"status": "ready_for_review"}).status_code == 200
+    done = http.post("/api/drafts/%s/review" % did,
+                     json={"analysis_version": "v1", "revision": "r0"})
+    assert done.status_code == 200, done.text
+    assert done.json()["draft"]["status"] == "reviewed"
+    again = http.post("/api/drafts/%s/matches/confirm" % did,
+                      json=match)
+    assert again.status_code == 200, again.text
+    draft = http.get("/api/drafts/%s" % did).json()["draft"]
+    assert draft["status"] == "needs_confirmation"
+    assert draft["review"] == {}
+
+
+def test_campaign_scope_permissive_until_confirmed(tmp_path, monkeypatch):
+    """Audit followup: without a confirmed selection, cross-campaign
+    rows stay explorable (propose 200); confirmation is the gate."""
+    import sqlite3
+    db, http = make_app(tmp_path, monkeypatch)
+    authed(http, db)
+    did = http.post("/api/drafts", json={}).json()["draft"]["id"]
+    imp = import_fixture_csv(http, did)
+    conn = sqlite3.connect(db)
+    try:
+        rowids = [r[0] for r in conn.execute(
+            "SELECT id FROM ads WHERE import_id=? ORDER BY id",
+            (imp["version"],))]
+    finally:
+        conn.close()
+    rec = upload_fixture_video(http)
+    assert http.post("/api/videos/validate",
+                     json={"media_id": rec["id"],
+                           "draft_id": did}).status_code == 200
+    # Unconfirmed selection recorded but not confirmed: permissive.
+    assert http.patch(
+        "/api/drafts/%s" % did,
+        json={"spec": {"client": "Foap", "campaign": "Sample Launch",
+                       "clientConfirmed": False}}).status_code == 200
+    loose = {"creative_key": "video-upload-sample", "method": "manual",
+             "ad_rowids": rowids}
+    assert http.post("/api/drafts/%s/matches/propose" % did,
+                     json=loose).status_code == 200
+
+
 def test_review_op_and_invalidation(tmp_path, monkeypatch):
     """Audit A7: review is version-bound with reviewer identity, and
     a later material input change invalidates it."""
@@ -649,27 +738,29 @@ def test_review_op_and_invalidation(tmp_path, monkeypatch):
     assert http.post("/api/videos/validate",
                      json={"media_id": rec["id"],
                            "draft_id": did}).status_code == 200
+    imp = import_fixture_csv(http, did)
     conn = sqlite3.connect(db)
     try:
-        conn.execute(
-            "INSERT INTO annotations (creative_key, schema_version,"
-            " annotation_json, updated_at) VALUES ("
-            "'video-upload-sample', 'v0', ?, '')",
-            (_json.dumps({"status": "auto",
-                           "analysis": {"version": "v1"}}),))
-        conn.commit()
+        rowids = [r[0] for r in conn.execute(
+            "SELECT id FROM ads WHERE import_id=?", (imp["version"],))]
     finally:
         conn.close()
-    # Empty draft cannot be reviewed; wrong version cannot either.
-    assert http.post("/api/drafts/%s/review" % did,
-                     json={"analysis_version": "v1"}).status_code == 409
+    match = {"creative_key": "video-upload-sample", "method": "manual",
+             "ad_rowids": rowids}
+    assert http.post("/api/drafts/%s/matches/confirm" % did,
+                     json=match).status_code == 200
+    conn = sqlite3.connect(db)
+    try:
+        _seed_reviewable(conn, did, revision="r0")
+    finally:
+        conn.close()
     assert http.patch("/api/drafts/%s" % did,
                       json={"status": "ready_for_review"}).status_code == 200
     stale = http.post("/api/drafts/%s/review" % did,
-                      json={"analysis_version": "v0"})
+                      json={"analysis_version": "v0", "revision": "r0"})
     assert stale.status_code == 409, stale.text
     done = http.post("/api/drafts/%s/review" % did,
-                     json={"analysis_version": "v1",
+                     json={"analysis_version": "v1", "revision": "r0",
                            "note": "checked totals"})
     assert done.status_code == 200, done.text
     assert done.json()["draft"]["status"] == "reviewed"
@@ -746,6 +837,171 @@ def test_delete_draft_erases_unreferenced_content(tmp_path, monkeypatch):
     assert kept == 0
     assert ann == 0
     assert not os.path.isfile(os.path.join(media_dir, path))
+
+
+def test_media_serving_requires_draft_binding(tmp_path, monkeypatch):
+    """Recheck round 3: /media/{id} serves owners/admins bound via a
+    draft, and 403s authenticated strangers."""
+    db, http = make_app(tmp_path, monkeypatch)
+    authed(http, db, "owner@foap.test", role="employee")
+    rec = upload_fixture_video(http)
+    did = http.post("/api/drafts", json={}).json()["draft"]["id"]
+    assert http.post("/api/videos/validate",
+                     json={"media_id": rec["id"],
+                           "draft_id": did}).status_code == 200
+    assert http.get("/media/%s" % rec["id"]).status_code == 200
+    http.headers.clear()
+    authed(http, db, "stranger@foap.test", role="employee")
+    resp = http.get("/media/%s" % rec["id"])
+    assert resp.status_code == 403, resp.text
+    http.headers.clear()
+    authed(http, db)
+    assert http.get("/media/%s" % rec["id"]).status_code == 200
+
+
+def test_patch_dataset_version_allow_listed(tmp_path, monkeypatch):
+    """Recheck round 3: the version pointer only accepts this draft's
+    own imports — never an arbitrary import id."""
+    db, http = make_app(tmp_path, monkeypatch)
+    authed(http, db)
+    did = http.post("/api/drafts", json={}).json()["draft"]["id"]
+    imp = import_fixture_csv(http, did)
+    ok = http.patch("/api/drafts/%s" % did,
+                    json={"dataset_version": imp["version"]})
+    assert ok.status_code == 200, ok.text
+    assert http.patch("/api/drafts/%s" % did,
+                      json={"dataset_version": "deadbeefcafe"}
+                      ).status_code == 409
+
+
+def test_review_binds_revision_and_snapshot(tmp_path, monkeypatch):
+    """Recheck round 3: approval needs the stored unique revision and
+    a snapshot that still matches live inputs; success marks the
+    annotation human_verified for the export gate."""
+    import json as _json
+    import sqlite3
+    db, http = make_app(tmp_path, monkeypatch)
+    did, _version, rowids = _confirmed_setup(http, db)
+    match = {"creative_key": "video-upload-sample", "method": "manual",
+             "ad_rowids": rowids}
+    assert http.post("/api/drafts/%s/matches/confirm" % did,
+                     json=match).status_code == 200
+    conn = sqlite3.connect(db)
+    try:
+        _seed_reviewable(conn, did, revision="r1")
+    finally:
+        conn.close()
+    assert http.patch("/api/drafts/%s" % did,
+                      json={"status": "ready_for_review"}).status_code == 200
+    # Wrong revision: refused even though the version matches.
+    assert http.post("/api/drafts/%s/review" % did,
+                     json={"analysis_version": "v1",
+                           "revision": "stale"}).status_code == 409
+    done = http.post("/api/drafts/%s/review" % did,
+                     json={"analysis_version": "v1", "revision": "r1"})
+    assert done.status_code == 200, done.text
+    conn = sqlite3.connect(db)
+    try:
+        status = _json.loads(conn.execute(
+            "SELECT annotation_json FROM annotations WHERE creative_key=?",
+            ("video-upload-sample",)).fetchone()[0])["status"]
+    finally:
+        conn.close()
+    assert status == "human_verified"
+    # Inputs change after the run: the same revision is now stale.
+    with open(CSV_PATH) as fh:
+        csv_text = fh.read()
+    assert http.post("/api/datasets/import",
+                     json={"draft_id": did, "platform": "meta",
+                           "filename": "fixture.csv",
+                           "csv": csv_text}).status_code == 200
+    assert http.patch("/api/drafts/%s" % did,
+                      json={"status": "ready_for_review"}).status_code == 200
+    stale = http.post("/api/drafts/%s/review" % did,
+                      json={"analysis_version": "v1", "revision": "r1"})
+    assert stale.status_code == 409, stale.text
+
+
+def test_replace_reaps_old_media(tmp_path, monkeypatch):
+    """Recheck round 3: replacing the video erases the displaced
+    media row and file when nothing else references them."""
+    import os
+    import sqlite3
+    db, http = make_app(tmp_path, monkeypatch)
+    authed(http, db)
+    first = upload_fixture_video(http)
+    did = http.post("/api/drafts", json={}).json()["draft"]["id"]
+    assert http.post("/api/videos/validate",
+                     json={"media_id": first["id"],
+                           "draft_id": did}).status_code == 200
+    # Genuinely different bytes (identical uploads dedup to the same
+    # media row, which must then be kept as still-referenced).
+    with open(MP4_PATH, "rb") as fh:
+        blob = fh.read() + b"\x00" * 64
+    resp = http.post("/api/media/upload",
+                     data={"creative_key": "video-upload-sample"},
+                     files={"file": ("sample2.mp4", blob, "video/mp4")})
+    assert resp.status_code == 200, resp.text
+    second = resp.json()
+    assert second["id"] != first["id"]
+    assert http.post("/api/videos/validate",
+                     json={"media_id": second["id"],
+                           "draft_id": did}).status_code == 200
+    media_dir = os.environ["CREATIVE_INTEL_MEDIA_DIR"]
+    conn = sqlite3.connect(db)
+    try:
+        gone = conn.execute("SELECT stored_name FROM media WHERE id=?",
+                            (first["id"],)).fetchone()
+    finally:
+        conn.close()
+    assert gone is None
+
+
+def test_client_enforced_when_both_sides_carry_it(tmp_path,
+                                                  monkeypatch):
+    """Recheck round 3: records naming a different client than the
+    confirmed selection are refused; client-less rows stay usable."""
+    db, http = make_app(tmp_path, monkeypatch)
+    authed(http, db)
+    did = http.post("/api/drafts", json={}).json()["draft"]["id"]
+    two_clients = ("Campaign Name,Ad Set Name,Ad Name,Creative Name,"
+                   "Client,Amount Spent,Impressions,Link Clicks\n"
+                   "Sample Launch,Prospecting,Sample Story V1,"
+                   "video-upload-sample,Foap,10.00,1000,25\n"
+                   "Sample Launch,Prospecting,Sample Story V1,"
+                   "video-upload-sample,Rival,10.00,1000,25\n")
+    imp = http.post("/api/datasets/import",
+                    json={"draft_id": did, "platform": "meta",
+                          "filename": "clients.csv",
+                          "csv": two_clients}).json()
+    assert imp["rows"] == 2, imp
+    import sqlite3
+    conn = sqlite3.connect(db)
+    try:
+        ids = {r[0]: r[1] for r in conn.execute(
+            "SELECT id, client FROM ads WHERE import_id=?",
+            (imp["version"],))}
+    finally:
+        conn.close()
+    rec = upload_fixture_video(http)
+    assert http.post("/api/videos/validate",
+                     json={"media_id": rec["id"],
+                           "draft_id": did}).status_code == 200
+    assert http.patch(
+        "/api/drafts/%s" % did,
+        json={"spec": {"client": "Foap", "campaign": "Sample Launch",
+                       "clientConfirmed": True}}).status_code == 200
+    rival = [rid for rid, client in ids.items() if client == "Rival"]
+    assert len(rival) == 1
+    evil = {"creative_key": "video-upload-sample", "method": "manual",
+            "ad_rowids": rival}
+    assert http.post("/api/drafts/%s/matches/confirm" % did,
+                     json=evil).status_code == 409
+    own = [rid for rid, client in ids.items() if client == "Foap"]
+    good = {"creative_key": "video-upload-sample", "method": "manual",
+            "ad_rowids": own}
+    assert http.post("/api/drafts/%s/matches/confirm" % did,
+                     json=good).status_code == 200
 
 
 def test_delete_draft_cancels_bound_jobs(tmp_path, monkeypatch):

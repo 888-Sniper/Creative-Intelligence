@@ -291,13 +291,18 @@ def delete_media(conn, store, rid):
     if not row:
         return False
     stored = row[0] or ""
-    conn.execute("DELETE FROM media WHERE id=?", (rid,))
-    conn.commit()
     if stored and os.path.basename(stored) == stored:
+        # File first: if the filesystem delete fails, the row stays
+        # as the recovery record (retryable) instead of pointing at
+        # nothing. A file that is already gone is not a failure.
         try:
             os.unlink(os.path.join(store, stored))
-        except OSError:
+        except FileNotFoundError:
             pass
+        except OSError:
+            return False
+    conn.execute("DELETE FROM media WHERE id=?", (rid,))
+    conn.commit()
     return True
 
 

@@ -551,6 +551,7 @@ class DraftPatchBody(BaseModel):
 
 class DraftReviewBody(BaseModel):
     analysis_version: str = Field(min_length=1, max_length=40)
+    revision: str = Field(default="", max_length=64)
     note: str = Field(default="", max_length=2000)
 
 
@@ -1501,11 +1502,13 @@ async def creative_annotate(key: str, request: Request,
 # Guided video-upload flow: drafts, validation, datasets, matches
 # ---------------------------------------------------------------------------
 #
-# Writes are owner-or-admin (mirrors the sync-job guard: without it
-# any active employee could rewrite another owner's draft, dataset
-# link, or confirmed match). Reads follow the media convention (any
-# active employee). Draft creation is idempotent on client-supplied
+# Reads and writes are owner-or-admin (mirrors the sync-job guard:
+# without it any active employee could rewrite another owner's
+# draft, dataset link, or confirmed match — or read their matched
+# records and analysis). Only the shared media library stays
+# open-tenant. Draft creation is idempotent on client-supplied
 # draft_id so retries and double clicks never duplicate drafts.
+# Draft listing stays owner-scoped (admins read any draft by id).
 
 
 def _draft_or_404(conn, draft_id: str) -> dict:
@@ -1547,6 +1550,33 @@ def _draft_live_job_id(conn, draft_id: str):
         if (payload.get("snapshot") or {}).get("draft_id") == draft_id:
             return job_id
     return ""
+
+
+def _reap_unreferenced(conn, store, media_ids, keys) -> None:
+    """Erase assets no draft references anymore (media row + stored
+    file, annotation). Called whenever a binding is dropped — replace,
+    remove, or draft delete — so displaced assets cannot strand.
+    Shared (still-referenced) assets are kept; transcripts stay on
+    the shared creatives rows, which are reporting facts, and the
+    media helper keeps the row when the file cannot be removed."""
+    from creative_intel import media as media_mod
+    for mid in sorted(media_ids):
+        still = conn.execute(
+            "SELECT COUNT(*) FROM videos WHERE media_id = ?",
+            (mid,)).fetchone()[0]
+        if not still:
+            try:
+                media_mod.delete_media(conn, store, mid)
+            except ValueError:
+                pass
+    for key in sorted(keys):
+        still = conn.execute(
+            "SELECT COUNT(*) FROM videos WHERE creative_key = ?",
+            (key,)).fetchone()[0]
+        if not still:
+            conn.execute("DELETE FROM annotations WHERE creative_key=?",
+                         (key,))
+    conn.commit()
 
 
 def _invalidate_draft_review(conn, did: str) -> None:
@@ -1625,6 +1655,10 @@ async def video_validate(request: Request,
     except Exception as exc:
         raise HTTPException(status_code=409,
                             detail={"error": "Invalid validation: %s" % exc})
+    # Authorise before spending worker CPU: a stranger's draft_id
+    # 403s here, before media lookup and ffprobe run.
+    if body.draft_id:
+        _draft_owner_or_403(conn, body.draft_id, who)
     try:
         info = media.describe(conn, legacy._media_dir(), body.media_id)
         path = media.file_path(conn, legacy._media_dir(), body.media_id)
@@ -1640,9 +1674,7 @@ async def video_validate(request: Request,
     # the caller owns. Without a draft_id we mint a caller-owned
     # draft instead of leaving an orphan video row.
     draft_id = body.draft_id
-    if draft_id:
-        _draft_owner_or_403(conn, draft_id, who)
-    elif verdict["status"] == "valid":
+    if not draft_id and verdict["status"] == "valid":
         draft_id = drafts_mod.create_draft(conn, who.id)
     creative_key = ""
     if verdict["status"] == "valid":
@@ -1654,8 +1686,15 @@ async def video_validate(request: Request,
             # Replacement, not history: the newly validated video
             # becomes the draft's single active version, so analysis
             # can never bind an older row while the form shows the
-            # new one. (An invalid verdict leaves the prior valid
+            # new one. Displaced assets are reaped when unreferenced
+            # elsewhere. (An invalid verdict leaves the prior valid
             # video untouched.)
+            old_media = {v.get("media_id") for v in
+                         drafts_mod.list_videos(conn, draft_id)
+                         if v.get("media_id")}
+            old_keys = {v.get("creative_key") for v in
+                        drafts_mod.list_videos(conn, draft_id)
+                        if v.get("creative_key")}
             drafts_mod.clear_videos(conn, draft_id)
             vid = drafts_mod.add_video(
                 conn, draft_id, creative_key,
@@ -1667,6 +1706,8 @@ async def video_validate(request: Request,
             # same as a spec or dataset edit.
             drafts_mod.clear_matches(conn, draft_id)
             _invalidate_draft_review(conn, draft_id)
+            _reap_unreferenced(conn, legacy._media_dir(), old_media,
+                               old_keys)
         except ValueError as exc:
             raise _conflict(exc)
     else:
@@ -1755,6 +1796,17 @@ async def draft_patch(draft_id: str, request: Request,
         raise HTTPException(status_code=409, detail={
             "error": "Mark a draft reviewed with POST"
                      " /api/drafts/{id}/review, not PATCH."})
+    if body.dataset_version:
+        # The version pointer is allow-listed to this draft's own
+        # imports: pointing it at an arbitrary import id would leak
+        # another draft's (or client's) records through candidates
+        # and matching.
+        own = {d.get("version") for d in
+               drafts_mod.list_datasets(conn, did)}
+        if body.dataset_version not in own:
+            raise HTTPException(status_code=409, detail={
+                "error": "Unknown dataset version for this draft: import"
+                         " it (or pick an imported one) first."})
     try:
         ok = drafts_mod.update_draft(conn, did, status=body.status,
                                      spec=body.spec,
@@ -1781,7 +1833,6 @@ def draft_delete(draft_id: str, request: Request,
     from urllib.parse import unquote
     from creative_intel import jobs as jobs_mod
     from creative_intel import drafts as drafts_mod
-    from creative_intel import media as media_mod
     from ci_backend import actions as legacy
     did = unquote(draft_id)
     _draft_owner_or_403(conn, did, who)
@@ -1820,24 +1871,8 @@ def draft_delete(draft_id: str, request: Request,
         conn.execute("DELETE FROM %s WHERE draft_id = ?" % table, (did,))
     conn.execute("DELETE FROM drafts WHERE id = ?", (did,))
     conn.commit()
-    store = legacy._media_dir()
-    for mid in sorted(doomed_media):
-        still = conn.execute(
-            "SELECT COUNT(*) FROM videos WHERE media_id = ?",
-            (mid,)).fetchone()[0]
-        if not still:
-            try:
-                media_mod.delete_media(conn, store, mid)
-            except ValueError:
-                pass
-    for key in sorted(doomed_keys):
-        still = conn.execute(
-            "SELECT COUNT(*) FROM videos WHERE creative_key = ?",
-            (key,)).fetchone()[0]
-        if not still:
-            conn.execute("DELETE FROM annotations WHERE creative_key=?",
-                         (key,))
-    conn.commit()
+    _reap_unreferenced(conn, legacy._media_dir(), doomed_media,
+                       doomed_keys)
     paudit.audit_request(request, conn, employee_id=who.id,
                          action="draft_deleted", target=did)
     return {"ok": True}
@@ -1852,9 +1887,18 @@ def draft_videos_delete(draft_id: str, request: Request,
     reopen. Clearing the form alone is not removal."""
     from urllib.parse import unquote
     from creative_intel import drafts as drafts_mod
+    from ci_backend import actions as legacy
     did = unquote(draft_id)
     _draft_owner_or_403(conn, did, who)
+    doomed_media = {v.get("media_id") for v in
+                    drafts_mod.list_videos(conn, did)
+                    if v.get("media_id")}
+    doomed_keys = {v.get("creative_key") for v in
+                   drafts_mod.list_videos(conn, did)
+                   if v.get("creative_key")}
     removed = drafts_mod.clear_videos(conn, did)
+    _reap_unreferenced(conn, legacy._media_dir(), doomed_media,
+                       doomed_keys)
     # A removed video invalidates any prior confirmation like any
     # other material input change.
     drafts_mod.clear_matches(conn, did)
@@ -1974,15 +2018,25 @@ def _require_campaign_scope(draft: dict, records: list) -> None:
         spec = {}
     if not spec.get("clientConfirmed"):
         return
-    campaign = (spec.get("campaign") or "").strip()
-    if not campaign:
+    campaign = (spec.get("campaign") or "").strip().casefold()
+    client = (spec.get("client") or "").strip().casefold()
+    if not campaign and not client:
         return
-    foreign = [r.get("id") for r in (records or [])
-               if (r.get("campaign") or "").strip() != campaign]
+    foreign = []
+    for rec in (records or []):
+        rec_campaign = (rec.get("campaign") or "").strip().casefold()
+        rec_client = (rec.get("client") or "").strip().casefold()
+        if campaign and rec_campaign != campaign:
+            foreign.append(rec.get("id"))
+        elif client and rec_client and rec_client != client:
+            # Client is enforced only when both sides carry it: most
+            # report extracts have no client grain, and an empty
+            # report client must never veto a real selection.
+            foreign.append(rec.get("id"))
     if foreign:
         raise ValueError(
-            "records %s are not in the confirmed campaign %r"
-            % (foreign[:5], campaign))
+            "records %s are not in the confirmed client/campaign"
+            % foreign[:5])
 
 
 def _valid_video_keys(conn, draft_id: str) -> set:
@@ -2019,6 +2073,8 @@ async def match_propose(draft_id: str, request: Request,
         _require_campaign_scope(_draft_or_404(conn, did), records)
         drafts_mod.propose_match(conn, did, body.creative_key,
                                  body.method, records)
+        # A new proposal supersedes whatever was reviewed before.
+        _invalidate_draft_review(conn, did)
     except ValueError as exc:
         raise _conflict(exc)
     paudit.audit_request(request, conn, employee_id=who.id,
@@ -2045,6 +2101,10 @@ async def match_confirm(draft_id: str, request: Request,
             raise ValueError("match key must be a validated video on this draft")
         drafts_mod.confirm_match(conn, did, body.creative_key, who.id,
                                  method=body.method, records=records)
+        # A new confirmation supersedes whatever was reviewed before
+        # (even an identical re-confirm: its timestamp is newer than
+        # the approval).
+        _invalidate_draft_review(conn, did)
     except ValueError as exc:
         paudit.audit_request(request, conn, employee_id=who.id,
                              action="match_confirmed", target=did,
@@ -2059,17 +2119,23 @@ async def match_confirm(draft_id: str, request: Request,
 async def draft_review(draft_id: str, request: Request,
                        conn=Depends(get_product_conn),
                        who=Depends(get_current_employee)):
-    """Record a human review of the current analysis version.
+    """Record a human review of the current analysis result.
 
     Genuine review operation, not a status flip: the draft must be
-    ready_for_review and the submitted analysis_version must equal
-    the stored analysis block's version, binding the approval to
-    exactly what the reviewer saw (reviewer identity, timestamp,
-    and note are recorded). Any later material input change
-    invalidates it via _invalidate_draft_review.
+    ready_for_review, the submitted revision must equal the stored
+    analysis block's unique revision (no two analyses share an
+    approval identifier), and the block's frozen input snapshot must
+    still match the draft's live inputs — a dataset change after the
+    run refuses approval even when the version string is unchanged.
+    Reviewer identity, timestamp, and note are recorded, and the
+    annotation is marked human_verified so the export gate recognises
+    the approval. Any later material input change invalidates it via
+    _invalidate_draft_review.
     """
     from urllib.parse import unquote
     from creative_intel import drafts as drafts_mod
+    from creative_intel import creative as creative_mod
+    from creative_intel import video_analysis as video_analysis_mod
     import json as _json
     did = unquote(draft_id)
     draft = _draft_owner_or_403(conn, did, who)
@@ -2083,28 +2149,61 @@ async def draft_review(draft_id: str, request: Request,
             "error": "Only a draft ready for review can be reviewed"
                      " (status is %r)." % (draft.get("status") or "")})
     videos = drafts_mod.list_videos(conn, did)
-    key = videos[0]["creative_key"] if videos else ""
-    current = ""
+    # Newest wins, mirroring the analysis binder: validation
+    # replaces, so [0] and [-1] agree unless a stale row
+    # somehow survives.
+    key = videos[-1]["creative_key"] if videos else ""
+    block = {}
+    row = None
     if key:
         row = conn.execute(
             "SELECT annotation_json FROM annotations WHERE creative_key=?",
             (key,)).fetchone()
         if row:
             try:
-                current = (_json.loads(row[0]).get("analysis") or {}) \
-                    .get("version", "")
+                block = _json.loads(row[0]).get("analysis") or {}
             except ValueError:
-                current = ""
-    if not current:
+                block = {}
+    if not isinstance(block, dict) or not block.get("version"):
         raise HTTPException(status_code=409, detail={
             "error": "No stored analysis to review yet."})
-    if body.analysis_version != current:
+    if body.analysis_version != block.get("version"):
         raise HTTPException(status_code=409, detail={
             "error": "Analysis version %r is not current (%r): re-read "
                      "the findings before reviewing."
-            % (body.analysis_version, current)})
-    review = drafts_mod.set_review(conn, did, who.id, current,
+            % (body.analysis_version, block.get("version"))})
+    if block.get("revision") and body.revision != block.get("revision"):
+        raise HTTPException(status_code=409, detail={
+            "error": "Analysis revision does not match the stored result:"
+                     " re-read the findings before reviewing."})
+    # The approval binds the exact inputs the analysis ran on: re-bind
+    # live inputs and require the frozen snapshot to still hold.
+    try:
+        live = video_analysis_mod.bind_snapshot(conn, did)
+    except video_analysis_mod.AnalysisUnavailable as exc:
+        raise HTTPException(status_code=409, detail={
+            "error": "Inputs changed since this analysis ran: %s" % exc})
+    stored_snap = block.get("snapshot") or {}
+    for snap_key in ("video_sha256", "dataset_version",
+                     "match_confirmed_at"):
+        if (live.get(snap_key) or "") != (stored_snap.get(snap_key) or ""):
+            raise HTTPException(status_code=409, detail={
+                "error": "Inputs changed since this analysis ran (%s): "
+                         "re-confirm and analyse again." % snap_key})
+    review = drafts_mod.set_review(conn, did, who.id,
+                                   block.get("version") or "",
                                    note=body.note)
+    try:
+        stored = _json.loads(row[0]) if row else {}
+    except (ValueError, TypeError):
+        stored = {}
+    if isinstance(stored, dict):
+        stored["status"] = "human_verified"
+        try:
+            creative_mod.save_annotation(conn, key, stored)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail={
+                "error": "Reviewed analysis no longer validates: %s" % exc})
     paudit.audit_request(request, conn, employee_id=who.id,
                          action="draft_reviewed", target=did)
     return {"draft": _draft_view(conn, _draft_or_404(conn, did)),
@@ -2178,7 +2277,10 @@ def draft_analysis(draft_id: str, request: Request,
     _ = request
     draft = _draft_owner_or_403(conn, unquote(draft_id), who)
     videos = _draft_view(conn, draft)["videos"]
-    key = videos[0]["creative_key"] if videos else ""
+    # Newest wins, mirroring the analysis binder: validation
+    # replaces, so [0] and [-1] agree unless a stale row
+    # somehow survives.
+    key = videos[-1]["creative_key"] if videos else ""
     annotation, transcript = None, ""
     if key:
         row = conn.execute(
@@ -2466,9 +2568,17 @@ def creative_thumbnail(key: str, request: Request,
     except Exception:
         store = ""
     try:
+        from creative_intel import media as media_mod
         url = thumbnails.uploaded_image_url(conn, store, key)
         if url is not None:
-            return RedirectResponse(url, status_code=302)
+            # Serve preview bytes here, not via /media/{id}: raw file
+            # retrieval is draft-owner-gated, while small board
+            # thumbnails stay tenant-visible like the analytics
+            # surface around them.
+            rid = url.rsplit("/", 1)[-1]
+            content, mime, _name = media_mod.load_bytes(conn, store, rid)
+            return Response(content=content, media_type=mime,
+                            headers={"Cache-Control": "private, no-store"})
         svg = thumbnails.for_creative(conn, key)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail={"error": str(exc)})
@@ -2482,13 +2592,33 @@ def creative_thumbnail(key: str, request: Request,
 @router.get("/media/{media_id}")
 def serve_media(media_id: str, request: Request,
                 conn=Depends(get_product_conn),
-                _emp=Depends(get_current_employee)):
-    # Authenticated employees only, private cache: media rows are
-    # account data, never shared-cacheable. FileResponse serves byte
-    # ranges so video/audio seek instead of downloading whole files.
+                who=Depends(get_current_employee)):
+    # Owner-or-admin via draft reference: the file is served only when
+    # the caller owns (or administers) a draft whose videos bind this
+    # media row. Authenticated-but-unrelated employees get a 403 —
+    # there is no cross-employee media browsing. FileResponse serves
+    # byte ranges so video/audio seek instead of downloading whole
+    # files; private cache, never shared-cacheable.
     try:
-        info = media.describe(conn, legacy._media_dir(), media_id)
-        path = media.file_path(conn, legacy._media_dir(), media_id)
+        mid = int(media_id)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=404,
+                            detail={"error": "Unknown media."})
+    if (who.role or "") != "admin":
+        bound = conn.execute(
+            "SELECT COUNT(*) FROM videos JOIN drafts"
+            " ON drafts.id = videos.draft_id"
+            " WHERE videos.media_id = ?"
+            " AND drafts.owner_employee_id = ?",
+            (mid, who.id)).fetchone()[0]
+        if not bound:
+            raise HTTPException(status_code=403, detail={
+                "error": "Only a draft owner bound to this media (or an"
+                         " administrator) can fetch it.",
+                "gate": "forbidden"})
+    try:
+        info = media.describe(conn, legacy._media_dir(), mid)
+        path = media.file_path(conn, legacy._media_dir(), mid)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail={"error": str(exc)})
     return FileResponse(path, media_type=info["mime"],

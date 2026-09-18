@@ -1,5 +1,25 @@
 import { api } from "@/api/client";
 
+/** Backend errors arrive top-level ({error, ...}) via the app's
+ *  HTTPException handler — never under a {"detail"} envelope. Read
+ *  top-level first, tolerate the envelope for robustness. */
+export function errorMessage(body: unknown, fallback: string): string {
+  const top = (body ?? {}) as Record<string, unknown>;
+  const detail = top["detail"];
+  const src = (typeof detail === "object" && detail !== null
+    ? (detail as Record<string, unknown>) : top);
+  return typeof src["error"] === "string" ? String(src["error"]) : fallback;
+}
+
+function errorSheets(body: unknown): string[] | null {
+  const top = (body ?? {}) as Record<string, unknown>;
+  const detail = top["detail"];
+  const src = (typeof detail === "object" && detail !== null
+    ? (detail as Record<string, unknown>) : top);
+  const sheets = src["sheets"];
+  return Array.isArray(sheets) ? sheets.map(String) : null;
+}
+
 /* Dashboard Video Upload — typed client for the guided-flow routes.
  * Shapes mirror the BACKEND (Backend/ci_backend/routers/product.py +
  * creative_intel/drafts.py), which differs from the frozen contracts
@@ -38,12 +58,7 @@ export async function uploadMedia(creativeKey: string, file: File): Promise<Medi
   });
   const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (!res.ok) {
-    const detail = body["detail"];
-    const message =
-      typeof detail === "object" && detail !== null && typeof (detail as Record<string, unknown>)["error"] === "string"
-        ? String((detail as Record<string, unknown>)["error"])
-        : `Upload failed (${res.status})`;
-    throw new Error(message);
+    throw new Error(errorMessage(body, `Upload failed (${res.status})`));
   }
   return body as unknown as MediaRecord;
 }
@@ -160,6 +175,7 @@ export interface DraftView {
   datasets: DraftDatasetRow[];
   matches: DraftMatch[];
   live_job_id: string;
+  review?: DraftReview | null;
 }
 
 export function createDraft(spec: VideoUploadSpec = {}, draftId?: string): Promise<DraftView> {
@@ -244,6 +260,32 @@ export function deleteDraft(draftId: string): Promise<void> {
   ).then(() => undefined);
 }
 
+/** Explicit video removal: drops the draft's bound video row(s)
+ *  server-side so a removed video cannot resurrect on reopen. */
+export function deleteDraftVideos(draftId: string): Promise<number> {
+  return api<{ ok: boolean; removed: number }>(
+    "DELETE", `/api/drafts/${encodeURIComponent(draftId)}/videos`,
+  ).then((r) => r.removed ?? 0);
+}
+
+export interface DraftReview {
+  by: string;
+  at: string;
+  analysis_version: string;
+  note: string;
+}
+
+/** Version-bound human review: approves exactly the analysis
+ *  version the reviewer saw (reviewer + timestamp recorded). */
+export function reviewDraft(
+  draftId: string, analysisVersion: string, note = "",
+): Promise<{ draft: DraftView; review: DraftReview }> {
+  return api<{ draft: DraftView; review: DraftReview }>(
+    "POST", `/api/drafts/${encodeURIComponent(draftId)}/review`,
+    { analysis_version: analysisVersion, note },
+  );
+}
+
 export interface DatasetImportResp {
   dataset_id: string;
   draft_id: string;
@@ -282,13 +324,11 @@ export async function importDataset(body: {
   });
   const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (!res.ok) {
-    const detail = (data["detail"] ?? {}) as Record<string, unknown>;
-    if (Array.isArray(detail["sheets"])) {
-      throw new SheetConflictError(detail["sheets"].map(String));
+    const sheets = errorSheets(data);
+    if (sheets) {
+      throw new SheetConflictError(sheets);
     }
-    throw new Error(
-      typeof detail["error"] === "string" ? detail["error"] : `Import failed (${res.status})`,
-    );
+    throw new Error(errorMessage(data, `Import failed (${res.status})`));
   }
   return data as unknown as DatasetImportResp;
 }

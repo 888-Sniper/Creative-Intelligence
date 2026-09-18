@@ -549,6 +549,11 @@ class DraftPatchBody(BaseModel):
     dataset_version: str | None = Field(default=None, max_length=64)
 
 
+class DraftReviewBody(BaseModel):
+    analysis_version: str = Field(min_length=1, max_length=40)
+    note: str = Field(default="", max_length=2000)
+
+
 class DatasetImportBody(BaseModel):
     draft_id: str = Field(min_length=1, max_length=64)
     platform: str = Field(min_length=1, max_length=120)
@@ -1544,6 +1549,38 @@ def _draft_live_job_id(conn, draft_id: str):
     return ""
 
 
+def _invalidate_draft_review(conn, did: str) -> None:
+    """Drop a draft's recorded human review after a material input
+    change, and return this draft's still-bound video keys from
+    human_verified to auto: the approval belonged to the old inputs.
+    Annotations of videos already unbound from the draft (replaced
+    away) keep their history — they are no longer this draft's
+    claim."""
+    from creative_intel import drafts as drafts_mod
+    from creative_intel import creative as creative_mod
+    import json as _json
+    drafts_mod.clear_review(conn, did)
+    keys = {v.get("creative_key")
+            for v in drafts_mod.list_videos(conn, did)
+            if v.get("creative_key")}
+    for key in keys:
+        row = conn.execute(
+            "SELECT annotation_json FROM annotations WHERE creative_key=?",
+            (key,)).fetchone()
+        if not row:
+            continue
+        try:
+            ann = _json.loads(row[0])
+        except ValueError:
+            continue
+        if isinstance(ann, dict) and ann.get("status") == "human_verified":
+            ann["status"] = "auto"
+            try:
+                creative_mod.save_annotation(conn, key, ann)
+            except ValueError:
+                pass
+
+
 def _draft_view(conn, draft: dict) -> dict:
     from creative_intel import drafts as drafts_mod
     import json as _json
@@ -1553,6 +1590,12 @@ def _draft_view(conn, draft: dict) -> dict:
     except ValueError:
         out["spec"] = {}
     out.pop("spec_json", None)
+    try:
+        review = _json.loads(draft.get("review_json") or "{}")
+        out["review"] = review if isinstance(review, dict) else {}
+    except ValueError:
+        out["review"] = {}
+    out.pop("review_json", None)
     out["videos"] = drafts_mod.list_videos(conn, draft["id"])
     out["datasets"] = drafts_mod.list_datasets(conn, draft["id"])
     cur = conn.execute("SELECT * FROM matches WHERE draft_id = ?",
@@ -1608,6 +1651,12 @@ async def video_validate(request: Request,
                 "SELECT creative_key, sha256 FROM media WHERE id = ?",
                 (body.media_id,)).fetchone()
             creative_key = row[0] if row else ""
+            # Replacement, not history: the newly validated video
+            # becomes the draft's single active version, so analysis
+            # can never bind an older row while the form shows the
+            # new one. (An invalid verdict leaves the prior valid
+            # video untouched.)
+            drafts_mod.clear_videos(conn, draft_id)
             vid = drafts_mod.add_video(
                 conn, draft_id, creative_key,
                 media_id=body.media_id, duration_s=verdict["duration_s"],
@@ -1617,6 +1666,7 @@ async def video_validate(request: Request,
             # A new video version invalidates any prior confirmation,
             # same as a spec or dataset edit.
             drafts_mod.clear_matches(conn, draft_id)
+            _invalidate_draft_review(conn, draft_id)
         except ValueError as exc:
             raise _conflict(exc)
     else:
@@ -1666,11 +1716,15 @@ def draft_list(request: Request, conn=Depends(get_product_conn),
 @router.get("/api/drafts/{draft_id}")
 def draft_get(draft_id: str, request: Request,
               conn=Depends(get_product_conn),
-              _emp=Depends(get_current_employee)):
+              who=Depends(get_current_employee)):
     from urllib.parse import unquote
     _ = request
-    return {"draft": _draft_view(conn, _draft_or_404(conn,
-                                                     unquote(draft_id)))}
+    # Owner-or-admin like writes: the view carries matched
+    # performance records and analysis, which must not leak across
+    # employees (the media library stays shared-tenant; attribution
+    # lives on the draft).
+    return {"draft": _draft_view(
+        conn, _draft_owner_or_403(conn, unquote(draft_id), who))}
 
 
 @router.patch("/api/drafts/{draft_id}")
@@ -1694,6 +1748,13 @@ async def draft_patch(draft_id: str, request: Request,
         raise HTTPException(status_code=409, detail={
             "error": "Draft status %r is set by the analysis pipeline,"
                      " not by clients." % body.status})
+    if body.status == "reviewed":
+        # Reviewed is a recorded verdict (reviewer + analysis
+        # version), never a free status flip: approving an empty or
+        # stale draft must go through the review operation below.
+        raise HTTPException(status_code=409, detail={
+            "error": "Mark a draft reviewed with POST"
+                     " /api/drafts/{id}/review, not PATCH."})
     try:
         ok = drafts_mod.update_draft(conn, did, status=body.status,
                                      spec=body.spec,
@@ -1707,6 +1768,7 @@ async def draft_patch(draft_id: str, request: Request,
         # Material input change invalidates any prior confirmation
         # and its dependent review (caller re-confirms afterwards).
         drafts_mod.clear_matches(conn, did)
+        _invalidate_draft_review(conn, did)
     paudit.audit_request(request, conn, employee_id=who.id,
                          action="draft_updated", target=did)
     return {"draft": _draft_view(conn, _draft_or_404(conn, did))}
@@ -1718,8 +1780,22 @@ def draft_delete(draft_id: str, request: Request,
                  who=Depends(get_current_employee)):
     from urllib.parse import unquote
     from creative_intel import jobs as jobs_mod
+    from creative_intel import drafts as drafts_mod
+    from creative_intel import media as media_mod
+    from ci_backend import actions as legacy
     did = unquote(draft_id)
     _draft_owner_or_403(conn, did, who)
+    # Content lifecycle: collect this draft's media/keys first. After
+    # the workflow rows go, unreferenced assets are erased (media row
+    # + stored file, annotation); anything still referenced by
+    # another draft's videos is kept. Transcripts stay on the shared
+    # creatives rows, which are reporting facts, not draft content.
+    doomed_media = {v.get("media_id") for v in
+                    drafts_mod.list_videos(conn, did)
+                    if v.get("media_id")}
+    doomed_keys = {v.get("creative_key") for v in
+                   drafts_mod.list_videos(conn, did)
+                   if v.get("creative_key")}
     # Cancel every queued/running analysis bound to this draft
     # first so no orphan worker job later mirrors status onto a
     # gone draft (its staleness guard would drop the write, but
@@ -1744,9 +1820,48 @@ def draft_delete(draft_id: str, request: Request,
         conn.execute("DELETE FROM %s WHERE draft_id = ?" % table, (did,))
     conn.execute("DELETE FROM drafts WHERE id = ?", (did,))
     conn.commit()
+    store = legacy._media_dir()
+    for mid in sorted(doomed_media):
+        still = conn.execute(
+            "SELECT COUNT(*) FROM videos WHERE media_id = ?",
+            (mid,)).fetchone()[0]
+        if not still:
+            try:
+                media_mod.delete_media(conn, store, mid)
+            except ValueError:
+                pass
+    for key in sorted(doomed_keys):
+        still = conn.execute(
+            "SELECT COUNT(*) FROM videos WHERE creative_key = ?",
+            (key,)).fetchone()[0]
+        if not still:
+            conn.execute("DELETE FROM annotations WHERE creative_key=?",
+                         (key,))
+    conn.commit()
     paudit.audit_request(request, conn, employee_id=who.id,
                          action="draft_deleted", target=did)
     return {"ok": True}
+
+
+@router.delete("/api/drafts/{draft_id}/videos")
+def draft_videos_delete(draft_id: str, request: Request,
+                        conn=Depends(get_product_conn),
+                        who=Depends(get_current_employee)):
+    """Explicit video removal: drops the draft's bound video row(s)
+    so a removed video can never resurrect from the relationship on
+    reopen. Clearing the form alone is not removal."""
+    from urllib.parse import unquote
+    from creative_intel import drafts as drafts_mod
+    did = unquote(draft_id)
+    _draft_owner_or_403(conn, did, who)
+    removed = drafts_mod.clear_videos(conn, did)
+    # A removed video invalidates any prior confirmation like any
+    # other material input change.
+    drafts_mod.clear_matches(conn, did)
+    _invalidate_draft_review(conn, did)
+    paudit.audit_request(request, conn, employee_id=who.id,
+                         action="draft_video_removed", target=did)
+    return {"ok": True, "removed": removed}
 
 
 @router.post("/api/datasets/import")
@@ -1792,6 +1907,7 @@ async def dataset_import(request: Request, conn=Depends(get_product_conn),
                             dataset_version=result["import_id"])
     # New input invalidates any prior confirmation.
     drafts_mod.clear_matches(conn, body.draft_id)
+    _invalidate_draft_review(conn, body.draft_id)
     paudit.audit_request(request, conn, employee_id=who.id,
                          action="dataset_imported", target=dsid)
     return {"dataset_id": dsid, "draft_id": body.draft_id,
@@ -1808,7 +1924,8 @@ _MATCH_COLUMNS = ("id", "import_id", "platform", "campaign", "adset",
                   "ad_name", "creative_key", "spend", "impressions",
                   "clicks", "link_clicks", "conversions", "video_views",
                   "views_25", "views_50", "views_75", "views_100",
-                  "currency", "date", "client", "placement")
+                  "currency", "date", "client", "placement",
+                  "missing_json")
 
 
 def _match_records(conn, draft: dict, ad_rowids) -> list:
@@ -1842,6 +1959,32 @@ def _match_records(conn, draft: dict, ad_rowids) -> list:
             for r in wanted]
 
 
+def _require_campaign_scope(draft: dict, records: list) -> None:
+    """When the draft's client/campaign selection is confirmed, every
+    matched record must belong to that campaign. Without this, a
+    Client A selection could confirm Client B rows and the analysis
+    would attribute foreign performance to the video. (Unconfirmed
+    selections stay permissive so exploration is never blocked; the
+    report carries no client grain, so only campaign is enforceable
+    — client scoping is documented, not faked.)"""
+    import json as _json
+    try:
+        spec = _json.loads(draft.get("spec_json") or "{}")
+    except ValueError:
+        spec = {}
+    if not spec.get("clientConfirmed"):
+        return
+    campaign = (spec.get("campaign") or "").strip()
+    if not campaign:
+        return
+    foreign = [r.get("id") for r in (records or [])
+               if (r.get("campaign") or "").strip() != campaign]
+    if foreign:
+        raise ValueError(
+            "records %s are not in the confirmed campaign %r"
+            % (foreign[:5], campaign))
+
+
 def _valid_video_keys(conn, draft_id: str) -> set:
     """Creative keys of this draft's validated videos. Match keys
     must come from this set: it binds a confirmation to the video
@@ -1873,6 +2016,7 @@ async def match_propose(draft_id: str, request: Request,
             raise ValueError("match key must be a validated video on this draft")
         records = _match_records(conn, _draft_or_404(conn, did),
                                  body.ad_rowids)
+        _require_campaign_scope(_draft_or_404(conn, did), records)
         drafts_mod.propose_match(conn, did, body.creative_key,
                                  body.method, records)
     except ValueError as exc:
@@ -1893,6 +2037,7 @@ async def match_confirm(draft_id: str, request: Request,
     try:
         body = MatchBody.model_validate(await json_payload(request))
         records = _match_records(conn, draft, body.ad_rowids)
+        _require_campaign_scope(draft, records)
         valid_keys = _valid_video_keys(conn, did)
         if not valid_keys:
             raise ValueError("validate the video before confirming")
@@ -1908,6 +2053,62 @@ async def match_confirm(draft_id: str, request: Request,
     paudit.audit_request(request, conn, employee_id=who.id,
                          action="match_confirmed", target=did)
     return {"match": drafts_mod.get_match(conn, did, body.creative_key)}
+
+
+@router.post("/api/drafts/{draft_id}/review")
+async def draft_review(draft_id: str, request: Request,
+                       conn=Depends(get_product_conn),
+                       who=Depends(get_current_employee)):
+    """Record a human review of the current analysis version.
+
+    Genuine review operation, not a status flip: the draft must be
+    ready_for_review and the submitted analysis_version must equal
+    the stored analysis block's version, binding the approval to
+    exactly what the reviewer saw (reviewer identity, timestamp,
+    and note are recorded). Any later material input change
+    invalidates it via _invalidate_draft_review.
+    """
+    from urllib.parse import unquote
+    from creative_intel import drafts as drafts_mod
+    import json as _json
+    did = unquote(draft_id)
+    draft = _draft_owner_or_403(conn, did, who)
+    try:
+        body = DraftReviewBody.model_validate(await json_payload(request))
+    except Exception as exc:
+        raise HTTPException(status_code=409,
+                            detail={"error": "Invalid review: %s" % exc})
+    if (draft.get("status") or "") != "ready_for_review":
+        raise HTTPException(status_code=409, detail={
+            "error": "Only a draft ready for review can be reviewed"
+                     " (status is %r)." % (draft.get("status") or "")})
+    videos = drafts_mod.list_videos(conn, did)
+    key = videos[0]["creative_key"] if videos else ""
+    current = ""
+    if key:
+        row = conn.execute(
+            "SELECT annotation_json FROM annotations WHERE creative_key=?",
+            (key,)).fetchone()
+        if row:
+            try:
+                current = (_json.loads(row[0]).get("analysis") or {}) \
+                    .get("version", "")
+            except ValueError:
+                current = ""
+    if not current:
+        raise HTTPException(status_code=409, detail={
+            "error": "No stored analysis to review yet."})
+    if body.analysis_version != current:
+        raise HTTPException(status_code=409, detail={
+            "error": "Analysis version %r is not current (%r): re-read "
+                     "the findings before reviewing."
+            % (body.analysis_version, current)})
+    review = drafts_mod.set_review(conn, did, who.id, current,
+                                   note=body.note)
+    paudit.audit_request(request, conn, employee_id=who.id,
+                         action="draft_reviewed", target=did)
+    return {"draft": _draft_view(conn, _draft_or_404(conn, did)),
+            "review": review}
 
 
 def _draft_live_job(conn, draft_id: str):
@@ -1971,11 +2172,11 @@ async def draft_analyze(draft_id: str, request: Request,
 @router.get("/api/drafts/{draft_id}/analysis")
 def draft_analysis(draft_id: str, request: Request,
                    conn=Depends(get_product_conn),
-                   _emp=Depends(get_current_employee)):
+                   who=Depends(get_current_employee)):
     from urllib.parse import unquote
     import json as _json
     _ = request
-    draft = _draft_or_404(conn, unquote(draft_id))
+    draft = _draft_owner_or_403(conn, unquote(draft_id), who)
     videos = _draft_view(conn, draft)["videos"]
     key = videos[0]["creative_key"] if videos else ""
     annotation, transcript = None, ""
@@ -1999,17 +2200,17 @@ def draft_analysis(draft_id: str, request: Request,
 @router.get("/api/drafts/{draft_id}/candidates")
 def draft_candidates(draft_id: str, request: Request,
                      conn=Depends(get_product_conn),
-                     _emp=Depends(get_current_employee)):
+                     who=Depends(get_current_employee)):
     """Matchable performance rows for this draft's dataset version.
 
     Read-only and scoped: only rows from the draft's imported
     dataset_version are listed (capped), so the browser picks real
-    row ids instead of inventing them. Any active employee may read,
-    mirroring the other draft reads.
+    row ids instead of inventing them. Owner-or-admin like every
+    other draft read: candidates are the draft's private data.
     """
     from urllib.parse import unquote
     _ = request
-    draft = _draft_or_404(conn, unquote(draft_id))
+    draft = _draft_owner_or_403(conn, unquote(draft_id), who)
     version = draft.get("dataset_version") or ""
     if not version:
         return {"candidates": [], "version": ""}

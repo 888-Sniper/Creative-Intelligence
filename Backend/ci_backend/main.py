@@ -81,6 +81,21 @@ def maybe_seed_demo(db_path: str, settings, fresh: bool) -> int:
     return 0
 
 
+def _worker_enabled() -> bool:
+    """Run the analysis worker inside the web process. Explicit
+    CREATIVE_INTEL_RUN_WORKER wins; otherwise hosted single-service
+    deploys (PORT set, e.g. Render) default on so queued analyses
+    cannot strand, while local dev defaults off (run worker.py
+    separately, as Oracle's systemd unit does)."""
+    import os
+    raw = os.environ.get("CREATIVE_INTEL_RUN_WORKER", "").strip().lower()
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    if raw in ("0", "false", "no", "off"):
+        return False
+    return bool(os.environ.get("PORT"))
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--db", default="")
@@ -127,6 +142,16 @@ def main() -> None:
                   _google_bearer_resolver(db_path, settings)), daemon=True)
         thread.start()
         print("sync scheduler: every %d seconds" % sync_every)
+
+    if _worker_enabled():
+        import threading
+
+        from ci_backend import worker as worker_mod
+        worker_thread = threading.Thread(
+            target=worker_mod.daemon, args=(db_path, settings),
+            daemon=True)
+        worker_thread.start()
+        print("analysis worker: in-process (single-service deploy)")
 
     import uvicorn
     print("Creative Intelligence on http://%s:%d" % (host, port))

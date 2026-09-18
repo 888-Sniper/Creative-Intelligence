@@ -81,6 +81,7 @@ export function MediaPreview({ src, creativeKey, videoRef, testId, mutedPreview 
         playsInline
         preload="metadata"
         src={src}
+        ref={videoRef}
         title={t("creatives.previewTitle")}
         data-testid={testId}
         onClick={(e) => {

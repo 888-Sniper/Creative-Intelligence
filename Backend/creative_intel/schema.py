@@ -365,6 +365,7 @@ CREATE TABLE IF NOT EXISTS drafts (
     status TEXT NOT NULL DEFAULT 'draft',
     spec_json TEXT NOT NULL DEFAULT '{}',
     dataset_version TEXT NOT NULL DEFAULT '',
+    review_json TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL DEFAULT '',
     updated_at TEXT NOT NULL DEFAULT ''
 );
@@ -636,10 +637,16 @@ def migrate(conn):
         " status TEXT NOT NULL DEFAULT 'draft',"
         " spec_json TEXT NOT NULL DEFAULT '{}',"
         " dataset_version TEXT NOT NULL DEFAULT '',"
+        " review_json TEXT NOT NULL DEFAULT '{}',"
         " created_at TEXT NOT NULL DEFAULT '',"
         " updated_at TEXT NOT NULL DEFAULT '')")
     conn.execute("CREATE INDEX IF NOT EXISTS drafts_owner"
                  " ON drafts (owner_employee_id)")
+    draft_cols = {row[1] for row in
+                  conn.execute("PRAGMA table_info(drafts)")}
+    if "review_json" not in draft_cols:
+        conn.execute("ALTER TABLE drafts ADD COLUMN"
+                     " review_json TEXT NOT NULL DEFAULT '{}'")
     conn.execute(
         "CREATE TABLE IF NOT EXISTS videos ("
         "id TEXT PRIMARY KEY,"

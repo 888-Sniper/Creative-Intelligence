@@ -89,7 +89,10 @@ def bind_snapshot(conn, draft_id):
         raise AnalysisUnavailable("unknown upload draft")
     videos = drafts_mod.list_videos(conn, draft_id)
     video = None
-    for cand in videos:
+    # Newest valid row wins: validation replaces (never appends
+    # history), so the active version is the latest one even if an
+    # older row somehow survives.
+    for cand in reversed(videos):
         try:
             verdict = json.loads(cand.get("validation_json") or "{}")
         except ValueError:
@@ -208,10 +211,15 @@ def measured_from_records(records):
     warnings = []
     complete = 0
     currencies, dates, platforms = set(), set(), set()
+    spend_by_currency: dict = {}
     for rec in records or []:
         if not isinstance(rec, dict):
             continue
         totals["records"] += 1
+        try:
+            missing = set(json.loads(rec.get("missing_json") or "[]"))
+        except ValueError:
+            missing = set()
         try:
             imp = int(rec.get("impressions") or 0)
             lnk = int(rec.get("link_clicks") or 0)
@@ -219,7 +227,12 @@ def measured_from_records(records):
             warnings.append("record %s has non-numeric counts: excluded "
                             "from pooled totals" % rec.get("id"))
             continue
-        has_counts = ("impressions" in rec and "link_clicks" in rec)
+        # Missing is not zero: a blank-at-import metric (stored 0 and
+        # listed in missing_json) contributes nothing to its pool, so
+        # unknown link clicks can never drag a CTR to 0%.
+        has_counts = ("impressions" in rec and "link_clicks" in rec
+                      and "impressions" not in missing
+                      and "link_clicks" not in missing)
         if has_counts:
             complete += 1
             totals["impressions"] += imp
@@ -227,15 +240,27 @@ def measured_from_records(records):
         for key, num in (("clicks", "clicks_all"), ("video_views", None),
                          ("views_25", None), ("views_50", None),
                          ("views_75", None), ("views_100", None)):
+            if key in missing:
+                continue
             try:
                 totals[num or key] += int(rec.get(key) or 0)
             except (TypeError, ValueError):
                 pass
-        for key, num in (("spend", False), ("conversions", False)):
+        if "conversions" not in missing:
             try:
-                totals[key] += float(rec.get(key) or 0)
+                totals["conversions"] += float(rec.get("conversions") or 0)
             except (TypeError, ValueError):
                 pass
+        if "spend" not in missing:
+            try:
+                amount = float(rec.get("spend") or 0)
+            except (TypeError, ValueError):
+                amount = None
+            if amount is not None:
+                totals["spend"] += amount
+                cur = str(rec.get("currency") or "").strip() or "unspecified"
+                spend_by_currency[cur] = spend_by_currency.get(cur, 0.0) \
+                    + amount
         if rec.get("currency"):
             currencies.add(str(rec["currency"]))
         if rec.get("date"):
@@ -254,11 +279,16 @@ def measured_from_records(records):
         warnings.append("no impressions supplied: no rate computed "
                         "(missing is not zero)")
     if len(currencies) > 1:
-        warnings.append("mixed currencies %s: spend is not combined"
-                        % sorted(currencies))
+        # A combined spend across currencies is meaningless: keep it
+        # per-currency and zero the combined total instead of summing
+        # incompatible figures.
+        totals["spend"] = 0.0
+        warnings.append("mixed currencies %s: spend kept per-currency, "
+                        "not combined" % sorted(currencies))
     coverage = {"platforms": sorted(platforms),
                 "currencies": sorted(currencies),
-                "date_range": [min(dates), max(dates)] if dates else []}
+                "date_range": [min(dates), max(dates)] if dates else [],
+                "spend_by_currency": spend_by_currency}
     return {"totals": totals, "pooled_link_ctr_pct": ctr,
             "coverage": coverage, "warnings": warnings}
 
@@ -372,22 +402,65 @@ def run(conn, snapshot, owner="", media_dir="", providers=None,
                        if prep["audio"] else (None, None)),
              "images": prep["images"], "image_times": prep["image_times"],
              "duration_s": fresh["duration_s"]}
-    report = creative_mod.run_pipeline(
-        conn, key, prov, media=media, progress=progress,
-        cancelled=cancelled)
-    # Post-pipeline re-verification (M2): provider calls take
-    # minutes, during which inputs may have changed or a concurrent
-    # job may have finished. Re-bind the snapshot, re-run the
-    # queued-at guard, and abort if another analysis landed while
-    # this one was running. The intermediate save preserves the
-    # prior stamp (see run_pipeline), so a changed stamp here
-    # proves a concurrent finisher — never overwrite it.
-    fresh = check_snapshot(conn, snapshot)
-    _guard_not_stale(conn, key, queued_at)
-    if _analysis_at(conn, key) != pre_at:
-        raise AnalysisUnavailable(
-            "another analysis finished while this one was running: "
-            "discarding this result")
+    # The pipeline below saves transcript + annotation as it goes, so
+    # capture the pre-run rows now: if the post-pipeline checks abort
+    # this job as stale, its partial output is rolled back instead of
+    # silently overwriting the stored creative data.
+    prior_ann_row = conn.execute(
+        "SELECT annotation_json FROM annotations WHERE creative_key=?",
+        (key,)).fetchone()
+    prior_ann = prior_ann_row[0] if prior_ann_row else None
+    prior_transcript_row = conn.execute(
+        "SELECT transcript FROM creatives WHERE creative_key=?",
+        (key,)).fetchone()
+    prior_transcript = prior_transcript_row[0] \
+        if prior_transcript_row else None
+    def _restore_prior():
+        if prior_ann is None:
+            conn.execute("DELETE FROM annotations WHERE creative_key=?",
+                         (key,))
+        else:
+            conn.execute("UPDATE annotations SET annotation_json=? "
+                         "WHERE creative_key=?", (prior_ann, key))
+        if prior_transcript is not None:
+            conn.execute("UPDATE creatives SET transcript=? "
+                         "WHERE creative_key=?", (prior_transcript, key))
+        conn.commit()
+
+    try:
+        report = creative_mod.run_pipeline(
+            conn, key, prov, media=media, progress=progress,
+            cancelled=cancelled)
+        # Post-pipeline re-verification (M2): provider calls take
+        # minutes, during which inputs may have changed or a concurrent
+        # job may have finished. Re-bind the snapshot, re-run the
+        # queued-at guard, and abort if another analysis landed while
+        # this one was running. The intermediate save preserves the
+        # prior stamp (see run_pipeline), so a changed stamp here
+        # proves a concurrent finisher — never overwrite it.
+        fresh = check_snapshot(conn, snapshot)
+        _guard_not_stale(conn, key, queued_at)
+        if _analysis_at(conn, key) != pre_at:
+            raise AnalysisUnavailable(
+                "another analysis finished while this one was running: "
+                "discarding this result")
+    except Exception:
+        # A job that never publishes leaves no trace: stale aborts,
+        # cancellations, and provider failures all roll back to the
+        # pre-run rows instead of leaving partial output behind.
+        _restore_prior()
+        raise
+        if prior_ann is None:
+            conn.execute("DELETE FROM annotations WHERE creative_key=?",
+                         (key,))
+        else:
+            conn.execute("UPDATE annotations SET annotation_json=? "
+                         "WHERE creative_key=?", (prior_ann, key))
+        if prior_transcript is not None:
+            conn.execute("UPDATE creatives SET transcript=? "
+                         "WHERE creative_key=?", (prior_transcript, key))
+        conn.commit()
+        raise
     checkpoint(90, "measured")
     measured = measured_from_records(fresh["records"])
     ann = report["annotation"]

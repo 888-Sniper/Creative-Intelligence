@@ -33,6 +33,17 @@ services:
       # persistent disk lands.
       - key: CREATIVE_INTEL_SEED_ADMINS
         value: "true"
+      # Analysis worker: the web process runs the queue worker
+      # in-process (see CREATIVE_INTEL_RUN_WORKER below), so this
+      # single-service blueprint analyses end to end with no second
+      # service. On a paid plan, prefer a dedicated Background Worker
+      # service (same Docker image, start command
+      # `python Backend/ci_backend/worker.py`) and set
+      # CREATIVE_INTEL_RUN_WORKER=false here so jobs are not
+      # double-claimed (claiming is lease-fenced, but one worker is
+      # cleaner). Oracle keeps its systemd worker unit unchanged.
+      - key: CREATIVE_INTEL_RUN_WORKER
+        value: "true"
       # Secrets below are placeholders: fill them in the Render
       # dashboard AFTER creating the service (never commit values).
       # The service stays unhealthy until the required ones are set.

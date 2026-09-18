@@ -165,6 +165,12 @@ function panelBackend(extra: Array<(method: string, url: string, body: unknown) 
       ? { containers: [".mp4", ".mov"], max_bytes: 104857600, max_duration_s: 300, note: "x" }
       : undefined),
     (_m, u) => (u.startsWith("/api/campaigns/meta") ? { campaigns: [], demo: false } : undefined),
+    (m, u) => (u === "/api/drafts/d1/videos" && m === "DELETE"
+      ? { ok: true, removed: 1 }
+      : undefined),
+    (m, u) => (u === "/api/drafts/d-new/videos" && m === "DELETE"
+      ? { ok: true, removed: 1 }
+      : undefined),
     (m, u) => (u === "/api/drafts/d1/matches/confirm" && m === "POST"
       ? {
         match: {
@@ -544,6 +550,197 @@ describe("VideoUpload guided panel", () => {
     // No new draft created: the pinned draft is resumed in place.
     expect(calls.some((c) => c.method === "POST" && c.url === "/api/drafts")).toBe(false);
     expect(window.localStorage.getItem("ci-video-draft:e7")).toBe("d1");
+  });
+
+  it("shows the sheet picker on a top-level sheet conflict", async () => {
+    const { calls } = panelBackend();
+    const base = window.fetch;
+    window.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input) === "/api/datasets/import") {
+        calls.push({ method: "POST", url: String(input), body: {} });
+        // Backend envelope is top-level (no {"detail"} wrapper).
+        return new Response(
+          JSON.stringify({ error: "several sheets", sheets: ["Meta", "Notes"] }),
+          { status: 409 },
+        );
+      }
+      return (base as typeof fetch)(input, init);
+    }) as typeof fetch;
+    render(
+      <MemoryRouter>
+        <VideoUploadPanel open={{}} employeeId="e7" onClose={() => undefined} />
+      </MemoryRouter>,
+    );
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Upload your video" })).toBeDefined();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.change(screen.getByLabelText("CSV data"), { target: { value: "a,b\n1,2" } });
+    fireEvent.click(screen.getByRole("button", { name: "Import dataset" }));
+    await waitFor(() => {
+      expect(screen.getByLabelText("Workbook sheet")).toBeDefined();
+    });
+    const sheetSelect = screen.getByLabelText("Workbook sheet") as HTMLSelectElement;
+    const sheetOptions = [...sheetSelect.options].map((o) => o.text);
+    expect(sheetOptions).toContain("Meta");
+    expect(sheetOptions).toContain("Notes");
+    expect(screen.queryByText(/Import failed \(409\)/)).toBeNull();
+  });
+
+  it("replaces the video through the visible Replace action", async () => {
+    const { calls } = panelBackend([
+      (m, u) => (u === "/api/media/upload" && m === "POST"
+        ? { id: 13, creative_key: "video-upload-sample", filename: "sample2.mp4", mime: "video/mp4", bytes: 100, sha256: "def", created_at: "x", url: "/media/13" }
+        : undefined),
+      (m, u) => (u === "/api/videos/validate" && m === "POST"
+        ? { video_id: "vid2", media_id: 13, creative_key: "video-upload-sample", duration_s: 15, width: 1280, height: 720, validation: { status: "valid", duration_s: 15, width: 1280, height: 720 } }
+        : undefined),
+    ]);
+    render(
+      <MemoryRouter>
+        <VideoUploadPanel open={{ draftId: "d1" }} employeeId="e7" onClose={() => undefined} />
+      </MemoryRouter>,
+    );
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Review and analyze" })).toBeDefined();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    // Existing media staged for replacement: the action stays visible.
+    const file = new File(["fake-bytes-2"], "sample2.mp4", { type: "video/mp4" });
+    fireEvent.change(screen.getByLabelText("Video file"), { target: { files: [file] } });
+    // Two Replace actions exist: the staged-file upload renders
+    // before the media block's pick-a-file trigger.
+    const replace = screen.getAllByRole("button", { name: "Replace" })[0];
+    expect(replace).toBeDefined();
+    fireEvent.click(replace);
+    await waitFor(() => {
+      const patch = calls.find((c) => c.method === "PATCH" && c.url === "/api/drafts/d1");
+      const spec = (patch?.body as Record<string, unknown>)?.["spec"] as Record<string, unknown>;
+      expect((spec?.["video"] as Record<string, unknown>)?.["video_id"]).toBe("vid2");
+    });
+  });
+
+  it("removes the video server-side so it cannot resurrect", async () => {
+    const { calls } = panelBackend();
+    render(
+      <MemoryRouter>
+        <VideoUploadPanel open={{ draftId: "d1" }} employeeId="e7" onClose={() => undefined} />
+      </MemoryRouter>,
+    );
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Review and analyze" })).toBeDefined();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(screen.getByTestId("vu-video-preview")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    await waitFor(() => {
+      expect(calls.some((c) => c.method === "DELETE" && c.url === "/api/drafts/d1/videos")).toBe(true);
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId("vu-video-preview")).toBeNull();
+    });
+  });
+
+  it("records a version-bound human review", async () => {
+    const reviewed = baseDraft({
+      id: "d2", status: "ready_for_review", dataset_version: "v1",
+      spec: {
+        creative_key: "video-upload-sample",
+        video: { video_id: "vid1", duration_s: 15, width: 1280, height: 720, status: "valid" },
+        dataset: { dataset_id: "ds1", version: "v1", rows: 1, inserted: 1, updated: 0, quarantined: 0, filename: "data.csv" },
+      },
+    });
+    const { calls } = panelBackend([
+      (m, u) => (u === "/api/drafts/d2" && m === "GET" ? { draft: reviewed } : undefined),
+      (m, u) => (u === "/api/drafts/d2/candidates" && m === "GET"
+        ? { version: "v1", candidates: [{ id: 11, import_id: "v1" }] }
+        : undefined),
+      (m, u) => (u === "/api/drafts/d2/analysis" && m === "GET"
+        ? {
+          draft_id: "d2", status: "ready_for_review",
+          creative_key: "video-upload-sample", transcript: "watch this",
+          annotation: {
+            status: "auto",
+            analysis: { version: "v1", at: "2026-09-10T12:00:00Z", model: "m", measured: { totals: {} }, suggested_tests: [] },
+            frame_labels: [{ t_sec: 1.0, label: "opening", brand_visible: true }],
+          },
+        }
+        : undefined),
+      (m, u) => (u === "/api/drafts/d2/review" && m === "POST"
+        ? {
+          draft: { ...reviewed, status: "reviewed", review: { by: "e7", at: "2026-09-10T13:00:00Z", analysis_version: "v1", note: "ok" } },
+          review: { by: "e7", at: "2026-09-10T13:00:00Z", analysis_version: "v1", note: "ok" },
+        }
+        : undefined),
+    ]);
+    render(
+      <MemoryRouter>
+        <VideoUploadPanel open={{ draftId: "d2", stage: "review" }} employeeId="e7" onClose={() => undefined} />
+      </MemoryRouter>,
+    );
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Mark reviewed" })).toBeDefined();
+    });
+    expect(screen.getByText("Key moments")).toBeDefined();
+    fireEvent.change(screen.getByLabelText("Review note"), { target: { value: "ok" } });
+    fireEvent.click(screen.getByRole("button", { name: "Mark reviewed" }));
+    await waitFor(() => {
+      const review = calls.find((c) => c.method === "POST" && c.url === "/api/drafts/d2/review");
+      expect((review?.body as Record<string, unknown>)?.["analysis_version"]).toBe("v1");
+    });
+    await waitFor(() => {
+      // Announced twice by design: the polite status region + the toast.
+      expect(screen.getAllByText("Review recorded.").length).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  it("switches back to an already-imported dataset version", async () => {
+    const two = baseDraft({
+      id: "d3", dataset_version: "v1",
+      spec: {
+        creative_key: "video-upload-sample",
+        video: { video_id: "vid1", duration_s: 15, width: 1280, height: 720, status: "valid" },
+        dataset: { dataset_id: "ds1", version: "v1", rows: 3, inserted: 3, updated: 0, quarantined: 0, filename: "a.csv" },
+      },
+      datasets: [
+        { id: "ds1", draft_id: "d3", filename: "a.csv", rows: 3, version: "v1", sha256: "", created_at: "" },
+        { id: "ds2", draft_id: "d3", filename: "b.csv", rows: 5, version: "v2", sha256: "", created_at: "" },
+      ],
+    });
+    const { calls } = panelBackend([
+      (m, u) => (u === "/api/drafts/d3" && m === "GET" ? { draft: two } : undefined),
+      (m, u) => (u === "/api/drafts/d3/candidates" && m === "GET"
+        ? { version: "v2", candidates: [] }
+        : undefined),
+      (m, u, b) => {
+        if (u === "/api/drafts/d3" && m === "PATCH") {
+          const patch = (b ?? {}) as { dataset_version?: string };
+          return { draft: { ...two, dataset_version: patch.dataset_version ?? two.dataset_version } };
+        }
+        return undefined;
+      },
+    ]);
+    render(
+      <MemoryRouter>
+        <VideoUploadPanel open={{ draftId: "d3", stage: "dataset" }} employeeId="e7" onClose={() => undefined} />
+      </MemoryRouter>,
+    );
+    await waitFor(() => {
+      expect(screen.getByLabelText("Imported dataset")).toBeDefined();
+    });
+    fireEvent.change(screen.getByLabelText("Imported dataset"), { target: { value: "v2" } });
+    await waitFor(() => {
+      const patch = calls.find((c) => c.method === "PATCH" && c.url === "/api/drafts/d3");
+      expect((patch?.body as Record<string, unknown>)?.["dataset_version"]).toBe("v2");
+    });
+    await waitFor(() => {
+      expect(screen.getByText("Switched to b.csv: 0 records.")).toBeDefined();
+    });
   });
 
   it("editing the creative key clears the confirmed match", async () => {

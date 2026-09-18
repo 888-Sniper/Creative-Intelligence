@@ -140,7 +140,7 @@ describe("SettingsPage", () => {
       expect(screen.getByText("General Settings")).toBeDefined();
     });
     expect((screen.getByLabelText("Workspace Name") as HTMLInputElement).value).toBe("Foap Creative Intelligence");
-    expect((screen.getByLabelText("Theme") as HTMLSelectElement).value).toBe("dark");
+    expect((screen.getByLabelText("Theme") as HTMLSelectElement).value).toBe("light");
     expect((screen.getByLabelText("Accent Color") as HTMLSelectElement).value).toBe("Teal (Default)");
     expect((screen.getByLabelText("Interface Density") as HTMLSelectElement).value).toBe("Comfortable");
     expect(screen.getByText("Notifications")).toBeDefined();
@@ -170,7 +170,7 @@ describe("SettingsPage", () => {
     await waitFor(() => {
       expect((screen.getByLabelText("Theme") as HTMLSelectElement).value).toBe("light");
     });
-    // Explicit choice wins over the dark default.
+    // Explicit choice wins over the light default.
     expect(document.documentElement.dataset["theme"] ?? "").toBe("");
     // Typing a name autosaves (debounced) without any Save click.
     vi.useFakeTimers();

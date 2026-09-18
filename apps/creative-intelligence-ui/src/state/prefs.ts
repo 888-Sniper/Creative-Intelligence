@@ -87,7 +87,7 @@ export const DEFAULTS: Prefs = {
   workspace: "Foap Creative Intelligence",
   timezone: guessTimezone(),
   language: "en",
-  theme: "dark",
+  theme: "light",
   defaultView: "Dashboard",
   currency: "USD – US Dollar",
   dateRange: "Last 30 Days",

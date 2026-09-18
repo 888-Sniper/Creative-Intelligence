@@ -1594,8 +1594,8 @@ export const en = {
     appearance: {
       title: "Appearance",
       theme: "Theme",
-      themeLight: "Light",
-      themeDark: "Dark (Default)",
+      themeLight: "Light (Default)",
+      themeDark: "Dark",
       themeSystem: "System",
       accent: "Accent Color",
       density: "Interface Density",

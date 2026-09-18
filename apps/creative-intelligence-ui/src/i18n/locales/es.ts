@@ -1594,8 +1594,8 @@ export const es = {
     appearance: {
       title: "Apariencia",
       theme: "Tema",
-      themeLight: "Claro",
-      themeDark: "Oscuro (predeterminado)",
+      themeLight: "Claro (predeterminado)",
+      themeDark: "Oscuro",
       themeSystem: "Sistema",
       accent: "Color de acento",
       density: "Densidad de la interfaz",

@@ -1608,8 +1608,8 @@ export const pl = {
     appearance: {
       title: "Wygląd",
       theme: "Motyw",
-      themeLight: "Jasny",
-      themeDark: "Ciemny (domyślny)",
+      themeLight: "Jasny (domyślny)",
+      themeDark: "Ciemny",
       themeSystem: "Systemowy",
       accent: "Kolor akcentu",
       density: "Gęstość interfejsu",

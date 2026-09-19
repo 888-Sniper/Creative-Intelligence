@@ -1400,3 +1400,69 @@ def test_confirm_freezes_complete_snapshot_and_video(tmp_path, monkeypatch):
         conn.close()
     assert frozen != ""
     assert frozen in valid
+
+
+def test_stranger_cannot_launder_media_through_own_draft(tmp_path,
+                                                        monkeypatch):
+    """Recheck High-1: attaching another employee's media id to one's
+    own draft (or a minted draft) must 403 at validation — the new
+    draft relationship must never satisfy the download check."""
+    db, http = make_app(tmp_path, monkeypatch)
+    authed(http, db, "owner@foap.test", role="employee")
+    rec = upload_fixture_video(http)
+    own = http.post("/api/drafts", json={}).json()["draft"]["id"]
+    assert http.post("/api/videos/validate",
+                     json={"media_id": rec["id"],
+                           "draft_id": own}).status_code == 200
+    assert http.get("/media/%s" % rec["id"]).status_code == 200
+    http.headers.clear()
+    authed(http, db, "stranger@foap.test", role="employee")
+    sown = http.post("/api/drafts", json={}).json()["draft"]["id"]
+    resp = http.post("/api/videos/validate",
+                     json={"media_id": rec["id"], "draft_id": sown})
+    assert resp.status_code == 403, resp.text
+    resp = http.post("/api/videos/validate",
+                     json={"media_id": rec["id"]})
+    assert resp.status_code == 403, resp.text
+    assert http.get("/media/%s" % rec["id"]).status_code == 403
+
+
+def test_review_rolls_back_when_annotation_save_fails(tmp_path, monkeypatch):
+    """Recheck review atomicity: an annotation-validation failure at
+    approval returns 409 with the draft still awaiting review — the
+    Reviewed stamp and the annotation save succeed or fail together."""
+    import sqlite3
+    from creative_intel import creative as creative_mod
+    from creative_intel import drafts as drafts_mod
+    db, http = make_app(tmp_path, monkeypatch)
+    did, _version, rowids = _confirmed_setup(http, db)
+    match = {"creative_key": "video-upload-sample", "method": "manual",
+             "ad_rowids": rowids}
+    assert http.post("/api/drafts/%s/matches/confirm" % did,
+                     json=match).status_code == 200
+    conn = sqlite3.connect(db)
+    try:
+        _seed_reviewable(conn, did, revision="r0")
+    finally:
+        conn.close()
+    assert http.patch("/api/drafts/%s" % did,
+                      json={"status": "ready_for_review"}).status_code == 200
+
+    def boom(conn, key, ann, **kw):
+        raise ValueError("injected annotation validation failure")
+
+    monkeypatch.setattr(creative_mod, "save_annotation", boom)
+    resp = http.post("/api/drafts/%s/review" % did,
+                     json={"analysis_version": "v1", "revision": "r0"})
+    assert resp.status_code == 409, resp.text
+    conn = sqlite3.connect(db)
+    try:
+        assert drafts_mod.get_draft(conn, did)["status"] \
+            == "ready_for_review"
+        assert drafts_mod.get_review(conn, did) == {}
+        assert (conn.execute(
+            "SELECT annotation_json FROM annotations"
+            " WHERE creative_key=?", ("video-upload-sample",)).fetchone()
+                is not None)
+    finally:
+        conn.close()

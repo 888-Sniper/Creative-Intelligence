@@ -1031,7 +1031,7 @@ export const es = {
       discardButton: "Descartar",
       recentTitle: "Subidas recientes",
       recentEmptyTitle: "Aún no hay subidas",
-      recentEmpty: "Los borradores que inicies aparecen aquí.",
+      recentEmpty: "Los vídeos que subas aparecerán aquí.",
       continueBtn: "Continuar",
       viewBtn: "Ver",
       retryBtn: "Reintentar",

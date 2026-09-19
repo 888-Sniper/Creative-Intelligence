@@ -1031,7 +1031,7 @@ export const en = {
       discardButton: "Discard",
       recentTitle: "Recent Uploads",
       recentEmptyTitle: "No Uploads Yet",
-      recentEmpty: "Drafts you start appear here.",
+      recentEmpty: "Uploaded videos will appear here.",
       continueBtn: "Continue",
       viewBtn: "View",
       retryBtn: "Retry",

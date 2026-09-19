@@ -1045,7 +1045,7 @@ export const pl = {
       discardButton: "Odrzuć",
       recentTitle: "Ostatnie przesłania",
       recentEmptyTitle: "Brak przesłań",
-      recentEmpty: "Rozpoczęte szkice pojawią się tutaj.",
+      recentEmpty: "Przesłane filmy pojawią się tutaj.",
       continueBtn: "Kontynuuj",
       viewBtn: "Podgląd",
       retryBtn: "Ponów",

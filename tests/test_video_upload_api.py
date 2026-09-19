@@ -1143,7 +1143,8 @@ def test_corrections_rewrite_findings_and_invalidate_review(
               "hook_type": "bold_claim", "hook_confidence": 0.8,
               "frame_labels": [{"t_sec": 2.5, "label": "opening",
                                 "cta_visible": True}],
-              "tests": [{"id": "hook-clarity", "status": "accepted"}]})
+              "tests": [{"id": "hook-clarity", "status": "accepted"}],
+              "revision": "r0"})
     assert fixed.status_code == 200, fixed.text
     body = fixed.json()
     assert body["revision"] != "r0"
@@ -1177,17 +1178,24 @@ def test_corrections_rewrite_findings_and_invalidate_review(
         "/api/drafts/%s/review" % did,
         json={"analysis_version": "v1", "revision": body["revision"]})
     assert again.status_code == 200, again.text
-    # Fail-closed inputs.
+    # Fail-closed inputs (sent against the current revision so they
+    # exercise field validation, not the revision gate).
     assert http.post("/api/drafts/%s/corrections" % did,
-                     json={"hook_type": "not_a_hook"}).status_code == 409
+                     json={"hook_type": "not_a_hook",
+                           "revision": body["revision"]}).status_code == 409
     assert http.post("/api/drafts/%s/corrections" % did,
                      json={"tests": [{"id": "nope",
-                                      "status": "accepted"}]}).status_code \
+                                      "status": "accepted"}],
+                           "revision": body["revision"]}).status_code \
         == 409
     assert http.post("/api/drafts/%s/corrections" % did,
-                     json={"colour": "teal"}).status_code == 409
+                     json={"colour": "teal",
+                           "revision": body["revision"]}).status_code == 409
     assert http.post("/api/drafts/%s/corrections" % did,
-                     json={}).status_code == 409
+                     json={"revision": body["revision"]}).status_code == 409
+    # A blind correction against a revisioned result is rejected.
+    assert http.post("/api/drafts/%s/corrections" % did,
+                     json={"hook_type": "question"}).status_code == 409
     http.headers.clear()
     authed(http, db, "stranger@foap.test", role="employee")
     assert http.post("/api/drafts/%s/corrections" % did,

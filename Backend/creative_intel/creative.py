@@ -192,7 +192,9 @@ def validate(ann):
             errors.append("structure.%s end_s < start_s" % slot)
         for key in ("start_s", "end_s", "confidence"):
             try:
-                float(seg.get(key, 0))
+                import math as _math
+                if not _math.isfinite(float(seg.get(key, 0))):
+                    raise ValueError("non-finite")
             except (TypeError, ValueError):
                 errors.append("structure.%s.%s not numeric" % (slot, key))
     for key in ("brand_seconds", "product_seconds", "logo_seconds"):
@@ -201,8 +203,9 @@ def validate(ann):
                 errors.append("%s span end_s < start_s" % key)
     for key in ("hook_confidence", "creator_confidence"):
         try:
+            import math as _math
             c = float(ann.get(key, -1))
-            if not 0.0 <= c <= 1.0:
+            if not _math.isfinite(c) or not 0.0 <= c <= 1.0:
                 errors.append("%s must be 0..1" % key)
         except (TypeError, ValueError):
             errors.append("%s must be 0..1" % key)
@@ -601,7 +604,13 @@ def report_unavailable_fields(conn, creative_key, owner=None,
 
 def annotation_for_report(conn, creative_key, owner=None, admin=False):
     """One consistent result identity for reporting surfaces, or
-    None when no authorised result exists. See _report_selection."""
+    None when no authorised result exists. See _report_selection.
+
+    With no viewer identity (owner None, not admin) the legacy
+    global reader stands: viewer-less aggregate surfaces keep
+    their existing semantics, and no per-viewer claim is made."""
+    if owner is None and not admin:
+        return annotation_for_key(conn, creative_key)
     ann, _vid = _report_selection(conn, creative_key, owner=owner,
                                   admin=admin)
     return ann
@@ -612,6 +621,8 @@ def annotation_scope_for_report(conn, creative_key, owner=None,
     """video_id of the row annotation_for_report would return ( ''
     when none): lets export and reporting pair the selected
     annotation with the same version's transcript."""
+    if owner is None and not admin:
+        return annotation_scope_for_key(conn, creative_key)
     _ann, vid = _report_selection(conn, creative_key, owner=owner,
                                   admin=admin)
     if _ann is None:

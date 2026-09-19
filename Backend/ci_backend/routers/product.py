@@ -212,12 +212,13 @@ def creatives(request: Request, conn=Depends(get_product_conn),
 
 @router.get("/api/retention")
 def retention_segments(request: Request, conn=Depends(get_product_conn),
-                       _emp=Depends(get_current_employee)):
+                       who=Depends(get_current_employee)):
     q = query_multidict(request)
     try:
         return retention.join_segments(
             conn, q.get("creative_key", [""])[0]
-            if q.get("creative_key") else "")
+            if q.get("creative_key") else "",
+            owner=who.id, admin=(who.role or "") == "admin")
     except (ValueError, export_gate.ExportBlocked, emp.StoreError) as exc:
         raise _conflict(exc)
 
@@ -235,22 +236,24 @@ def compare(request: Request, conn=Depends(get_product_conn),
 
 @router.get("/api/retention/patterns")
 def retention_patterns(request: Request, conn=Depends(get_product_conn),
-                       _emp=Depends(get_current_employee)):
+                       who=Depends(get_current_employee)):
     try:
         return retention.patterns(
-            conn, benchmarks.Scope.from_query(query_multidict(request)).resolve(conn))
+            conn, benchmarks.Scope.from_query(query_multidict(request)).resolve(conn),
+            owner=who.id, admin=(who.role or "") == "admin")
     except (ValueError, export_gate.ExportBlocked, emp.StoreError) as exc:
         raise _conflict(exc)
 
 
 @router.get("/api/retention/curve")
 def retention_curve(request: Request, conn=Depends(get_product_conn),
-                    _emp=Depends(get_current_employee)):
+                    who=Depends(get_current_employee)):
     q = query_multidict(request)
     try:
         return retention.curve(
             conn, q.get("creative_key", [""])[0]
-            if q.get("creative_key") else "")
+            if q.get("creative_key") else "",
+            owner=who.id, admin=(who.role or "") == "admin")
     except (ValueError, export_gate.ExportBlocked, emp.StoreError) as exc:
         raise _conflict(exc)
 
@@ -1043,7 +1046,9 @@ def analyst_creatives(request: Request,
 
     # Sync route: FastAPI already runs this off the event loop.
     try:
-        analysis = analyst.analyze_campaign(conn, scope, objective)
+        analysis = analyst.analyze_campaign(conn, scope, objective,
+                                            owner=who.id,
+                                            admin=(who.role or "") == "admin")
     except ValueError as exc:
         raise _conflict(exc)
     cards = []
@@ -1139,7 +1144,8 @@ async def analyst_report(request: Request,
     def _compute():
         analysis = analyst.analyze_campaign(
             conn, payload.get("scope") or {}, payload.get("objective") or
-            "reach")
+            "reach", owner=who.id,
+            admin=(who.role or "") == "admin")
         return analyst_chat.build_analyst_report(
             analysis, lang=payload.get("language") or "en",
             sections=payload.get("sections") or None,
@@ -1393,7 +1399,6 @@ async def export(request: Request, conn=Depends(get_product_conn),
                  who=Depends(get_current_employee)):
     body = _validated(ExportBody, await json_payload(request), "export")
     try:
-        export_gate.check_reviews(conn)
         result = export_gate.build_one_pager(
             conn, body.creative_keys,
             benchmarks.benchmark(conn, "hook_type"),
@@ -2678,7 +2683,7 @@ def media_by_creative(key: str, request: Request,
 @router.get("/api/creatives/{key}/thumbnail")
 def creative_thumbnail(key: str, request: Request,
                        conn=Depends(get_product_conn),
-                       _emp=Depends(get_current_employee)):
+                       who=Depends(get_current_employee)):
     # Authenticated employees only: creative names are account data.
     # Uploaded media wins; generated sample art covers creatives
     # without uploads; unknown creatives 404 so cards keep the
@@ -2701,7 +2706,8 @@ def creative_thumbnail(key: str, request: Request,
             content, mime, _name = media_mod.load_bytes(conn, store, rid)
             return Response(content=content, media_type=mime,
                             headers={"Cache-Control": "private, no-store"})
-        svg = thumbnails.for_creative(conn, key)
+        svg = thumbnails.for_creative(conn, key, owner=who.id,
+                                        admin=(who.role or "") == "admin")
     except ValueError as exc:
         raise HTTPException(status_code=404, detail={"error": str(exc)})
     if svg is None:

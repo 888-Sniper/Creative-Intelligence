@@ -90,12 +90,17 @@ def durations_for(conn, creative_keys):
     return out
 
 
-def annotations_for(conn, creative_keys):
-    """Approved-or-latest annotations + status keyed by creative_key."""
+def annotations_for(conn, creative_keys, owner=None, admin=False):
+    """Authorised annotations + status keyed by creative_key.
+
+    Uses the same owner-scoped selection as reporting: another
+    owner's private findings are never cited, and missing results
+    surface as (None, "none") instead of borrowed content."""
     from creative_intel import creative as _creative_mod
     out = {}
     for key in creative_keys:
-        ann = _creative_mod.annotation_for_key(conn, key)
+        ann = _creative_mod.annotation_for_report(
+            conn, key, owner=owner, admin=admin)
         if not isinstance(ann, dict):
             out[key] = (None, "none")
             continue
@@ -211,13 +216,15 @@ def _series_for(rows):
     return series
 
 
-def analyze_campaign(conn, scope, objective="reach"):
+def analyze_campaign(conn, scope, objective="reach", owner=None,
+                     admin=False):
     """Full deterministic analysis for one scope + objective.
 
     Returns {"creatives": [...], "cohort_findings": [...],
     "scope": ..., "dataset_version": ..., "objective": ...} where each
     creative carries metrics, findings, five-layer summary,
     annotation, durations and limitations. No LLM in this path.
+    Annotations are owner-scoped (see annotations_for).
     """
     objective = objective if objective in OBJECTIVES else "reach"
     rows, scope_obj = scoped_rows(conn, scope)
@@ -235,7 +242,7 @@ def analyze_campaign(conn, scope, objective="reach"):
             row)
     keys = sorted(by_creative)
     durations = durations_for(conn, keys)
-    annotations = annotations_for(conn, keys)
+    annotations = annotations_for(conn, keys, owner=owner, admin=admin)
     per_creative_metrics = {
         key: creative_metrics(grows, durations.get(key, 0))
         for key, grows in by_creative.items()}
@@ -252,7 +259,8 @@ def analyze_campaign(conn, scope, objective="reach"):
         grows = by_creative[key]
         ann, ann_status = annotations[key]
         try:
-            drops = retention_mod.drop_events(conn, key)
+            drops = retention_mod.drop_events(conn, key, owner=owner,
+                                                   admin=admin)
         except Exception:
             drops = []
         ctx = {"creative_key": key,

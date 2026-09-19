@@ -231,7 +231,7 @@ describe("VideoUpload dashboard card", () => {
       Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
     expect(follows(greeting, card)).toBe(true);
     expect(follows(card, filters)).toBe(true);
-    expect(screen.getByRole("button", { name: /Upload video/ })).toBeDefined();
+    expect(screen.getByRole("button", { name: /Upload Video/ })).toBeDefined();
   });
 
   it("lists recent drafts with status text plus actions", async () => {
@@ -244,7 +244,7 @@ describe("VideoUpload dashboard card", () => {
       </MemoryRouter>,
     );
     await waitFor(() => {
-      expect(screen.getByText("Recent uploads")).toBeDefined();
+      expect(screen.getByText("Recent Uploads")).toBeDefined();
     });
     // Status is text (never color-only) with per-status actions.
     expect(screen.getByText("Draft")).toBeDefined();
@@ -301,7 +301,7 @@ describe("VideoUpload dashboard card", () => {
       await waitFor(() => {
         expect(screen.getByRole("heading", { name: "Analyze a video" })).toBeDefined();
       });
-      expect(screen.getByRole("button", { name: /Upload video/ })).toBeDefined();
+      expect(screen.getByRole("button", { name: /Upload Video/ })).toBeDefined();
       // Status stays a text pill in both themes (never color-only).
       expect(screen.getByText("Draft")).toBeDefined();
       cleanup();
@@ -393,7 +393,7 @@ describe("VideoUpload guided panel", () => {
     });
     const file = new File(["fake-bytes"], "sample.mp4", { type: "video/mp4" });
     fireEvent.change(screen.getByLabelText("Video file"), { target: { files: [file] } });
-    fireEvent.click(screen.getByRole("button", { name: "Upload video" }));
+    fireEvent.click(screen.getByRole("button", { name: "Upload Video" }));
     await waitFor(() => {
       expect(screen.getByText("Video valid — 1280×720, 15s.")).toBeDefined();
     });

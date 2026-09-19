@@ -431,13 +431,25 @@ def performance_rows_for_key(conn, creative_key, ads_rows, owner=None,
         fills[col[1]] = 0 if ("INT" in ctype or "REAL" in ctype
                               or "FLOA" in ctype or "DOUB" in ctype
                               or "NUM" in ctype) else ""
+    import math as _math
     shaped = []
     for rec in confirmed:
         if not isinstance(rec, dict):
             continue
         if fills:
-            row = {col: rec.get(col) if rec.get(col) is not None
-                   else fill for col, fill in fills.items()}
+            row = {}
+            for col, fill in fills.items():
+                val = rec.get(col)
+                if val is None:
+                    row[col] = fill
+                elif isinstance(val, float) \
+                        and not _math.isfinite(val):
+                    # Historic NaN/inf snapshots (or JSON
+                    # round-trips) degrade to the column default
+                    # rather than poisoning downstream sums.
+                    row[col] = fill
+                else:
+                    row[col] = val
         else:
             row = dict(rec)
         if not row.get("client") and bundle["client"]:

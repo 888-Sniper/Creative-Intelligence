@@ -11,9 +11,10 @@ normally lose viewers?".
 DROP_PTS_MIN = 5.0
 
 
-def _structure(conn, creative_key):
+def _structure(conn, creative_key, owner=None, admin=False):
     from creative_intel import creative as _creative_mod
-    ann = _creative_mod.annotation_for_key(conn, creative_key)
+    ann = _creative_mod.annotation_for_report(
+        conn, creative_key, owner=owner, admin=admin)
     if not isinstance(ann, dict):
         raise ValueError("no annotation for %r" % creative_key)
     return ann
@@ -112,9 +113,10 @@ def _curve(conn, creative_key):
     return [(float(t), float(p)) for t, p in curve]
 
 
-def join_segments(conn, creative_key):
+def join_segments(conn, creative_key, owner=None, admin=False):
     """Per-structure-segment retention drop: first vs last curve point inside."""
-    structure = _structure(conn, creative_key).get("structure", {})
+    structure = _structure(conn, creative_key, owner=owner,
+                           admin=admin).get("structure", {})
     curve = _curve(conn, creative_key)
     out = []
     for slot, seg in structure.items():
@@ -145,7 +147,7 @@ def _span_min(spans):
     return min(starts) if starts else None
 
 
-def curve(conn, creative_key):
+def curve(conn, creative_key, owner=None, admin=False):
     """Full retention curve plus timeline markers for the graph.
 
     Returns every stored (t, pct) point plus the creative moments
@@ -154,7 +156,7 @@ def curve(conn, creative_key):
     retention-%-vs-time from this; drop_events() supplies the
     clickable drop windows overlaid on top.
     """
-    ann = _structure(conn, creative_key)
+    ann = _structure(conn, creative_key, owner=owner, admin=admin)
     pts = _curve(conn, creative_key)
     structure = ann.get("structure") or {}
 
@@ -230,7 +232,8 @@ def element_at(annotation, t):
             "voiceover": voiceover}
 
 
-def drop_events(conn, creative_key, min_drop_pts=DROP_PTS_MIN):
+def drop_events(conn, creative_key, min_drop_pts=DROP_PTS_MIN, owner=None,
+                 admin=False):
     """Seekable drop moments for one creative, steepest first.
 
     Each event carries the curve window (from/to seconds and pct),
@@ -238,9 +241,10 @@ def drop_events(conn, creative_key, min_drop_pts=DROP_PTS_MIN):
     it via element_at. Events below min_drop_pts are noise, not
     moments, and are left out.
     """
-    ann = _structure(conn, creative_key)
+    ann = _structure(conn, creative_key, owner=owner, admin=admin)
     events = []
-    for seg in join_segments(conn, creative_key):
+    for seg in join_segments(conn, creative_key, owner=owner,
+                             admin=admin):
         if seg["n_points"] < 2 or seg["drop_pts"] < min_drop_pts:
             continue
         mid = round((seg["start_s"] + seg["end_s"]) / 2, 2)
@@ -256,7 +260,8 @@ def drop_events(conn, creative_key, min_drop_pts=DROP_PTS_MIN):
     return events
 
 
-def patterns(conn, scope=None, min_drop_pts=DROP_PTS_MIN):
+def patterns(conn, scope=None, min_drop_pts=DROP_PTS_MIN, owner=None,
+             admin=False):
     """Cross-video drop patterns over the scoped population.
 
     scope is the shared analysis Scope (or plain filter dict):
@@ -282,8 +287,9 @@ def patterns(conn, scope=None, min_drop_pts=DROP_PTS_MIN):
     events, agg = [], {}
     for key in keys:
         try:
-            _structure(conn, key)
-            evs = drop_events(conn, key, min_drop_pts)
+            _structure(conn, key, owner=owner, admin=admin)
+            evs = drop_events(conn, key, min_drop_pts, owner=owner,
+                              admin=admin)
         except ValueError:
             continue
         events.extend(evs)

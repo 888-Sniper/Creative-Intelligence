@@ -628,8 +628,12 @@ def apply_corrections(conn, creative_key, corrections, by="",
     stored_snap = ann["analysis"].get("snapshot") or {}
     if video_id and stored_snap.get("video_id", video_id) != video_id:
         raise ValueError("stored analysis belongs to another video")
-    if expected_revision and ann["analysis"].get("revision", "") \
-            != expected_revision:
+    stored_revision = ann["analysis"].get("revision", "") or ""
+    if stored_revision and not expected_revision:
+        raise ValueError("stored result has revision %s: correct against"
+                         " the revision you read, not blindly"
+                         % stored_revision)
+    if expected_revision and stored_revision != expected_revision:
         raise ValueError("stored result changed since you read it: "
                          "re-read the findings and correct again")
     if duration_s is not None:
@@ -637,7 +641,8 @@ def apply_corrections(conn, creative_key, corrections, by="",
             clip_s = float(duration_s)
         except (TypeError, ValueError):
             raise ValueError("clip duration is unavailable")
-        if clip_s <= 0:
+        import math as _math
+        if not _math.isfinite(clip_s) or clip_s <= 0:
             raise ValueError("clip duration is unavailable")
     else:
         clip_s = None
@@ -726,9 +731,14 @@ def apply_corrections(conn, creative_key, corrections, by="",
             raise ValueError("stored analysis has no suggested tests")
         by_id = {t.get("id"): t for t in stored
                  if isinstance(t, dict) and t.get("id")}
+        seen_ops = set()
         for op in ops:
             if not isinstance(op, dict) or not op.get("id"):
                 raise ValueError("test verdicts need an id")
+            if op["id"] in seen_ops:
+                raise ValueError("duplicate test verdict for %r"
+                                 % (op["id"],))
+            seen_ops.add(op["id"])
             if op.get("id") not in by_id:
                 raise ValueError("unknown suggested test %r"
                                  % (op.get("id"),))

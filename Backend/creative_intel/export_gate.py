@@ -15,6 +15,17 @@ class ExportBlocked(Exception):
             self.missing = sorted(missing)
 
 
+def _finite_or_na(value):
+    """Render guard: non-finite numbers print as n/a, never nan/inf."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, float):
+        import math as _math
+        if not _math.isfinite(value):
+            return "n/a"
+    return value
+
+
 def check_reviews(conn):
     """Review-to-zero gate: every grounded Q&A answer must be reviewed
     before the one-pager may export."""
@@ -27,6 +38,9 @@ def check_reviews(conn):
 
 def build_one_pager(conn, creative_keys, benchmarks, override=False,
                     owner=None, admin=False):
+    # Review-to-zero is enforced here (not just at the route), so no
+    # caller — HTTP, worker, or test — can export past pending QA.
+    check_reviews(conn)
     missing = []
     cards = []
     from creative_intel import creative as _creative_mod
@@ -80,7 +94,8 @@ def build_one_pager(conn, creative_keys, benchmarks, override=False,
     lines += ["## Spend-weighted benchmarks", ""]
     for group, vals in (benchmarks or {}).items():
         lines.append("- %s: CPA $%s, CTR %s, spend $%s"
-                     % (group, vals.get("cpa"), vals.get("ctr"),
-                        vals.get("spend")))
+                     % (group, _finite_or_na(vals.get("cpa")),
+                        _finite_or_na(vals.get("ctr")),
+                        _finite_or_na(vals.get("spend"))))
     return {"markdown": "\n".join(lines), "cards": cards,
             "override": override, "missing": missing}

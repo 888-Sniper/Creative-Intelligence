@@ -25,13 +25,13 @@ test("dashboard video upload: real file, data, match, honest analyze", async ({
   await page.screenshot({ path: "test-results/screens/vu-card.png" });
 
   // Open the panel and upload the real fixture clip.
-  await page.getByRole("button", { name: /Upload video/ }).click();
+  await page.getByRole("button", { name: /Upload Video/ }).click();
   await expect(
     page.getByRole("heading", { name: "Upload your video" }),
   ).toBeVisible();
   await page.getByLabel("Creative key").fill("video-upload-sample");
   await page.locator("#vu-file").setInputFiles(MP4);
-  await page.getByRole("dialog").getByRole("button", { name: "Upload video" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Upload Video" }).click();
   await expect(page.getByText(/Video valid — 1280×720, 15s/)).toBeVisible();
   await expect(page.getByTestId("vu-video-preview")).toBeVisible();
 
@@ -95,13 +95,13 @@ test("video remove drops the binding and never resurrects", async ({
 }) => {
   const seeds = readSeeds();
   await loginAs(context, page, seeds.employee, "/");
-  await page.getByRole("button", { name: /Upload video/ }).click();
+  await page.getByRole("button", { name: /Upload Video/ }).click();
   await expect(
     page.getByRole("heading", { name: "Upload your video" }),
   ).toBeVisible();
   await page.getByLabel("Creative key").fill("video-upload-sample");
   await page.locator("#vu-file").setInputFiles(MP4);
-  await page.getByRole("dialog").getByRole("button", { name: "Upload video" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Upload Video" }).click();
   await expect(page.getByText(/Video valid — 1280×720, 15s/)).toBeVisible();
   // Explicit backend removal: the preview and stored binding go.
   await page.getByRole("button", { name: "Remove", exact: true }).click();
@@ -116,7 +116,7 @@ test("video remove drops the binding and never resurrects", async ({
   ).toBeVisible();
   await expect(page.getByTestId("vu-video-preview")).toBeHidden();
   await page.locator("#vu-file").setInputFiles(MP4);
-  await page.getByRole("dialog").getByRole("button", { name: "Upload video" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Upload Video" }).click();
   await expect(page.getByText(/Video valid — 1280×720, 15s/)).toBeVisible();
   await expect(page.getByTestId("vu-video-preview")).toBeVisible();
 });

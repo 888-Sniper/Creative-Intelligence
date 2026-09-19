@@ -704,7 +704,7 @@ def _scope_changed_note(old_scope, new_scope, old_dv, new_dv, lang):
 
 def answer_turn(conn, owner_id, question, conversation_id=None,
                 scope=None, objective="reach", language=None,
-                rank_by=None, max_points=None):
+                rank_by=None, max_points=None, admin=False):
     """One persistent analyst turn: route, compute, render, store.
 
     Scope/objective changes recompute visibly; the new scope and
@@ -753,7 +753,8 @@ def answer_turn(conn, owner_id, question, conversation_id=None,
             "full_analysis", "full_table", "group_awt", "all_watchtime"):
         task, args = "condense", {"target": "recommendations",
                                   "limit": max_points}
-    analysis = analyst.analyze_campaign(conn, scope, objective)
+    analysis = analyst.analyze_campaign(conn, scope, objective,
+                                        owner=owner_id, admin=admin)
     note = _scope_changed_note(old_scope, scope, old_dv,
                                analysis.get("dataset_version", ""),
                                lang)

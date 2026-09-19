@@ -104,10 +104,12 @@ def uploaded_image_url(conn, store, key: str):
     return "/media/%s" % row[0]
 
 
-def for_creative(conn, key: str):
+def for_creative(conn, key: str, owner=None, admin=False):
     """Sample SVG for a stored creative, or None when unknown.
 
     Raises ValueError for malformed keys (same grain as media keys).
+    The hook label uses the owner-scoped reporting selection, so a
+    thumbnail never carries another owner's finding.
     """
     from . import media as _media
 
@@ -122,7 +124,8 @@ def for_creative(conn, key: str):
     hook = ""
     try:
         from creative_intel import creative as _creative_mod
-        _ann = _creative_mod.annotation_for_key(conn, key)
+        _ann = _creative_mod.annotation_for_report(
+            conn, key, owner=owner, admin=admin)
         if isinstance(_ann, dict):
             hook = str(_ann.get("hook_type") or "")
     except ValueError:

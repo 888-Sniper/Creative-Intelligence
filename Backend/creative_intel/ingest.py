@@ -163,14 +163,19 @@ class _BadValue(ValueError):
 
 
 def _to_number(raw, kind):
-    """Legacy lenient coercion: blanks and garbage become zero."""
+    """Legacy lenient coercion: blanks, garbage, and non-finite
+    values become zero (NaN/inf must never reach stored rows, where
+    they would poison sums and JSON round-trips)."""
     try:
         cleaned = str(raw).replace(",", "").replace("$", "").replace("%", "").strip()
         if cleaned in ("", "-", "n/a"):
             return kind(0)
-        return kind(float(cleaned))
+        value = kind(float(cleaned))
     except (ValueError, TypeError, OverflowError):
         return kind(0)
+    if isinstance(value, float) and not math.isfinite(value):
+        return kind(0)
+    return value
 
 
 _CURRENCY_TOKENS = ("zł", "pln", "$", "€", "eur", "usd", "£", "gbp")

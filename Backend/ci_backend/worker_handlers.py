@@ -112,7 +112,7 @@ def run_ask(conn, payload, owner, ctx, job_id=None):
     live = prov.llm if getattr(prov, "mode", "mock") == "live" else None
     scope = benchmarks.Scope.from_payload(payload).resolve(conn)
     result = qa.answer(conn, payload.get("question", ""), llm=live,
-                       scope=scope)
+                       scope=scope, owner=owner or "")
     if progress is not None:
         progress(90, "answered")
     if not isinstance(result, dict):

@@ -51,11 +51,12 @@ def _ads(conn):
             conn.execute("SELECT * FROM ads").fetchall()]
 
 
-def _annotations(conn):
+def _annotations(conn, owner=None, admin=False):
     """Map creative_key -> annotation dict ({} when absent or unparseable).
 
-    Reads the approved-or-latest scoped row per creative name so QA
-    verdicts track the same findings the reporting surfaces show.
+    Reads the owner-scoped reporting selection per creative name so
+    QA verdicts track the same authorised findings the reporting
+    surfaces show — never another owner's private result.
     """
     from creative_intel import creative as _creative_mod
     try:
@@ -65,7 +66,8 @@ def _annotations(conn):
         return {}
     out = {}
     for key in keys:
-        ann = _creative_mod.annotation_for_key(conn, key)
+        ann = _creative_mod.annotation_for_report(
+            conn, key, owner=owner, admin=admin)
         out[key] = ann if isinstance(ann, dict) else {}
     return out
 
@@ -146,16 +148,17 @@ def _show_metric(metric, value):
     return str(value)
 
 
-def _fact_pack(conn, limit=8, scope=None):
+def _fact_pack(conn, limit=8, scope=None, owner=None, admin=False):
     """Compact computed facts for the LLM asker. Every number below is
     derived from uploaded rows/annotations in this call. scope (the
     shared analysis Scope or a plain filter dict) restricts the rows
-    first, so Ask answers the filtered dataset it was asked about."""
+    first, so Ask answers the filtered dataset it was asked about.
+    Annotations are owner-scoped (see _annotations)."""
     from . import benchmarks
     scope = (scope if isinstance(scope, benchmarks.Scope)
              else benchmarks.Scope(scope))
     rows = [r for r in _ads(conn) if scope.match(r)]
-    anns = _annotations(conn)
+    anns = _annotations(conn, owner=owner, admin=admin)
     spend = sum(r["spend"] for r in rows)
     impr = sum(r["impressions"] for r in rows)
     clicks = sum(r["clicks"] for r in rows)
@@ -397,11 +400,12 @@ _USED_SOURCES = {
 }
 
 
-def _llm_answer(conn, question, llm, scope=None):
+def _llm_answer(conn, question, llm, scope=None, owner=None,
+                 admin=False):
     """LLM answer strictly over _fact_pack. Raises ProviderUnavailable
     on any failure so the caller falls back to the rule engine."""
     from . import providers
-    pack = _fact_pack(conn, scope=scope)
+    pack = _fact_pack(conn, scope=scope, owner=owner, admin=admin)
     try:
         data = _extract_json_obj(providers, llm, question, pack)
     except providers.ProviderUnavailable:
@@ -446,7 +450,8 @@ def _extract_json_obj(providers, llm, question, pack):
         raise providers.ProviderUnavailable("ask output is not valid JSON")
 
 
-def answer(conn, question, llm=None, scope=None):
+def answer(conn, question, llm=None, scope=None, owner=None,
+           admin=False):
     """Answer strictly from uploaded rows + annotations + transcripts.
 
     llm (optional LiveLlm-compatible) answers over a computed fact pack;
@@ -454,6 +459,7 @@ def answer(conn, question, llm=None, scope=None):
     both paths open the review-to-zero row. scope (the shared analysis
     Scope or a plain filter dict) restricts every number on both
     paths, so Ask answers the filtered dataset it was asked about.
+    Annotations and transcripts are owner-scoped throughout.
     """
     from . import benchmarks, providers
     ensure(conn)
@@ -473,7 +479,8 @@ def answer(conn, question, llm=None, scope=None):
                 "scope": scope.describe()}
     if llm is not None:
         try:
-            return _llm_answer(conn, question, llm, scope=scope)
+            return _llm_answer(conn, question, llm, scope=scope,
+                               owner=owner, admin=admin)
         except providers.ProviderUnavailable as exc:
             # Managed single-active failures (and the honest
             # not-configured message) surface to the caller instead
@@ -628,22 +635,37 @@ def answer(conn, question, llm=None, scope=None):
             cite("Uploaded CSV")
         key = leaders[0] if ranked else None
         from creative_intel import creative as _creative_mod
-        a = _creative_mod.annotation_for_key(conn, key) \
+        from creative_intel import drafts as _drafts_mod
+        a = _creative_mod.annotation_for_report(
+            conn, key, owner=owner, admin=admin) \
             if _level == "creative_key" and ranked and key else None
         if isinstance(a, dict):
             parts.append("Annotation: hook=%s, format=%s."
                          % (a.get("hook_type", "?"),
                             a.get("creator_vs_branded", "?")))
             cite("Annotation")
-        tr = conn.execute(
-            "SELECT transcript FROM creatives WHERE creative_key=?",
-            (key,)).fetchone() if _level == "creative_key" and ranked else None
-        if tr and tr[0]:
-            parts.append("Transcript excerpt: %s" % tr[0][:200])
+        _vid = _creative_mod.annotation_scope_for_report(
+            conn, key, owner=owner, admin=admin) \
+            if _level == "creative_key" and ranked and key else ""
+        if _vid:
+            tr = _drafts_mod.get_video_transcript(conn, _vid)
+        elif isinstance(a, dict):
+            # Legacy version-less authorised row: the shared copy
+            # is its own field. Otherwise (no authorised result)
+            # quote nothing.
+            _shared = conn.execute(
+                "SELECT transcript FROM creatives WHERE creative_key=?",
+                (key,)).fetchone() \
+                if _level == "creative_key" and ranked else None
+            tr = _shared[0] if _shared else ""
+        else:
+            tr = ""
+        if tr:
+            parts.append("Transcript excerpt: %s" % tr[:200])
             cite("ASR Transcript")
     if any(w in q for w in ("vtr", "view-through", "view through",
                             "view rate", "completion")):
-        anns = _annotations(conn)
+        anns = _annotations(conn, owner=owner, admin=admin)
         early, late = [], []
         for r in rows:
             start = _product_start(anns.get(r["creative_key"], {}))
@@ -689,7 +711,7 @@ def answer(conn, question, llm=None, scope=None):
                          "TikTok export before asking about formats.")
             cite("Uploaded CSV")
         else:
-            anns = _annotations(conn)
+            anns = _annotations(conn, owner=owner, admin=admin)
             groups = {}
             for r in tik:
                 mode = (anns.get(r["creative_key"], {}) or {}).get(
@@ -712,7 +734,8 @@ def answer(conn, question, llm=None, scope=None):
     def scoped_pack():
         nonlocal pack
         if pack is None:
-            pack = _fact_pack(conn, scope=scope)
+            pack = _fact_pack(conn, scope=scope, owner=owner,
+                              admin=admin)
         return pack
 
     def _money(value):
@@ -903,7 +926,9 @@ def answer(conn, question, llm=None, scope=None):
                         if ret["avg_drop_pts"] is not None else "n/a"))
             try:
                 from . import retention as retention_mod
-                pats = retention_mod.patterns(conn, scope)["patterns"][:3]
+                pats = retention_mod.patterns(
+                    conn, scope, owner=owner,
+                    admin=admin)["patterns"][:3]
                 for p in pats:
                     line += (" Normal loss: ~%s pts %s%s." % (
                         p["avg_drop_pts"],

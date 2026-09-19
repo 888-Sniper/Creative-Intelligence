@@ -910,7 +910,7 @@ def test_apply_corrections_rewrites_findings(tmp_path):
          "frame_labels": [{"t_sec": 2.5, "label": "opening",
                            "cta_visible": True}],
          "tests": [{"id": "hook-clarity", "status": "rejected"}]},
-        by="emp-1")
+        by="emp-1", expected_revision="rev-0")
     assert ann["hook_type"] == "bold_claim"
     assert ann["confirmed"]["hook_type"] == "bold_claim"
     assert ann["frame_labels"][0]["t_sec"] == 2.5
@@ -920,18 +920,33 @@ def test_apply_corrections_rewrites_findings(tmp_path):
     assert conn.execute("SELECT transcript FROM creatives"
                         " WHERE creative_key=?", (key,)).fetchone()[0] \
         == "fixed words"
+    # Blind corrections (no revision) are rejected once the stored
+    # result carries one; field validation still runs afterwards.
     with pytest.raises(ValueError):
-        va.apply_corrections(conn, key, {"hook_type": "nope"}, by="emp-1")
+        va.apply_corrections(conn, key, {"hook_type": "bold_claim"},
+                             by="emp-1")
+    rev = ann["analysis"]["revision"]
+    with pytest.raises(ValueError):
+        va.apply_corrections(conn, key, {"hook_type": "nope"}, by="emp-1",
+                             expected_revision=rev)
     with pytest.raises(ValueError):
         va.apply_corrections(conn, key, {"tests": [{"id": "ghost",
                                                    "status": "accepted"}]},
-                             by="emp-1")
+                             by="emp-1", expected_revision=rev)
     with pytest.raises(ValueError):
-        va.apply_corrections(conn, key, {"colour": "teal"}, by="emp-1")
+        va.apply_corrections(conn, key, {"colour": "teal"}, by="emp-1",
+                             expected_revision=rev)
     with pytest.raises(ValueError):
-        va.apply_corrections(conn, key, {}, by="emp-1")
+        va.apply_corrections(conn, key, {}, by="emp-1",
+                             expected_revision=rev)
     with pytest.raises(ValueError):
         va.apply_corrections(conn, "missing-key", {"hook_type": "other"})
+    with pytest.raises(ValueError):
+        va.apply_corrections(
+            conn, key,
+            {"tests": [{"id": "hook-clarity", "status": "accepted"},
+                       {"id": "hook-clarity", "status": "rejected"}]},
+            by="emp-1", expected_revision=rev)
     conn.close()
 
 
@@ -1322,6 +1337,82 @@ def test_worker_chain_cancel_aborts_publish(tmp_path, monkeypatch):
     conn.close()
 
 
+def test_scoped_helpers_withhold_stranger_findings(tmp_path):
+    """Round-9: analyst and QA helpers use the authorised selection —
+    a stranger gets nothing, the owner keeps access, and legacy
+    viewer-less callers behave exactly as before."""
+    from creative_intel import analyst as analyst_mod
+    from creative_intel import qa as qa_mod
+    conn, key, _vidA, _vidB, _didB = _two_video_setup(tmp_path)
+    assert analyst_mod.annotations_for(conn, [key],
+                                       owner="emp-C") == {key: (None, "none")}
+    assert qa_mod._annotations(conn, owner="emp-C") == {key: {}}
+    ann, status = analyst_mod.annotations_for(
+        conn, [key], owner="emp-A")[key]
+    assert ann["analysis"]["revision"] == "rev-A"
+    assert status == "human_verified"
+    legacy, _ = analyst_mod.annotations_for(conn, [key])[key]
+    assert legacy["analysis"]["revision"] == "rev-A"
+    conn.close()
+
+
+def test_export_blocked_on_pending_qa(tmp_path):
+    """Round-9: the review-to-zero gate lives inside build_one_pager,
+    so no caller can export past pending QA answers."""
+    from creative_intel import export_gate
+    from creative_intel import qa as qa_mod
+    conn, _store, _did = bound_db(tmp_path)
+    got = qa_mod.answer(conn, "what is spend?")
+    assert got["review_id"] is not None
+    assert qa_mod.pending_count(conn) == 1
+    with pytest.raises(export_gate.ExportBlocked) as exc:
+        export_gate.build_one_pager(conn, ["video-upload-sample"], {})
+    assert "review-to-zero" in str(exc.value)
+    conn.close()
+
+
+def test_nan_never_reaches_rows_or_render(tmp_path):
+    """Round-9: non-finite numerics degrade to safe defaults at
+    ingest, snapshot shaping, and export rendering — never nan."""
+    from creative_intel import export_gate
+    from creative_intel import ingest as ingest_mod
+    assert ingest_mod._to_number("NaN", float) == 0.0
+    assert ingest_mod._to_number("-inf", float) == 0.0
+    assert ingest_mod._to_number("1,000.5", float) == 1000.5
+    conn, _store, _did = bound_db(tmp_path)
+    key = "video-upload-sample"
+    vid = conn.execute(
+        "SELECT id FROM videos WHERE draft_id=?", (_did,)).fetchone()[0]
+    rec = {"id": 11, "import_id": "imp", "platform": "meta",
+           "campaign": "Sample Launch", "spend": float("nan"),
+           "impressions": 6000, "clicks": 150, "creative_key": "x"}
+    drafts.confirm_match(conn, _did, key, "emp-1", method="manual",
+                         records=[rec], video_id=vid)
+    rows = drafts.performance_rows_for_key(conn, key, [], owner="emp-1")
+    assert rows[0]["spend"] == 0
+    assert rows[0]["impressions"] == 6000
+    assert export_gate._finite_or_na(float("nan")) == "n/a"
+    assert export_gate._finite_or_na(float("inf")) == "n/a"
+    assert export_gate._finite_or_na(12.5) == 12.5
+    conn.close()
+
+
+def test_validate_rejects_nonfinite(tmp_path):
+    """Round-9: validate() treats NaN/inf numerics as invalid, not
+    merely out of range."""
+    conn, _store, _did = bound_db(tmp_path)
+    ann = creative_mod.blank_annotation()
+    assert isinstance(ann, dict)
+    bad = creative_mod.blank_annotation()
+    bad["structure"] = {"hook": {"start_s": float("nan"), "end_s": 1.0,
+                                 "confidence": 0.5}}
+    bad["hook_confidence"] = float("inf")
+    errors = creative_mod.validate(bad)
+    assert any("not numeric" in e for e in errors)
+    assert any("hook_confidence" in e for e in errors)
+    conn.close()
+
+
 def test_correction_rejects_nonfinite_moment(tmp_path):
     """Round-6 validation: NaN/inf timestamps are rejected before
     range checks (both comparisons pass NaN silently)."""
@@ -1339,10 +1430,10 @@ def test_correction_rejects_nonfinite_moment(tmp_path):
         va.apply_corrections(
             conn, key,
             {"frame_labels": [{"t_sec": "NaN", "label": "opening"}]},
-            by="emp-1", duration_s=15.0)
+            by="emp-1", duration_s=15.0, expected_revision="rev-0")
     with pytest.raises(ValueError):
         va.apply_corrections(
             conn, key,
             {"frame_labels": [{"t_sec": "inf", "label": "opening"}]},
-            by="emp-1", duration_s=15.0)
+            by="emp-1", duration_s=15.0, expected_revision="rev-0")
     conn.close()

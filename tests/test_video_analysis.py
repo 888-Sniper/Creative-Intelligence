@@ -1650,6 +1650,134 @@ def test_correction_commits_atomically(tmp_path):
     conn.close()
 
 
+def test_simultaneous_corrections_serialize(tmp_path, monkeypatch):
+    """Audit recheck: two corrections against the same revision must
+    serialize — the edit that validates first but saves second still
+    wins only if it locks first; here A locks (gated at save) while
+    B attempts, B waits on the lock, then loses with a re-read
+    error instead of overwriting A's saved edit."""
+    import threading
+    conn, _store, _did = bound_db(tmp_path)
+    db = str(tmp_path / "va.db")
+    key = "video-upload-sample"
+    vid = conn.execute(
+        "SELECT id FROM videos WHERE draft_id=?", (_did,)).fetchone()[0]
+    seed = creative_mod.blank_annotation()
+    seed["status"] = "human_verified"
+    seed["analysis"] = {"version": "v1", "revision": "rev-0",
+                        "at": "2026-01-01T00:00:00+00:00",
+                        "model": "test/test-frames",
+                        "snapshot": {}, "measured": {},
+                        "suggested_tests": []}
+    creative_mod.save_annotation(conn, key, seed, video_id=vid)
+    conn.execute("INSERT INTO creatives (creative_key, transcript)"
+                 " VALUES (?, ?) ON CONFLICT (creative_key) DO UPDATE"
+                 " SET transcript = excluded.transcript",
+                 (key, "raw words"))
+    conn.commit()
+
+    entered = threading.Event()
+    release = threading.Event()
+    real_save = creative_mod.save_annotation
+
+    def gated_save(conn, key, ann, **kw):
+        entered.set()
+        assert release.wait(timeout=20)
+        return real_save(conn, key, ann, **kw)
+
+    monkeypatch.setattr(creative_mod, "save_annotation", gated_save)
+    out_a, out_b = {}, {}
+
+    def do_a():
+        c = sqlite3.connect(db, timeout=10)
+        try:
+            va.apply_corrections(c, key, {"transcript": "A words"},
+                                 by="emp-1", video_id=vid,
+                                 expected_revision="rev-0")
+            out_a["ok"] = True
+        except Exception as exc:  # noqa: BLE001 - asserted below
+            out_a["error"] = repr(exc)
+        finally:
+            c.close()
+
+    def do_b():
+        c = sqlite3.connect(db, timeout=10)
+        try:
+            va.apply_corrections(c, key, {"transcript": "B words"},
+                                 by="emp-2", video_id=vid,
+                                 expected_revision="rev-0")
+            out_b["ok"] = True
+        except Exception as exc:  # noqa: BLE001 - asserted below
+            out_b["error"] = repr(exc)
+        finally:
+            c.close()
+
+    ta = threading.Thread(target=do_a)
+    ta.start()
+    assert entered.wait(timeout=20), (out_a, out_b)
+    tb = threading.Thread(target=do_b)
+    tb.start()
+    tb.join(timeout=3)
+    # B cannot validate-then-write around A: it waits on A's lock.
+    assert tb.is_alive()
+    release.set()
+    ta.join(timeout=20)
+    tb.join(timeout=20)
+    assert out_a.get("ok") is True, out_a
+    assert "changed since you read it" in out_b.get("error", ""), out_b
+    final = creative_mod.scoped_annotation(conn, key, vid)
+    assert drafts.get_video_transcript(conn, vid) == "A words"
+    assert final["analysis"]["revision"] != "rev-0"
+    assert [e["fields"] for e in
+            final["analysis"]["corrections"]] == [["transcript"]]
+    conn.close()
+
+
+def test_stale_attempt_error_leaves_draft(tmp_path, monkeypatch):
+    """Audit recheck: a superseded attempt whose provider fails must
+    not mark the replacement's draft failed (or analyzing). The live
+    token control still marks failed."""
+    from ci_backend import worker_handlers
+    conn, store, did = bound_db(tmp_path)
+    initial = drafts.get_draft(conn, did)["status"]
+    snap = va.bind_snapshot(conn, did)
+    job = jobs_mod.enqueue(conn, "video_analysis",
+                           {"snapshot": snap}, owner="emp-1")
+    token_a = jobs_mod.claim(conn, job["id"],
+                             lease_owner="w1")["run_token"]
+    rival = sqlite3.connect(str(tmp_path / "va.db"))
+    try:
+        jobs_mod.fail(rival, job["id"], "worker lost",
+                      run_token=token_a)
+        token_b = jobs_mod.claim(rival, job["id"],
+                                 lease_owner="w2")["run_token"]
+    finally:
+        rival.close()
+
+    def boom(conn, key, providers, **kw):
+        raise RuntimeError("synthetic provider timeout")
+
+    monkeypatch.setattr(creative_mod, "run_pipeline", boom)
+    monkeypatch.setattr(va, "eligible_vision_roster",
+                        lambda: [("mock", "mock-model", 1)])
+    with pytest.raises(RuntimeError):
+        worker_handlers.run(conn, "video_analysis",
+                            {"snapshot": snap}, "emp-1",
+                            {"media_dir": store}, job["id"],
+                            run_token=token_a)
+    assert drafts.get_draft(conn, did)["status"] == initial
+    assert conn.execute("SELECT COUNT(*) FROM annotations"
+                        " WHERE creative_key=?",
+                        ("video-upload-sample",)).fetchone()[0] == 0
+    with pytest.raises(RuntimeError):
+        worker_handlers.run(conn, "video_analysis",
+                            {"snapshot": snap}, "emp-1",
+                            {"media_dir": store}, job["id"],
+                            run_token=token_b)
+    assert drafts.get_draft(conn, did)["status"] == "failed"
+    conn.close()
+
+
 def test_stale_pipeline_attempt_cannot_persist(tmp_path):
     """H2: the legacy pipeline persist path verifies the claim token
     before every write — a superseded attempt saves nothing, while

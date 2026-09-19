@@ -775,52 +775,80 @@ def apply_corrections(conn, creative_key, corrections, by="",
                                  % list(CORRECTION_TEST_STATUSES))
             by_id[op["id"]]["status"] = op["status"]
         touched.append("tests")
-    if "transcript" in corrections \
-            and corrections["transcript"] is not None:
-        text = corrections["transcript"]
-        if not isinstance(text, str) \
-                or len(text) > MAX_CORRECTION_TRANSCRIPT:
-            raise ValueError("transcript must be text of at most %d chars"
-                             % MAX_CORRECTION_TRANSCRIPT)
-        # One transaction for the whole correction (see below): the
-        # transcript, shared copy, revision bump, and approval
-        # invalidation must never be visible piecemeal — an export
-        # snapshotting between two commits would mix new words with
-        # the old approval.
-        if video_id:
-            drafts_mod.set_video_transcript(conn, video_id, text,
-                                            commit=False)
-        conn.execute("UPDATE creatives SET transcript=? WHERE creative_key=?",
-                     (text, creative_key))
-        touched.append("transcript")
-    if not touched:
-        raise ValueError("corrections need at least one field")
-    log = ann["analysis"].get("corrections")
-    if not isinstance(log, list):
-        log = []
-        ann["analysis"]["corrections"] = log
-    log.append({"by": by or "human", "at": utcnow(),
-                "fields": sorted(touched)})
-    ann["analysis"]["revision"] = uuid.uuid4().hex
-    if ann.get("status") == "human_verified":
-        # A correction supersedes the approval of the old content:
-        # the invalidation lands in this same commit as the new
-        # words, revision, and history — never in a later router
-        # step a concurrent export could slip between (the router's
-        # draft-review clearing stays where it is; it is idempotent
-        # for this video from here on).
-        ann["status"] = "auto"
-    # keep=touched: the corrected values replace the previous locked
-    # decisions instead of being restored over. Single commit for the
-    # whole correction: transcript, revision, history, and approval
-    # invalidation land atomically, so a concurrent export either
-    # sees the complete old approved version or the complete new
-    # unapproved one — never a mix.
-    # Return the row as actually persisted — never the pre-save dict.
-    creative_mod.save_annotation(conn, creative_key, ann,
-                                 video_id=video_id, keep=touched,
-                                 commit=False)
-    conn.commit()
+    # Serialize simultaneous corrections: hold the write
+    # transaction from a revision recheck through the save. The
+    # recheck runs under the lock, so a rival correction committing
+    # after our validation either waits (then sees the fresh
+    # revision here and loses with the re-read error) or committed
+    # first (then we see it here) — either way the loser never
+    # silently overwrites the saved edit (lost update).
+    own_txn = not conn.in_transaction
+    if own_txn:
+        conn.execute("BEGIN IMMEDIATE")
+    try:
+        current = creative_mod.scoped_annotation(conn, creative_key,
+                                                 video_id)
+        current_revision = ((current.get("analysis") or {})
+                            .get("revision", "") or "")
+        if current_revision != stored_revision:
+            raise ValueError("stored result changed since you read it: "
+                             "re-read the findings and correct again")
+        if "transcript" in corrections \
+                and corrections["transcript"] is not None:
+            text = corrections["transcript"]
+            if not isinstance(text, str) \
+                    or len(text) > MAX_CORRECTION_TRANSCRIPT:
+                raise ValueError("transcript must be text of at most"
+                                 " %d chars" % MAX_CORRECTION_TRANSCRIPT)
+            # One transaction for the whole correction (see below):
+            # the transcript, shared copy, revision bump, and
+            # approval invalidation must never be visible piecemeal
+            # — an export snapshotting between two commits would mix
+            # new words with the old approval.
+            if video_id:
+                drafts_mod.set_video_transcript(conn, video_id, text,
+                                                commit=False)
+            conn.execute("UPDATE creatives SET transcript=?"
+                         " WHERE creative_key=?",
+                         (text, creative_key))
+            touched.append("transcript")
+        if not touched:
+            raise ValueError("corrections need at least one field")
+        log = ann["analysis"].get("corrections")
+        if not isinstance(log, list):
+            log = []
+            ann["analysis"]["corrections"] = log
+        log.append({"by": by or "human", "at": utcnow(),
+                    "fields": sorted(touched)})
+        ann["analysis"]["revision"] = uuid.uuid4().hex
+        if ann.get("status") == "human_verified":
+            # A correction supersedes the approval of the old
+            # content: the invalidation lands in this same commit as
+            # the new words, revision, and history — never in a
+            # later router step a concurrent export could slip
+            # between (the router's draft-review clearing stays
+            # where it is; it is idempotent for this video from
+            # here on).
+            ann["status"] = "auto"
+        # keep=touched: the corrected values replace the previous
+        # locked decisions instead of being restored over. Single
+        # commit for the whole correction: transcript, revision,
+        # history, and approval invalidation land atomically, so a
+        # concurrent export either sees the complete old approved
+        # version or the complete new unapproved one — never a mix.
+        # Return the row as actually persisted — never the pre-save
+        # dict.
+        creative_mod.save_annotation(conn, creative_key, ann,
+                                     video_id=video_id, keep=touched,
+                                     commit=False)
+        conn.commit()
+    except Exception:
+        if own_txn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        raise
     persisted = creative_mod.scoped_annotation(conn, creative_key,
                                                video_id)
     if not isinstance(persisted, dict):

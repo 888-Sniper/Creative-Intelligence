@@ -83,6 +83,27 @@ def _raise_if_cancelled(cancelled):
         raise jobs_mod.JobCancelled("job cancelled before start")
 
 
+def _owns_draft(conn, job_id, attempt_token):
+    """True when this attempt may touch the shared draft row.
+
+    Draft status (analyzing/failed/cancelled) belongs to the live
+    attempt: a superseded attempt must exit without changing the
+    replacement's state — not just skip publication. Only a present
+    row carrying a different token gates; anything else (no job,
+    vanished row, pre-fencing table, matching/empty tokens) keeps
+    the long-standing behaviour.
+    """
+    if not job_id:
+        return True
+    try:
+        row = jobs_mod.get(conn, job_id) or {}
+    except Exception:
+        return True
+    if not row:
+        return True
+    return (row.get("run_token") or "") == (attempt_token or "")
+
+
 def run_pipeline(conn, payload, owner, ctx, job_id=None, run_token=None):
     settings = ctx.get("settings") or Settings()
     _ = settings
@@ -192,7 +213,9 @@ def run_video_analysis(conn, payload, owner, ctx, job_id=None,
         try:
             _raise_if_cancelled(cancelled)
         except jobs_mod.JobCancelled:
-            if did:
+            # A superseded attempt exits without touching the
+            # replacement's draft — even for cancellation.
+            if did and _owns_draft(conn, job_id, attempt_token):
                 try:
                     drafts_mod.update_draft(conn, did, status="cancelled")
                 except Exception:
@@ -208,8 +231,9 @@ def run_video_analysis(conn, payload, owner, ctx, job_id=None,
     media_dir = (ctx or {}).get("media_dir")
     try:
         # The endpoint submits as queued; the worker owns the
-        # queued -> analyzing transition when work actually starts.
-        if did:
+        # queued -> analyzing transition when work actually starts —
+        # but only the live attempt may take it.
+        if did and _owns_draft(conn, job_id, attempt_token):
             try:
                 drafts_mod.update_draft(conn, did, status="analyzing")
             except Exception:
@@ -220,8 +244,8 @@ def run_video_analysis(conn, payload, owner, ctx, job_id=None,
             job_id=job_id, run_token=attempt_token)
     except jobs_mod.JobCancelled:
         # Owner cancel: the draft returns to cancelled (re-analysable),
-        # never strands in analyzing.
-        if did:
+        # never strands in analyzing — unless a replacement owns it.
+        if did and _owns_draft(conn, job_id, attempt_token):
             try:
                 drafts_mod.update_draft(conn, did, status="cancelled")
             except Exception:
@@ -235,8 +259,10 @@ def run_video_analysis(conn, payload, owner, ctx, job_id=None,
     except Exception:
         # ProviderUnavailable, timeouts, corrupt media, stale inputs:
         # every failure path lands the draft in failed with the job
-        # error preserved on the job row. Never strand in analyzing.
-        if did:
+        # error preserved on the job row. Never strand in analyzing —
+        # and never mark a replacement attempt's draft failed: a
+        # superseded attempt's error is its own, not the draft's.
+        if did and _owns_draft(conn, job_id, attempt_token):
             try:
                 drafts_mod.update_draft(conn, did, status="failed")
             except Exception:

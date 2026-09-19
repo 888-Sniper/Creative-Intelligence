@@ -322,18 +322,39 @@ def _link_source_url(conn, creative_key, rid):
     import json
 
     from . import creative as creative_mod
-    got = conn.execute("SELECT annotation_json FROM annotations WHERE creative_key=?",
-                       (creative_key,)).fetchone()
-    if not got:
-        return
+    # Scope the upload link to the asset versions actually bound to
+    # this media row: a new upload under a shared creative name must
+    # never rewrite a sibling version's source. Videos with no bound
+    # analysis fall back to the legacy '' row (global annotate flow).
     try:
-        ann = json.loads(got[0])
-    except ValueError:
+        targets = [row[0] for row in conn.execute(
+            "SELECT id FROM videos WHERE media_id=?", (int(rid),))]
+    except (TypeError, ValueError):
         return
-    if not isinstance(ann, dict) or ann.get("source_url"):
-        return
-    ann["source_url"] = "/media/%d" % rid
-    creative_mod.save_annotation(conn, creative_key, ann)
+    if not targets:
+        targets = [""]
+    for video_id in targets:
+        try:
+            got = conn.execute(
+                "SELECT annotation_json FROM annotations"
+                " WHERE creative_key=? AND video_id=?",
+                (creative_key, video_id)).fetchone()
+        except Exception:
+            continue
+        if not got:
+            continue
+        try:
+            ann = json.loads(got[0])
+        except ValueError:
+            continue
+        if not isinstance(ann, dict) or ann.get("source_url"):
+            continue
+        ann["source_url"] = "/media/%d" % int(rid)
+        try:
+            creative_mod.save_annotation(conn, creative_key, ann,
+                                         video_id=video_id)
+        except ValueError:
+            continue
 
 
 def delete_media(conn, store, rid):

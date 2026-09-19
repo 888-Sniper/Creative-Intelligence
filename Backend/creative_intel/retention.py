@@ -12,12 +12,11 @@ DROP_PTS_MIN = 5.0
 
 
 def _structure(conn, creative_key):
-    import json
-    row = conn.execute("SELECT annotation_json FROM annotations WHERE creative_key=?",
-                       (creative_key,)).fetchone()
-    if not row:
+    from creative_intel import creative as _creative_mod
+    ann = _creative_mod.annotation_for_key(conn, creative_key)
+    if not isinstance(ann, dict):
         raise ValueError("no annotation for %r" % creative_key)
-    return json.loads(row[0])
+    return ann
 
 
 SYNTH_SOURCE = "quartile_synthesized"
@@ -79,12 +78,12 @@ def synthesize_from_quartiles(conn):
                            (key,)).fetchone()
         duration = (dur[0] if dur and dur[0] else 0) or 0
         if not duration:
-            ann = conn.execute("SELECT annotation_json FROM annotations"
-                               " WHERE creative_key=?", (key,)).fetchone()
-            if ann:
+            from creative_intel import creative as _creative_mod
+            _ann = _creative_mod.annotation_for_key(conn, key)
+            if isinstance(_ann, dict):
                 try:
-                    duration = json.loads(ann[0]).get("duration_s") or 0
-                except ValueError:
+                    duration = _ann.get("duration_s") or 0
+                except (TypeError, ValueError):
                     duration = 0
         duration = float(duration) if duration else 30.0
         pts = [(0.0, 100.0)]

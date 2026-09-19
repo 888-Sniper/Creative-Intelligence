@@ -132,7 +132,15 @@ def providers_status(request: Request,
                         if providers_mod._configured(p)})
         caps[cap] = {"status": "configured" if names else "missing",
                      "adapters": names}
-    return {"mode": providers_mod.mode(), "capabilities": caps}
+    # What video analysis would send and where derived media lives:
+    # informational copy only (no key values, Bearer tokens, or
+    # provider secrets) so the upload review stage can display it
+    # before Analyze is submitted.
+    from creative_intel import video_analysis as _va
+    _ready = _va.readiness()
+    return {"mode": providers_mod.mode(), "capabilities": caps,
+            "analysis": {"sends": _ready["sends"],
+                         "storage": _ready["storage"]}}
 
 
 @router.get("/api/campaigns")
@@ -162,7 +170,7 @@ def campaigns_meta(request: Request, conn=Depends(get_product_conn),
 
 @router.get("/api/campaigns/recommendations")
 def recommendations(request: Request, conn=Depends(get_product_conn),
-                    _emp=Depends(get_current_employee)):
+                    who=Depends(get_current_employee)):
     q = query_multidict(request)
     name = (q.get("name", [""])[0] if q.get("name") else "")
     if not name:
@@ -171,7 +179,9 @@ def recommendations(request: Request, conn=Depends(get_product_conn),
                 if q.get("rank_by") else "cpa") or "cpa").lower()
     try:
         return benchmarks.campaign_recommendations(
-            conn, name, benchmarks.Scope.from_query(q).resolve(conn), rank_by)
+            conn, name, benchmarks.Scope.from_query(q).resolve(conn),
+            rank_by, owner=who.id,
+            admin=(who.role or "") == "admin")
     except (ValueError, export_gate.ExportBlocked, emp.StoreError) as exc:
         raise _conflict(exc)
 
@@ -191,9 +201,11 @@ def benchmark_route(request: Request, conn=Depends(get_product_conn),
 
 @router.get("/api/creatives")
 def creatives(request: Request, conn=Depends(get_product_conn),
-              _emp=Depends(get_current_employee)):
+              who=Depends(get_current_employee)):
     try:
-        return legacy.build_creatives_list(conn, query_multidict(request))
+        return legacy.build_creatives_list(
+            conn, query_multidict(request), owner=who.id,
+            admin=(who.role or "") == "admin")
     except (ValueError, export_gate.ExportBlocked, emp.StoreError) as exc:
         raise _conflict(exc)
 
@@ -212,9 +224,11 @@ def retention_segments(request: Request, conn=Depends(get_product_conn),
 
 @router.get("/api/compare")
 def compare(request: Request, conn=Depends(get_product_conn),
-            _emp=Depends(get_current_employee)):
+            who=Depends(get_current_employee)):
     try:
-        return legacy.build_compare(conn, query_multidict(request))
+        return legacy.build_compare(conn, query_multidict(request),
+                                    owner=who.id,
+                                    admin=(who.role or "") == "admin")
     except (ValueError, export_gate.ExportBlocked, emp.StoreError) as exc:
         raise _conflict(exc)
 
@@ -559,10 +573,13 @@ class DraftCorrectionBody(BaseModel):
     """Human corrections to a finished analysis. Every field is
     optional, but at least one correctable field must be present —
     unknown fields 409 via apply_corrections (extra="allow" carries
-    them through instead of silently dropping them)."""
+    them through instead of silently dropping them). revision is the
+    result the reviewer saw: a stale edit against already-corrected
+    content is rejected instead of silently winning."""
 
     model_config = ConfigDict(extra="allow")
 
+    revision: str = Field(default="", max_length=64)
     transcript: str | None = Field(default=None, max_length=20000)
     hook_type: str | None = None
     hook_confidence: float | None = None
@@ -1489,7 +1506,9 @@ async def report(request: Request, conn=Depends(get_product_conn),
     body = _validated(ReportBody, await json_payload(request), "report")
     payload = body.model_dump()
     try:
-        out = legacy.expert2_report_route(conn, payload)
+        out = legacy.expert2_report_route(
+            conn, payload, owner=who.id,
+            admin=(who.role or "") == "admin")
     except ValueError as exc:
         paudit.audit_request(request, conn, employee_id=who.id,
                              action="report_generated", result="error")
@@ -1611,32 +1630,28 @@ def _reap_unreferenced(conn, store, media_ids, keys) -> None:
 
 def _invalidate_draft_review(conn, did: str) -> None:
     """Drop a draft's recorded human review after a material input
-    change, and return this draft's still-bound video keys from
+    change, and return this draft's still-bound video versions from
     human_verified to auto: the approval belonged to the old inputs.
-    Annotations of videos already unbound from the draft (replaced
-    away) keep their history — they are no longer this draft's
-    claim."""
+    Scoped per video id — a sibling version's approval is never
+    touched. Annotations of videos already unbound from the draft
+    (replaced away) keep their history — they are no longer this
+    draft's claim."""
     from creative_intel import drafts as drafts_mod
     from creative_intel import creative as creative_mod
-    import json as _json
     drafts_mod.clear_review(conn, did)
-    keys = {v.get("creative_key")
-            for v in drafts_mod.list_videos(conn, did)
-            if v.get("creative_key")}
-    for key in keys:
-        row = conn.execute(
-            "SELECT annotation_json FROM annotations WHERE creative_key=?",
-            (key,)).fetchone()
-        if not row:
+    seen = set()
+    for video in drafts_mod.list_videos(conn, did):
+        key = video.get("creative_key") or ""
+        vid = video.get("id") or ""
+        if not key or (key, vid) in seen:
             continue
-        try:
-            ann = _json.loads(row[0])
-        except ValueError:
-            continue
+        seen.add((key, vid))
+        ann = creative_mod.scoped_annotation(conn, key, vid)
         if isinstance(ann, dict) and ann.get("status") == "human_verified":
             ann["status"] = "auto"
             try:
-                creative_mod.save_annotation(conn, key, ann)
+                creative_mod.save_annotation(conn, key, ann,
+                                             video_id=vid)
             except ValueError:
                 pass
 
@@ -2187,25 +2202,19 @@ async def draft_review(draft_id: str, request: Request,
         raise HTTPException(status_code=409, detail={
             "error": "Only a draft ready for review can be reviewed"
                      " (status is %r)." % (draft.get("status") or "")})
-    videos = drafts_mod.list_videos(conn, did)
-    # Newest wins, mirroring the analysis binder: validation
-    # replaces, so [0] and [-1] agree unless a stale row
-    # somehow survives.
-    key = videos[-1]["creative_key"] if videos else ""
-    block = {}
-    row = None
-    if key:
-        row = conn.execute(
-            "SELECT annotation_json FROM annotations WHERE creative_key=?",
-            (key,)).fetchone()
-        if row:
-            try:
-                block = _json.loads(row[0]).get("analysis") or {}
-            except ValueError:
-                block = {}
+    video = drafts_mod.active_video(conn, did)
+    # The approval targets the bound video version's own result —
+    # never a sibling upload's row under the same creative name.
+    key = video["creative_key"] if video else ""
+    if not video or not key:
+        raise HTTPException(status_code=409, detail={
+            "error": "No validated video on this draft to review."})
+    stored = creative_mod.scoped_annotation(conn, key, video["id"])
+    block = (stored.get("analysis") if isinstance(stored, dict)
+             else None) or {}
     if not isinstance(block, dict) or not block.get("version"):
         raise HTTPException(status_code=409, detail={
-            "error": "No stored analysis to review yet."})
+            "error": "No stored analysis of this video to review yet."})
     if body.analysis_version != block.get("version"):
         raise HTTPException(status_code=409, detail={
             "error": "Analysis version %r is not current (%r): re-read "
@@ -2223,8 +2232,9 @@ async def draft_review(draft_id: str, request: Request,
         raise HTTPException(status_code=409, detail={
             "error": "Inputs changed since this analysis ran: %s" % exc})
     stored_snap = block.get("snapshot") or {}
-    for snap_key in ("video_sha256", "dataset_version",
-                     "match_confirmed_at", "client", "campaign"):
+    for snap_key in ("video_id", "media_id", "video_sha256",
+                     "dataset_version", "match_confirmed_at",
+                     "client", "campaign"):
         if (live.get(snap_key) or "") != (stored_snap.get(snap_key) or ""):
             raise HTTPException(status_code=409, detail={
                 "error": "Inputs changed since this analysis ran (%s): "
@@ -2232,14 +2242,11 @@ async def draft_review(draft_id: str, request: Request,
     review = drafts_mod.set_review(conn, did, who.id,
                                    block.get("version") or "",
                                    note=body.note)
-    try:
-        stored = _json.loads(row[0]) if row else {}
-    except (ValueError, TypeError):
-        stored = {}
     if isinstance(stored, dict):
         stored["status"] = "human_verified"
         try:
-            creative_mod.save_annotation(conn, key, stored)
+            creative_mod.save_annotation(conn, key, stored,
+                                         video_id=video["id"])
         except ValueError as exc:
             raise HTTPException(status_code=409, detail={
                 "error": "Reviewed analysis no longer validates: %s" % exc})
@@ -2257,39 +2264,53 @@ async def draft_correct(draft_id: str, request: Request,
 
     A review note cannot rewrite the underlying finding, so each
     correctable field — transcript text, hook/category values and
-    confidence, frame-label timestamps, and per-test accept/reject —
-    is validated and applied to the stored annotation (dimension
-    corrections lock like analyst confirmations). Every call mints a
-    fresh analysis revision with a {by, at, fields} log entry, and any
-    recorded review is invalidated: the correction supersedes the
-    approval and must be re-reviewed.
+    confidence, frame-label timestamps (bounded by the clip
+    duration), and per-test accept/reject — is validated and applied
+    to the bound video version's own stored annotation (dimension
+    corrections lock like analyst confirmations, and a repeated
+    correction replaces the earlier decision). Every call mints a
+    fresh analysis revision with a {by, at, fields} log entry, and
+    any recorded review is invalidated: a corrected reviewed result
+    returns to ready_for_review so it can simply be re-approved.
     """
     from urllib.parse import unquote
     from creative_intel import drafts as drafts_mod
     from creative_intel import video_analysis as video_analysis_mod
     did = unquote(draft_id)
-    _draft_owner_or_403(conn, did, who)
+    draft = _draft_owner_or_403(conn, did, who)
     try:
         body = DraftCorrectionBody.model_validate(await json_payload(request))
     except Exception as exc:
         raise HTTPException(status_code=409,
                             detail={"error": "Invalid corrections: %s" % exc})
-    videos = drafts_mod.list_videos(conn, did)
-    key = videos[-1]["creative_key"] if videos else ""
-    if not key:
+    if _draft_live_job(conn, did):
+        raise HTTPException(status_code=409, detail={
+            "error": "An analysis is still running on this draft: wait"
+                     " for it (or cancel it) before correcting."})
+    video = drafts_mod.active_video(conn, did)
+    key = video["creative_key"] if video else ""
+    if not video or not key:
         raise HTTPException(status_code=409, detail={
             "error": "Nothing to correct yet: validate the video and"
                      " analyse first."})
     corrections = {k: v for k, v in body.model_dump().items()
-                   if v is not None}
+                   if v is not None and k != "revision"}
+    was_reviewed = (draft.get("status") or "") == "reviewed"
     try:
         ann = video_analysis_mod.apply_corrections(
-            conn, key, corrections, by=who.id)
+            conn, key, corrections, by=who.id, video_id=video["id"],
+            expected_revision=body.revision or "",
+            duration_s=video.get("duration_s") or 0.0)
     except ValueError as exc:
         raise HTTPException(status_code=409,
                             detail={"error": str(exc)})
     # Corrected findings supersede any approval of the old content.
     _invalidate_draft_review(conn, did)
+    if was_reviewed:
+        # Inputs are unchanged and a fresh corrected result exists:
+        # it is ready for review, so correct-and-reapprove needs no
+        # extra transition or re-analysis.
+        drafts_mod.update_draft(conn, did, status="ready_for_review")
     paudit.audit_request(request, conn, employee_id=who.id,
                          action="draft_corrected", target=did)
     return {"draft": _draft_view(conn, _draft_or_404(conn, did)),
@@ -2360,27 +2381,30 @@ def draft_analysis(draft_id: str, request: Request,
                    conn=Depends(get_product_conn),
                    who=Depends(get_current_employee)):
     from urllib.parse import unquote
-    import json as _json
+    from creative_intel import creative as creative_mod
+    from creative_intel import drafts as drafts_mod
     _ = request
     draft = _draft_owner_or_403(conn, unquote(draft_id), who)
-    videos = _draft_view(conn, draft)["videos"]
-    # Newest wins, mirroring the analysis binder: validation
-    # replaces, so [0] and [-1] agree unless a stale row
-    # somehow survives.
-    key = videos[-1]["creative_key"] if videos else ""
+    # Identity-scoped read: the bound video version's own analysis
+    # row and transcript — never another upload's findings under the
+    # same editable creative name.
+    video = drafts_mod.active_video(conn, draft["id"])
+    key = video["creative_key"] if video else ""
     annotation, transcript = None, ""
-    if key:
-        row = conn.execute(
-            "SELECT annotation_json FROM annotations WHERE creative_key=?",
-            (key,)).fetchone()
-        if row:
-            try:
-                annotation = _json.loads(row[0])
-            except ValueError:
+    if video and key:
+        annotation = creative_mod.scoped_annotation(
+            conn, key, video["id"])
+        if isinstance(annotation, dict):
+            stored_snap = (annotation.get("analysis") or {}).get(
+                "snapshot") or {}
+            if stored_snap.get("video_id",
+                               video["id"]) != video["id"] or \
+                    (stored_snap.get("video_sha256") or "") != \
+                    (video.get("sha256") or ""):
+                # A row that cannot prove it belongs to this exact
+                # version is not this draft's analysis.
                 annotation = None
-        trow = conn.execute("SELECT transcript FROM creatives"
-                            " WHERE creative_key=?", (key,)).fetchone()
-        transcript = trow[0] if trow else ""
+        transcript = video.get("transcript") or ""
     return {"draft_id": draft["id"], "status": draft["status"],
             "creative_key": key, "annotation": annotation,
             "transcript": transcript}

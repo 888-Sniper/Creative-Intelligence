@@ -504,14 +504,24 @@ def apply_action(conn, action, payload, prov, media_dir=None, actor="",
     raise ValueError("unknown action %r" % action)
 
 
-def build_creatives_list(conn, q):
-    """Creatives with cohort-correct scoped metrics (shared)."""
+def build_creatives_list(conn, q, owner=None, admin=False):
+    """Creatives with cohort-correct scoped metrics (shared).
+
+    Per-key performance resolves through the canonical
+    video-to-record relationship: the viewer's own confirmed match
+    for a creative replaces key equality (never unions with it), so
+    a confirmed video-to-report association shows even when the
+    identifiers differ. Annotation axes read the approved-or-latest
+    scoped row for the creative name.
+    """
     cols = ["creative_key", "platform", "name", "duration_s",
             "status", "transcript"]
     rows = [dict(zip(cols, r)) for r in conn.execute(
         "SELECT creative_key, platform, name, duration_s, status,"
         " transcript FROM creatives")]
     from creative_intel import benchmarks as _bench
+    from creative_intel import creative as _creative
+    from creative_intel import drafts as _drafts
     scope = _bench.Scope.from_query(q).resolve(conn)
     norm = scope.normalized()
     ad_cols = [c[0] for c in conn.execute(
@@ -521,18 +531,14 @@ def build_creatives_list(conn, q):
         ad_rows = [dict(zip(ad_cols, v)) for v in conn.execute(
             "SELECT * FROM ads WHERE creative_key=?",
             (r["creative_key"],)).fetchall()]
+        ad_rows = _drafts.performance_rows_for_key(
+            conn, r["creative_key"], ad_rows, owner=owner,
+            admin=admin)
         # Annotation axes (hook_type, creator_vs_branded) live on the
         # creative, not the ad rows: stamp them before cohort matching
         # so those filters constrain instead of hiding everything.
-        ann_row = conn.execute(
-            "SELECT annotation_json FROM annotations WHERE creative_key=?",
-            (r["creative_key"],)).fetchone()
-        if ann_row:
-            import json as _json_ann
-            try:
-                _ann = _json_ann.loads(ann_row[0])
-            except ValueError:
-                _ann = {}
+        _ann = _creative.annotation_for_key(conn, r["creative_key"]) or {}
+        if _ann:
             for ad in ad_rows:
                 ad.setdefault("hook_type", _ann.get("hook_type", "") or "")
                 ad.setdefault("creator_vs_branded",
@@ -589,10 +595,9 @@ def build_creatives_list(conn, q):
             "roas": None if _mixed else _roas,
             "roas_coverage": _roas_cov}
         r["scope"] = scope.describe()
-        ann = conn.execute(
-            "SELECT annotation_json FROM annotations WHERE creative_key=?",
-            (r["creative_key"],)).fetchone()
-        r["annotation"] = json.loads(ann[0]) if ann else None
+        from creative_intel import creative as _creative_board
+        r["annotation"] = _creative_board.annotation_for_key(
+            conn, r["creative_key"])
         kept.append(r)
     return kept
 
@@ -664,9 +669,17 @@ def _rank_creatives(keys, per, rank_by):
     return ranking, ranking[0]
 
 
-def build_compare(conn, q):
-    """N-way creative compare with why-analysis (shared)."""
+def build_compare(conn, q, owner=None, admin=False):
+    """N-way creative compare with why-analysis (shared).
+
+    Per-key rows resolve through the canonical video-to-record
+    relationship (viewer's own confirmed match replaces key
+    equality), and the annotation reads the approved-or-latest
+    scoped row — same contract as the creatives board.
+    """
     from creative_intel import benchmarks as _bench2
+    from creative_intel import creative as _creative2
+    from creative_intel import drafts as _drafts2
     rank_by = (q.get("rank_by", ["cpa"])[0] or "cpa").lower()
     if rank_by not in COMPARE_RANK_METRICS:
         raise ValueError("rank_by must be one of %s"
@@ -693,6 +706,8 @@ def build_compare(conn, q):
         rows = [dict(zip(ad_cols, v)) for v in conn.execute(
             "SELECT * FROM ads WHERE creative_key=?",
             (key,)).fetchall()]
+        rows = _drafts2.performance_rows_for_key(
+            conn, key, rows, owner=owner, admin=admin)
         # Same scope as every other surface: a Spain
         # comparison never blends France rows.
         rows = [r for r in rows if scope.match(r)]
@@ -700,8 +715,7 @@ def build_compare(conn, q):
         impr = sum(r["impressions"] for r in rows)
         clicks = sum(r["clicks"] for r in rows)
         conv = sum(r["conversions"] for r in rows)
-        ann = conn.execute("SELECT annotation_json FROM annotations"
-                           " WHERE creative_key=?", (key,)).fetchone()
+        ann = _creative2.annotation_for_key(conn, key)
         # A14/A15: same pooled contract as benchmarks.kpis_for_rows
         # (currency metadata, mixed-scope money gating,
         # matched-population ROAS, registry vtr/view_rate split).
@@ -729,7 +743,7 @@ def build_compare(conn, q):
                     "roas": None if _mixed else _roas,
                     "roas_coverage": _roas_cov,
                     "scope": scope.describe(),
-                    "annotation": json.loads(ann[0]) if ann else None}
+                    "annotation": ann}
     if len(keys) == 2:
         out["why"] = _creative_why(keys[0], keys[1],
                                    out.get(keys[0], {}),
@@ -1159,7 +1173,7 @@ def expert2_cohort_build_route(conn, query):
     return _cohorts.build_cohort(conn, filters=filt, metric=metric)
 
 
-def expert2_report_route(conn, payload):
+def expert2_report_route(conn, payload, owner=None, admin=False):
     from creative_intel import benchmarks as _bench
     # Same review-to-zero gate as /api/export: annotation-derived
     # insights must not ship in official reports while QA reviews
@@ -1179,7 +1193,8 @@ def expert2_report_route(conn, payload):
                                  filters=payload.get("filters"),
                                  benchmark_scope=payload.get(
                                      "benchmark_scope", "filters"),
-                                 rank_by=payload.get("rank_by"))
+                                 rank_by=payload.get("rank_by"),
+                                 owner=owner, admin=admin)
     if override:
         replay.log(conn, "report-override",
                    {"campaigns": campaigns, "format": fmt,

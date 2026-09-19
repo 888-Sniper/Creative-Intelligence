@@ -64,6 +64,10 @@ test("dashboard video upload: real file, data, match, honest analyze", async ({
     page.getByRole("heading", { name: "Review and analyze" }),
   ).toBeVisible();
   await expect(page.getByText("Sample Story V1").first()).toBeVisible();
+  // Stage D shows provider readiness before Analyze is submitted
+  // (mock mode here: vision missing, so the server will refuse).
+  await expect(page.getByText(/mock mode · vision missing/i)).toBeVisible();
+  await expect(page.getByText(/What analysis sends/i)).toBeVisible();
   await page.screenshot({ path: "test-results/screens/vu-review.png" });
 
   // Confirm the match, then Analyze: no live provider in E2E, so the

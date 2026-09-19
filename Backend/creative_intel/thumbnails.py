@@ -121,11 +121,10 @@ def for_creative(conn, key: str):
     name, platform, duration_s = row[0], row[1], row[2]
     hook = ""
     try:
-        ann = conn.execute("SELECT annotation_json FROM annotations"
-                           " WHERE creative_key=?", (key,)).fetchone()
-        if ann and ann[0]:
-            import json as _json
-            hook = str(_json.loads(ann[0]).get("hook_type") or "")
+        from creative_intel import creative as _creative_mod
+        _ann = _creative_mod.annotation_for_key(conn, key)
+        if isinstance(_ann, dict):
+            hook = str(_ann.get("hook_type") or "")
     except ValueError:
         hook = ""
     return sample_svg(key, name=name, platform=platform,

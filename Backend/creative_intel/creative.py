@@ -236,14 +236,15 @@ def _confirmed_of(ann):
 
 
 def set_classification(conn, creative_key, dim, value, evidence=None,
-                       measured_recall=None):
+                       measured_recall=None, video_id=None):
     """Human correction path for one classification dimension.
 
     Validates the value, appends the supporting evidence entry and
     locks the dimension: later auto saves preserve it instead of
     silently overwriting the analyst's judgement. measured_recall may
     only be set here with an explicit study reference — never inferred
-    from logo exposure or audio mentions.
+    from logo exposure or audio mentions. Without video_id the edit
+    targets the same approved-or-latest row the global readers see.
     """
     allowed = {"opening_delivery": OPENING_DELIVERY,
                "hook_type": HOOK_TYPES, "hook_modality": HOOK_MODALITIES,
@@ -256,9 +257,10 @@ def set_classification(conn, creative_key, dim, value, evidence=None,
         raise ValueError("dimension %r is not human-confirmable" % (dim,))
     if value not in allowed:
         raise ValueError("%s must be one of %s" % (dim, list(allowed)))
-    row = conn.execute("SELECT annotation_json FROM annotations"
-                       " WHERE creative_key=?", (creative_key,)).fetchone()
-    ann = dict(json.loads(row[0])) if row else blank_annotation()
+    scope = video_id if video_id is not None \
+        else annotation_scope_for_key(conn, creative_key)
+    ann = scoped_annotation(conn, creative_key, scope)
+    ann = dict(ann) if isinstance(ann, dict) else blank_annotation()
     ann[dim] = value
     confirmed = _confirmed_of(ann)
     confirmed[dim] = value
@@ -274,7 +276,7 @@ def set_classification(conn, creative_key, dim, value, evidence=None,
                 not measured_recall.get("study"):
             raise ValueError("measured recall needs a study reference")
         ann["measured_recall"] = measured_recall
-    save_annotation(conn, creative_key, ann)
+    save_annotation(conn, creative_key, ann, video_id=scope)
     return ann
 
 
@@ -321,35 +323,63 @@ def message_class_of(ann, ads_row=None):
     return "unknown"
 
 
-def _attach_prior_media(conn, creative_key, ann):
-    """Fill source_url from the newest upload when the annotation lacks one.
+def _attach_prior_media(conn, creative_key, ann, video_id=""):
+    """Fill source_url from the bound upload when the annotation lacks one.
 
     Media uploaded before any annotation exists cannot link at upload
     time; the pipeline (or a later manual annotate) creating the first
     annotation picks that upload up here instead of leaving the
-    creative without a preview. Never overwrites an existing value.
+    creative without a preview. Prefers the media bound to this
+    asset version's video row so a shared creative name never links
+    a sibling version's bytes; falls back to the newest upload for
+    the key (legacy/global flows). Never overwrites an existing value.
     """
     if not isinstance(ann, dict) or ann.get("source_url"):
         return
-    try:
-        row = conn.execute(
-            "SELECT id FROM media WHERE creative_key=? ORDER BY id DESC"
-            " LIMIT 1", (creative_key,)).fetchone()
-    except Exception:
-        return
+    row = None
+    if video_id:
+        try:
+            video = conn.execute("SELECT media_id FROM videos WHERE id=?",
+                                 (video_id,)).fetchone()
+            if video and video[0]:
+                row = (video[0],)
+        except Exception:
+            row = None
+    if row is None:
+        try:
+            row = conn.execute(
+                "SELECT id FROM media WHERE creative_key=? ORDER BY id DESC"
+                " LIMIT 1", (creative_key,)).fetchone()
+        except Exception:
+            return
     if row:
         ann["source_url"] = "/media/%d" % row[0]
 
 
-def save_annotation(conn, creative_key, ann):
+def save_annotation(conn, creative_key, ann, video_id="", keep=(),
+                    commit=True):
+    """Persist an annotation, preserving analyst-confirmed dimensions.
+
+    Auto analysis never silently overwrites human-confirmed labels:
+    locked dimensions are restored from the stored revision — except
+    dimensions named in keep, which carry an explicit human edit that
+    must replace the previous decision (see apply_corrections: a new
+    authorised correction wins over the old locked value, and the
+    confirmed map is updated to the new value). video_id scopes the
+    row to one immutable asset version (see scoped_annotation);
+    commit=False defers the commit for a caller-owned transaction.
+    """
     ann = dict(ann)
     if ann.get("status") != "human_verified":
         # Auto analysis never silently overwrites human-confirmed
-        # labels: restore locked dimensions from the stored revision.
+        # labels: restore locked dimensions from the stored revision
+        # of the SAME scoped row (a sibling asset version's locks
+        # must never bleed across).
         try:
             row = conn.execute("SELECT annotation_json FROM annotations"
-                               " WHERE creative_key=?",
-                               (creative_key,)).fetchone()
+                               " WHERE creative_key=? AND video_id=?",
+                               (creative_key,
+                                video_id or "")).fetchone()
         except Exception:
             row = None
         if row:
@@ -357,7 +387,8 @@ def save_annotation(conn, creative_key, ann):
                 prior = json.loads(row[0])
             except (ValueError, TypeError):
                 prior = {}
-            locked = _confirmed_of(prior)
+            locked = {dim: value for dim, value in
+                      _confirmed_of(prior).items() if dim not in keep}
             if locked:
                 for dim, value in locked.items():
                     ann[dim] = value
@@ -367,29 +398,117 @@ def save_annotation(conn, creative_key, ann):
     errors = validate(ann)
     if errors:
         raise ValueError("; ".join(errors))
-    _attach_prior_media(conn, creative_key, ann)
+    _attach_prior_media(conn, creative_key, ann, video_id=video_id)
     conn.execute(
-        "INSERT INTO annotations (creative_key, schema_version, annotation_json, updated_at)"
-        " VALUES (?, ?, ?, ?) ON CONFLICT (creative_key) DO UPDATE SET"
+        "INSERT INTO annotations (creative_key, schema_version,"
+        " annotation_json, updated_at, video_id)"
+        " VALUES (?, ?, ?, ?, ?) ON CONFLICT (creative_key, video_id)"
+        " DO UPDATE SET"
         " schema_version=excluded.schema_version,"
         " annotation_json=excluded.annotation_json,"
         " updated_at=excluded.updated_at",
         (creative_key, SCHEMA_VERSION, json.dumps(ann),
-         datetime.datetime.now(datetime.timezone.utc).isoformat()))
+         datetime.datetime.now(datetime.timezone.utc).isoformat(),
+         video_id or ""))
     conn.execute("UPDATE creatives SET status=? WHERE creative_key=?",
                  (ann["status"], creative_key))
-    conn.commit()
+    if commit:
+        conn.commit()
 
 
-def mark_verified(conn, creative_key):
-    """Manual-verify hook: flip latest annotation + creative to human_verified."""
-    row = conn.execute("SELECT annotation_json FROM annotations WHERE creative_key=?",
-                       (creative_key,)).fetchone()
+def scoped_annotation(conn, creative_key, video_id):
+    """One asset version's annotation, or None.
+
+    Exact (creative_key, video_id) match only — never the legacy ''
+    row, never a sibling version's row. Draft-scoped paths (read,
+    correct, approve, export) must resolve through the draft's bound
+    video id so two uploads sharing one editable creative name can
+    never see each other's findings.
+    """
+    try:
+        row = conn.execute("SELECT annotation_json FROM annotations"
+                           " WHERE creative_key=? AND video_id=?",
+                           (creative_key, video_id or "")).fetchone()
+    except Exception:
+        return None
     if not row:
+        return None
+    try:
+        ann = json.loads(row[0])
+    except (ValueError, TypeError):
+        return None
+    return ann if isinstance(ann, dict) else None
+
+
+def _ranked_key_rows(conn, creative_key):
+    """(annotation, video_id, updated_at) rows for one creative name,
+    human_verified first, then latest stamp."""
+    try:
+        rows = conn.execute("SELECT annotation_json, video_id, updated_at"
+                            " FROM annotations WHERE creative_key=?",
+                            (creative_key,)).fetchall()
+    except Exception:
+        return []
+    anns = []
+    for row in rows or []:
+        try:
+            ann = json.loads(row[0])
+        except (ValueError, TypeError):
+            continue
+        if isinstance(ann, dict):
+            anns.append((ann, row[1] if len(row) > 1 else "",
+                         row[2] if len(row) > 2 else ""))
+    if not anns:
+        return []
+    # Human-verified first; among equals, latest stamp wins.
+    best = None
+    for entry in anns:
+        ann, _vid, stamp = entry
+        if best is None:
+            best = entry
+            continue
+        verified = ann.get("status") == "human_verified"
+        best_verified = best[0].get("status") == "human_verified"
+        if verified and not best_verified:
+            best = entry
+        elif verified == best_verified \
+                and str(stamp or "") > str(best[2] or ""):
+            best = entry
+    ranked = [best]
+    ranked.extend(e for e in anns if e is not best)
+    return ranked
+
+
+def annotation_for_key(conn, creative_key):
+    """Global reporting reader for one creative name.
+
+    Prefers the human_verified scoped row (the approved result is the
+    reporting truth), else the latest-updated row. Tenant-visible
+    surfaces keep working across asset versions without ever
+    inventing numbers.
+    """
+    ranked = _ranked_key_rows(conn, creative_key)
+    return ranked[0][0] if ranked else None
+
+
+def annotation_scope_for_key(conn, creative_key):
+    """video_id of the row annotation_for_key would return ('' when
+    none): lets global write flows target the same row they read."""
+    ranked = _ranked_key_rows(conn, creative_key)
+    return ranked[0][1] if ranked else ""
+
+
+def mark_verified(conn, creative_key, video_id=None):
+    """Manual-verify hook: flip the annotation + creative to
+    human_verified. Without video_id acts on the approved-or-latest
+    row, matching the global readers."""
+    scope = video_id if video_id is not None \
+        else annotation_scope_for_key(conn, creative_key)
+    ann = scoped_annotation(conn, creative_key, scope)
+    if not isinstance(ann, dict):
         raise ValueError("no annotation for %r: annotate first" % creative_key)
-    ann = json.loads(row[0])
     ann["status"] = "human_verified"
-    save_annotation(conn, creative_key, ann)
+    save_annotation(conn, creative_key, ann, video_id=scope)
     return ann
 
 

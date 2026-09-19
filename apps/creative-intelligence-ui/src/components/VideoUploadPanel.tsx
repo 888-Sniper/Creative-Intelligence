@@ -15,6 +15,7 @@ import {
   getAnalysis,
   getCandidates,
   getDraft,
+  getProvidersStatus,
   getVideoLimits,
   HOOK_TYPE_OPTIONS,
   importDataset,
@@ -32,6 +33,7 @@ import {
   type DraftMatch,
   type DraftView,
   type MatchSnapshot,
+  type ProvidersStatus,
   type VideoLimits,
   type VideoUploadSpec,
 } from "@/components/videoUploadApi";
@@ -497,6 +499,8 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
   const [customClient, setCustomClient] = useState(false);
   const [reviewNote, setReviewNote] = useState("");
   const [reviewBusy, setReviewBusy] = useState(false);
+  const [providerStatus, setProviderStatus] = useState<ProvidersStatus | null>(null);
+  const [providerError, setProviderError] = useState("");
   const reviewVideoRef = useRef<HTMLVideoElement | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const openerRef = useRef<Element | null>(null);
@@ -598,14 +602,18 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
   const findingsBlock = ((findings?.annotation ?? {}) as Record<string, unknown>)["analysis"] as
     Record<string, unknown> | undefined;
 
-  /** Human corrections to the stored findings. The server applies
-   *  them to the annotation (fresh revision, locked dimensions) and
-   *  invalidates any prior review, so the screen reloads the analysis
-   *  and the corrected content must be re-reviewed. */
+  /** Human corrections to the stored findings. The on-screen
+   *  result revision rides along so a stale edit against
+   *  already-corrected content is rejected instead of silently
+   *  winning; the server applies them to the annotation (fresh
+   *  revision, locked dimensions) and invalidates any prior review,
+   *  so the screen reloads the analysis and the corrected content
+   *  must be re-reviewed. */
   const runCorrection = async (corrections: DraftCorrections): Promise<void> => {
     const current = draftRef.current;
     if (!current) return;
-    const res = await correctDraft(current.id, corrections);
+    const seenRevision = String(findingsBlock?.["revision"] ?? "");
+    const res = await correctDraft(current.id, corrections, seenRevision);
     setDraft(res.draft);
     const reading = await getAnalysis(current.id).catch(() => null);
     if (reading) setFindings(reading);
@@ -665,6 +673,8 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
     setPicked([]);
     setRowsError("");
     setFindings(null);
+    setProviderStatus(null);
+    setProviderError("");
     stagedFileRef.current = null;
     setStagedName("");
     const boot = async () => {
@@ -781,6 +791,26 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  const reviewDraftId = draft?.id ?? "";
+  /** Provider/storage readiness for the review stage: refreshed
+   *  whenever the reviewer reaches it, so Analyze is offered only
+   *  against a live vision entry. The Analyze endpoint re-checks
+   *  server-side and refuses honestly; this display keeps the
+   *  screen from promising what the server will reject. */
+  useEffect(() => {
+    if (!open || stage !== "review" || !reviewDraftId) return;
+    let live = true;
+    setProviderError("");
+    getProvidersStatus()
+      .then((res) => { if (live) setProviderStatus(res); })
+      .catch((e: unknown) => {
+        if (!live) return;
+        setProviderStatus(null);
+        setProviderError(e instanceof Error ? e.message : String(e));
+      });
+    return () => { live = false; };
+  }, [open, stage, reviewDraftId]);
 
   /** Persist the working spec. Any spec change clears confirmed matches
    *  server-side, so the local match is dropped unless the caller is
@@ -1129,7 +1159,10 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
     spec.clientConfirmed && spec.client === client.trim() && spec.campaign === campaign.trim()
     && client.trim() !== "" && campaign.trim() !== "";
   // Guided order: video, then confirmed client/campaign destination,
-  // then dataset match — the server binds in the same order.
+  // then dataset match — the server binds in the same order. The
+  // readiness block above is display-only: the Analyze endpoint
+  // re-checks provider readiness server-side and refuses honestly,
+  // so the screen never overrules it in either direction.
   const canAnalyze = videoValid && grantConfirmed && matchConfirmed
     && draft?.status !== "queued" && draft?.status !== "analyzing";
   const analyzeReason = !videoValid
@@ -1500,6 +1533,32 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
                 <dt>{vu("methodLabel")}</dt>
                 <dd>{matchedMethod}</dd>
               </div>
+              <div>
+                <dt>{vu("providerTitle")}</dt>
+                <dd>
+                  {providerError
+                    ? vu("providerError", { error: providerError })
+                    : !providerStatus
+                      ? vu("providerLoading")
+                      : vu("providerSummary", {
+                        mode: providerStatus.mode || "—",
+                        vision: providerStatus.capabilities?.vision?.status === "configured"
+                          ? `${vu("providerConfigured")}${(providerStatus.capabilities.vision.adapters ?? []).length ? ` (${(providerStatus.capabilities.vision.adapters ?? []).join(", ")})` : ""}`
+                          : vu("providerMissing"),
+                      })}
+                </dd>
+              </div>
+              {providerStatus?.analysis ? (
+                <div>
+                  <dt>{vu("providerSendsTitle")}</dt>
+                  <dd>
+                    {vu("providerSendsSummary", {
+                      sends: providerStatus.analysis.sends,
+                      storage: providerStatus.analysis.storage,
+                    })}
+                  </dd>
+                </div>
+              ) : null}
             </dl>
             {warnings.length ? (
               <div style={{ marginTop: 10 }}>

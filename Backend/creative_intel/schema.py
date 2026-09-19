@@ -195,10 +195,17 @@ CREATE TABLE IF NOT EXISTS creatives (
     pipeline_json TEXT NOT NULL DEFAULT '{}'
 );
 CREATE TABLE IF NOT EXISTS annotations (
-    creative_key TEXT PRIMARY KEY,
+    creative_key TEXT NOT NULL DEFAULT '',
     schema_version TEXT NOT NULL DEFAULT 'v0',
     annotation_json TEXT NOT NULL DEFAULT '{}',
-    updated_at TEXT NOT NULL DEFAULT ''
+    updated_at TEXT NOT NULL DEFAULT '',
+    -- Immutable asset-version identity (videos.id): each uploaded
+    -- video version carries its own analysis row, so two uploads
+    -- sharing one editable creative name can never read, correct,
+    -- approve, or export each other's findings. '' is the legacy
+    -- pre-scoped row.
+    video_id TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (creative_key, video_id)
 );
 CREATE TABLE IF NOT EXISTS retention (
     creative_key TEXT NOT NULL,
@@ -381,6 +388,7 @@ CREATE TABLE IF NOT EXISTS videos (
     height INTEGER NOT NULL DEFAULT 0,
     sha256 TEXT NOT NULL DEFAULT '',
     validation_json TEXT NOT NULL DEFAULT '{}',
+    transcript TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS videos_draft ON videos (draft_id);
@@ -470,6 +478,44 @@ def ensure_sync_key(conn):
         if not got or (got[0] or "") != want:
             raise
     return True
+
+
+def _migrate_annotations(conn):
+    """Rebuild pre-scoped annotations to the (creative_key, video_id)
+    identity.
+
+    Idempotent: fresh databases already match the static DDL, and the
+    rebuild runs once — when video_id is missing — preserving every
+    existing row under the legacy '' video scope.
+    """
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(annotations)")]
+    if not cols:
+        conn.execute(
+            "CREATE TABLE annotations ("
+            "creative_key TEXT NOT NULL DEFAULT '',"
+            " schema_version TEXT NOT NULL DEFAULT 'v0',"
+            " annotation_json TEXT NOT NULL DEFAULT '{}',"
+            " updated_at TEXT NOT NULL DEFAULT '',"
+            " video_id TEXT NOT NULL DEFAULT '',"
+            " PRIMARY KEY (creative_key, video_id))")
+        return
+    if "video_id" in cols:
+        return
+    conn.execute(
+        "CREATE TABLE annotations_new ("
+        "creative_key TEXT NOT NULL DEFAULT '',"
+        " schema_version TEXT NOT NULL DEFAULT 'v0',"
+        " annotation_json TEXT NOT NULL DEFAULT '{}',"
+        " updated_at TEXT NOT NULL DEFAULT '',"
+        " video_id TEXT NOT NULL DEFAULT '',"
+        " PRIMARY KEY (creative_key, video_id))")
+    conn.execute(
+        "INSERT INTO annotations_new (creative_key, schema_version,"
+        " annotation_json, updated_at, video_id)"
+        " SELECT creative_key, schema_version, annotation_json,"
+        " updated_at, '' FROM annotations")
+    conn.execute("DROP TABLE annotations")
+    conn.execute("ALTER TABLE annotations_new RENAME TO annotations")
 
 
 def migrate(conn):
@@ -658,7 +704,13 @@ def migrate(conn):
         " height INTEGER NOT NULL DEFAULT 0,"
         " sha256 TEXT NOT NULL DEFAULT '',"
         " validation_json TEXT NOT NULL DEFAULT '{}',"
+        " transcript TEXT NOT NULL DEFAULT '',"
         " created_at TEXT NOT NULL DEFAULT '')")
+    video_cols = {row[1] for row in
+                  conn.execute("PRAGMA table_info(videos)")}
+    if "transcript" not in video_cols:
+        conn.execute("ALTER TABLE videos ADD COLUMN"
+                     " transcript TEXT NOT NULL DEFAULT ''")
     conn.execute("CREATE INDEX IF NOT EXISTS videos_draft"
                  " ON videos (draft_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS videos_creative"
@@ -674,6 +726,7 @@ def migrate(conn):
         " created_at TEXT NOT NULL DEFAULT '')")
     conn.execute("CREATE INDEX IF NOT EXISTS datasets_draft"
                  " ON datasets (draft_id)")
+    _migrate_annotations(conn)
     conn.execute(
         "CREATE TABLE IF NOT EXISTS matches ("
         "draft_id TEXT NOT NULL DEFAULT '',"

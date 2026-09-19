@@ -52,18 +52,21 @@ def _ads(conn):
 
 
 def _annotations(conn):
-    """Map creative_key -> annotation dict ({} when absent or unparseable)."""
+    """Map creative_key -> annotation dict ({} when absent or unparseable).
+
+    Reads the approved-or-latest scoped row per creative name so QA
+    verdicts track the same findings the reporting surfaces show.
+    """
+    from creative_intel import creative as _creative_mod
     try:
-        pairs = conn.execute(
-            "SELECT creative_key, annotation_json FROM annotations").fetchall()
+        keys = [row[0] for row in conn.execute(
+            "SELECT DISTINCT creative_key FROM annotations").fetchall()]
     except Exception:
         return {}
     out = {}
-    for key, raw in pairs:
-        try:
-            out[key] = json.loads(raw) if raw else {}
-        except ValueError:
-            out[key] = {}
+    for key in keys:
+        ann = _creative_mod.annotation_for_key(conn, key)
+        out[key] = ann if isinstance(ann, dict) else {}
     return out
 
 
@@ -624,11 +627,10 @@ def answer(conn, question, llm=None, scope=None):
                              % (_lname, _metric_name, shown, top_disp))
             cite("Uploaded CSV")
         key = leaders[0] if ranked else None
-        ann = conn.execute(
-            "SELECT annotation_json FROM annotations WHERE creative_key=?",
-            (key,)).fetchone() if _level == "creative_key" and ranked else None
-        if ann and ann[0]:
-            a = json.loads(ann[0])
+        from creative_intel import creative as _creative_mod
+        a = _creative_mod.annotation_for_key(conn, key) \
+            if _level == "creative_key" and ranked and key else None
+        if isinstance(a, dict):
             parts.append("Annotation: hook=%s, format=%s."
                          % (a.get("hook_type", "?"),
                             a.get("creator_vs_branded", "?")))

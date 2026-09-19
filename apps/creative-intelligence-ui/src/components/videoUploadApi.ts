@@ -213,6 +213,21 @@ export interface AnalyzeResp {
   poll: string;
 }
 
+/** Authenticated AI readiness for the review stage (same shape as
+ *  GET /api/providers/status): per-capability configured/missing.
+ *  Video analysis needs a configured vision entry in live mode —
+ *  the Analyze submit stays disabled until then, and the Analyze
+ *  endpoint itself re-checks and refuses honestly on 409. */
+export interface ProvidersStatus {
+  mode: string;
+  capabilities: Record<string, { status: string; adapters: string[] }>;
+  analysis?: { sends: string; storage: string };
+}
+
+export function getProvidersStatus(): Promise<ProvidersStatus> {
+  return api<ProvidersStatus>("GET", "/api/providers/status");
+}
+
 /** Binds the immutable snapshot and enqueues the analysis job.
  *  Throws ApiError with the server's honest reason (preconditions,
  *  provider readiness, duplicate submit) on 409. */
@@ -323,14 +338,17 @@ export const TEST_STATUS_OPTIONS = ["suggested", "accepted", "rejected"];
 
 /** Human corrections to the stored findings: transcript text,
  *  hook/category values, frame moments, per-test accept/reject.
- *  The server validates, locks corrected dimensions, mints a fresh
- *  revision, and invalidates any prior review of the old content. */
+ *  revision is the result the reviewer saw on screen: the server
+ *  rejects a stale edit against already-corrected content instead
+ *  of silently winning. The server validates, locks corrected
+ *  dimensions, mints a fresh revision, and invalidates any prior
+ *  review of the old content. */
 export function correctDraft(
-  draftId: string, corrections: DraftCorrections,
+  draftId: string, corrections: DraftCorrections, revision = "",
 ): Promise<DraftCorrectionResp> {
   return api<DraftCorrectionResp>(
     "POST", `/api/drafts/${encodeURIComponent(draftId)}/corrections`,
-    corrections,
+    { ...corrections, revision },
   );
 }
 

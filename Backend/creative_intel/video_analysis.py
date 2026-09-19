@@ -97,19 +97,7 @@ def bind_snapshot(conn, draft_id):
     draft = drafts_mod.get_draft(conn, draft_id)
     if draft is None:
         raise AnalysisUnavailable("unknown upload draft")
-    videos = drafts_mod.list_videos(conn, draft_id)
-    video = None
-    # Newest valid row wins: validation replaces (never appends
-    # history), so the active version is the latest one even if an
-    # older row somehow survives.
-    for cand in reversed(videos):
-        try:
-            verdict = json.loads(cand.get("validation_json") or "{}")
-        except ValueError:
-            continue
-        if verdict.get("status") == "valid":
-            video = cand
-            break
+    video = drafts_mod.active_video(conn, draft_id)
     if video is None:
         raise AnalysisUnavailable("validate the video before analysing")
     try:
@@ -232,11 +220,14 @@ def measured_from_records(records):
     # denominator (or any other unknown metric) prevents only its own
     # ratio — never erases other known measurements. Only records with
     # BOTH impressions and link clicks known enter the CTR pool;
-    # unavailable totals stay out, genuine zeros stay in.
+    # unavailable totals stay out, genuine zeros stay in. A total with
+    # no known contributor at all is returned as None ("not supplied"),
+    # never as a false zero.
     totals = {"records": 0, "impressions": 0, "link_clicks": 0,
               "clicks_all": 0, "spend": 0.0, "conversions": 0.0,
               "video_views": 0, "views_25": 0, "views_50": 0,
               "views_75": 0, "views_100": 0}
+    known = set()
     warnings = []
     pool_impressions = 0
     pool_clicks = 0
@@ -285,8 +276,10 @@ def measured_from_records(records):
                 "pooled totals" % rec.get("id"))
         if imp is not None:
             totals["impressions"] += imp
+            known.add("impressions")
         if lnk is not None:
             totals["link_clicks"] += lnk
+            known.add("link_clicks")
         # The CTR pool needs BOTH sides known: unknown clicks can
         # never drag a rate to 0%, and each known total above is still
         # preserved when the other side is missing.
@@ -302,14 +295,17 @@ def measured_from_records(records):
             value = _num(rec.get(key))
             if value is not None:
                 totals[num or key] += value
+                known.add(num or key)
         if "conversions" not in missing:
             value = _float(rec.get("conversions"))
             if value is not None:
                 totals["conversions"] += value
+                known.add("conversions")
         if "spend" not in missing:
             amount = _float(rec.get("spend"))
             if amount is not None:
                 totals["spend"] += amount
+                known.add("spend")
                 cur = str(rec.get("currency") or "").strip() or "unspecified"
                 spend_by_currency[cur] = spend_by_currency.get(cur, 0.0) \
                     + amount
@@ -336,6 +332,11 @@ def measured_from_records(records):
         totals["spend"] = None
         warnings.append("mixed currencies %s: spend kept per-currency, "
                         "not combined" % sorted(currencies))
+    for total_key in ("impressions", "link_clicks", "clicks_all",
+                      "spend", "conversions", "video_views", "views_25",
+                      "views_50", "views_75", "views_100"):
+        if total_key not in known:
+            totals[total_key] = None
     coverage = {"platforms": sorted(platforms),
                 "currencies": sorted(currencies),
                 "date_range": [min(dates), max(dates)] if dates else [],
@@ -414,12 +415,14 @@ def run(conn, snapshot, owner="", media_dir="", providers=None,
     fresh = check_snapshot(conn, snapshot)
     checkpoint(5, "snapshot")
     key = fresh["creative_key"]
+    video_id = fresh["video_id"]
     # Before any provider work: a late result must never overwrite a
-    # newer analysis. (The pipeline itself no longer writes — see
-    # persist=False below — so this guard only ever sees other jobs'
-    # rows, never this job's own partial output.)
-    _guard_not_stale(conn, key, queued_at)
-    pre_at = _analysis_at(conn, key)
+    # newer analysis of the same asset version. (The pipeline itself
+    # no longer writes — see persist=False below — so these guards
+    # only ever see other jobs' rows, never this job's own partial
+    # output.)
+    _guard_not_stale(conn, key, queued_at, video_id)
+    pre_identity = _analysis_identity(conn, key, video_id)
     conn.execute(
         "INSERT OR IGNORE INTO creatives (creative_key, platform, name,"
         " status) VALUES (?, ?, ?, 'auto')",
@@ -470,11 +473,11 @@ def run(conn, snapshot, owner="", media_dir="", providers=None,
     # this one was running. A changed stamp here proves a concurrent
     # finisher — never overwrite it.
     fresh = check_snapshot(conn, snapshot)
-    _guard_not_stale(conn, key, queued_at)
-    if _analysis_at(conn, key) != pre_at:
+    _guard_not_stale(conn, key, queued_at, video_id)
+    if _analysis_identity(conn, key, video_id) != pre_identity:
         raise AnalysisUnavailable(
-            "another analysis finished while this one was running: "
-            "discarding this result")
+            "another analysis finished or the findings were corrected"
+            " while this one was running: discarding this result")
     checkpoint(90, "measured")
     measured = measured_from_records(fresh["records"])
     ann = report["annotation"]
@@ -497,31 +500,48 @@ def run(conn, snapshot, owner="", media_dir="", providers=None,
         "coverage": {"frames": len(prep["images"]),
                      "clip_s": fresh["duration_s"]},
         "snapshot": {k: fresh[k] for k in
-                     ("video_sha256", "dataset_version",
-                      "match_confirmed_at", "match_method",
-                      "client", "campaign")},
+                     ("video_id", "media_id", "video_sha256",
+                      "dataset_version", "match_confirmed_at",
+                      "match_method", "client", "campaign")},
         "measured": measured,
         "suggested_tests": suggest_tests(ann, measured, transcript)}
-    # Final gate immediately before publish: cancellation and
-    # freshness are re-checked after the last provider-derived
-    # computation, while still nothing has been written.
+    # Final gate immediately before publish: the snapshot is re-bound
+    # (a dataset change or cleared match after the post-pipeline
+    # check aborts here — the old result is never saved), then
+    # cancellation, the queued-at guard, and the revision identity
+    # are re-checked while still nothing has been written.
     checkpoint(95, "publish")
-    _guard_not_stale(conn, key, queued_at)
-    if _analysis_at(conn, key) != pre_at:
+    fresh = check_snapshot(conn, snapshot)
+    _guard_not_stale(conn, key, queued_at, video_id)
+    if _analysis_identity(conn, key, video_id) != pre_identity:
         raise AnalysisUnavailable(
-            "another analysis finished while this one was running: "
-            "discarding this result")
-    # Publish the complete result in one step: generated derivatives
-    # first, then the annotation carrying the new unique revision,
-    # then the draft status. No publish-then-repair: a failure here
-    # raises before any dependent step, never after a partial write.
-    conn.execute("UPDATE creatives SET transcript=?, pipeline_json=?"
-                 " WHERE creative_key=?",
-                 (transcript, json.dumps(report["stages"]), key))
-    creative_mod.save_annotation(conn, key, ann)
-    drafts_mod.update_draft(conn, fresh["draft_id"],
-                            status="ready_for_review")
-    conn.commit()
+            "another analysis finished or the findings were corrected"
+            " while this one was running: discarding this result")
+    # Publish the complete result in one all-or-nothing transaction:
+    # the version's own transcript, the global display copies, the
+    # annotation carrying the new unique revision, and the draft
+    # status. No publish-then-repair, no split commits.
+    if fresh["media_id"]:
+        ann.setdefault("source_url", "/media/%d" % fresh["media_id"])
+    try:
+        if not conn.in_transaction:
+            conn.execute("BEGIN IMMEDIATE")
+        drafts_mod.set_video_transcript(conn, video_id, transcript,
+                                        commit=False)
+        conn.execute("UPDATE creatives SET transcript=?,"
+                     " pipeline_json=? WHERE creative_key=?",
+                     (transcript, json.dumps(report["stages"]), key))
+        creative_mod.save_annotation(conn, key, ann, video_id=video_id,
+                                     commit=False)
+        drafts_mod.update_draft(conn, fresh["draft_id"],
+                                status="ready_for_review", commit=False)
+        conn.commit()
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
     return {"creative_key": key, "draft_id": fresh["draft_id"],
             "stages": report["stages"], "measured": measured,
             "analysis_version": ANALYSIS_VERSION,
@@ -559,19 +579,32 @@ def _correction_dims():
     }
 
 
-def apply_corrections(conn, creative_key, corrections, by=""):
-    """Apply human corrections to a stored analysis; returns the updated
-    annotation.
+def apply_corrections(conn, creative_key, corrections, by="",
+                      video_id="", expected_revision="",
+                      duration_s=None):
+    """Apply human corrections to a stored analysis; returns the
+    actually persisted annotation (re-read after save).
 
-    Only the correctable fields are accepted; unknown fields, illegal
-    enum values, out-of-range confidences/timestamps, and verdicts for
-    unknown test ids raise ValueError. Dimension corrections lock like
-    analyst confirmations. Every call mints a fresh analysis revision
-    and appends a {by, at, fields} log entry, so an approval granted
-    before the correction can never silently cover the new content —
-    the caller invalidates any recorded review.
+    The correction targets one immutable asset version (video_id):
+    the stored row and its snapshot identity must belong to that
+    version, so one upload can never edit a sibling version's
+    findings. expected_revision (when given) must equal the stored
+    revision — a stale edit against already-corrected content is
+    rejected instead of silently winning. Only the correctable fields
+    are accepted; unknown fields, illegal enum values, out-of-range
+    confidences/timestamps (frame moments are bounded by the clip
+    duration when known), and verdicts for unknown test ids raise
+    ValueError. Dimension corrections lock like analyst
+    confirmations, and the save preserves exactly the corrected
+    values (keep=) instead of restoring the previous locked ones —
+    a repeated correction replaces the earlier decision. Every call
+    mints a fresh analysis revision and appends a {by, at, fields}
+    log entry, so an approval granted before the correction can never
+    silently cover the new content — the caller invalidates any
+    recorded review.
     """
     from creative_intel import creative as creative_mod
+    from creative_intel import drafts as drafts_mod
     if not isinstance(corrections, dict) or not corrections:
         raise ValueError("corrections need at least one field")
     dims = _correction_dims()
@@ -581,17 +614,26 @@ def apply_corrections(conn, creative_key, corrections, by=""):
     if unknown:
         raise ValueError("uncorrectable field(s): %s"
                          % ", ".join(sorted(unknown)[:5]))
-    row = conn.execute("SELECT annotation_json FROM annotations"
-                       " WHERE creative_key=?", (creative_key,)).fetchone()
-    if not row:
-        raise ValueError("no stored analysis to correct")
-    try:
-        ann = json.loads(row[0])
-    except ValueError:
-        raise ValueError("no stored analysis to correct")
+    ann = creative_mod.scoped_annotation(conn, creative_key, video_id)
     if not isinstance(ann, dict) \
             or not isinstance(ann.get("analysis"), dict):
-        raise ValueError("no finished analysis to correct yet")
+        raise ValueError("no stored analysis of this video to correct")
+    stored_snap = ann["analysis"].get("snapshot") or {}
+    if video_id and stored_snap.get("video_id", video_id) != video_id:
+        raise ValueError("stored analysis belongs to another video")
+    if expected_revision and ann["analysis"].get("revision", "") \
+            != expected_revision:
+        raise ValueError("stored result changed since you read it: "
+                         "re-read the findings and correct again")
+    if duration_s is not None:
+        try:
+            clip_s = float(duration_s)
+        except (TypeError, ValueError):
+            raise ValueError("clip duration is unavailable")
+        if clip_s <= 0:
+            raise ValueError("clip duration is unavailable")
+    else:
+        clip_s = None
     touched = []
 
     def _confirm(dim, value):
@@ -642,6 +684,10 @@ def apply_corrections(conn, creative_key, corrections, by=""):
                 raise ValueError("frame moment t_sec must be numeric")
             if moment < 0:
                 raise ValueError("frame moment t_sec cannot be negative")
+            if clip_s is not None and moment > clip_s:
+                raise ValueError(
+                    "frame moment t_sec %.1f exceeds the %.1f-second"
+                    " clip" % (moment, clip_s))
             label = item.get("label", "")
             if not isinstance(label, str) \
                     or len(label) > MAX_CORRECTION_LABEL:
@@ -687,6 +733,8 @@ def apply_corrections(conn, creative_key, corrections, by=""):
                 or len(text) > MAX_CORRECTION_TRANSCRIPT:
             raise ValueError("transcript must be text of at most %d chars"
                              % MAX_CORRECTION_TRANSCRIPT)
+        if video_id:
+            drafts_mod.set_video_transcript(conn, video_id, text)
         conn.execute("UPDATE creatives SET transcript=? WHERE creative_key=?",
                      (text, creative_key))
         touched.append("transcript")
@@ -699,9 +747,17 @@ def apply_corrections(conn, creative_key, corrections, by=""):
     log.append({"by": by or "human", "at": utcnow(),
                 "fields": sorted(touched)})
     ann["analysis"]["revision"] = uuid.uuid4().hex
-    creative_mod.save_annotation(conn, creative_key, ann)
+    # keep=touched: the corrected values replace the previous locked
+    # decisions instead of being restored over. Return the row as
+    # actually persisted — never the pre-save dict.
+    creative_mod.save_annotation(conn, creative_key, ann,
+                                 video_id=video_id, keep=touched)
     conn.commit()
-    return ann
+    persisted = creative_mod.scoped_annotation(conn, creative_key,
+                                               video_id)
+    if not isinstance(persisted, dict):
+        raise ValueError("correction did not persist")
+    return persisted
 
 
 def _vision_model(prov):
@@ -712,14 +768,34 @@ def _vision_model(prov):
         return ""
 
 
-def _analysis_at(conn, creative_key):
+def _scoped_block(conn, creative_key, video_id=""):
+    """The stored analysis block for one asset version, or {}."""
+    from creative_intel import creative as creative_mod
+    ann = creative_mod.scoped_annotation(conn, creative_key, video_id)
+    if not isinstance(ann, dict):
+        return {}
+    block = ann.get("analysis")
+    return block if isinstance(block, dict) else {}
+
+
+def _analysis_at(conn, creative_key, video_id=""):
     """Stamp of the currently stored analysis block, or ''."""
-    row = conn.execute("SELECT annotation_json FROM annotations"
-                       " WHERE creative_key=?", (creative_key,)).fetchone()
-    if not row:
-        return ""
     try:
-        return (json.loads(row[0]).get("analysis") or {}).get("at", "")
+        return _scoped_block(conn, creative_key, video_id).get("at", "")
+    except ValueError:
+        return ""
+
+
+def _analysis_revision(conn, creative_key, video_id=""):
+    """Unique revision of the stored analysis block, or ''.
+
+    Human corrections mint a fresh revision without touching `at`,
+    so staleness checks must compare revisions — not stamps — to
+    notice a correction that landed mid-run.
+    """
+    try:
+        return _scoped_block(conn, creative_key, video_id).get(
+            "revision", "")
     except ValueError:
         return ""
 
@@ -736,16 +812,18 @@ def _parse_stamp(value):
     return moment
 
 
-def _guard_not_stale(conn, creative_key, queued_at):
-    """A late result never overwrites a newer analysis."""
+def _analysis_identity(conn, creative_key, video_id=""):
+    """(revision, at) of the stored analysis block for one version."""
+    block = _scoped_block(conn, creative_key, video_id)
+    return (block.get("revision", ""), block.get("at", ""))
+
+
+def _guard_not_stale(conn, creative_key, queued_at, video_id=""):
+    """A late result never overwrites a newer analysis (same version)."""
     if not queued_at:
         return
-    row = conn.execute("SELECT annotation_json FROM annotations"
-                       " WHERE creative_key=?", (creative_key,)).fetchone()
-    if not row:
-        return
     try:
-        prior = (json.loads(row[0]).get("analysis") or {}).get("at", "")
+        prior = _scoped_block(conn, creative_key, video_id).get("at", "")
     except ValueError:
         return
     if not prior:

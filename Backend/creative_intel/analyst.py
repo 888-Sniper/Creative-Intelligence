@@ -91,17 +91,12 @@ def durations_for(conn, creative_keys):
 
 
 def annotations_for(conn, creative_keys):
-    """Latest annotations + status keyed by creative_key."""
+    """Approved-or-latest annotations + status keyed by creative_key."""
+    from creative_intel import creative as _creative_mod
     out = {}
     for key in creative_keys:
-        row = conn.execute("SELECT annotation_json FROM annotations"
-                           " WHERE creative_key=?", (key,)).fetchone()
-        if not row:
-            out[key] = (None, "none")
-            continue
-        try:
-            ann = json.loads(row[0])
-        except (ValueError, TypeError):
+        ann = _creative_mod.annotation_for_key(conn, key)
+        if not isinstance(ann, dict):
             out[key] = (None, "none")
             continue
         status = "human_verified" if ann.get("status") == \

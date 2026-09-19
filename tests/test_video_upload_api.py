@@ -657,12 +657,15 @@ def _seed_reviewable(conn, draft_id, revision="r1"):
             (draft_id,)).fetchone()[0] or "{}")
     except ValueError:
         _spec = {}
+    video = conn.execute(
+        "SELECT id, media_id, sha256 FROM videos WHERE draft_id=?",
+        (draft_id,)).fetchone()
     seed["analysis"] = {
         "version": "v1", "revision": revision,
         "snapshot": {
-            "video_sha256": conn.execute(
-                "SELECT sha256 FROM videos WHERE draft_id=?",
-                (draft_id,)).fetchone()[0],
+            "video_id": video[0],
+            "media_id": video[1],
+            "video_sha256": video[2],
             "dataset_version": conn.execute(
                 "SELECT dataset_version FROM drafts WHERE id=?",
                 (draft_id,)).fetchone()[0],
@@ -672,11 +675,8 @@ def _seed_reviewable(conn, draft_id, revision="r1"):
             "client": _spec.get("client") or "",
             "campaign": _spec.get("campaign") or "",
             "match_method": "manual"}}
-    conn.execute(
-        "INSERT INTO annotations (creative_key, schema_version,"
-        " annotation_json, updated_at) VALUES ("
-        "'video-upload-sample', 'v0', ?, '')",
-        (_json.dumps(seed),))
+    creative_mod.save_annotation(conn, "video-upload-sample", seed,
+                                 video_id=video[0])
     conn.commit()
 
 

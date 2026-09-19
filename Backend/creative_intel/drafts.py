@@ -116,9 +116,10 @@ def list_drafts(conn, owner_employee_id):
 
 
 def update_draft(conn, draft_id, status=None, spec=None,
-                 dataset_version=None):
+                 dataset_version=None, commit=True):
     """Patch mutable draft fields; unknown statuses are rejected
-    fail-closed. Returns True when the row exists."""
+    fail-closed. Returns True when the row exists. commit=False
+    defers the commit for a caller-owned transaction."""
     did = _require(draft_id, "draft_id")
     sets, args = [], []
     if status is not None:
@@ -139,7 +140,8 @@ def update_draft(conn, draft_id, status=None, spec=None,
     args.append(did)
     cur = conn.execute("UPDATE drafts SET %s WHERE id = ?"
                        % ", ".join(sets), args)
-    conn.commit()
+    if commit:
+        conn.commit()
     return cur.rowcount > 0
 
 
@@ -163,6 +165,36 @@ def list_videos(conn, draft_id):
     return _rows(conn, "SELECT * FROM videos WHERE draft_id = ?"
                        " ORDER BY rowid",
                  (_require(draft_id, "draft_id"),))
+
+
+def active_video(conn, draft_id):
+    """The draft's bound video version, or None.
+
+    Newest valid row wins: validation replaces (never appends
+    history), so the active version is the latest valid one even if
+    an older row somehow survives. The row id is the immutable
+    asset-version identity used to scope analysis reads and writes.
+    """
+    for cand in reversed(list_videos(conn, draft_id)):
+        try:
+            verdict = json.loads(cand.get("validation_json") or "{}")
+        except ValueError:
+            continue
+        if verdict.get("status") == "valid":
+            return cand
+    return None
+
+
+def set_video_transcript(conn, video_id, text, commit=True):
+    """Store a video version's own transcript on its immutable row.
+
+    Per-version transcripts die with the draft (video rows are
+    draft-owned); the creatives copy stays the global display record.
+    """
+    conn.execute("UPDATE videos SET transcript=? WHERE id=?",
+                 (text or "", _require(video_id, "video_id")))
+    if commit:
+        conn.commit()
 
 
 def clear_videos(conn, draft_id):
@@ -251,6 +283,105 @@ def get_match(conn, draft_id, creative_key):
                       " AND creative_key = ?",
                 (_require(draft_id, "draft_id"),
                  _require(creative_key, "creative_key")))
+
+
+def confirmed_records_for_key(conn, creative_key, owner=None,
+                               admin=False):
+    """Latest confirmed match snapshots for one creative name, or None.
+
+    Owner-scoped: the viewer's own draft-owned confirmation wins;
+    administrators may use any owner's. Match selections are private
+    draft data, so one employee's selection is never borrowed for
+    another employee's views — without your own confirmation you see
+    key-equal rows, never someone else's pick.
+    """
+    try:
+        rows = conn.execute(
+            "SELECT m.record_json, d.owner_employee_id FROM matches m"
+            " JOIN drafts d ON d.id = m.draft_id"
+            " WHERE m.creative_key = ? AND m.confirmed = 1"
+            " ORDER BY m.confirmed_at DESC",
+            (_require(creative_key, "creative_key"),)).fetchall()
+    except Exception:
+        return None
+    for record_json, match_owner in rows or []:
+        if not admin and owner is not None \
+                and (match_owner or "") != owner:
+            continue
+        try:
+            records = json.loads(record_json or "[]")
+        except ValueError:
+            continue
+        if isinstance(records, list) and records:
+            return records
+    return None
+
+
+def performance_rows_for_key(conn, creative_key, ads_rows, owner=None,
+                             admin=False):
+    """Canonical per-key performance for reporting surfaces.
+
+    The confirmed video-to-record set replaces key equality (never
+    unions with it): a confirmed 6,000-impression match shows instead
+    of a key-query 0 when the video and report identifiers differ.
+    Without an applicable confirmation, the key-equal ads rows stand.
+    Snapshots are shaped like ads rows (missing columns read None)
+    so downstream sums and scope filters behave identically.
+    """
+    confirmed = confirmed_records_for_key(
+        conn, creative_key, owner=owner, admin=admin)
+    if confirmed is None:
+        return ads_rows
+    # Shape snapshots exactly like ads rows: columns the frozen
+    # snapshot does not carry (revenue, reach, ...) take the ads
+    # table's own defaults, so downstream sums, scope filters, and
+    # money helpers behave identically to key-equal rows.
+    try:
+        info = conn.execute("PRAGMA table_info(ads)").fetchall()
+    except Exception:
+        info = []
+    fills = {}
+    for col in info:
+        ctype = str(col[2] or "").upper()
+        fills[col[1]] = 0 if ("INT" in ctype or "REAL" in ctype
+                              or "FLOA" in ctype or "DOUB" in ctype
+                              or "NUM" in ctype) else ""
+    shaped = []
+    for rec in confirmed:
+        if not isinstance(rec, dict):
+            continue
+        if fills:
+            shaped.append({col: rec.get(col) if rec.get(col) is not None
+                           else fill for col, fill in fills.items()})
+        else:
+            shaped.append(dict(rec))
+    return shaped
+
+
+def confirmed_match_keys(conn, owner=None, admin=False):
+    """Creative names with an applicable confirmed match.
+
+    Lets campaign listings surface videos whose confirmed records
+    live under a different report-side identifier: the key set is
+    the union of observed ads keys and confirmed match keys, with
+    the same owner scoping as confirmed_records_for_key.
+    """
+    try:
+        rows = conn.execute(
+            "SELECT m.creative_key, d.owner_employee_id FROM matches m"
+            " JOIN drafts d ON d.id = m.draft_id"
+            " WHERE m.confirmed = 1").fetchall()
+    except Exception:
+        return set()
+    keys = set()
+    for key, match_owner in rows or []:
+        if not key:
+            continue
+        if not admin and owner is not None \
+                and (match_owner or "") != owner:
+            continue
+        keys.add(key)
+    return keys
 
 
 def clear_matches(conn, draft_id):

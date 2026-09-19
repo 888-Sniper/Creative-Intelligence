@@ -26,20 +26,22 @@ def check_reviews(conn):
 
 
 def build_one_pager(conn, creative_keys, benchmarks, override=False):
-    import json
     missing = []
     cards = []
+    from creative_intel import creative as _creative_mod
     for key in creative_keys:
         row = conn.execute(
-            "SELECT c.name, c.platform, c.transcript, a.annotation_json"
-            " FROM creatives c LEFT JOIN annotations a"
-            " ON c.creative_key=a.creative_key WHERE c.creative_key=?",
+            "SELECT name, platform, transcript FROM creatives"
+            " WHERE creative_key=?",
             (key,)).fetchone()
         if not row:
             missing.append(key + " (unknown)")
             continue
-        name, platform, transcript, ann_json = row
-        ann = json.loads(ann_json) if ann_json else {}
+        name, platform, transcript = row
+        # Export the approved result: the human_verified scoped row
+        # when one exists, else the latest — never an arbitrary
+        # sibling version's findings.
+        ann = _creative_mod.annotation_for_key(conn, key) or {}
         if ann.get("status") != "human_verified" and not override:
             missing.append(key)
             continue

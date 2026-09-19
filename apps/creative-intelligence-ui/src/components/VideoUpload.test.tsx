@@ -430,6 +430,35 @@ describe("VideoUpload guided panel", () => {
     expect(screen.getByText("Confirm the dataset match to enable analysis.")).toBeDefined();
   });
 
+  it("shows provider and sends readiness on the review stage", async () => {
+    window.localStorage.setItem("ci-video-draft:e7", "d1");
+    panelBackend([
+      (m, u) => (u === "/api/providers/status" && m === "GET"
+        ? {
+          mode: "live",
+          capabilities: {
+            vision: { status: "configured", adapters: ["gemini"] },
+            stt: { status: "missing", adapters: [] },
+            llm: { status: "missing", adapters: [] },
+          },
+          analysis: { sends: "sampled frames", storage: "private store" },
+        }
+        : undefined),
+    ]);
+    render(
+      <MemoryRouter>
+        <VideoUploadPanel open={{ draftId: "d1", stage: "review" }} employeeId="e7" onClose={() => undefined} />
+      </MemoryRouter>,
+    );
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Review and analyze" })).toBeDefined();
+    });
+    await waitFor(() => {
+      expect(screen.getByText("live mode · vision configured (gemini).")).toBeDefined();
+    });
+    expect(screen.getByText("Sends sampled frames. private store.")).toBeDefined();
+  });
+
   it("confirms the match and queues analysis via the analyze endpoint", async () => {
     window.localStorage.setItem("ci-video-draft:e7", "d1");
     const { calls } = panelBackend([
@@ -923,6 +952,9 @@ describe("VideoUpload guided panel", () => {
       expect((posted?.body as Record<string, unknown>)?.["tests"]).toEqual([
         { id: "hook-clarity", status: "accepted" },
       ]);
+      // The on-screen result revision rides along so a stale edit is
+      // rejected instead of silently winning.
+      expect((posted?.body as Record<string, unknown>)?.["revision"]).toBe("rev-0");
     });
     // Transcript + hook + moment corrections ride the same endpoint.
     fireEvent.click(screen.getByRole("button", { name: "Correct findings" }));

@@ -26,3 +26,10 @@ def test_reports_capabilities_without_secrets(tmp_db, monkeypatch):
             "configured", "missing")
         assert isinstance(body["capabilities"][cap]["adapters"], list)
     assert "dummy-secret-xyz" not in r.text
+    # The upload review stage shows these before Analyze is
+    # submitted: what would be sent and where derived media lives.
+    assert isinstance(body["analysis"]["sends"], str)
+    assert "raw video file" in body["analysis"]["sends"]
+    assert isinstance(body["analysis"]["storage"], str)
+    assert "dummy-secret-xyz" not in body["analysis"]["sends"]
+    assert "dummy-secret-xyz" not in body["analysis"]["storage"]

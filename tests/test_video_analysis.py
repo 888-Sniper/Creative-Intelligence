@@ -425,16 +425,16 @@ def test_concurrent_finisher_aborts_mid_run(tmp_path, monkeypatch):
     """A newer stamp landing mid-run aborts before persistence (M2)."""
     conn, store, did = bound_db(tmp_path)
     snap = va.bind_snapshot(conn, did)
-    real_at = va._analysis_at
+    real_identity = va._analysis_identity
     calls = {"n": 0}
 
-    def fake_at(conn, key):
+    def fake_identity(conn, key, video_id=""):
         calls["n"] += 1
         if calls["n"] > 1:
-            return "2999-01-01T00:00:00"  # B finished mid-run
-        return real_at(conn, key)
+            return ("", "2999-01-01T00:00:00")  # B finished mid-run
+        return real_identity(conn, key, video_id)
 
-    monkeypatch.setattr(va, "_analysis_at", fake_at)
+    monkeypatch.setattr(va, "_analysis_identity", fake_identity)
     with pytest.raises(va.AnalysisUnavailable):
         va.run(conn, snap, owner="emp-1", media_dir=store,
                providers=StubProviders(), queued_at="2000-01-01T00:00:00")
@@ -519,7 +519,9 @@ def test_known_totals_survive_missing_clicks(tmp_path):
     bare_null = va.measured_from_records([
         {"id": 1, "impressions": 1000, "link_clicks": None}])
     assert bare_null["pooled_link_ctr_pct"] is None
-    assert bare_null["totals"]["link_clicks"] == 0
+    # Unknown is not zero: no known click contributor, so the total
+    # reads "not supplied" instead of a false 0.
+    assert bare_null["totals"]["link_clicks"] is None
     mixed_unspecified = va.measured_from_records([
         {"id": 1, "impressions": 1000, "link_clicks": 25,
          "spend": 100.0, "currency": "USD", "missing_json": "[]"},
@@ -545,7 +547,7 @@ def test_restore_paths_cancel_and_provider_failure(tmp_path):
                  (key, "prior words"))
     conn.execute("INSERT INTO annotations (creative_key, schema_version,"
                  " annotation_json, updated_at) VALUES (?, 'v0', ?, '')"
-                 " ON CONFLICT (creative_key) DO UPDATE SET"
+                 " ON CONFLICT (creative_key, video_id) DO UPDATE SET"
                  " annotation_json = excluded.annotation_json",
                  (key, json.dumps({"status": "auto",
                                    "analysis": {"version": "v0"}})))
@@ -653,35 +655,35 @@ def test_newer_finisher_survives_abort(tmp_path, monkeypatch):
     snap = va.bind_snapshot(conn, did)
     key = "video-upload-sample"
     calls = {"n": 0}
-    real_at = va._analysis_at
+    real_identity = va._analysis_identity
 
-    def fake_at(conn, key):
+    def fake_identity(conn, key, video_id=""):
         calls["n"] += 1
         if calls["n"] > 1:
-            # B finishes while A is still running.
-            conn.execute(
-                "INSERT INTO annotations (creative_key, schema_version,"
-                " annotation_json, updated_at) VALUES (?, 'v0', ?, '')"
-                " ON CONFLICT (creative_key) DO UPDATE SET"
-                " annotation_json = excluded.annotation_json",
-                (key, json.dumps({"status": "auto", "analysis": {
-                    "version": "v1", "at": "2026-05-01T00:00:00"}})))
+            # B finishes while A is still running, publishing to the
+            # same asset version's scoped row.
+            seed = creative_mod.blank_annotation()
+            seed["analysis"] = {
+                "version": "v1", "revision": "newer-B",
+                "at": "2026-05-01T00:00:00"}
+            creative_mod.save_annotation(
+                conn, key, seed, video_id=snap["video_id"])
             conn.execute("UPDATE creatives SET transcript=?"
                          " WHERE creative_key=?", ("B words", key))
             conn.commit()
-            return "2026-05-01T00:00:00"
-        return real_at(conn, key)
+            return ("newer-B", "2026-05-01T00:00:00")
+        return real_identity(conn, key, video_id)
 
-    monkeypatch.setattr(va, "_analysis_at", fake_at)
+    monkeypatch.setattr(va, "_analysis_identity", fake_identity)
     with pytest.raises(va.AnalysisUnavailable):
         va.run(conn, snap, owner="emp-1", media_dir=store,
                providers=StubProviders(), queued_at="")
     assert conn.execute("SELECT transcript FROM creatives"
                         " WHERE creative_key=?", (key,)).fetchone()[0] \
         == "B words"
-    assert json.loads(conn.execute(
-        "SELECT annotation_json FROM annotations WHERE creative_key=?",
-        (key,)).fetchone()[0])["analysis"]["at"] == "2026-05-01T00:00:00"
+    final = creative_mod.scoped_annotation(conn, key, snap["video_id"])
+    assert final["analysis"]["revision"] == "newer-B"
+    assert final["analysis"]["at"] == "2026-05-01T00:00:00"
     conn.close()
 
 
@@ -725,24 +727,26 @@ def test_stale_abort_restores_prior_rows(tmp_path, monkeypatch):
                  " SET transcript = excluded.transcript",
                  (key, "prior words"))
     conn.execute("INSERT INTO annotations (creative_key, schema_version,"
-                 " annotation_json, updated_at) VALUES (?, 'v0', ?, '')"
-                 " ON CONFLICT (creative_key) DO UPDATE SET"
+                 " annotation_json, updated_at, video_id)"
+                 " VALUES (?, 'v0', ?, '', ?)"
+                 " ON CONFLICT (creative_key, video_id) DO UPDATE SET"
                  " annotation_json = excluded.annotation_json",
                  (key, json.dumps({"status": "auto",
-                                   "analysis": {"version": "v0"}})))
+                                   "analysis": {"version": "v0"}}),
+                  snap["video_id"]))
     conn.commit()
-    real_at = va._analysis_at
+    real_identity = va._analysis_identity
     calls = {"n": 0}
 
-    def fake_at(conn, key):
+    def fake_identity(conn, key, video_id=""):
         calls["n"] += 1
         if calls["n"] == 2:
-            return "2999-01-01T00:00:00"  # B finished mid-run
+            return ("", "2999-01-01T00:00:00")  # B finished mid-run
         # Later reads hit the real store: nobody else published, so
-        # the abort path must roll back to the pre-run rows.
-        return real_at(conn, key)
+        # the aborted run leaves the pre-run rows behind.
+        return real_identity(conn, key, video_id)
 
-    monkeypatch.setattr(va, "_analysis_at", fake_at)
+    monkeypatch.setattr(va, "_analysis_identity", fake_identity)
     drafts.update_draft(conn, did, status="analyzing")
     with pytest.raises(va.AnalysisUnavailable):
         va.run(conn, snap, owner="emp-1", media_dir=store,
@@ -814,7 +818,7 @@ def test_independent_totals_survive_missing_pairs():
         {"id": 3, "impressions": None, "link_clicks": 25,
          "missing_json": "[\"impressions\"]"}])
     assert clicks["totals"]["link_clicks"] == 25
-    assert clicks["totals"]["impressions"] == 0
+    assert clicks["totals"]["impressions"] is None
     assert clicks["pooled_link_ctr_pct"] is None
 
 
@@ -846,14 +850,14 @@ def test_stale_job_never_relabels_newer_findings(tmp_path, monkeypatch):
     conn, store, did = bound_db(tmp_path)
     snap = va.bind_snapshot(conn, did)
     key = "video-upload-sample"
-    real_at = va._analysis_at
+    real_identity = va._analysis_identity
     calls = {"n": 0}
 
-    def fake_at(conn, key):
+    def fake_identity(conn, key, video_id=""):
         calls["n"] += 1
         if calls["n"] > 1:
             # B finishes while A is still running: bold_claim under
-            # revision newer-B.
+            # revision newer-B, published to the same version row.
             newer = creative_mod.blank_annotation()
             newer["hook_type"] = "bold_claim"
             newer["analysis"] = {
@@ -862,17 +866,16 @@ def test_stale_job_never_relabels_newer_findings(tmp_path, monkeypatch):
                 "model": "test/test-frames",
                 "snapshot": dict(snap, records=[]),
                 "measured": {}, "suggested_tests": []}
-            creative_mod.save_annotation(conn, key, newer)
-            return "2026-05-01T00:00:00+00:00"
-        return real_at(conn, key)
+            creative_mod.save_annotation(conn, key, newer,
+                                         video_id=snap["video_id"])
+            return ("newer-B", "2026-05-01T00:00:00+00:00")
+        return real_identity(conn, key, video_id)
 
-    monkeypatch.setattr(va, "_analysis_at", fake_at)
+    monkeypatch.setattr(va, "_analysis_identity", fake_identity)
     with pytest.raises(va.AnalysisUnavailable):
         va.run(conn, snap, owner="emp-1", media_dir=store,
                providers=StubProviders(), queued_at="")
-    after = conn.execute("SELECT annotation_json FROM annotations"
-                         " WHERE creative_key=?", (key,)).fetchone()[0]
-    final = json.loads(after)
+    final = creative_mod.scoped_annotation(conn, key, snap["video_id"])
     assert final["hook_type"] == "bold_claim"
     assert final["analysis"]["revision"] == "newer-B"
     conn.close()

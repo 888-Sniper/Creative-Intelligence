@@ -170,22 +170,17 @@ def summarize(rows):
 
 def _enrich(conn, rows):
     """Attach hook_type / creator_vs_branded / edit_style from
-    annotations ('' if none)."""
+    annotations ('' if none). Reads the approved-or-latest scoped
+    row per creative name."""
+    from creative_intel import creative as _creative_mod
     out = []
     for r in rows:
-        got = conn.execute(
-            "SELECT annotation_json FROM annotations WHERE creative_key=?",
-            (r["creative_key"],)).fetchone()
+        ann = _creative_mod.annotation_for_key(conn, r["creative_key"])
         hook, cvb, style = "", "", ""
-        if got:
-            import json
-            try:
-                ann = json.loads(got[0])
-                hook = ann.get("hook_type", "") or ""
-                cvb = ann.get("creator_vs_branded", "") or ""
-                style = ann.get("edit_style", "") or ""
-            except ValueError:
-                pass
+        if isinstance(ann, dict):
+            hook = ann.get("hook_type", "") or ""
+            cvb = ann.get("creator_vs_branded", "") or ""
+            style = ann.get("edit_style", "") or ""
         impr = r["impressions"] or 0
         d = dict(r)
         d["hook_type"] = hook
@@ -853,21 +848,15 @@ def _campaign_elements(conn, campaign, scope=None):
     scope (shared Scope or plain filter dict) restricts the rows, so
     a Market=Spain why-analysis never cites the French creative mix.
     """
-    import json
+    from creative_intel import creative as _creative_mod
     scope = resolve_scope(conn, scope)
     rows = [r for r in all_rows(conn)
             if (r.get("campaign") or "") == campaign and scope.match(r)]
     hook_types, modes, platforms = set(), set(), set()
     for r in rows:
         platforms.add(r.get("platform") or "")
-        got = conn.execute(
-            "SELECT annotation_json FROM annotations WHERE creative_key=?",
-            (r.get("creative_key"),)).fetchone()
-        if got:
-            try:
-                ann = json.loads(got[0])
-            except ValueError:
-                continue
+        ann = _creative_mod.annotation_for_key(conn, r.get("creative_key"))
+        if isinstance(ann, dict):
             if ann.get("hook_type"):
                 hook_types.add(ann["hook_type"])
             if ann.get("creator_vs_branded"):
@@ -1027,7 +1016,8 @@ def _span_min(ann, key):
     return min(starts) if starts else None
 
 
-def _creative_rows(conn, campaign, scope=None):
+def _creative_rows(conn, campaign, scope=None, owner=None,
+                   admin=False):
     """Per-creative performance + annotation labels for one campaign.
 
     scope (Scope or plain filter dict, default everything) restricts
@@ -1035,21 +1025,44 @@ def _creative_rows(conn, campaign, scope=None):
     Campaign A + B shows only Campaign-A metrics when the scope
     selects Campaign A. Rows also carry the full creative-analysis
     classification set the XLSX export needs.
+
+    Per-key rows resolve through the canonical video-to-record
+    relationship (the viewer's own confirmed match replaces key
+    equality), and the listing also surfaces confirmed keys whose
+    records live under a different report-side identifier — so a
+    matched video still meets its performance when the identifiers
+    differ. Annotation labels read the approved-or-latest scoped row.
     """
+    from creative_intel import creative as _creative_mod
+    from creative_intel import drafts as _drafts_mod
     scope = resolve_scope(conn, scope)
     cols = ["spend", "impressions", "clicks", "conversions",
             "video_views", "views_100", "revenue", "revenue_reported",
             "currency", "missing_json", "platform",
             "client", "project", "campaign", "vertical", "market",
             "objective", "funnel_stage", "date"]
-    out = []
+    seen, keys = set(), []
     for (key,) in conn.execute(
             "SELECT DISTINCT creative_key FROM ads WHERE campaign=?",
             (campaign,)).fetchall():
-        rows = [dict(zip(cols, r)) for r in conn.execute(
+        if key and key not in seen:
+            seen.add(key)
+            keys.append(key)
+    for key in sorted(_drafts_mod.confirmed_match_keys(
+            conn, owner=owner, admin=admin)):
+        if key not in seen:
+            seen.add(key)
+            keys.append(key)
+    out = []
+    for key in keys:
+        base = [dict(zip(cols, r)) for r in conn.execute(
             "SELECT %s FROM ads WHERE creative_key=? AND campaign=?" % (
                 ", ".join(cols)), (key, campaign,)).fetchall()]
-        rows = [r for r in rows if scope.match(r)]
+        rows = _drafts_mod.performance_rows_for_key(
+            conn, key, base, owner=owner, admin=admin)
+        rows = [r for r in rows
+                if (r.get("campaign") or "") == campaign
+                and scope.match(r)]
         if not rows and not scope.is_empty():
             continue
         spend = sum(r["spend"] for r in rows)
@@ -1065,13 +1078,7 @@ def _creative_rows(conn, campaign, scope=None):
 
         def _distinct(col):
             return sorted({str(r[col]) for r in rows if r[col]})
-        got = conn.execute("SELECT annotation_json FROM annotations"
-                           " WHERE creative_key=?", (key,)).fetchone()
-        try:
-            ann = json.loads(got[0]) if got else {}
-        except ValueError:
-            ann = {}
-        ann = ann or {}
+        ann = _creative_mod.annotation_for_key(conn, key) or {}
         status = conn.execute("SELECT status FROM creatives WHERE creative_key=?",
                               (key,)).fetchone()
         duration = conn.execute("SELECT duration_s FROM creatives WHERE creative_key=?",
@@ -1152,7 +1159,7 @@ def _creative_rows(conn, campaign, scope=None):
 
 
 def _report_extras(conn, names, strict_human=False, scope=None,
-                   rank_by="cpa"):
+                   rank_by="cpa", owner=None, admin=False):
     """Best/worst creatives, hook learnings, heuristic next steps.
 
     Everything is computed from uploaded rows + annotations in this
@@ -1176,7 +1183,8 @@ def _report_extras(conn, names, strict_human=False, scope=None,
     hook_spend, hook_conv = {}, {}
     strict_nulled = 0
     for name in names:
-        rows = _creative_rows(conn, name, scope=scope)
+        rows = _creative_rows(conn, name, scope=scope, owner=owner,
+                              admin=admin)
 
         def _rank(pool):
             def _key(r):
@@ -1230,21 +1238,15 @@ def _report_extras(conn, names, strict_human=False, scope=None,
             True))
     # Annotation lookup for brief provenance: a brief is verified only
     # when every creative behind its cited label is HUMAN-VERIFIED.
-    import json as _json
+    # Reads the approved-or-latest scoped row per creative name.
+    from creative_intel import creative as _creative_mod
     ann_by_key = {}
     for name in names:
         for r in per_campaign[name]["creatives"]:
             key = r["creative_key"]
             if key in ann_by_key:
                 continue
-            got = conn.execute("SELECT annotation_json FROM annotations"
-                               " WHERE creative_key=?", (key,)).fetchone()
-            ann = {}
-            if got:
-                try:
-                    ann = _json.loads(got[0])
-                except ValueError:
-                    ann = {}
+            ann = _creative_mod.annotation_for_key(conn, key) or {}
             ann_by_key[key] = (ann, ann.get("status") == "human_verified")
 
     def _brief_verified(keys):
@@ -1532,7 +1534,8 @@ def _cta_span(cta_text):
         return None
 
 
-def campaign_recommendations(conn, campaign, scope=None, rank_by="cpa"):
+def campaign_recommendations(conn, campaign, scope=None, rank_by="cpa",
+                             owner=None, admin=False):
     """Scoped six-section recommendations for Campaign Detail.
 
     Same engine as reports: _report_extras(conn, [campaign], scope,
@@ -1565,7 +1568,8 @@ def campaign_recommendations(conn, campaign, scope=None, rank_by="cpa"):
         scoped = Scope(raw)
     higher = KPI_DIRECTIONS[rank_by] == "higher"
     lead_word = "highest" if higher else "lowest"
-    extras = _report_extras(conn, [campaign], scope=scoped, rank_by=rank_by)
+    extras = _report_extras(conn, [campaign], scope=scoped,
+                            rank_by=rank_by, owner=owner, admin=admin)
     info = extras["per_campaign"][campaign]
     rows = info["creatives"]
     best = info["best"]
@@ -1883,7 +1887,8 @@ def _display_label(field):
 
 def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
                  fmt="one-pager", strict_human=False, filters=None,
-                 benchmark_scope="filters", rank_by=None):
+                 benchmark_scope="filters", rank_by=None, owner=None,
+                 admin=False):
     """Generate a report over selected campaigns + KPIs + benchmark.
 
     fmt is "one-pager" (markdown), "csv", "deck" (slide JSON),
@@ -1970,7 +1975,8 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
         lines.append("- (no benchmark selected)")
     strict = bool(strict_human)
     extras = _report_extras(conn, names, strict_human=strict,
-                            scope=scope, rank_by=rank_by)
+                            scope=scope, rank_by=rank_by, owner=owner,
+                            admin=admin)
     rank_sym = "$" if rank_by in ("cpm", "cpc", "cpa") else ""
 
     def _show_rank(value):

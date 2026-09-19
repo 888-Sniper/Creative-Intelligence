@@ -58,7 +58,7 @@ def test_ask_reports_progress_marks():
 def test_worker_keeps_midrun_cancellation(tmp_path, monkeypatch):
     db = str(tmp_path / "jobs.db")
 
-    def stub(conn, payload, owner, ctx, job_id):
+    def stub(conn, payload, owner, ctx, job_id, run_token=None):
         jobs_mod.cancel(conn, job_id)
         raise jobs_mod.JobCancelled("stop here")
 
@@ -80,7 +80,7 @@ def test_worker_keeps_midrun_cancellation(tmp_path, monkeypatch):
 def test_run_through_maps_cancellation_to_failed_cancelled(monkeypatch):
     conn = make_conn()
 
-    def stub(conn, kind, payload, owner, ctx, job_id):
+    def stub(conn, kind, payload, owner, ctx, job_id, run_token=None):
         raise jobs_mod.JobCancelled("stop here")
 
     monkeypatch.setattr(worker_handlers, "run", stub)

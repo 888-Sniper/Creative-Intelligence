@@ -83,7 +83,7 @@ def _raise_if_cancelled(cancelled):
         raise jobs_mod.JobCancelled("job cancelled before start")
 
 
-def run_pipeline(conn, payload, owner, ctx, job_id=None):
+def run_pipeline(conn, payload, owner, ctx, job_id=None, run_token=None):
     settings = ctx.get("settings") or Settings()
     _ = settings
     progress, cancelled = (None, None)
@@ -94,14 +94,17 @@ def run_pipeline(conn, payload, owner, ctx, job_id=None):
     result = legacy.apply_action(
         conn, "pipeline", dict(payload or {}), _providers(ctx, conn),
         media_dir=ctx.get("media_dir"), actor=owner or "",
-        progress=progress, cancelled=cancelled)
+        progress=progress, cancelled=cancelled,
+        job_id=job_id, run_token=run_token)
     if not isinstance(result, dict):
         return {"result": result}
     return result
 
 
-def run_ask(conn, payload, owner, ctx, job_id=None):
-    _ = owner
+def run_ask(conn, payload, owner, ctx, job_id=None, run_token=None):
+    # run_token intentionally unused: ask persists only owner-scoped
+    # conversation rows, never published findings.
+    _ = (owner, run_token)
     payload = dict(payload or {})
     progress, cancelled = (None, None)
     if job_id:
@@ -120,13 +123,16 @@ def run_ask(conn, payload, owner, ctx, job_id=None):
     return result
 
 
-def run_analyst(conn, payload, owner, ctx, job_id=None):
+def run_analyst(conn, payload, owner, ctx, job_id=None, run_token=None):
     """One persistent Foap Analyst turn, off the event loop.
 
     Deterministic: numbers come from the shared calculation engine,
     never the LLM. Progress checkpoints bracket routing, analysis
     and persistence so cancellation lands between stages.
+    run_token is intentionally unused: analyst turns persist only
+    owner-scoped conversation rows, never published findings.
     """
+    _ = run_token
     _ = ctx
     payload = dict(payload or {})
     progress, cancelled = (None, None)
@@ -151,7 +157,8 @@ def run_analyst(conn, payload, owner, ctx, job_id=None):
     return out
 
 
-def run_video_analysis(conn, payload, owner, ctx, job_id=None):
+def run_video_analysis(conn, payload, owner, ctx, job_id=None,
+                       run_token=None):
     """Guided-upload analysis off the event loop.
 
     The payload snapshot (bound at Analyse-press time) is re-checked
@@ -160,6 +167,10 @@ def run_video_analysis(conn, payload, owner, ctx, job_id=None):
     (queued at submit, analyzing at start, ready_for_review / failed
     / cancelled on the way out); cancellation flows through the
     standard job path.
+    run_token is the claim token handed down by the dispatcher —
+    the publication guard compares against this original, never a
+    re-read of the mutable job row (a takeover in between would
+    hand us the replacement's token).
     """
     from creative_intel import drafts as drafts_mod
     from creative_intel import video_analysis
@@ -171,14 +182,12 @@ def run_video_analysis(conn, payload, owner, ctx, job_id=None):
         raise ValueError("video_analysis needs a bound snapshot")
     did = snapshot.get("draft_id") or ""
     progress, cancelled = (None, None)
-    attempt_token = ""
+    # The dispatcher's claim token, not a fresh read: re-reading the
+    # row here would pick up a replacement attempt's token after a
+    # recovery takeover and defeat the publication guard.
+    attempt_token = run_token or ""
     if job_id:
         progress, cancelled = _control(conn, job_id)
-        try:
-            attempt_token = \
-                (jobs_mod.get(conn, job_id) or {}).get("run_token") or ""
-        except Exception:
-            attempt_token = ""
         progress(5, "start")
         try:
             _raise_if_cancelled(cancelled)
@@ -243,9 +252,13 @@ HANDLERS = {
 }
 
 
-def run(conn, kind, payload, owner, ctx, job_id):
+def run(conn, kind, payload, owner, ctx, job_id, run_token=None):
+    """Dispatch one claimed job. run_token is the claim token minted
+    for this attempt: it travels unchanged from claim to publication
+    guard, never re-read from the mutable job row."""
     try:
         handler = HANDLERS[kind]
     except KeyError:
         raise ValueError("unknown job kind %r" % (kind,))
-    return handler(conn, payload, owner, ctx or {}, job_id)
+    return handler(conn, payload, owner, ctx or {}, job_id,
+                   run_token=run_token)

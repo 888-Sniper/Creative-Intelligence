@@ -533,32 +533,34 @@ def run(conn, snapshot, owner="", media_dir="", providers=None,
                 "another analysis finished or the findings were"
                 " corrected while this one was running:"
                 " discarding this result")
-        # Cancellation is rechecked inside the same transaction: a
-        # cancel landing after the final checkpoint must still stop
-        # the publish, and the job-state change need not touch the
-        # input snapshot the checks above verify.
+        # Attempt ownership is verified first inside the same
+        # transaction: a superseded attempt (requeued and re-claimed
+        # by a replacement after recovery) holds a stale run_token
+        # and must raise StaleAttempt — never JobCancelled, which
+        # would mark the shared draft cancelled under the live
+        # replacement. The read is write-free so the publication
+        # transaction stays open.
+        # Cancellation is rechecked next: a cancel landing after the
+        # final checkpoint must still stop the publish, and the
+        # job-state change need not touch the input snapshot the
+        # checks above verify. A cancelled status with no callback
+        # fails closed the same way.
+        if job_id:
+            from creative_intel import jobs as _jobs_mod
+            _jobs_mod.require_live_attempt(conn, job_id, run_token)
+            try:
+                _jstatus = conn.execute(
+                    "SELECT status FROM worker_jobs WHERE id=?",
+                    (job_id,)).fetchone()
+            except Exception:
+                _jstatus = None
+            if _jstatus is not None \
+                    and (_jstatus[0] or "") == "cancelled":
+                raise _jobs_mod.JobCancelled(
+                    "video analysis job cancelled at publish")
         if cancelled is not None and cancelled():
             from creative_intel.jobs import JobCancelled
             raise JobCancelled("video analysis cancelled at publish")
-        # Attempt ownership is verified in the same transaction: a
-        # superseded attempt (requeued and re-claimed by a
-        # replacement after recovery) holds a stale run_token. The
-        # read is write-free so the publication transaction stays
-        # open; a row or table this connection cannot see simply
-        # skips the check, like pre-fencing rows.
-        if job_id:
-            from creative_intel.jobs import StaleAttempt
-            try:
-                _jrow = conn.execute(
-                    "SELECT run_token FROM worker_jobs WHERE id=?",
-                    (job_id,)).fetchone()
-            except Exception:
-                _jrow = None
-            if _jrow is not None \
-                    and (_jrow[0] or "") != (run_token or ""):
-                raise StaleAttempt(
-                    "job %s claimed by another attempt;"
-                    " not publishing" % (job_id,))
         drafts_mod.set_video_transcript(conn, video_id, transcript,
                                         commit=False)
         conn.execute("UPDATE creatives SET transcript=?,"
@@ -780,8 +782,14 @@ def apply_corrections(conn, creative_key, corrections, by="",
                 or len(text) > MAX_CORRECTION_TRANSCRIPT:
             raise ValueError("transcript must be text of at most %d chars"
                              % MAX_CORRECTION_TRANSCRIPT)
+        # One transaction for the whole correction (see below): the
+        # transcript, shared copy, revision bump, and approval
+        # invalidation must never be visible piecemeal — an export
+        # snapshotting between two commits would mix new words with
+        # the old approval.
         if video_id:
-            drafts_mod.set_video_transcript(conn, video_id, text)
+            drafts_mod.set_video_transcript(conn, video_id, text,
+                                            commit=False)
         conn.execute("UPDATE creatives SET transcript=? WHERE creative_key=?",
                      (text, creative_key))
         touched.append("transcript")
@@ -794,11 +802,24 @@ def apply_corrections(conn, creative_key, corrections, by="",
     log.append({"by": by or "human", "at": utcnow(),
                 "fields": sorted(touched)})
     ann["analysis"]["revision"] = uuid.uuid4().hex
+    if ann.get("status") == "human_verified":
+        # A correction supersedes the approval of the old content:
+        # the invalidation lands in this same commit as the new
+        # words, revision, and history — never in a later router
+        # step a concurrent export could slip between (the router's
+        # draft-review clearing stays where it is; it is idempotent
+        # for this video from here on).
+        ann["status"] = "auto"
     # keep=touched: the corrected values replace the previous locked
-    # decisions instead of being restored over. Return the row as
-    # actually persisted — never the pre-save dict.
+    # decisions instead of being restored over. Single commit for the
+    # whole correction: transcript, revision, history, and approval
+    # invalidation land atomically, so a concurrent export either
+    # sees the complete old approved version or the complete new
+    # unapproved one — never a mix.
+    # Return the row as actually persisted — never the pre-save dict.
     creative_mod.save_annotation(conn, creative_key, ann,
-                                 video_id=video_id, keep=touched)
+                                 video_id=video_id, keep=touched,
+                                 commit=False)
     conn.commit()
     persisted = creative_mod.scoped_annotation(conn, creative_key,
                                                video_id)

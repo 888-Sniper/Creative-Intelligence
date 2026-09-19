@@ -69,10 +69,14 @@ def run_once(db_path, settings, media_dir=None):
                                  daemon=True)
         pulse.start()
         try:
+            # The claim token travels unchanged into the handler and
+            # its publication guard: re-reading it later could pick
+            # up a replacement attempt's token after a takeover.
             result = worker_handlers.run(conn, job["kind"],
                                          job.get("payload") or {},
                                          job.get("owner_employee_id") or "",
-                                         ctx, job["id"])
+                                         ctx, job["id"],
+                                         run_token=token)
         except jobs.JobCancelled:
             # Owner cancelled mid-run: keep the cancelled state, never a
             # failure. In-flight provider work already stopped chaining.
@@ -88,14 +92,32 @@ def run_once(db_path, settings, media_dir=None):
                   % (job["id"], job["kind"]), flush=True)
             return True
         except Exception as exc:  # noqa: BLE001 - recorded on the job
-            jobs.fail(conn, job["id"], exc, run_token=token)
-            print("job %s (%s) failed: %s" % (job["id"], job["kind"], exc),
-                  flush=True)
+            after = jobs.fail(conn, job["id"], exc, run_token=token)
+            if (after or {}).get("status") in ("queued", "failed"):
+                print("job %s (%s) failed: %s"
+                      % (job["id"], job["kind"], exc), flush=True)
+            else:
+                # Fenced out: another attempt owns the job now (or
+                # it left running/cancelled/completed without us).
+                # Loud, not silent — a lost failure record hides a
+                # live job.
+                print("job %s (%s) failure NOT recorded (fenced;"
+                      " owned by another attempt)"
+                      % (job["id"], job["kind"]), flush=True)
             return True
         finally:
             stop.set()
-        jobs.complete(conn, job["id"], result, run_token=token)
-        print("job %s (%s) completed" % (job["id"], job["kind"]), flush=True)
+        finished = jobs.complete(conn, job["id"], result,
+                                 run_token=token)
+        if (finished or {}).get("status") != "completed":
+            # Fenced out after the work: another attempt owns the
+            # job. The result above is dropped, loudly.
+            print("job %s (%s) completion NOT applied (fenced;"
+                  " owned by another attempt)"
+                  % (job["id"], job["kind"]), flush=True)
+        else:
+            print("job %s (%s) completed" % (job["id"], job["kind"]),
+                  flush=True)
         return True
     finally:
         conn.close()

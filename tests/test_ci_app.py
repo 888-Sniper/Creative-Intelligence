@@ -979,8 +979,8 @@ def test_slow_action_does_not_block_health(tmp_path, monkeypatch):
     client.headers.update(mint_admin(_db))
     entered = threading.Event()
 
-    def slow(conn, payload, owner, ctx, job_id=None):
-        _ = job_id
+    def slow(conn, payload, owner, ctx, job_id=None, run_token=None):
+        _ = (job_id, run_token)
         entered.set()
         time.sleep(4)
         return {"answer": "slow"}

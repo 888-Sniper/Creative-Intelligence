@@ -1500,6 +1500,197 @@ def test_superseded_attempt_cannot_publish(tmp_path):
     conn.close()
 
 
+def test_stale_cancelled_attempt_stays_stale(tmp_path):
+    """H1: token mismatch beats cancellation. A superseded attempt
+    whose job was also cancelled raises StaleAttempt — never
+    JobCancelled, which would mark the shared draft cancelled under
+    the live replacement. A live-token attempt on the cancelled job
+    still raises JobCancelled."""
+    conn, store, did = bound_db(tmp_path)
+    snap = va.bind_snapshot(conn, did)
+    job = jobs_mod.enqueue(conn, "video_analysis", {}, owner="emp-1")
+    token_a = jobs_mod.claim(conn, job["id"],
+                             lease_owner="w1")["run_token"]
+    rival = sqlite3.connect(str(tmp_path / "va.db"))
+    try:
+        jobs_mod.fail(rival, job["id"], "worker lost",
+                      run_token=token_a)
+        token_b = jobs_mod.claim(rival, job["id"],
+                                 lease_owner="w2")["run_token"]
+        jobs_mod.cancel(rival, job["id"])
+    finally:
+        rival.close()
+    with pytest.raises(jobs_mod.StaleAttempt):
+        va.run(conn, snap, owner="emp-1", media_dir=store,
+               providers=StubProviders(), queued_at="",
+               job_id=job["id"], run_token=token_a)
+    assert drafts.get_draft(conn, did)["status"] != "cancelled"
+    assert conn.execute("SELECT COUNT(*) FROM annotations"
+                        " WHERE creative_key=?",
+                        ("video-upload-sample",)).fetchone()[0] == 0
+    with pytest.raises(jobs_mod.JobCancelled):
+        va.run(conn, snap, owner="emp-1", media_dir=store,
+               providers=StubProviders(), queued_at="",
+               job_id=job["id"], run_token=token_b)
+    conn.close()
+
+
+def test_dispatch_carries_claim_token(tmp_path, monkeypatch):
+    """Audit recheck M2b: the dispatcher hands the ORIGINAL claim
+    token to the handler. A takeover between claim and dispatch can
+    no longer smuggle the replacement's token into the stale
+    attempt — with the old token it refuses, with the live one it
+    publishes (provider layer stubbed, guard chain real)."""
+    from ci_backend import worker_handlers
+    conn, store, did = bound_db(tmp_path)
+    snap = va.bind_snapshot(conn, did)
+    job = jobs_mod.enqueue(conn, "video_analysis",
+                           {"snapshot": snap}, owner="emp-1")
+    token_a = jobs_mod.claim(conn, job["id"],
+                             lease_owner="w1")["run_token"]
+    rival = sqlite3.connect(str(tmp_path / "va.db"))
+    try:
+        jobs_mod.fail(rival, job["id"], "worker lost",
+                      run_token=token_a)
+        token_b = jobs_mod.claim(rival, job["id"],
+                                 lease_owner="w2")["run_token"]
+    finally:
+        rival.close()
+
+    def fake_pipeline(conn, key, providers, **kw):
+        ann = creative_mod.blank_annotation()
+        ann["analysis"] = {"version": "vtest", "revision": "rev-stub",
+                           "at": "2026-01-01T00:00:00+00:00",
+                           "model": "stub", "snapshot": {},
+                           "measured": {}, "suggested_tests": []}
+        return {"creative_key": key, "stages": [], "annotation": ann,
+                "frame_labels": [], "transcript": ""}
+
+    monkeypatch.setattr(creative_mod, "run_pipeline", fake_pipeline)
+    # Handler builds live providers: stub the roster gate (the fake
+    # pipeline ignores providers; the guard chain stays real).
+    monkeypatch.setattr(va, "eligible_vision_roster",
+                        lambda: [("mock", "mock-model", 1)])
+    with pytest.raises(jobs_mod.StaleAttempt):
+        worker_handlers.run(conn, "video_analysis",
+                            {"snapshot": snap}, "emp-1",
+                            {"media_dir": store}, job["id"],
+                            run_token=token_a)
+    assert drafts.get_draft(conn, did)["status"] != "ready_for_review"
+    assert conn.execute("SELECT COUNT(*) FROM annotations"
+                        " WHERE creative_key=?",
+                        ("video-upload-sample",)).fetchone()[0] == 0
+    out = worker_handlers.run(conn, "video_analysis",
+                              {"snapshot": snap}, "emp-1",
+                              {"media_dir": store}, job["id"],
+                              run_token=token_b)
+    assert out["creative_key"] == "video-upload-sample"
+    assert drafts.get_draft(conn, did)["status"] == "ready_for_review"
+    conn.close()
+
+
+def test_qa_check_keeps_caller_transaction(tmp_path):
+    """Audit recheck 1a: check_reviews (via qa.ensure) must not
+    commit a caller's open transaction — the export snapshot depends
+    on holding its BEGIN IMMEDIATE across the QA gate."""
+    from creative_intel import export_gate
+    conn, _store, _did = bound_db(tmp_path)
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        export_gate.check_reviews(conn)
+        assert conn.in_transaction
+    finally:
+        conn.rollback()
+    conn.close()
+
+
+def test_correction_commits_atomically(tmp_path):
+    """Audit recheck 1b: transcript, revision, history, and approval
+    invalidation land in ONE commit — provably (commit counting),
+    never piecemeal an export could split. The correction also flips
+    a prior approval to auto in that same commit."""
+    conn, _store, _did = bound_db(tmp_path)
+    key = "video-upload-sample"
+    seed = creative_mod.blank_annotation()
+    seed["status"] = "human_verified"
+    seed["analysis"] = {"version": "v1", "revision": "rev-0",
+                        "at": "2026-01-01T00:00:00+00:00",
+                        "model": "test/test-frames",
+                        "snapshot": {}, "measured": {},
+                        "suggested_tests": []}
+    creative_mod.save_annotation(conn, key, seed)
+    conn.execute("INSERT INTO creatives (creative_key, transcript)"
+                 " VALUES (?, ?) ON CONFLICT (creative_key) DO UPDATE"
+                 " SET transcript = excluded.transcript",
+                 (key, "raw words"))
+    conn.commit()
+
+    class _Counter:
+        def __init__(self, wrapped):
+            self._wrapped = wrapped
+            self.commits = 0
+
+        def commit(self):
+            self.commits += 1
+            return self._wrapped.commit()
+
+        def __getattr__(self, name):
+            return getattr(self._wrapped, name)
+
+    proxy = _Counter(conn)
+    ann = va.apply_corrections(proxy, key,
+                               {"transcript": "fixed words"},
+                               by="emp-1", expected_revision="rev-0")
+    assert proxy.commits == 1
+    assert ann["status"] == "auto"
+    assert ann["analysis"]["revision"] != "rev-0"
+    assert conn.execute("SELECT transcript FROM creatives"
+                        " WHERE creative_key=?", (key,)).fetchone()[0] \
+        == "fixed words"
+    conn.close()
+
+
+def test_stale_pipeline_attempt_cannot_persist(tmp_path):
+    """H2: the legacy pipeline persist path verifies the claim token
+    before every write — a superseded attempt saves nothing, while
+    the live token publishes normally (mock providers)."""
+    from creative_intel import providers as providers_mod
+    conn = sqlite3.connect(str(tmp_path / "pipe.db"))
+    schema.init_db(conn)
+    media_mod.ensure_schema(conn)
+    key = "legacy-sample"
+    conn.execute("INSERT INTO creatives (creative_key, name)"
+                 " VALUES (?, ?)", (key, key))
+    conn.commit()
+    job = jobs_mod.enqueue(conn, "pipeline", {"creative_key": key},
+                           owner="emp-1")
+    token_a = jobs_mod.claim(conn, job["id"],
+                             lease_owner="w1")["run_token"]
+    rival = sqlite3.connect(str(tmp_path / "pipe.db"))
+    try:
+        jobs_mod.fail(rival, job["id"], "worker lost",
+                      run_token=token_a)
+        token_b = jobs_mod.claim(rival, job["id"],
+                                 lease_owner="w2")["run_token"]
+    finally:
+        rival.close()
+    prov = providers_mod.Providers()
+    with pytest.raises(jobs_mod.StaleAttempt):
+        creative_mod.run_pipeline(conn, key, prov, job_id=job["id"],
+                                  run_token=token_a)
+    assert conn.execute("SELECT COUNT(*) FROM annotations"
+                        " WHERE creative_key=?",
+                        (key,)).fetchone()[0] == 0
+    report = creative_mod.run_pipeline(conn, key, prov,
+                                       job_id=job["id"],
+                                       run_token=token_b)
+    assert report["annotation"]["status"] == "auto"
+    assert conn.execute("SELECT COUNT(*) FROM annotations"
+                        " WHERE creative_key=?",
+                        (key,)).fetchone()[0] == 1
+    conn.close()
+
+
 def test_correction_rejects_nonfinite_moment(tmp_path):
     """Round-6 validation: NaN/inf timestamps are rejected before
     range checks (both comparisons pass NaN silently)."""

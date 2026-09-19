@@ -266,7 +266,6 @@ export function AnalyzeVideoSection() {
           <div style={{ flex: "1 1 auto", minWidth: 0 }}>
             <h2 className="panel-title" id="vu-card-title">{vu("title")}</h2>
             <p className="panel-sub">{vu("description")}</p>
-            <p className="panel-sub">{vu("dropHint")}</p>
           </div>
           <div className="vu-actions">
             <button type="button" className="btn-primary" onClick={() => setPanel({})}>

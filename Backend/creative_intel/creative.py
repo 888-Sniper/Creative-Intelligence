@@ -644,8 +644,22 @@ def mark_verified(conn, creative_key, video_id=None):
     return ann
 
 
+def _require_live_attempt(conn, job_id, run_token):
+    """No-op without a job; otherwise prove this attempt still owns
+    it (see jobs.require_live_attempt). The legacy pipeline persists
+    incrementally between provider calls, so the guard runs before
+    each write — shrinking a minutes-wide race to microseconds
+    (the guided path instead batches all writes into one guarded
+    publication transaction)."""
+    if job_id is None:
+        return
+    from creative_intel import jobs as _jobs_mod
+    _jobs_mod.require_live_attempt(conn, job_id, run_token)
+
+
 def run_pipeline(conn, creative_key, providers, media=None, brand_terms=None,
-                 progress=None, cancelled=None, persist=True):
+                 progress=None, cancelled=None, persist=True, job_id=None,
+                 run_token=None):
     """Run all five stages with the given provider bundle; returns stage report.
 
     media is optional: {"audio": (bytes, mime), "images": [jpeg bytes]}.
@@ -700,6 +714,7 @@ def run_pipeline(conn, creative_key, providers, media=None, brand_terms=None,
         stages.append({"stage": "transcribe", "confidence": conf})
         checkpoint(40, "transcribe")
     if persist:
+        _require_live_attempt(conn, job_id, run_token)
         conn.execute("UPDATE creatives SET transcript=? WHERE creative_key=?",
                      (transcript, creative_key))
 
@@ -735,6 +750,7 @@ def run_pipeline(conn, creative_key, providers, media=None, brand_terms=None,
     checkpoint(55, "frame-sample")
     labels = providers.vision.annotate(frames, images=media.get("images"))
     if persist and media.get("duration_s"):
+        _require_live_attempt(conn, job_id, run_token)
         conn.execute("UPDATE creatives SET duration_s=? WHERE creative_key=?",
                      (media["duration_s"], creative_key))
     stages.append({"stage": "vision-annotate", "labels": len(labels),
@@ -768,6 +784,7 @@ def run_pipeline(conn, creative_key, providers, media=None, brand_terms=None,
     # persist=False: nothing below runs, and the caller publishes the
     # complete result only after its freshness checks pass.)
     if persist:
+        _require_live_attempt(conn, job_id, run_token)
         try:
             prior_row = conn.execute(
                 "SELECT annotation_json FROM annotations WHERE creative_key=?",
@@ -784,6 +801,7 @@ def run_pipeline(conn, creative_key, providers, media=None, brand_terms=None,
     stages.append({"stage": "llm-structure", "confidence": round(mean_conf, 3),
                    "gate": "needs HUMAN-VERIFIED before export"})
     if persist:
+        _require_live_attempt(conn, job_id, run_token)
         conn.execute("UPDATE creatives SET pipeline_json=? WHERE creative_key=?",
                      (json.dumps(stages), creative_key))
         conn.commit()

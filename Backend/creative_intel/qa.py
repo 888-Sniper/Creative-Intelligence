@@ -34,8 +34,14 @@ CREATE TABLE IF NOT EXISTS qa_reviews (
 
 
 def ensure(conn):
+    # Read-only when the caller already holds a transaction (e.g. an
+    # export snapshot): an unconditional commit here would release a
+    # BEGIN IMMEDIATE the caller is depending on to serialize
+    # writers. Standalone callers keep the old commit behaviour.
+    own = not conn.in_transaction
     conn.execute(QA_DDL)
-    conn.commit()
+    if own:
+        conn.commit()
 
 
 def pending_count(conn):

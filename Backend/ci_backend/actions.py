@@ -343,9 +343,13 @@ def list_views(conn):
 
 
 def apply_action(conn, action, payload, prov, media_dir=None, actor="",
-                 progress=None, cancelled=None):
+                 progress=None, cancelled=None, job_id=None,
+                 run_token=None):
     """progress(pct, stage)/cancelled() flow into the pipeline branch only;
-    every other action ignores them (all existing callers unaffected)."""
+    every other action ignores them (all existing callers unaffected).
+    job_id/run_token flow into the pipeline branch's publication
+    guard the same way (a superseded legacy attempt must not persist
+    findings either)."""
     if action == "ingest":
         if not payload.get("platform"):
             raise ValueError("ingest needs a platform")
@@ -421,7 +425,8 @@ def apply_action(conn, action, payload, prov, media_dir=None, actor="",
         return creative.run_pipeline(conn, payload["creative_key"], prov,
                                      media=bundle, brand_terms=terms or None,
                                      progress=_scaled if progress else None,
-                                     cancelled=cancelled)
+                                     cancelled=cancelled, job_id=job_id,
+                                     run_token=run_token)
     if action == "media-upload":
         if not isinstance(payload, dict) or not payload.get("creative_key"):
             raise ValueError("media upload needs creative_key")

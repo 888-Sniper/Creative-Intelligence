@@ -1035,7 +1035,7 @@ export const pl = {
     },
     videoUpload: {
       title: "Przeanalizuj wideo",
-      description: "Prześlij kreację wideo i połącz ją z danymi o wynikach, aby poznać jej treść, strukturę i rezultaty.",
+      description: "Prześlij wideo, aby przeanalizować jego treść i wyniki.",
       uploadButton: "Prześlij wideo",
       dropHint: "Przeciągnij i upuść wideo lub przeglądaj swoje pliki.",
       browseLabel: "Wybierz plik wideo",

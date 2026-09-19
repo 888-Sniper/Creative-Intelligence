@@ -167,7 +167,7 @@ def test_run_through_retries_inline_after_transient_failure():
     calls = []
     real_run = wh.run
 
-    def flaky(conn, kind, payload, owner, ctx, job_id):
+    def flaky(conn, kind, payload, owner, ctx, job_id, run_token=None):
         calls.append(1)
         if len(calls) == 1:
             raise RuntimeError("transient")

@@ -1021,7 +1021,7 @@ export const en = {
     },
     videoUpload: {
       title: "Analyze Video",
-      description: "Upload a creative and connect its performance data to understand its content, structure, and results.",
+      description: "Upload a video to analyze its content and performance.",
       uploadButton: "Upload Video",
       dropHint: "Drag and drop a video, or browse your files.",
       browseLabel: "Choose a video file",

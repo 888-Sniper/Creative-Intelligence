@@ -407,6 +407,11 @@ select:not([multiple]):not([size]){appearance:none;background-image:url("data:im
 .daterange-actions{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .kpi-value{font-size:27px;font-weight:750;letter-spacing:-.015em;color:var(--shell-navy);margin-top:2px;font-variant-numeric:tabular-nums}
 .cols-2{display:grid;grid-template-columns:7fr 5fr;gap:12px;margin-top:4px}
+/* Dashboard lower-left column: Top Creatives with Recent Uploads
+ * stacked directly beneath it. The column owns the gap so the two
+ * panels keep the same 12px rhythm without doubled margins. */
+.dash-col{display:flex;flex-direction:column;gap:12px;min-width:0}
+.dash-col>.panel+.panel{margin-top:0}
 /* Row-unit rule: every horizontal group is one visual unit. Grid
  * stretch equalises outer heights; direct panel/card children fill
  * their track as flex columns so headings align and bodies absorb

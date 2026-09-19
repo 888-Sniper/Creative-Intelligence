@@ -212,7 +212,7 @@ describe("VideoUpload dashboard card", () => {
     document.documentElement.removeAttribute("data-theme");
   });
 
-  it("places the card between the greeting and the filters", async () => {
+  it("places Analyze Video below the KPI cards and Recent Uploads below Top Creatives", async () => {
     dashboardBackend([]);
     render(
       <MemoryRouter>
@@ -224,13 +224,16 @@ describe("VideoUpload dashboard card", () => {
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Analyze Video" })).toBeDefined();
     });
-    const greeting = screen.getByRole("heading", { level: 1 });
+    const kpi = screen.getByText("Total Impressions");
     const card = screen.getByRole("heading", { name: "Analyze Video" });
-    const filters = screen.getByLabelText("Filters");
+    const charts = screen.getByRole("heading", { name: "Performance Trends" });
+    const top = screen.getByRole("heading", { name: "Top Creatives" });
+    const recent = screen.getByRole("heading", { name: "Recent Uploads" });
     const follows = (a: Element, b: Element): boolean =>
       Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
-    expect(follows(greeting, card)).toBe(true);
-    expect(follows(card, filters)).toBe(true);
+    expect(follows(kpi, card)).toBe(true);
+    expect(follows(card, charts)).toBe(true);
+    expect(follows(top, recent)).toBe(true);
     expect(screen.getByRole("button", { name: /Upload Video/ })).toBeDefined();
   });
 

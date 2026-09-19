@@ -4,7 +4,7 @@ import { api } from "@/api/client";
 import { useAuth } from "@/auth/AuthProvider";
 import { useFilters } from "@/state/FilterContext";
 import { useLocale } from "@/i18n";
-import { VideoUploadCard } from "@/components/VideoUploadCard";
+import { AnalyzeVideoSection, RecentUploadsSection, VideoUploadsProvider } from "@/components/VideoUploadCard";
 import { monthName } from "@/components/KpiTrend";
 import { GroupBars, RetentionCurve, TrendChart } from "@/components/charts";
 import { Icon } from "@/components/icons";
@@ -544,10 +544,6 @@ export function DashboardPage() {
           </>
         )}
       />
-      {/* Guided video upload: compact card plus recent uploads, below
-        the greeting and above the filters. Never touches Apply/Reset,
-        the greeting, KPIs, charts or layout. */}
-      <VideoUploadCard />
       {/* Team stays in the global scope but hides on Dashboard only.
         A hidden-yet-active scope is never silent: the chip below names
         it and clears it deliberately. */}
@@ -561,8 +557,10 @@ export function DashboardPage() {
         </div>
       ) : null}
       {/* Approved composition: the Insights rail spans the full right
-        side from the KPI row down (KPIs | Insights, Charts | Insights,
-        Top Creatives + Retention | Insights). */}
+        side from the KPI row down (KPIs | Insights, Analyze Video |
+        Insights, Charts | Insights, Top Creatives + Retention |
+        Insights, Recent Uploads under Top Creatives). */}
+      <VideoUploadsProvider>
       <div className="main-rail">
         <div className="rail-stack">
       {compare ? (
@@ -588,6 +586,8 @@ export function DashboardPage() {
           {[0, 1, 2, 3].map((i) => <Skeleton key={i} height={100} />)}
         </div>
       )}
+      {/* Analyze Video: full rail-stack width below the four KPI cards. */}
+      <AnalyzeVideoSection />
       <div className="cols-2 dash-charts">
         <Panel
           title={t("dashboard.trends.title")}
@@ -657,6 +657,7 @@ export function DashboardPage() {
       {/* Approved composition: Top Creatives and Retention sit side by
         side beneath the charts (collapses to stacked under 1180px). */}
       <div className="cols-2 dash-lower">
+        <div className="dash-col">
           <Panel
             title={t("dashboard.topCreatives.title")}
             action={<Link className="link-teal" to="/creatives">{t("dashboard.topCreatives.seeAll")}</Link>}
@@ -716,6 +717,9 @@ export function DashboardPage() {
               ) : <EmptyState compact verbatim icon="creatives" title={t("dashboard.topCreatives.emptyTitle")} text={t("dashboard.topCreatives.emptyBody")} />
             ) : <Skeleton height={220} />}
           </Panel>
+          {/* Recent Uploads sits directly below Top Creatives. */}
+          <RecentUploadsSection />
+        </div>
           <Panel title={t("dashboard.retention.title")}>
             <div className="field" style={{ margin: "0 0 12px" }}>
               <select
@@ -803,6 +807,7 @@ export function DashboardPage() {
           ) : <Skeleton height={320} />}
         </Panel>
       </div>
+      </VideoUploadsProvider>
     </div>
   );
 }

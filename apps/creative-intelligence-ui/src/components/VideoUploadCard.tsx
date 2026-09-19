@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { useAuth } from "@/auth/AuthProvider";
 import { useLocale } from "@/i18n";
 import { Icon } from "@/components/icons";
@@ -34,7 +35,41 @@ function draftSeed(d: DraftView): string {
   return d.spec?.creative_key || d.videos?.[0]?.creative_key || d.id;
 }
 
-export function VideoUploadCard() {
+interface VideoUploadsState {
+  vu: (key: string, vars?: Record<string, string | number>) => string;
+  fmtDate: (value: string) => string;
+  employeeId: string;
+  panel: PanelOpen | null;
+  setPanel: (open: PanelOpen | null) => void;
+  drafts: DraftView[] | null;
+  draftsError: string;
+  resume: DraftView | null;
+  cardMsg: string;
+  dragOver: boolean;
+  setDragOver: (over: boolean) => void;
+  confirmDelete: string | null;
+  setConfirmDelete: (id: string | null) => void;
+  busyDelete: boolean;
+  busyCancelId: string | null;
+  statusName: (status: string) => string;
+  openForFile: (file: File | null) => void;
+  cancelDraft: (id: string) => Promise<void>;
+  discardResume: () => Promise<void>;
+  cancelAnalysis: (d: DraftView) => Promise<void>;
+}
+
+const VideoUploadsContext = createContext<VideoUploadsState | null>(null);
+
+function useVideoUploads(): VideoUploadsState {
+  const state = useContext(VideoUploadsContext);
+  if (!state) throw new Error("video upload section outside provider");
+  return state;
+}
+
+/** Shared upload state (drafts, dialog, toasts) for the two dashboard
+ *  sections below. The provider also renders the guided-upload dialog
+ *  and toast once, wherever the sections are placed. */
+export function VideoUploadsProvider({ children }: { children: ReactNode }) {
   const { me } = useAuth();
   const { t, fmtDate } = useLocale();
   const vu = (key: string, vars?: Record<string, string | number>): string =>
@@ -176,8 +211,39 @@ export function VideoUploadCard() {
     }
   };
 
+  const state: VideoUploadsState = {
+    vu, fmtDate, employeeId, panel, setPanel, drafts, draftsError,
+    resume, cardMsg, dragOver, setDragOver, confirmDelete,
+    setConfirmDelete, busyDelete, busyCancelId, statusName,
+    openForFile, cancelDraft, discardResume, cancelAnalysis,
+  };
   return (
-    <>
+    <VideoUploadsContext.Provider value={state}>
+      {children}
+      {panel ? (
+        <VideoUploadPanel
+          open={panel}
+          employeeId={employeeId}
+          onClose={(refresh) => {
+            setPanel(null);
+            if (refresh) void reload();
+          }}
+        />
+      ) : null}
+      {toast ? <Toast message={toast} onClose={() => setToast("")} /> : null}
+    </VideoUploadsContext.Provider>
+  );
+}
+
+
+/** "Analyze Video" panel: upload entry point plus recovery. Place it
+ *  full-width below the KPI cards. */
+export function AnalyzeVideoSection() {
+  const {
+    vu, fmtDate, resume, cardMsg, dragOver, setDragOver, setPanel,
+    openForFile, discardResume,
+  } = useVideoUploads();
+  return (
       <section
         className={`panel vu-card${dragOver ? " vu-drop-over" : ""}`}
         aria-labelledby="vu-card-title"
@@ -227,7 +293,19 @@ export function VideoUploadCard() {
           </div>
         ) : null}
       </section>
+  );
+}
 
+
+/** "Recent Uploads" panel: the draft list. Place it below the
+ *  Top Creatives panel. */
+export function RecentUploadsSection() {
+  const {
+    vu, fmtDate, drafts, draftsError, setPanel, statusName,
+    busyCancelId, cancelAnalysis, confirmDelete, setConfirmDelete,
+    cancelDraft, busyDelete,
+  } = useVideoUploads();
+  return (
       <section className="panel" aria-labelledby="vu-recent-title">
         <div className="panel-head">
           <h2 className="panel-title" id="vu-recent-title">{vu("recentTitle")}</h2>
@@ -318,18 +396,17 @@ export function VideoUploadCard() {
           <EmptyState compact verbatim icon="play" title={vu("recentEmptyTitle")} text={vu("recentEmpty")} />
         )}
       </section>
+  );
+}
 
-      {panel ? (
-        <VideoUploadPanel
-          open={panel}
-          employeeId={employeeId}
-          onClose={(refresh) => {
-            setPanel(null);
-            if (refresh) void reload();
-          }}
-        />
-      ) : null}
-      {toast ? <Toast message={toast} onClose={() => setToast("")} /> : null}
-    </>
+
+/** Combined card (Analyze Video plus Recent Uploads) for surfaces
+ *  that keep the original stacked layout. */
+export function VideoUploadCard() {
+  return (
+    <VideoUploadsProvider>
+      <AnalyzeVideoSection />
+      <RecentUploadsSection />
+    </VideoUploadsProvider>
   );
 }

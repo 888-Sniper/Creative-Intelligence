@@ -511,48 +511,112 @@ def _report_bundle(conn, creative_key, owner=None, admin=False):
     return None
 
 
-def annotation_for_report(conn, creative_key, owner=None, admin=False):
-    """One consistent result identity for reporting surfaces, or
-    None when no authorised result exists.
+def _row_owner(conn, video_id):
+    """Owning employee of one video version, or '' when the row is
+    version-less legacy (a global annotation, not a private video
+    result) or unresolvable."""
+    if not video_id:
+        return ""
+    try:
+        row = conn.execute(
+            "SELECT d.owner_employee_id FROM videos v"
+            " JOIN drafts d ON d.id = v.draft_id"
+            " WHERE v.id = ?", (video_id,)).fetchone()
+    except Exception:
+        return None
+    if not row:
+        return None
+    return row[0] or ""
 
-    When the viewer has an applicable confirmed match, the
-    annotation is the confirming video version's own row — the same
-    identity whose performance the resolver shows. When that video
-    has no stored analysis, None is returned ("analysis not
-    available"): another video's result is never substituted, and
-    export is blocked. Without an applicable confirmation the row
-    is returned only when exactly one version exists for the name
-    (unambiguous, preserving legacy single-video reporting); with
-    several versions and no confirmation, None is returned rather
-    than another owner's approved findings."""
+
+def _report_selection(conn, creative_key, owner=None, admin=False):
+    """(annotation_or_None, video_id): one call, one selection.
+
+    The confirming video version's own row when the viewer has an
+    applicable confirmation (None when that video has no stored
+    analysis). Otherwise, a lone stored row is returned only with
+    an authorised reader: its video owner (or any admin), or — for
+    a version-less legacy row that cannot be anyone's private
+    video result — any viewer. Anything else yields (None, ''),
+    so export blocks and reporting shows no borrowed findings."""
     bundle = _report_bundle(conn, creative_key, owner=owner,
                             admin=admin)
     if bundle is not None:
-        return scoped_annotation(conn, creative_key,
-                                 bundle["video_id"])
+        vid = bundle["video_id"]
+        return scoped_annotation(conn, creative_key, vid), vid
     ranked = _ranked_key_rows(conn, creative_key)
-    if len(ranked) == 1:
-        return ranked[0][0]
+    if len(ranked) != 1:
+        return None, ""
+    ann, vid, _stamp = ranked[0]
+    if not vid:
+        return ann, ""
+    if admin:
+        return ann, vid
+    if owner and _row_owner(conn, vid) == owner:
+        return ann, vid
+    return None, ""
+
+
+def video_duration(conn, video_id):
+    """One video version's own length, or None when unknown."""
+    try:
+        row = conn.execute("SELECT duration_s FROM videos WHERE id=?",
+                           (video_id,)).fetchone()
+    except Exception:
+        return None
+    if not row or not row[0]:
+        return None
+    return row[0]
+
+
+def report_unavailable_fields(conn, creative_key, owner=None,
+                              admin=False):
+    """(transcript, status, duration_or_None) for a key with no
+    authorised annotation — or None when no findings exist at all.
+
+    Findings that exist but are not the viewer's are never
+    surfaced: a confirmed-but-unanalysed video reports its own
+    length with empty words and status; any other unauthorised
+    case reports all empty. Only when no analysis rows exist does
+    the caller keep the shared copies (nothing exists to leak, so
+    pre-analysis drafts keep their working display)."""
+    from creative_intel import drafts as _drafts_mod
+    try:
+        bundle = _drafts_mod.confirmed_bundle_for_key(
+            conn, creative_key, owner=owner, admin=admin)
+    except Exception:
+        bundle = None
+    bvid = bundle.get("video_id") or "" \
+        if isinstance(bundle, dict) else ""
+    if bvid:
+        return "", "", video_duration(conn, bvid)
+    try:
+        ranked = _ranked_key_rows(conn, creative_key)
+    except Exception:
+        ranked = []
+    if ranked:
+        return "", "", None
     return None
+
+
+def annotation_for_report(conn, creative_key, owner=None, admin=False):
+    """One consistent result identity for reporting surfaces, or
+    None when no authorised result exists. See _report_selection."""
+    ann, _vid = _report_selection(conn, creative_key, owner=owner,
+                                  admin=admin)
+    return ann
 
 
 def annotation_scope_for_report(conn, creative_key, owner=None,
                                 admin=False):
     """video_id of the row annotation_for_report would return ( ''
     when none): lets export and reporting pair the selected
-    annotation with the same version's transcript. The selection
-    mirrors annotation_for_report exactly, never a sibling version."""
-    bundle = _report_bundle(conn, creative_key, owner=owner,
-                            admin=admin)
-    if bundle is not None:
-        if isinstance(scoped_annotation(conn, creative_key,
-                                        bundle["video_id"]), dict):
-            return bundle["video_id"]
+    annotation with the same version's transcript."""
+    _ann, vid = _report_selection(conn, creative_key, owner=owner,
+                                  admin=admin)
+    if _ann is None:
         return ""
-    ranked = _ranked_key_rows(conn, creative_key)
-    if len(ranked) == 1:
-        return ranked[0][1]
-    return ""
+    return vid
 
 
 def mark_verified(conn, creative_key, video_id=None):

@@ -1203,6 +1203,125 @@ def test_late_cancel_aborts_publish_inside_transaction(tmp_path,
     conn.close()
 
 
+def test_single_row_fallback_needs_owner(tmp_path):
+    """Round-8 recheck 1: one stored analysis is not an access
+    permission. A stranger with no confirmation gets nothing and
+    export blocks; the owning employee and admins keep access."""
+    from creative_intel import export_gate
+    conn, key, _vidA, vidB, _didB = _two_video_setup(tmp_path)
+    # Only A analysed: one stored row (B's video exists, unanalysed).
+    conn.execute("DELETE FROM annotations WHERE creative_key=?"
+                 " AND video_id=?", (key, vidB))
+    conn.commit()
+    # Stranger C: no confirmation, not admin.
+    assert creative_mod.annotation_for_report(
+        conn, key, owner="emp-C") is None
+    assert creative_mod.annotation_scope_for_report(
+        conn, key, owner="emp-C") == ""
+    with pytest.raises(export_gate.ExportBlocked):
+        export_gate.build_one_pager(conn, [key], {}, owner="emp-C")
+    # Owner A and admins still read A's lone approved row.
+    assert creative_mod.annotation_for_report(
+        conn, key, owner="emp-A")["analysis"]["revision"] == "rev-A"
+    assert creative_mod.annotation_for_report(
+        conn, key, owner="emp-C",
+        admin=True)["analysis"]["revision"] == "rev-A"
+    conn.close()
+
+
+def test_unavailable_card_hides_shared_fields(tmp_path):
+    """Round-8 recheck 2: B confirmed but unanalysed → the card
+    carries B's own duration with empty transcript/status, never
+    A's shared words, approval, or length."""
+    from ci_backend import actions as actions_mod
+    conn, key, _vidA, vidB, didB = _two_video_setup(tmp_path)
+    conn.execute("DELETE FROM annotations WHERE creative_key=?"
+                 " AND video_id=?", (key, vidB))
+    conn.execute("UPDATE videos SET duration_s=? WHERE id=?",
+                 (15.0, vidB))
+    conn.execute("UPDATE creatives SET transcript=?, status=?,"
+                 " duration_s=? WHERE creative_key=?",
+                 ("PRIVATE A shared words", "human_verified", 99.0,
+                  key))
+    conn.commit()
+    rec = {"id": 7, "import_id": "imp-B", "platform": "meta",
+           "campaign": "Campaign B", "impressions": 6000,
+           "creative_key": "report_asset"}
+    drafts.confirm_match(conn, didB, key, "emp-B", method="manual",
+                         records=[rec], video_id=vidB)
+    cards = actions_mod.build_creatives_list(conn, {}, owner="emp-B")
+    card = [c for c in cards if c["creative_key"] == key][0]
+    assert card["annotation"] is None
+    assert card["transcript"] == ""
+    assert card["status"] == ""
+    assert card["duration_s"] == 15.0
+    conn.close()
+
+
+def test_job_read_keeps_publish_transaction(tmp_path):
+    """Round-8 recheck 3 (unit): a job-state read inside an open
+    transaction performs no writes and no commit — the same
+    transaction stays active for the save."""
+    from creative_intel import jobs as jobs_mod
+    conn, _store, _did = bound_db(tmp_path)
+    job = jobs_mod.enqueue(conn, "video_analysis", {}, owner="emp-1")
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        row = jobs_mod.get(conn, job["id"])
+        assert row["status"] != "cancelled"
+        assert conn.in_transaction
+    finally:
+        conn.rollback()
+    conn.close()
+
+
+@NEEDS_FFMPEG
+def test_worker_chain_cancel_aborts_publish(tmp_path, monkeypatch):
+    """Round-8 recheck 3 (integration): the real worker-style
+    cancellation callback (jobs.get-based, as built in
+    worker_handlers._control) observes a rival connection's cancel
+    and stops the job. Nothing is saved. The in-transaction
+    half is covered by test_late_cancel_aborts_publish_inside_transaction;
+    the no-release half by test_job_read_keeps_publish_transaction
+    (which fails against the old committing ensure)."""
+    from creative_intel import jobs as jobs_mod
+    db = str(tmp_path / "va.db")
+    conn, store, did = bound_db(tmp_path)
+    snap = va.bind_snapshot(conn, did)
+    job = jobs_mod.enqueue(conn, "video_analysis", {}, owner="emp-1")
+    real_check = va.check_snapshot
+    calls = {"n": 0}
+
+    def worker_cancelled():
+        try:
+            row = jobs_mod.get(conn, job["id"])
+        except Exception:
+            return False
+        return row is None or row["status"] == "cancelled"
+
+    def spy(conn, snapshot):
+        calls["n"] += 1
+        try:
+            return real_check(conn, snapshot)
+        finally:
+            if calls["n"] == 2:
+                rival = sqlite3.connect(db)
+                jobs_mod.cancel(rival, job["id"])
+                rival.commit()
+                rival.close()
+
+    monkeypatch.setattr(va, "check_snapshot", spy)
+    with pytest.raises(jobs_mod.JobCancelled):
+        va.run(conn, snap, owner="emp-1", media_dir=store,
+               providers=StubProviders(), queued_at="",
+               cancelled=worker_cancelled)
+    assert drafts.get_draft(conn, did)["status"] != "ready_for_review"
+    assert conn.execute("SELECT COUNT(*) FROM annotations"
+                        " WHERE creative_key=?",
+                        ("video-upload-sample",)).fetchone()[0] == 0
+    conn.close()
+
+
 def test_correction_rejects_nonfinite_moment(tmp_path):
     """Round-6 validation: NaN/inf timestamps are rejected before
     range checks (both comparisons pass NaN silently)."""

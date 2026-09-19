@@ -612,14 +612,16 @@ def build_creatives_list(conn, q, owner=None, admin=False):
             if isinstance(r["annotation"], dict):
                 r["status"] = r["annotation"].get("status") \
                     or r["status"]
-            try:
-                _dur = conn.execute(
-                    "SELECT duration_s FROM videos WHERE id=?",
-                    (_vid,)).fetchone()
-            except Exception:
-                _dur = None
-            if _dur and _dur[0]:
-                r["duration_s"] = _dur[0]
+            _dur = _creative_board.video_duration(conn, _vid)
+            if _dur:
+                r["duration_s"] = _dur
+        else:
+            # No authorised result: never retain shared values that
+            # may be another video's words, approval, or length.
+            _blank = _creative_board.report_unavailable_fields(
+                conn, r["creative_key"], owner=owner, admin=admin)
+            if _blank is not None:
+                r["transcript"], r["status"], r["duration_s"] = _blank
         kept.append(r)
     return kept
 

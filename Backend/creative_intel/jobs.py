@@ -59,6 +59,21 @@ def utcnow() -> str:
 
 
 def ensure(conn) -> None:
+    """Create worker tables when missing; otherwise do nothing.
+
+    The no-op path performs no writes and no commit, so job-state
+    reads (get) stay genuinely read-only and transaction-safe: a
+    cancellation check inside a publication transaction must never
+    release that transaction. Schema creation still happens on
+    first use outside any active transaction (writers call this
+    before their own writes)."""
+    try:
+        cols = {r[1] for r in
+                conn.execute("PRAGMA table_info(worker_jobs)").fetchall()}
+    except Exception:
+        cols = set()
+    if "id" in cols and all(name in cols for name, _ctype in LEASE_COLUMNS):
+        return
     conn.executescript(DDL)
     cols = {r[1] for r in
             conn.execute("PRAGMA table_info(worker_jobs)").fetchall()}

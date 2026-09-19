@@ -2213,58 +2213,84 @@ async def draft_review(draft_id: str, request: Request,
     except Exception as exc:
         raise HTTPException(status_code=409,
                             detail={"error": "Invalid review: %s" % exc})
-    if (draft.get("status") or "") != "ready_for_review":
-        raise HTTPException(status_code=409, detail={
-            "error": "Only a draft ready for review can be reviewed"
-                     " (status is %r)." % (draft.get("status") or "")})
-    video = drafts_mod.active_video(conn, did)
-    # The approval targets the bound video version's own result —
-    # never a sibling upload's row under the same creative name.
-    key = video["creative_key"] if video else ""
-    if not video or not key:
-        raise HTTPException(status_code=409, detail={
-            "error": "No validated video on this draft to review."})
-    stored = creative_mod.scoped_annotation(conn, key, video["id"])
-    block = (stored.get("analysis") if isinstance(stored, dict)
-             else None) or {}
-    if not isinstance(block, dict) or not block.get("version"):
-        raise HTTPException(status_code=409, detail={
-            "error": "No stored analysis of this video to review yet."})
-    if body.analysis_version != block.get("version"):
-        raise HTTPException(status_code=409, detail={
-            "error": "Analysis version %r is not current (%r): re-read "
-                     "the findings before reviewing."
-            % (body.analysis_version, block.get("version"))})
-    if block.get("revision") and body.revision != block.get("revision"):
-        raise HTTPException(status_code=409, detail={
-            "error": "Analysis revision does not match the stored result:"
-                     " re-read the findings before reviewing."})
-    # The approval binds the exact inputs the analysis ran on: re-bind
-    # live inputs and require the frozen snapshot to still hold.
+    # The revision check, snapshot re-bind, review record, and
+    # approval stamp run in one IMMEDIATE transaction when the
+    # caller holds none: a correction committing between the check
+    # and the save would otherwise resurrect the old content as
+    # approved and clobber the fresh correction. A concurrent
+    # correction either lands fully before (revision mismatch, the
+    # reviewer re-reads) or waits until the approval commits.
+    own_txn = not conn.in_transaction
+    if own_txn:
+        conn.execute("BEGIN IMMEDIATE")
     try:
-        live = video_analysis_mod.bind_snapshot(conn, did)
-    except video_analysis_mod.AnalysisUnavailable as exc:
-        raise HTTPException(status_code=409, detail={
-            "error": "Inputs changed since this analysis ran: %s" % exc})
-    stored_snap = block.get("snapshot") or {}
-    for snap_key in ("video_id", "media_id", "video_sha256",
-                     "dataset_version", "match_confirmed_at",
-                     "client", "campaign"):
-        if (live.get(snap_key) or "") != (stored_snap.get(snap_key) or ""):
+        if (draft.get("status") or "") != "ready_for_review":
             raise HTTPException(status_code=409, detail={
-                "error": "Inputs changed since this analysis ran (%s): "
-                         "re-confirm and analyse again." % snap_key})
-    review = drafts_mod.set_review(conn, did, who.id,
-                                   block.get("version") or "",
-                                   note=body.note)
-    if isinstance(stored, dict):
-        stored["status"] = "human_verified"
+                "error": "Only a draft ready for review can be reviewed"
+                         " (status is %r)." % (draft.get("status") or "")})
+        video = drafts_mod.active_video(conn, did)
+        # The approval targets the bound video version's own result —
+        # never a sibling upload's row under the same creative name.
+        key = video["creative_key"] if video else ""
+        if not video or not key:
+            raise HTTPException(status_code=409, detail={
+                "error": "No validated video on this draft to review."})
+        stored = creative_mod.scoped_annotation(conn, key, video["id"])
+        block = (stored.get("analysis") if isinstance(stored, dict)
+                 else None) or {}
+        if not isinstance(block, dict) or not block.get("version"):
+            raise HTTPException(status_code=409, detail={
+                "error": "No stored analysis of this video to review yet."})
+        if body.analysis_version != block.get("version"):
+            raise HTTPException(status_code=409, detail={
+                "error": "Analysis version %r is not current (%r): re-read "
+                         "the findings before reviewing."
+                % (body.analysis_version, block.get("version"))})
+        if block.get("revision") \
+                and body.revision != block.get("revision"):
+            raise HTTPException(status_code=409, detail={
+                "error": "Analysis revision does not match the stored"
+                         " result: re-read the findings before reviewing."})
+        # The approval binds the exact inputs the analysis ran on:
+        # re-bind live inputs and require the frozen snapshot to
+        # still hold.
         try:
-            creative_mod.save_annotation(conn, key, stored,
-                                         video_id=video["id"])
-        except ValueError as exc:
+            live = video_analysis_mod.bind_snapshot(conn, did)
+        except video_analysis_mod.AnalysisUnavailable as exc:
             raise HTTPException(status_code=409, detail={
-                "error": "Reviewed analysis no longer validates: %s" % exc})
+                "error": "Inputs changed since this analysis ran: %s" % exc})
+        stored_snap = block.get("snapshot") or {}
+        for snap_key in ("video_id", "media_id", "video_sha256",
+                         "dataset_version", "match_confirmed_at",
+                         "client", "campaign"):
+            if (live.get(snap_key) or "") \
+                    != (stored_snap.get(snap_key) or ""):
+                raise HTTPException(status_code=409, detail={
+                    "error": "Inputs changed since this analysis ran"
+                             " (%s): re-confirm and analyse again."
+                    % snap_key})
+        review = drafts_mod.set_review(conn, did, who.id,
+                                       block.get("version") or "",
+                                       note=body.note, commit=False)
+        if isinstance(stored, dict):
+            stored["status"] = "human_verified"
+            try:
+                creative_mod.save_annotation(conn, key, stored,
+                                             video_id=video["id"],
+                                             commit=False)
+            except ValueError as exc:
+                raise HTTPException(status_code=409, detail={
+                    "error": "Reviewed analysis no longer validates: %s"
+                    % exc})
+        if own_txn:
+            conn.commit()
+    except Exception:
+        if own_txn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        raise
     paudit.audit_request(request, conn, employee_id=who.id,
                          action="draft_reviewed", target=did)
     return {"draft": _draft_view(conn, _draft_or_404(conn, did)),

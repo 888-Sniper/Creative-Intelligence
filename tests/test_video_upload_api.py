@@ -10,6 +10,8 @@ import hashlib
 import os
 import sys
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Backend"))
 
 from ci_backend import employees as emp_store  # noqa: E402
@@ -708,6 +710,80 @@ def test_reconfirm_invalidates_review(tmp_path, monkeypatch):
     draft = http.get("/api/drafts/%s" % did).json()["draft"]
     assert draft["status"] == "needs_confirmation"
     assert draft["review"] == {}
+
+
+def test_review_holds_lock_across_check_and_save(tmp_path, monkeypatch):
+    """Approve-race: a writer attempting to commit while the review
+    endpoint runs its revision-check → approval-save transaction must
+    wait on the lock — it can neither slip between the check and the
+    save (resurrecting old content as approved) nor proceed
+    concurrently. After approval commits, the same writer proceeds
+    normally."""
+    import sqlite3
+    import threading
+    from creative_intel import creative as creative_mod
+    db, http = make_app(tmp_path, monkeypatch)
+    did, _version, rowids = _confirmed_setup(http, db)
+    match = {"creative_key": "video-upload-sample", "method": "manual",
+             "ad_rowids": rowids}
+    assert http.post("/api/drafts/%s/matches/confirm" % did,
+                     json=match).status_code == 200
+    conn = sqlite3.connect(db)
+    try:
+        _seed_reviewable(conn, did, revision="r0")
+    finally:
+        conn.close()
+    assert http.patch("/api/drafts/%s" % did,
+                      json={"status": "ready_for_review"}).status_code == 200
+
+    entered = threading.Event()
+    release = threading.Event()
+    real_save = creative_mod.save_annotation
+
+    def gated_save(conn, key, ann, **kw):
+        entered.set()
+        assert release.wait(timeout=20)
+        return real_save(conn, key, ann, **kw)
+
+    monkeypatch.setattr(creative_mod, "save_annotation", gated_save)
+    result = {}
+
+    def do_review():
+        try:
+            r = http.post("/api/drafts/%s/review" % did,
+                          json={"analysis_version": "v1",
+                                "revision": "r0"})
+            result["code"] = r.status_code
+            result["text"] = r.text
+        except Exception as exc:  # noqa: BLE001 - surfaced below
+            result["error"] = repr(exc)
+
+    worker = threading.Thread(target=do_review)
+    worker.start()
+    assert entered.wait(timeout=20)
+    # The endpoint holds its transaction between check and save: a
+    # rival writer blocks on the lock instead of landing mid-approval.
+    rival = sqlite3.connect(db, timeout=2)
+    try:
+        with pytest.raises(sqlite3.OperationalError):
+            rival.execute("BEGIN IMMEDIATE")
+    finally:
+        rival.close()
+    release.set()
+    worker.join(timeout=30)
+    assert result.get("code") == 200, result
+    check = sqlite3.connect(db)
+    try:
+        row = check.execute(
+            "SELECT annotation_json FROM annotations"
+            " WHERE creative_key=? AND video_id<>''",
+            ("video-upload-sample",)).fetchone()
+        import json as _json
+        ann = _json.loads(row[0])
+        assert ann["status"] == "human_verified"
+        assert ann["analysis"]["revision"] == "r0"
+    finally:
+        check.close()
 
 
 def test_campaign_scope_permissive_until_confirmed(tmp_path, monkeypatch):

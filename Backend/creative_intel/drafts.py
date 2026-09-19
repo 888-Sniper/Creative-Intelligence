@@ -509,9 +509,11 @@ def get_review(conn, draft_id):
     return review if isinstance(review, dict) else {}
 
 
-def set_review(conn, draft_id, reviewer, analysis_version, note=""):
+def set_review(conn, draft_id, reviewer, analysis_version, note="",
+               commit=True):
     """Record a version-bound human review. The caller must have
-    verified the draft is ready and the version is current."""
+    verified the draft is ready and the version is current.
+    commit=False defers the commit for a caller-owned transaction."""
     did = _require(draft_id, "draft_id")
     review = {"by": _require(reviewer, "reviewer"),
               "at": utcnow(),
@@ -521,7 +523,8 @@ def set_review(conn, draft_id, reviewer, analysis_version, note=""):
     conn.execute("UPDATE drafts SET review_json = ?, status = 'reviewed',"
                  " updated_at = ? WHERE id = ?",
                  (_dump(review), utcnow(), did))
-    conn.commit()
+    if commit:
+        conn.commit()
     return review
 
 

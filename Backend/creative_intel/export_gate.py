@@ -48,15 +48,23 @@ def build_one_pager(conn, creative_keys, benchmarks, override=False,
         # only a fallback for legacy version-less rows.
         ann = _creative_mod.annotation_for_report(
             conn, key, owner=owner, admin=admin) or {}
+        vid = _creative_mod.annotation_scope_for_report(
+            conn, key, owner=owner, admin=admin)
+        if not ann:
+            # No authorised result for this viewer: never substitute
+            # another video's findings, and never authorise export
+            # off them.
+            missing.append(key + " (no authorised result)")
+            continue
         if ann.get("status") != "human_verified" and not override:
             missing.append(key)
             continue
-        vid = _creative_mod.annotation_scope_for_report(
-            conn, key, owner=owner, admin=admin)
+        # The selected version's own transcript — even when empty
+        # (a silent clip has no speech). "No speech" and "no valid
+        # result identity" are separate states: only a missing
+        # identity falls back to the shared display copy.
         transcript = _drafts_mod.get_video_transcript(conn, vid) \
-            if vid else ""
-        if not transcript:
-            transcript = shared_transcript
+            if vid else shared_transcript
         cards.append({"creative_key": key, "name": name, "platform": platform,
                       "hook_type": ann.get("hook_type", ""),
                       "creator_vs_branded": ann.get("creator_vs_branded", ""),

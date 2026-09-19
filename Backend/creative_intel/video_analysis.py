@@ -526,6 +526,13 @@ def run(conn, snapshot, owner="", media_dir="", providers=None,
                 "another analysis finished or the findings were"
                 " corrected while this one was running:"
                 " discarding this result")
+        # Cancellation is rechecked inside the same transaction: a
+        # cancel landing after the final checkpoint must still stop
+        # the publish, and the job-state change need not touch the
+        # input snapshot the checks above verify.
+        if cancelled is not None and cancelled():
+            from creative_intel.jobs import JobCancelled
+            raise JobCancelled("video analysis cancelled at publish")
         drafts_mod.set_video_transcript(conn, video_id, transcript,
                                         commit=False)
         conn.execute("UPDATE creatives SET transcript=?,"

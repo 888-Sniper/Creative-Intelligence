@@ -1105,6 +1105,104 @@ def test_publish_rejects_rival_commit_inside_transaction(tmp_path,
     conn.close()
 
 
+def test_no_analysis_means_none_and_blocked_export(tmp_path):
+    """Round-7 recheck 1: B confirmed but never analysed → no
+    annotation and a blocked export. A's approved result is not
+    substituted, with or without a confirmation."""
+    from creative_intel import export_gate
+    conn, key, _vidA, vidB, didB = _two_video_setup(tmp_path)
+    # No applicable confirmation and several versions: no
+    # substitution for a stranger to the key.
+    assert creative_mod.annotation_for_report(
+        conn, key, owner="emp-C") is None
+    # B matched but never analysed: no scoped analysis row.
+    conn.execute("DELETE FROM annotations WHERE creative_key=?"
+                 " AND video_id=?", (key, vidB))
+    conn.commit()
+    rec = {"id": 7, "import_id": "imp-B", "platform": "meta",
+           "campaign": "Campaign B", "impressions": 6000,
+           "creative_key": "report_asset"}
+    drafts.confirm_match(conn, didB, key, "emp-B", method="manual",
+                         records=[rec], video_id=vidB)
+    assert creative_mod.annotation_for_report(
+        conn, key, owner="emp-B") is None
+    with pytest.raises(export_gate.ExportBlocked):
+        export_gate.build_one_pager(conn, [key], {}, owner="emp-B")
+    conn.close()
+
+
+def test_silent_video_exports_empty_transcript(tmp_path):
+    """Round-7 recheck 2: an approved silent video exports with an
+    empty transcript — A's speech from the shared copy is not
+    borrowed, and the card renders '(no transcript)' downstream."""
+    from creative_intel import export_gate
+    conn, key, _vidA, vidB, didB = _two_video_setup(tmp_path)
+    rec = {"id": 7, "import_id": "imp-B", "platform": "meta",
+           "campaign": "Campaign B", "impressions": 6000,
+           "creative_key": "report_asset"}
+    drafts.confirm_match(conn, didB, key, "emp-B", method="manual",
+                         records=[rec], video_id=vidB)
+    creative_mod.mark_verified(conn, key, video_id=vidB)
+    drafts.set_video_transcript(conn, vidB, "")
+    out = export_gate.build_one_pager(conn, [key], {}, owner="emp-B")
+    assert out["cards"][0]["hook_type"] == "bold_claim"
+    assert out["cards"][0]["transcript"] == ""
+    assert "(no transcript)" in out["markdown"]
+    conn.close()
+
+
+def test_creatives_card_uses_scoped_identity(tmp_path):
+    """Round-7 recheck 3: the Creatives card's annotation,
+    transcript, and status come from B's version — never the
+    shared last-writer copies."""
+    from ci_backend import actions as actions_mod
+    conn, key, _vidA, vidB, didB = _two_video_setup(tmp_path)
+    rec = {"id": 7, "import_id": "imp-B", "platform": "meta",
+           "campaign": "Campaign B", "impressions": 6000,
+           "creative_key": "report_asset"}
+    drafts.confirm_match(conn, didB, key, "emp-B", method="manual",
+                         records=[rec], video_id=vidB)
+    cards = actions_mod.build_creatives_list(conn, {}, owner="emp-B")
+    card = [c for c in cards if c["creative_key"] == key][0]
+    assert card["annotation"]["hook_type"] == "bold_claim"
+    assert card["transcript"] == "B exact words"
+    assert card["status"] == "auto"
+    conn.close()
+
+
+@NEEDS_FFMPEG
+def test_late_cancel_aborts_publish_inside_transaction(tmp_path,
+                                                       monkeypatch):
+    """Round-7 recheck 4: a cancel landing after the final
+    checkpoint — after the last pre-transaction check — still stops
+    the publish via the in-transaction recheck. Nothing is saved."""
+    conn, store, did = bound_db(tmp_path)
+    snap = va.bind_snapshot(conn, did)
+    real_check = va.check_snapshot
+    calls = {"n": 0}
+    flag = {"off": False}
+
+    def spy(conn, snapshot):
+        calls["n"] += 1
+        try:
+            return real_check(conn, snapshot)
+        finally:
+            if calls["n"] == 3:
+                flag["off"] = True
+
+    monkeypatch.setattr(va, "check_snapshot", spy)
+    with pytest.raises(jobs_mod.JobCancelled):
+        va.run(conn, snap, owner="emp-1", media_dir=store,
+               providers=StubProviders(), queued_at="",
+               cancelled=lambda: flag["off"])
+    assert calls["n"] == 3
+    assert drafts.get_draft(conn, did)["status"] != "ready_for_review"
+    assert conn.execute("SELECT COUNT(*) FROM annotations"
+                        " WHERE creative_key=?",
+                        ("video-upload-sample",)).fetchone()[0] == 0
+    conn.close()
+
+
 def test_correction_rejects_nonfinite_moment(tmp_path):
     """Round-6 validation: NaN/inf timestamps are rejected before
     range checks (both comparisons pass NaN silently)."""

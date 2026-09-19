@@ -511,8 +511,10 @@ def build_creatives_list(conn, q, owner=None, admin=False):
     video-to-record relationship: the viewer's own confirmed match
     for a creative replaces key equality (never unions with it), so
     a confirmed video-to-report association shows even when the
-    identifiers differ. Annotation axes read the approved-or-latest
-    scoped row for the creative name.
+    identifiers differ. Annotation, transcript, status, and duration
+    all come from the same authorised video version (the confirming
+    one when the viewer confirmed, else the single version when
+    unambiguous) — never mixed across sibling versions.
     """
     cols = ["creative_key", "platform", "name", "duration_s",
             "status", "transcript"]
@@ -599,6 +601,25 @@ def build_creatives_list(conn, q, owner=None, admin=False):
         from creative_intel import creative as _creative_board
         r["annotation"] = _creative_board.annotation_for_report(
             conn, r["creative_key"], owner=owner, admin=admin)
+        _vid = _creative_board.annotation_scope_for_report(
+            conn, r["creative_key"], owner=owner, admin=admin)
+        if _vid:
+            # One consistent identity: the selected version's own
+            # words, approval status, and duration — never the
+            # shared last-writer-wins creatives copies. An empty
+            # scoped transcript stays empty (silent clip).
+            r["transcript"] = _drafts.get_video_transcript(conn, _vid)
+            if isinstance(r["annotation"], dict):
+                r["status"] = r["annotation"].get("status") \
+                    or r["status"]
+            try:
+                _dur = conn.execute(
+                    "SELECT duration_s FROM videos WHERE id=?",
+                    (_vid,)).fetchone()
+            except Exception:
+                _dur = None
+            if _dur and _dur[0]:
+                r["duration_s"] = _dur[0]
         kept.append(r)
     return kept
 

@@ -197,6 +197,22 @@ def set_video_transcript(conn, video_id, text, commit=True):
         conn.commit()
 
 
+def get_video_transcript(conn, video_id):
+    """One asset version's own transcript, or ''.
+
+    Exact video-row read — never the shared creatives copy — so an
+    export pairs the selected annotation with the same version's
+    words."""
+    try:
+        row = conn.execute("SELECT transcript FROM videos WHERE id = ?",
+                           (_require(video_id, "video_id"),)).fetchone()
+    except Exception:
+        return ""
+    if not row or row[0] is None:
+        return ""
+    return row[0]
+
+
 def clear_videos(conn, draft_id):
     """Remove every video row bound to a draft. Replacement and
     removal are explicit backend operations: a draft has exactly
@@ -248,33 +264,41 @@ def propose_match(conn, draft_id, creative_key, method, records):
 
 
 def confirm_match(conn, draft_id, creative_key, confirmed_by,
-                  method="manual", records=None):
+                  method="manual", records=None, video_id=""):
     """Explicit human confirmation of a video-to-record set. Records
-    must already have been revalidated server-side by the caller."""
+    must already have been revalidated server-side by the caller.
+    video_id freezes the bound asset version the confirmation was
+    made against, so reporting and export can later select the same
+    video's own annotation and transcript even if the draft's
+    active video has since changed."""
     did = _require(draft_id, "draft_id")
     key = _require(creative_key, "creative_key")
     who = _require(confirmed_by, "confirmed_by")
     if method not in MATCH_METHODS:
         raise ValueError("drafts: unknown match method %r" % (method,))
     now = utcnow()
+    vid = video_id or ""
     if records is None:
         conn.execute(
             "UPDATE matches SET confirmed = 1, confirmed_by = ?,"
-            " confirmed_at = ? WHERE draft_id = ? AND creative_key = ?",
-            (who, now, did, key))
+            " confirmed_at = ?, video_id = ?"
+            " WHERE draft_id = ? AND creative_key = ?",
+            (who, now, vid, did, key))
     else:
         conn.execute(
             "INSERT INTO matches (draft_id, creative_key, method,"
-            " record_json, confirmed, confirmed_by, confirmed_at)"
-            " VALUES (?, ?, ?, ?, 1, ?, ?)"
+            " record_json, confirmed, confirmed_by, confirmed_at,"
+            " video_id)"
+            " VALUES (?, ?, ?, ?, 1, ?, ?, ?)"
             " ON CONFLICT (draft_id, creative_key) DO UPDATE SET"
             " method = excluded.method,"
             " record_json = excluded.record_json, confirmed = 1,"
             " confirmed_by = excluded.confirmed_by,"
-            " confirmed_at = excluded.confirmed_at",
+            " confirmed_at = excluded.confirmed_at,"
+            " video_id = excluded.video_id",
             (did, key, method,
              json.dumps(records, sort_keys=True, default=str),
-             who, now))
+             who, now, vid))
     conn.commit()
 
 
@@ -317,6 +341,61 @@ def confirmed_records_for_key(conn, creative_key, owner=None,
     return None
 
 
+def confirmed_bundle_for_key(conn, creative_key, owner=None,
+                               admin=False):
+    """Applicable confirmation as one identity bundle, or None.
+
+    Owner-scoped like confirmed_records_for_key: the viewer's own
+    draft-owned confirmation wins; administrators may use any
+    owner's. Returns {records, video_id, draft_id, client, campaign,
+    method, confirmed_at}. video_id is the asset version frozen at
+    confirm time (falling back to that draft's current active video
+    for confirmations predating the freeze); client/campaign come
+    from the confirming draft's spec so report rows without a
+    client column still carry the authorised destination."""
+    try:
+        rows = conn.execute(
+            "SELECT m.record_json, m.video_id, m.method,"
+            " m.confirmed_at, m.draft_id, d.owner_employee_id,"
+            " d.spec_json FROM matches m"
+            " JOIN drafts d ON d.id = m.draft_id"
+            " WHERE m.creative_key = ? AND m.confirmed = 1"
+            " ORDER BY m.confirmed_at DESC",
+            (_require(creative_key, "creative_key"),)).fetchall()
+    except Exception:
+        return None
+    for record_json, frozen_vid, method, confirmed_at, did, \
+            match_owner, spec_json in rows or []:
+        if not admin and owner is not None \
+                and (match_owner or "") != owner:
+            continue
+        try:
+            records = json.loads(record_json or "[]")
+        except ValueError:
+            continue
+        if not isinstance(records, list) or not records:
+            continue
+        try:
+            spec = json.loads(spec_json or "{}")
+        except ValueError:
+            spec = {}
+        if not isinstance(spec, dict):
+            spec = {}
+        vid = frozen_vid or ""
+        if not vid:
+            try:
+                active = active_video(conn, did)
+            except Exception:
+                active = None
+            vid = active["id"] if isinstance(active, dict) else ""
+        return {"records": records, "video_id": vid or "",
+                "draft_id": did, "client": spec.get("client") or "",
+                "campaign": spec.get("campaign") or "",
+                "method": method or "",
+                "confirmed_at": confirmed_at or ""}
+    return None
+
+
 def performance_rows_for_key(conn, creative_key, ads_rows, owner=None,
                              admin=False):
     """Canonical per-key performance for reporting surfaces.
@@ -325,17 +404,23 @@ def performance_rows_for_key(conn, creative_key, ads_rows, owner=None,
     unions with it): a confirmed 6,000-impression match shows instead
     of a key-query 0 when the video and report identifiers differ.
     Without an applicable confirmation, the key-equal ads rows stand.
-    Snapshots are shaped like ads rows (missing columns read None)
-    so downstream sums and scope filters behave identically.
+    Stored snapshots are complete ads rows (every column is frozen
+    at confirm time), so known values like revenue and reach are
+    never reconstructed from defaults; only columns absent from an
+    older partial snapshot take type-safe fills. Rows whose own
+    client/campaign is empty inherit the confirming draft's
+    authorised destination, so client-filterable surfaces stay
+    connected to the confirmed association.
     """
-    confirmed = confirmed_records_for_key(
+    bundle = confirmed_bundle_for_key(
         conn, creative_key, owner=owner, admin=admin)
-    if confirmed is None:
+    if bundle is None:
         return ads_rows
-    # Shape snapshots exactly like ads rows: columns the frozen
-    # snapshot does not carry (revenue, reach, ...) take the ads
-    # table's own defaults, so downstream sums, scope filters, and
-    # money helpers behave identically to key-equal rows.
+    confirmed = bundle["records"]
+    # Shape snapshots exactly like ads rows: columns a frozen
+    # snapshot does not carry take the ads table's own defaults, so
+    # downstream sums, scope filters, and money helpers behave
+    # identically to key-equal rows.
     try:
         info = conn.execute("PRAGMA table_info(ads)").fetchall()
     except Exception:
@@ -351,10 +436,15 @@ def performance_rows_for_key(conn, creative_key, ads_rows, owner=None,
         if not isinstance(rec, dict):
             continue
         if fills:
-            shaped.append({col: rec.get(col) if rec.get(col) is not None
-                           else fill for col, fill in fills.items()})
+            row = {col: rec.get(col) if rec.get(col) is not None
+                   else fill for col, fill in fills.items()}
         else:
-            shaped.append(dict(rec))
+            row = dict(rec)
+        if not row.get("client") and bundle["client"]:
+            row["client"] = bundle["client"]
+        if not row.get("campaign") and bundle["campaign"]:
+            row["campaign"] = bundle["campaign"]
+        shaped.append(row)
     return shaped
 
 

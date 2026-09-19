@@ -411,6 +411,7 @@ CREATE TABLE IF NOT EXISTS matches (
     confirmed INTEGER NOT NULL DEFAULT 0,
     confirmed_by TEXT NOT NULL DEFAULT '',
     confirmed_at TEXT NOT NULL DEFAULT '',
+    video_id TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (draft_id, creative_key)
 );
 """
@@ -736,7 +737,13 @@ def migrate(conn):
         " confirmed INTEGER NOT NULL DEFAULT 0,"
         " confirmed_by TEXT NOT NULL DEFAULT '',"
         " confirmed_at TEXT NOT NULL DEFAULT '',"
+        " video_id TEXT NOT NULL DEFAULT '',"
         " PRIMARY KEY (draft_id, creative_key))")
+    match_cols = {row[1] for row in
+                  conn.execute("PRAGMA table_info(matches)")}
+    if "video_id" not in match_cols:
+        conn.execute("ALTER TABLE matches ADD COLUMN"
+                     " video_id TEXT NOT NULL DEFAULT ''")
     ensure_sync_key(conn)
     conn.execute(
         "CREATE TABLE IF NOT EXISTS sync_runs ("

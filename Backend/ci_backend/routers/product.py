@@ -1397,7 +1397,8 @@ async def export(request: Request, conn=Depends(get_product_conn),
         result = export_gate.build_one_pager(
             conn, body.creative_keys,
             benchmarks.benchmark(conn, "hook_type"),
-            override=body.override)
+            override=body.override, owner=who.id,
+            admin=(who.role or "") == "admin")
     except export_gate.ExportBlocked as exc:
         paudit.audit_request(request, conn, employee_id=who.id,
                              action="report_exported", result="error")
@@ -2029,10 +2030,15 @@ _MATCH_COLUMNS = ("id", "import_id", "platform", "campaign", "adset",
 def _match_records(conn, draft: dict, ad_rowids) -> list:
     """Load frozen snapshots of the submitted ads rows, verifying
     each one belongs to the draft's imported dataset version.
-    Browser-submitted identifiers are never trusted on their own."""
+    Browser-submitted identifiers are never trusted on their own.
+    Snapshots freeze the COMPLETE ads row (every column, via
+    SELECT *), so reporting never reconstructs known values like
+    revenue or reach from defaults. Duplicate ids collapse to one
+    selection: the canonical selected-record set enforces
+    uniqueness, so [1, 1] counts one record's impressions once."""
     import json as _json
     try:
-        wanted = [int(r) for r in (ad_rowids or [])]
+        wanted = list(dict.fromkeys(int(r) for r in (ad_rowids or [])))
     except (TypeError, ValueError):
         raise ValueError("ad_rowids must be ads row ids")
     if not wanted:
@@ -2040,11 +2046,11 @@ def _match_records(conn, draft: dict, ad_rowids) -> list:
     version = draft.get("dataset_version") or ""
     if not version:
         raise ValueError("import performance data before matching")
-    cols = ", ".join(_MATCH_COLUMNS)
-    found = conn.execute(
-        "SELECT %s FROM ads WHERE id IN (%s)"
-        % (cols, ",".join("?" * len(wanted))), wanted).fetchall()
-    by_id = {row[0]: dict(zip(_MATCH_COLUMNS, row)) for row in found}
+    cur = conn.execute(
+        "SELECT * FROM ads WHERE id IN (%s)"
+        % ",".join("?" * len(wanted)), wanted)
+    names = [d[0] for d in cur.description]
+    by_id = {row[0]: dict(zip(names, row)) for row in cur.fetchall()}
     missing = [r for r in wanted if r not in by_id]
     if missing:
         raise ValueError("unknown performance records: %s" % missing[:5])
@@ -2153,8 +2159,12 @@ async def match_confirm(draft_id: str, request: Request,
             raise ValueError("validate the video before confirming")
         if body.creative_key not in valid_keys:
             raise ValueError("match key must be a validated video on this draft")
-        drafts_mod.confirm_match(conn, did, body.creative_key, who.id,
-                                 method=body.method, records=records)
+        _confirm_video = drafts_mod.active_video(conn, did)
+        drafts_mod.confirm_match(
+            conn, did, body.creative_key, who.id,
+            method=body.method, records=records,
+            video_id=_confirm_video["id"]
+            if isinstance(_confirm_video, dict) else "")
         # A new confirmation supersedes whatever was reviewed before
         # (even an identical re-confirm: its timestamp is newer than
         # the approval).

@@ -537,7 +537,8 @@ def build_creatives_list(conn, q, owner=None, admin=False):
         # Annotation axes (hook_type, creator_vs_branded) live on the
         # creative, not the ad rows: stamp them before cohort matching
         # so those filters constrain instead of hiding everything.
-        _ann = _creative.annotation_for_key(conn, r["creative_key"]) or {}
+        _ann = _creative.annotation_for_report(
+            conn, r["creative_key"], owner=owner, admin=admin) or {}
         if _ann:
             for ad in ad_rows:
                 ad.setdefault("hook_type", _ann.get("hook_type", "") or "")
@@ -596,8 +597,8 @@ def build_creatives_list(conn, q, owner=None, admin=False):
             "roas_coverage": _roas_cov}
         r["scope"] = scope.describe()
         from creative_intel import creative as _creative_board
-        r["annotation"] = _creative_board.annotation_for_key(
-            conn, r["creative_key"])
+        r["annotation"] = _creative_board.annotation_for_report(
+            conn, r["creative_key"], owner=owner, admin=admin)
         kept.append(r)
     return kept
 
@@ -715,7 +716,8 @@ def build_compare(conn, q, owner=None, admin=False):
         impr = sum(r["impressions"] for r in rows)
         clicks = sum(r["clicks"] for r in rows)
         conv = sum(r["conversions"] for r in rows)
-        ann = _creative2.annotation_for_key(conn, key)
+        ann = _creative2.annotation_for_report(
+            conn, key, owner=owner, admin=admin)
         # A14/A15: same pooled contract as benchmarks.kpis_for_rows
         # (currency metadata, mixed-scope money gating,
         # matched-population ROAS, registry vtr/view_rate split).

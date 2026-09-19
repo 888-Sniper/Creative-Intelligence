@@ -25,10 +25,12 @@ def check_reviews(conn):
             ["gate:review-to-zero: %d QA review(s) still pending" % pending])
 
 
-def build_one_pager(conn, creative_keys, benchmarks, override=False):
+def build_one_pager(conn, creative_keys, benchmarks, override=False,
+                    owner=None, admin=False):
     missing = []
     cards = []
     from creative_intel import creative as _creative_mod
+    from creative_intel import drafts as _drafts_mod
     for key in creative_keys:
         row = conn.execute(
             "SELECT name, platform, transcript FROM creatives"
@@ -37,14 +39,24 @@ def build_one_pager(conn, creative_keys, benchmarks, override=False):
         if not row:
             missing.append(key + " (unknown)")
             continue
-        name, platform, transcript = row
-        # Export the approved result: the human_verified scoped row
-        # when one exists, else the latest — never an arbitrary
-        # sibling version's findings.
-        ann = _creative_mod.annotation_for_key(conn, key) or {}
+        name, platform, shared_transcript = row
+        # One consistent result identity: the viewer's applicable
+        # confirmation selects the video version, and approval, hook
+        # classification, and transcript all come from that same
+        # version's rows. An older approved result never authorises
+        # another video's content, and the shared creatives copy is
+        # only a fallback for legacy version-less rows.
+        ann = _creative_mod.annotation_for_report(
+            conn, key, owner=owner, admin=admin) or {}
         if ann.get("status") != "human_verified" and not override:
             missing.append(key)
             continue
+        vid = _creative_mod.annotation_scope_for_report(
+            conn, key, owner=owner, admin=admin)
+        transcript = _drafts_mod.get_video_transcript(conn, vid) \
+            if vid else ""
+        if not transcript:
+            transcript = shared_transcript
         cards.append({"creative_key": key, "name": name, "platform": platform,
                       "hook_type": ann.get("hook_type", ""),
                       "creator_vs_branded": ann.get("creator_vs_branded", ""),

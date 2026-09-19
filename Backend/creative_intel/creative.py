@@ -498,6 +498,50 @@ def annotation_scope_for_key(conn, creative_key):
     return ranked[0][1] if ranked else ""
 
 
+def annotation_for_report(conn, creative_key, owner=None, admin=False):
+    """One consistent result identity for reporting surfaces.
+
+    When the viewer has an applicable confirmed match, the
+    annotation is the confirming video version's own row — the same
+    identity whose performance the resolver shows — never a sibling
+    version's approved findings. Without an applicable confirmation
+    there is no authorised version to prefer, so the legacy
+    approved-or-latest row stands (documented fallback, not a
+    silent mix: no confirmed performance is displayed either)."""
+    from creative_intel import drafts as _drafts_mod
+    try:
+        bundle = _drafts_mod.confirmed_bundle_for_key(
+            conn, creative_key, owner=owner, admin=admin)
+    except Exception:
+        bundle = None
+    if bundle and bundle.get("video_id"):
+        scoped = scoped_annotation(conn, creative_key,
+                                   bundle["video_id"])
+        if isinstance(scoped, dict):
+            return scoped
+    return annotation_for_key(conn, creative_key)
+
+
+def annotation_scope_for_report(conn, creative_key, owner=None,
+                                admin=False):
+    """video_id of the row annotation_for_report would return.
+
+    Lets export pair the selected annotation with the same
+    version's transcript — the fallback path matches
+    annotation_for_report exactly, never a sibling version."""
+    from creative_intel import drafts as _drafts_mod
+    try:
+        bundle = _drafts_mod.confirmed_bundle_for_key(
+            conn, creative_key, owner=owner, admin=admin)
+    except Exception:
+        bundle = None
+    if bundle and bundle.get("video_id") and isinstance(
+            scoped_annotation(conn, creative_key,
+                              bundle["video_id"]), dict):
+        return bundle["video_id"]
+    return annotation_scope_for_key(conn, creative_key)
+
+
 def mark_verified(conn, creative_key, video_id=None):
     """Manual-verify hook: flip the annotation + creative to
     human_verified. Without video_id acts on the approved-or-latest

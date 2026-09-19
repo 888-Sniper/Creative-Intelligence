@@ -1260,3 +1260,59 @@ def test_delete_draft_clears_generated_transcript(tmp_path, monkeypatch):
     finally:
         conn.close()
     assert row == ("", "{}")
+
+
+def test_confirm_dedupes_record_ids(tmp_path, monkeypatch):
+    """Round-6 validation: confirming [id, id] freezes one record,
+    so the canonical selected-record set counts its impressions
+    once, not twice."""
+    import json as _json
+    db, http = make_app(tmp_path, monkeypatch)
+    did, _version, rowids = _confirmed_setup(http, db)
+    match = {"creative_key": "video-upload-sample",
+             "method": "platform_id",
+             "ad_rowids": [rowids[0], rowids[0]]}
+    done = http.post("/api/drafts/%s/matches/confirm" % did, json=match)
+    assert done.status_code == 200, done.text
+    stored = _json.loads(done.json()["match"]["record_json"])
+    assert [r["id"] for r in stored] == [rowids[0]]
+
+
+def test_confirm_freezes_complete_snapshot_and_video(tmp_path, monkeypatch):
+    """Round-6 recheck 2 (HTTP): the frozen snapshot carries every
+    ads column — revenue, reach, market, conversion event — and the
+    match freezes the bound video version for later reporting."""
+    import json as _json
+    import sqlite3
+    db, http = make_app(tmp_path, monkeypatch)
+    did, _version, rowids = _confirmed_setup(http, db)
+    conn = sqlite3.connect(db)
+    try:
+        conn.execute(
+            "UPDATE ads SET revenue=240.0, revenue_reported=1,"
+            " reach=4500, market='MY', conversion_event='purchase',"
+            " client='' WHERE id=?", (rowids[0],))
+        conn.commit()
+    finally:
+        conn.close()
+    match = {"creative_key": "video-upload-sample",
+             "method": "platform_id", "ad_rowids": [rowids[0]]}
+    done = http.post("/api/drafts/%s/matches/confirm" % did, json=match)
+    assert done.status_code == 200, done.text
+    stored = _json.loads(done.json()["match"]["record_json"])
+    assert stored[0]["revenue"] == 240.0
+    assert stored[0]["reach"] == 4500
+    assert stored[0]["market"] == "MY"
+    assert stored[0]["conversion_event"] == "purchase"
+    conn = sqlite3.connect(db)
+    try:
+        frozen = conn.execute(
+            "SELECT video_id FROM matches WHERE draft_id=?",
+            (did,)).fetchone()[0]
+        valid = [vid for vid, vj in conn.execute(
+            "SELECT id, validation_json FROM videos WHERE draft_id=?",
+            (did,)).fetchall() if '"valid"' in (vj or "")]
+    finally:
+        conn.close()
+    assert frozen != ""
+    assert frozen in valid

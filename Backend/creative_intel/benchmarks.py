@@ -1078,7 +1078,8 @@ def _creative_rows(conn, campaign, scope=None, owner=None,
 
         def _distinct(col):
             return sorted({str(r[col]) for r in rows if r[col]})
-        ann = _creative_mod.annotation_for_key(conn, key) or {}
+        ann = _creative_mod.annotation_for_report(
+            conn, key, owner=owner, admin=admin) or {}
         status = conn.execute("SELECT status FROM creatives WHERE creative_key=?",
                               (key,)).fetchone()
         duration = conn.execute("SELECT duration_s FROM creatives WHERE creative_key=?",

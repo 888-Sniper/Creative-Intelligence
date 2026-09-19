@@ -505,27 +505,27 @@ def run(conn, snapshot, owner="", media_dir="", providers=None,
                       "match_method", "client", "campaign")},
         "measured": measured,
         "suggested_tests": suggest_tests(ann, measured, transcript)}
-    # Final gate immediately before publish: the snapshot is re-bound
-    # (a dataset change or cleared match after the post-pipeline
-    # check aborts here — the old result is never saved), then
-    # cancellation, the queued-at guard, and the revision identity
-    # are re-checked while still nothing has been written.
+    # Publish the complete result in one all-or-nothing transaction.
+    # The transaction is acquired FIRST, then the snapshot, the
+    # queued-at guard, and the revision identity are rechecked
+    # INSIDE it: a dataset change or cleared match committed by
+    # another request after the post-pipeline check is visible to
+    # the in-transaction re-bind and aborts the publish instead of
+    # saving a stale result. A check outside the transaction would
+    # merely move the same race.
     checkpoint(95, "publish")
-    fresh = check_snapshot(conn, snapshot)
-    _guard_not_stale(conn, key, queued_at, video_id)
-    if _analysis_identity(conn, key, video_id) != pre_identity:
-        raise AnalysisUnavailable(
-            "another analysis finished or the findings were corrected"
-            " while this one was running: discarding this result")
-    # Publish the complete result in one all-or-nothing transaction:
-    # the version's own transcript, the global display copies, the
-    # annotation carrying the new unique revision, and the draft
-    # status. No publish-then-repair, no split commits.
     if fresh["media_id"]:
         ann.setdefault("source_url", "/media/%d" % fresh["media_id"])
     try:
         if not conn.in_transaction:
             conn.execute("BEGIN IMMEDIATE")
+        fresh = check_snapshot(conn, snapshot)
+        _guard_not_stale(conn, key, queued_at, video_id)
+        if _analysis_identity(conn, key, video_id) != pre_identity:
+            raise AnalysisUnavailable(
+                "another analysis finished or the findings were"
+                " corrected while this one was running:"
+                " discarding this result")
         drafts_mod.set_video_transcript(conn, video_id, transcript,
                                         commit=False)
         conn.execute("UPDATE creatives SET transcript=?,"
@@ -682,6 +682,10 @@ def apply_corrections(conn, creative_key, corrections, by="",
                 moment = float(item.get("t_sec"))
             except (TypeError, ValueError):
                 raise ValueError("frame moment t_sec must be numeric")
+            import math as _math
+            if not _math.isfinite(moment):
+                raise ValueError(
+                    "frame moment t_sec must be a finite number")
             if moment < 0:
                 raise ValueError("frame moment t_sec cannot be negative")
             if clip_s is not None and moment > clip_s:

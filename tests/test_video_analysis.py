@@ -933,3 +933,199 @@ def test_apply_corrections_rewrites_findings(tmp_path):
     with pytest.raises(ValueError):
         va.apply_corrections(conn, "missing-key", {"hook_type": "other"})
     conn.close()
+
+
+def _seed_versioned(conn, key, video_id, hook, status, transcript,
+                    revision):
+    """One video version's own annotation + transcript rows."""
+    ann = creative_mod.blank_annotation()
+    ann["hook_type"] = hook
+    ann["status"] = status
+    ann["analysis"] = {"version": "v1", "revision": revision,
+                       "at": "2026-01-01T00:00:00+00:00",
+                       "model": "test/test-frames", "snapshot": {},
+                       "measured": {}, "suggested_tests": []}
+    creative_mod.save_annotation(conn, key, ann, video_id=video_id)
+    drafts.set_video_transcript(conn, video_id, transcript)
+
+
+def _two_video_setup(tmp_path):
+    """Two drafts/owners, different videos, one creative name.
+
+    Video A (emp-A): approved, hook question. Video B (emp-B):
+    analysed, hook bold_claim, confirmed match. Returns
+    (conn, key, vidA, vidB, didB)."""
+    conn, _store, didA = bound_db(tmp_path)
+    key = "video-upload-sample"
+    media_id = conn.execute(
+        "SELECT media_id FROM videos WHERE draft_id=?",
+        (didA,)).fetchone()[0]
+    vidA = conn.execute(
+        "SELECT id FROM videos WHERE draft_id=?", (didA,)).fetchone()[0]
+    # bound_db's draft belongs to emp-1: reassign as emp-A's draft.
+    conn.execute("UPDATE drafts SET owner_employee_id=? WHERE id=?",
+                 ("emp-A", didA))
+    conn.execute("UPDATE videos SET creative_key=? WHERE id=?",
+                 (key, vidA))
+    _seed_versioned(conn, key, vidA, "question", "human_verified",
+                    "A exact words", "rev-A")
+    didB = drafts.create_draft(conn, "emp-B")
+    drafts.update_draft(conn, didB, spec={"client": "Client B",
+                                          "campaign": "Campaign B",
+                                          "clientConfirmed": True})
+    vidB = drafts.add_video(conn, didB, key, media_id=media_id,
+                            duration_s=15.0, width=1280, height=720,
+                            sha256="other-sha-B",
+                            validation={"status": "valid"})
+    drafts.add_dataset(conn, didB, "b.csv", rows=1, version="imp-B")
+    drafts.update_draft(conn, didB, dataset_version="imp-B")
+    _seed_versioned(conn, key, vidB, "bold_claim", "auto",
+                    "B exact words", "rev-B")
+    conn.execute("INSERT INTO creatives (creative_key, transcript)"
+                 " VALUES (?, ?) ON CONFLICT (creative_key) DO UPDATE"
+                 " SET transcript = excluded.transcript",
+                 (key, "stale shared words"))
+    conn.commit()
+    return conn, key, vidA, vidB, didB
+
+
+def test_report_annotation_prefers_confirming_video(tmp_path):
+    """Round-6 recheck 1: B's confirmed performance must pair with
+    B's own annotation — never A's approved findings."""
+    conn, key, _vidA, vidB, didB = _two_video_setup(tmp_path)
+    rec = {"id": 7, "import_id": "imp-B", "platform": "meta",
+           "campaign": "Campaign B", "impressions": 6000,
+           "creative_key": "report_asset"}
+    drafts.confirm_match(conn, didB, key, "emp-B", method="manual",
+                         records=[rec], video_id=vidB)
+    ann = creative_mod.annotation_for_report(conn, key, owner="emp-B")
+    assert ann["hook_type"] == "bold_claim"
+    assert ann["analysis"]["revision"] == "rev-B"
+    # A viewer with no applicable confirmation keeps the legacy
+    # approved-or-latest row (documented fallback, no confirmed
+    # performance shown alongside it either).
+    legacy = creative_mod.annotation_for_report(conn, key,
+                                                owner="emp-A")
+    assert legacy["hook_type"] == "question"
+    conn.close()
+
+
+def test_export_uses_single_result_identity(tmp_path):
+    """Round-6 recheck 1 (export): approval, hook, and transcript
+    come from the same video version. A's approval must not
+    authorise B's unreviewed content, and an approved B exports
+    B's own words — never the shared copy."""
+    from creative_intel import export_gate
+    conn, key, _vidA, vidB, didB = _two_video_setup(tmp_path)
+    rec = {"id": 7, "import_id": "imp-B", "platform": "meta",
+           "campaign": "Campaign B", "impressions": 6000,
+           "creative_key": "report_asset"}
+    drafts.confirm_match(conn, didB, key, "emp-B", method="manual",
+                         records=[rec], video_id=vidB)
+    # B is unreviewed: export is blocked even though A is approved
+    # (the old code exported A's hook with the shared transcript).
+    with pytest.raises(export_gate.ExportBlocked):
+        export_gate.build_one_pager(conn, [key], {}, owner="emp-B")
+    creative_mod.mark_verified(conn, key, video_id=vidB)
+    out = export_gate.build_one_pager(conn, [key], {}, owner="emp-B")
+    assert out["cards"][0]["hook_type"] == "bold_claim"
+    assert out["cards"][0]["transcript"] == "B exact words"
+    conn.close()
+
+
+def test_confirmed_rows_keep_full_fields_and_destination(tmp_path):
+    """Round-6 recheck 2: complete snapshots preserve revenue,
+    reach, market, and conversion event; client-less rows inherit
+    the confirming draft's authorised destination."""
+    conn, _store, _did = bound_db(tmp_path)
+    key = "video-upload-sample"
+    vid = conn.execute(
+        "SELECT id FROM videos WHERE draft_id=?", (_did,)).fetchone()[0]
+    rec = {"id": 9, "import_id": "imp", "platform": "meta",
+           "campaign": "Sample Launch", "adset": "Prospecting",
+           "ad_name": "B Story", "creative_key": "report_asset",
+           "spend": 120.0, "impressions": 6000, "clicks": 150,
+           "conversions": 7.0, "video_views": 3000,
+           "client": "", "project": "", "vertical": "", "market": "MY",
+           "objective": "", "funnel_stage": "", "date": "2026-09-01",
+           "revenue": 240.0, "revenue_reported": 1, "reach": 4500,
+           "currency": "USD", "link_clicks": 140,
+           "conversion_event": "purchase", "missing_json": "[]"}
+    drafts.confirm_match(conn, _did, key, "emp-1", method="manual",
+                         records=[rec], video_id=vid)
+    rows = drafts.performance_rows_for_key(conn, key, [], owner="emp-1")
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["impressions"] == 6000
+    assert row["revenue"] == 240.0
+    assert row["reach"] == 4500
+    assert row["market"] == "MY"
+    assert row["conversion_event"] == "purchase"
+    assert row["client"] == "Foap"
+    assert row["campaign"] == "Sample Launch"
+    conn.close()
+
+
+@NEEDS_FFMPEG
+def test_publish_rejects_rival_commit_inside_transaction(tmp_path,
+                                                         monkeypatch):
+    """Round-6 recheck 3: a dataset change plus cleared match
+    committed after the post-pipeline check must abort the publish.
+    The in-transaction re-bind sees the rival commit and nothing is
+    saved — no stale result, no ready_for_review."""
+    db = str(tmp_path / "va.db")
+    conn, store, did = bound_db(tmp_path)
+    snap = va.bind_snapshot(conn, did)
+    real_check = va.check_snapshot
+    calls = {"n": 0}
+
+    def spy(conn, snapshot):
+        calls["n"] += 1
+        try:
+            return real_check(conn, snapshot)
+        finally:
+            if calls["n"] == 2:
+                rival = sqlite3.connect(db)
+                rival.execute("UPDATE drafts SET dataset_version='import-2'"
+                              " WHERE id=?", (did,))
+                rival.execute("DELETE FROM matches WHERE draft_id=?",
+                              (did,))
+                rival.commit()
+                rival.close()
+
+    monkeypatch.setattr(va, "check_snapshot", spy)
+    with pytest.raises(va.AnalysisUnavailable):
+        va.run(conn, snap, owner="emp-1", media_dir=store,
+               providers=StubProviders(), queued_at="")
+    assert calls["n"] == 3
+    assert drafts.get_draft(conn, did)["status"] != "ready_for_review"
+    assert conn.execute("SELECT COUNT(*) FROM annotations"
+                        " WHERE creative_key=?",
+                        ("video-upload-sample",)).fetchone()[0] == 0
+    conn.close()
+
+
+def test_correction_rejects_nonfinite_moment(tmp_path):
+    """Round-6 validation: NaN/inf timestamps are rejected before
+    range checks (both comparisons pass NaN silently)."""
+    conn, _store, _did = bound_db(tmp_path)
+    key = "video-upload-sample"
+    seed = creative_mod.blank_annotation()
+    seed["analysis"] = {"version": "v1", "revision": "rev-0",
+                        "at": "2026-01-01T00:00:00+00:00",
+                        "model": "test/test-frames",
+                        "snapshot": {}, "measured": {},
+                        "suggested_tests": []}
+    creative_mod.save_annotation(conn, key, seed)
+    conn.commit()
+    with pytest.raises(ValueError):
+        va.apply_corrections(
+            conn, key,
+            {"frame_labels": [{"t_sec": "NaN", "label": "opening"}]},
+            by="emp-1", duration_s=15.0)
+    with pytest.raises(ValueError):
+        va.apply_corrections(
+            conn, key,
+            {"frame_labels": [{"t_sec": "inf", "label": "opening"}]},
+            by="emp-1", duration_s=15.0)
+    conn.close()

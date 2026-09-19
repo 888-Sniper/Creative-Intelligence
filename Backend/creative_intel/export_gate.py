@@ -15,6 +15,15 @@ class ExportBlocked(Exception):
             self.missing = sorted(missing)
 
 
+def _ann_fingerprint(ann):
+    """Stable snapshot of one annotation for change detection."""
+    import json as _json
+    try:
+        return _json.dumps(ann, sort_keys=True, default=str)
+    except (TypeError, ValueError):
+        return repr(sorted((ann or {}).items()))
+
+
 def _finite_or_na(value):
     """Render guard: non-finite numbers print as n/a, never nan/inf."""
     if isinstance(value, bool):
@@ -36,53 +45,99 @@ def check_reviews(conn):
             ["gate:review-to-zero: %d QA review(s) still pending" % pending])
 
 
+def _export_card(conn, key, owner=None, admin=False, override=False):
+    """One export card from a single consistent result snapshot.
+
+    Returns (card, missing_entry): card is None when the key cannot
+    export. Raises ExportBlocked when the annotation or transcript
+    changes between the approval read and the content read — a
+    concurrent correction must leave the export on the complete old
+    approved version or refuse it, never mix old approval with new
+    unreviewed content (override does not waive this).
+    """
+    from creative_intel import creative as _creative_mod
+    from creative_intel import drafts as _drafts_mod
+    row = conn.execute(
+        "SELECT name, platform, transcript FROM creatives"
+        " WHERE creative_key=?",
+        (key,)).fetchone()
+    if not row:
+        return None, key + " (unknown)"
+    name, platform, shared_transcript = row
+    # One consistent result identity: the viewer's applicable
+    # confirmation selects the video version, and approval, hook
+    # classification, and transcript all come from that same
+    # version's rows. An older approved result never authorises
+    # another video's content, and the shared creatives copy is
+    # only a fallback for legacy version-less rows.
+    ann = _creative_mod.annotation_for_report(
+        conn, key, owner=owner, admin=admin) or {}
+    vid = _creative_mod.annotation_scope_for_report(
+        conn, key, owner=owner, admin=admin)
+    if not ann:
+        # No authorised result for this viewer: never substitute
+        # another video's findings, and never authorise export
+        # off them.
+        return None, key + " (no authorised result)"
+    if ann.get("status") != "human_verified" and not override:
+        return None, key
+    fingerprint = _ann_fingerprint(ann)
+    # The selected version's own transcript — even when empty
+    # (a silent clip has no speech). "No speech" and "no valid
+    # result identity" are separate states: only a missing
+    # identity falls back to the shared display copy.
+    transcript = _drafts_mod.get_video_transcript(conn, vid) \
+        if vid else shared_transcript
+    # Re-read inside the same snapshot: a correction landing
+    # between the approval check and the content read changes the
+    # revision (every correction mints one), so any difference
+    # proves the export would mix versions.
+    ann_again = _creative_mod.annotation_for_report(
+        conn, key, owner=owner, admin=admin) or {}
+    transcript_again = _drafts_mod.get_video_transcript(conn, vid) \
+        if vid else shared_transcript
+    if _ann_fingerprint(ann_again) != fingerprint \
+            or transcript_again != transcript:
+        raise ExportBlocked(
+            ["gate:export changed during read; retry: %s" % key])
+    return {"creative_key": key, "name": name, "platform": platform,
+            "hook_type": ann.get("hook_type", ""),
+            "creator_vs_branded": ann.get("creator_vs_branded", ""),
+            "transcript": transcript}, None
+
+
 def build_one_pager(conn, creative_keys, benchmarks, override=False,
                     owner=None, admin=False):
     # Review-to-zero is enforced here (not just at the route), so no
     # caller — HTTP, worker, or test — can export past pending QA.
-    check_reviews(conn)
+    # The card reads run in one IMMEDIATE transaction when the
+    # caller is not already inside one: a concurrent correction
+    # either lands fully before the export (seen as unapproved and
+    # blocked) or waits until the reads finish. The per-card
+    # re-read above still guards callers that arrived mid-transaction.
+    own_txn = not conn.in_transaction
     missing = []
     cards = []
-    from creative_intel import creative as _creative_mod
-    from creative_intel import drafts as _drafts_mod
-    for key in creative_keys:
-        row = conn.execute(
-            "SELECT name, platform, transcript FROM creatives"
-            " WHERE creative_key=?",
-            (key,)).fetchone()
-        if not row:
-            missing.append(key + " (unknown)")
-            continue
-        name, platform, shared_transcript = row
-        # One consistent result identity: the viewer's applicable
-        # confirmation selects the video version, and approval, hook
-        # classification, and transcript all come from that same
-        # version's rows. An older approved result never authorises
-        # another video's content, and the shared creatives copy is
-        # only a fallback for legacy version-less rows.
-        ann = _creative_mod.annotation_for_report(
-            conn, key, owner=owner, admin=admin) or {}
-        vid = _creative_mod.annotation_scope_for_report(
-            conn, key, owner=owner, admin=admin)
-        if not ann:
-            # No authorised result for this viewer: never substitute
-            # another video's findings, and never authorise export
-            # off them.
-            missing.append(key + " (no authorised result)")
-            continue
-        if ann.get("status") != "human_verified" and not override:
-            missing.append(key)
-            continue
-        # The selected version's own transcript — even when empty
-        # (a silent clip has no speech). "No speech" and "no valid
-        # result identity" are separate states: only a missing
-        # identity falls back to the shared display copy.
-        transcript = _drafts_mod.get_video_transcript(conn, vid) \
-            if vid else shared_transcript
-        cards.append({"creative_key": key, "name": name, "platform": platform,
-                      "hook_type": ann.get("hook_type", ""),
-                      "creator_vs_branded": ann.get("creator_vs_branded", ""),
-                      "transcript": transcript})
+    try:
+        if own_txn:
+            conn.execute("BEGIN IMMEDIATE")
+        check_reviews(conn)
+        for key in creative_keys:
+            card, miss = _export_card(conn, key, owner=owner,
+                                      admin=admin, override=override)
+            if card is not None:
+                cards.append(card)
+            elif miss:
+                missing.append(miss)
+        if own_txn:
+            conn.commit()
+    except Exception:
+        if own_txn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        raise
     if missing and not override:
         raise ExportBlocked(missing)
     lines = ["# Creative Intelligence — One-Pager", ""]

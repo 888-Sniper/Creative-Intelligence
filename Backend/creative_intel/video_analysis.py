@@ -396,8 +396,15 @@ def suggest_tests(annotation, measured, transcript=""):
 
 
 def run(conn, snapshot, owner="", media_dir="", providers=None,
-        progress=None, cancelled=None, queued_at=""):
-    """Execute the bound analysis. Returns the persisted result."""
+        progress=None, cancelled=None, queued_at="", job_id=None,
+        run_token=None):
+    """Execute the bound analysis. Returns the persisted result.
+
+    job_id/run_token bind this execution to one claimed worker
+    attempt: the publication transaction verifies the job row still
+    carries this attempt's token, so a superseded attempt (requeued
+    and claimed by a replacement after recovery) publishes nothing.
+    """
     from creative_intel import creative as creative_mod
     from creative_intel import drafts as drafts_mod
     from creative_intel import media as media_mod
@@ -533,6 +540,25 @@ def run(conn, snapshot, owner="", media_dir="", providers=None,
         if cancelled is not None and cancelled():
             from creative_intel.jobs import JobCancelled
             raise JobCancelled("video analysis cancelled at publish")
+        # Attempt ownership is verified in the same transaction: a
+        # superseded attempt (requeued and re-claimed by a
+        # replacement after recovery) holds a stale run_token. The
+        # read is write-free so the publication transaction stays
+        # open; a row or table this connection cannot see simply
+        # skips the check, like pre-fencing rows.
+        if job_id:
+            from creative_intel.jobs import StaleAttempt
+            try:
+                _jrow = conn.execute(
+                    "SELECT run_token FROM worker_jobs WHERE id=?",
+                    (job_id,)).fetchone()
+            except Exception:
+                _jrow = None
+            if _jrow is not None \
+                    and (_jrow[0] or "") != (run_token or ""):
+                raise StaleAttempt(
+                    "job %s claimed by another attempt;"
+                    " not publishing" % (job_id,))
         drafts_mod.set_video_transcript(conn, video_id, transcript,
                                         commit=False)
         conn.execute("UPDATE creatives SET transcript=?,"

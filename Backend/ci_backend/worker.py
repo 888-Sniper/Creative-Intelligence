@@ -80,6 +80,13 @@ def run_once(db_path, settings, media_dir=None):
             print("job %s (%s) cancelled" % (job["id"], job["kind"]),
                   flush=True)
             return True
+        except jobs.StaleAttempt:
+            # Superseded attempt: a replacement owns the job after
+            # recovery. Publish nothing, fail nothing, cancel
+            # nothing — just drop this attempt.
+            print("job %s (%s) superseded; dropping stale attempt"
+                  % (job["id"], job["kind"]), flush=True)
+            return True
         except Exception as exc:  # noqa: BLE001 - recorded on the job
             jobs.fail(conn, job["id"], exc, run_token=token)
             print("job %s (%s) failed: %s" % (job["id"], job["kind"], exc),

@@ -171,8 +171,14 @@ def run_video_analysis(conn, payload, owner, ctx, job_id=None):
         raise ValueError("video_analysis needs a bound snapshot")
     did = snapshot.get("draft_id") or ""
     progress, cancelled = (None, None)
+    attempt_token = ""
     if job_id:
         progress, cancelled = _control(conn, job_id)
+        try:
+            attempt_token = \
+                (jobs_mod.get(conn, job_id) or {}).get("run_token") or ""
+        except Exception:
+            attempt_token = ""
         progress(5, "start")
         try:
             _raise_if_cancelled(cancelled)
@@ -201,7 +207,8 @@ def run_video_analysis(conn, payload, owner, ctx, job_id=None):
                 pass
         return video_analysis.run(
             conn, snapshot, owner=owner or "", media_dir=media_dir or "",
-            progress=progress, cancelled=cancelled, queued_at=queued_at)
+            progress=progress, cancelled=cancelled, queued_at=queued_at,
+            job_id=job_id, run_token=attempt_token)
     except jobs_mod.JobCancelled:
         # Owner cancel: the draft returns to cancelled (re-analysable),
         # never strands in analyzing.
@@ -210,6 +217,11 @@ def run_video_analysis(conn, payload, owner, ctx, job_id=None):
                 drafts_mod.update_draft(conn, did, status="cancelled")
             except Exception:
                 pass
+        raise
+    except jobs_mod.StaleAttempt:
+        # Superseded attempt: the replacement owns the job and the
+        # draft now. Touch neither — especially not failed, which
+        # would clobber the replacement's analyzing state.
         raise
     except Exception:
         # ProviderUnavailable, timeouts, corrupt media, stale inputs:

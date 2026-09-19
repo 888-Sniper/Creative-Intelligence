@@ -298,6 +298,18 @@ class JobCancelled(Exception):
     """
 
 
+class StaleAttempt(Exception):
+    """A superseded worker attempt reached a write boundary.
+
+    The job has been requeued and claimed by a replacement attempt
+    (new run_token): this attempt must publish nothing — not the
+    annotation, not the transcript, not the ready status — and must
+    not mark the draft failed or cancelled either. The replacement
+    attempt owns the job now; rejecting this attempt's later
+    job-completion update is too late on its own.
+    """
+
+
 class JobTimeout(Exception):
     pass
 

@@ -1413,6 +1413,93 @@ def test_validate_rejects_nonfinite(tmp_path):
     conn.close()
 
 
+def test_export_refuses_mixed_approval_and_new_transcript(tmp_path,
+                                                           monkeypatch):
+    """Audit recheck H1: a transcript correction landing between the
+    export's approval read and its transcript read must refuse the
+    export — never combine the old approval with the new unreviewed
+    words. Control phase exports the old approved words cleanly."""
+    from creative_intel import drafts as drafts_mod
+    from creative_intel import export_gate
+    conn, _store, _did = bound_db(tmp_path)
+    key = "video-upload-sample"
+    vid = conn.execute(
+        "SELECT id FROM videos WHERE draft_id=?", (_did,)).fetchone()[0]
+    _seed_versioned(conn, key, vid, "question", "human_verified",
+                    "OLD approved words", "rev-1")
+    conn.execute("INSERT INTO creatives (creative_key, name, platform,"
+                 " transcript) VALUES (?, ?, ?, ?)"
+                 " ON CONFLICT (creative_key) DO UPDATE SET"
+                 " name=excluded.name, platform=excluded.platform,"
+                 " transcript=excluded.transcript",
+                 (key, "Sample", "meta", "shared words"))
+    conn.commit()
+    out = export_gate.build_one_pager(conn, [key], {}, owner="emp-1")
+    assert out["cards"][0]["transcript"] == "OLD approved words"
+
+    real_transcript = drafts_mod.get_video_transcript
+    fired = {"n": 0}
+
+    def racing_transcript(c, v):
+        # A concurrent correction (same effects as the correction
+        # route: new words + fresh revision) lands mid-export.
+        if fired["n"] == 0:
+            fired["n"] += 1
+            va.apply_corrections(
+                c, key, {"transcript": "NEW UNREVIEWED correction"},
+                by="emp-1", video_id=v, expected_revision="rev-1")
+        return real_transcript(c, v)
+
+    monkeypatch.setattr(drafts_mod, "get_video_transcript",
+                        racing_transcript)
+    with pytest.raises(export_gate.ExportBlocked) as exc:
+        export_gate.build_one_pager(conn, [key], {}, owner="emp-1")
+    assert "changed during read" in str(exc.value)
+    # The refused export wrote nothing.
+    assert conn.execute("SELECT COUNT(*) FROM annotations"
+                        " WHERE creative_key=?",
+                        (key,)).fetchone()[0] == 1
+    conn.close()
+
+
+def test_superseded_attempt_cannot_publish(tmp_path):
+    """Audit recheck M2: after recovery requeues the job and a
+    replacement claims it, the old attempt's run_token no longer
+    matches — its publication aborts inside the transaction, saving
+    neither the analysis nor the ready status, while the live token
+    still publishes."""
+    conn, store, did = bound_db(tmp_path)
+    snap = va.bind_snapshot(conn, did)
+    job = jobs_mod.enqueue(conn, "video_analysis", {}, owner="emp-1")
+    claimed = jobs_mod.claim(conn, job["id"], lease_owner="w1")
+    token_a = claimed["run_token"]
+    assert token_a
+    db = str(tmp_path / "va.db")
+    rival = sqlite3.connect(db)
+    try:
+        jobs_mod.fail(rival, job["id"], "worker lost",
+                      run_token=token_a)
+        repl = jobs_mod.claim(rival, job["id"], lease_owner="w2")
+    finally:
+        rival.close()
+    assert repl["run_token"] and repl["run_token"] != token_a
+    with pytest.raises(jobs_mod.StaleAttempt):
+        va.run(conn, snap, owner="emp-1", media_dir=store,
+               providers=StubProviders(), queued_at="",
+               job_id=job["id"], run_token=token_a)
+    assert drafts.get_draft(conn, did)["status"] != "ready_for_review"
+    assert conn.execute("SELECT COUNT(*) FROM annotations"
+                        " WHERE creative_key=?",
+                        ("video-upload-sample",)).fetchone()[0] == 0
+    # The replacement attempt holding the live token publishes.
+    out = va.run(conn, snap, owner="emp-1", media_dir=store,
+                 providers=StubProviders(), queued_at="",
+                 job_id=job["id"], run_token=repl["run_token"])
+    assert out["creative_key"] == "video-upload-sample"
+    assert drafts.get_draft(conn, did)["status"] == "ready_for_review"
+    conn.close()
+
+
 def test_correction_rejects_nonfinite_moment(tmp_path):
     """Round-6 validation: NaN/inf timestamps are rejected before
     range checks (both comparisons pass NaN silently)."""

@@ -222,10 +222,10 @@ describe("VideoUpload dashboard card", () => {
       </MemoryRouter>,
     );
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Analyze a video" })).toBeDefined();
+      expect(screen.getByRole("heading", { name: "Analyze Video" })).toBeDefined();
     });
     const greeting = screen.getByRole("heading", { level: 1 });
-    const card = screen.getByRole("heading", { name: "Analyze a video" });
+    const card = screen.getByRole("heading", { name: "Analyze Video" });
     const filters = screen.getByLabelText("Filters");
     const follows = (a: Element, b: Element): boolean =>
       Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
@@ -299,7 +299,7 @@ describe("VideoUpload dashboard card", () => {
         </MemoryRouter>,
       );
       await waitFor(() => {
-        expect(screen.getByRole("heading", { name: "Analyze a video" })).toBeDefined();
+        expect(screen.getByRole("heading", { name: "Analyze Video" })).toBeDefined();
       });
       expect(screen.getByRole("button", { name: /Upload Video/ })).toBeDefined();
       // Status stays a text pill in both themes (never color-only).

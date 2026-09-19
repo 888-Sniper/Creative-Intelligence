@@ -20,7 +20,7 @@ test("dashboard video upload: real file, data, match, honest analyze", async ({
 
   // Card sits between the greeting and the filters.
   await expect(
-    page.getByRole("heading", { name: "Analyze a video" }),
+    page.getByRole("heading", { name: "Analyze Video" }),
   ).toBeVisible();
   await page.screenshot({ path: "test-results/screens/vu-card.png" });
 
@@ -128,7 +128,7 @@ test("video upload card stacks on a narrow viewport", async ({
   const seeds = readSeeds();
   await loginAs(context, page, seeds.employee, "/");
   await expect(
-    page.getByRole("heading", { name: "Analyze a video" }),
+    page.getByRole("heading", { name: "Analyze Video" }),
   ).toBeVisible();
   const overflow = await page.evaluate(
     () => document.documentElement.scrollWidth - window.innerWidth,

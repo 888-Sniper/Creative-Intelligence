@@ -315,7 +315,7 @@ export function VideoUploadCard() {
             })}
           </ul>
         ) : (
-          <EmptyState compact verbatim icon="play" text={vu("recentEmpty")} />
+          <EmptyState compact verbatim icon="play" title={vu("recentEmptyTitle")} text={vu("recentEmpty")} />
         )}
       </section>
 

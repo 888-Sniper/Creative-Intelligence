@@ -313,26 +313,43 @@ class StaleAttempt(Exception):
 def require_live_attempt(conn, job_id, run_token):
     """Prove this attempt still owns its job, or raise StaleAttempt.
 
-    Compares the job row's current run_token against the token minted
-    by this attempt's claim — never a re-read presented as proof.
-    No code path deletes job rows, so a vanished row is the cancel
-    path's domain (callers check cancellation separately and treat
-    a vanished row as cancelled); a connection that cannot see the
-    table at all (pre-fencing/dev) skips the check like any other
-    fenceless row. A present row whose token differs fails closed.
+    Fail-closed ownership proof for job-bound work: the row must
+    exist, still be this attempt's (running, or cancelled under this
+    same token so the cancellation path raises JobCancelled
+    downstream instead), and carry the token minted by this
+    attempt's claim — never a re-read presented as proof. A missing
+    or unreadable row refuses: no code path deletes job rows, so
+    ownership that cannot be read cannot be established. (The
+    cooperative-cancel callback keeps treating a vanished row as
+    cancelled, so a job deleted out-of-band still lands its draft
+    in cancelled instead of publishing.) Calls without a job
+    (job_id None or empty: direct/dev runs) skip the check
+    explicitly — that job-less path is separate, never a silent
+    fallback for a job that should exist.
     """
+    if not job_id:
+        return
     try:
         row = conn.execute(
-            "SELECT run_token FROM worker_jobs WHERE id=?",
+            "SELECT status, run_token FROM worker_jobs WHERE id=?",
             (job_id,)).fetchone()
     except Exception:
-        return
+        raise StaleAttempt(
+            "job %s ownership unreadable;"
+            " not publishing" % (job_id,))
     if row is None:
-        return
-    if (row[0] or "") != (run_token or ""):
+        raise StaleAttempt(
+            "job %s has no live attempt;"
+            " not publishing" % (job_id,))
+    status, token = (row[0] or ""), (row[1] or "")
+    if token != (run_token or ""):
         raise StaleAttempt(
             "job %s claimed by another attempt;"
             " not publishing" % (job_id,))
+    if status not in ("running", "cancelled"):
+        raise StaleAttempt(
+            "job %s is %s;"
+            " not publishing" % (job_id, status or "unknown"))
 
 
 class JobTimeout(Exception):

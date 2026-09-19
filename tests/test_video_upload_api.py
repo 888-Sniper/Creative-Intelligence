@@ -1427,6 +1427,89 @@ def test_stranger_cannot_launder_media_through_own_draft(tmp_path,
     assert http.get("/media/%s" % rec["id"]).status_code == 403
 
 
+def test_positive_journey_analysis_correction_review_export(tmp_path,
+                                                             monkeypatch):
+    """Positive acceptance with synthetic providers: upload → analyse
+    → correct → review → approved export, with the confirmed campaign
+    destination carried from snapshot to reporting. The provider seam
+    (readiness + roster + bundle) is stubbed; everything else —
+    HTTP, worker claim/run/complete, transactions, gates — is real."""
+    import sqlite3
+    import types
+    from ci_backend import worker_handlers
+    from creative_intel import jobs as jobs_mod
+    from creative_intel import providers as prov_mod
+    from creative_intel import video as video_mod
+    from creative_intel import video_analysis as va_mod
+    from test_video_analysis import StubLlm, StubStt, StubVision
+    if not video_mod.have_ffmpeg():
+        pytest.skip("ffmpeg not installed")
+    db, http = make_app(tmp_path, monkeypatch)
+    did, _version, rowids = _confirmed_setup(http, db)
+    match = {"creative_key": "video-upload-sample",
+             "method": "platform_id", "ad_rowids": rowids}
+    assert http.post("/api/drafts/%s/matches/confirm" % did,
+                     json=match).status_code == 200
+    monkeypatch.setattr(va_mod, "readiness", lambda: {
+        "ready": True, "reason": "", "model": "stub-m",
+        "provider": "stub", "level": "full", "sends": "synthetic",
+        "storage": "ephemeral"})
+    monkeypatch.setattr(va_mod, "eligible_vision_roster",
+                        lambda: [("stub", "stub-m", "live")])
+    stubs = types.SimpleNamespace(stt=StubStt(), vision=StubVision(),
+                                  llm=StubLlm())
+    monkeypatch.setattr(prov_mod, "Providers",
+                        lambda db_path=None: stubs)
+    monkeypatch.setattr(prov_mod, "LiveVision",
+                        lambda roster: StubVision())
+    resp = http.post("/api/drafts/%s/analyze" % did, json={})
+    assert resp.status_code == 200, resp.text
+    job_id = resp.json()["job_id"]
+    # Drive the worker inline exactly like run_once does: claim the
+    # queued job, run the handler with the claim token, complete it.
+    media_dir = os.environ["CREATIVE_INTEL_MEDIA_DIR"]
+    conn = sqlite3.connect(db)
+    try:
+        claimed = jobs_mod.claim(conn, job_id, lease_owner="e2e")
+        assert claimed is not None
+        token = claimed["run_token"]
+        result = worker_handlers.run(
+            conn, "video_analysis", claimed["payload"],
+            "owner@foap.test", {"media_dir": media_dir}, job_id,
+            run_token=token)
+        finished = jobs_mod.complete(conn, job_id, result,
+                                     run_token=token)
+        assert finished["status"] == "completed"
+    finally:
+        conn.close()
+    got = http.get("/api/drafts/%s/analysis" % did).json()
+    assert got["status"] == "ready_for_review"
+    block = got["annotation"]["analysis"]
+    assert block["snapshot"]["client"] == "Foap"
+    assert block["snapshot"]["campaign"] == "Sample Launch"
+    assert got["transcript"] == "watch this"
+    # Correct the transcript against the revision on screen.
+    fix = http.post("/api/drafts/%s/corrections" % did,
+                    json={"revision": block["revision"],
+                          "transcript": "watch this launch"})
+    assert fix.status_code == 200, fix.text
+    new_rev = fix.json()["revision"]
+    assert new_rev and new_rev != block["revision"]
+    # The unreviewed correction blocks export.
+    exp = http.post("/api/export",
+                    json={"creative_keys": ["video-upload-sample"]})
+    assert exp.status_code == 409, exp.text
+    # Review the corrected result, then export carries the new words.
+    rev = http.post("/api/drafts/%s/review" % did,
+                    json={"analysis_version": block["version"],
+                          "revision": new_rev})
+    assert rev.status_code == 200, rev.text
+    exp = http.post("/api/export",
+                    json={"creative_keys": ["video-upload-sample"]})
+    assert exp.status_code == 200, exp.text
+    assert "watch this launch" in exp.json()["markdown"]
+
+
 def test_review_rolls_back_when_annotation_save_fails(tmp_path, monkeypatch):
     """Recheck review atomicity: an annotation-validation failure at
     approval returns 409 with the draft still awaiting review — the

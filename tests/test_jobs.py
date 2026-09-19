@@ -314,3 +314,59 @@ def test_pipeline_full_loop_through_worker(tmp_db):
     assert body["status"] == "completed"
     assert body["result"]["creative_key"] == "hook-a"
     assert body["result"]["stages"]
+
+
+def test_require_live_attempt_fails_closed():
+    """Recheck defensive guard: a job-bound attempt must prove
+    exists → running → claim-token match. Missing/unreadable rows,
+    token mismatch, and non-running states all raise StaleAttempt;
+    only the explicit job-less call skips the check."""
+    conn = memdb()
+    # Job-less dev/direct runs stay a separate explicit path.
+    jobs.require_live_attempt(conn, None, None)
+    jobs.require_live_attempt(conn, "", "")
+    # Missing row refuses (no code path deletes rows, so
+    # unestablishable ownership never publishes).
+    try:
+        jobs.require_live_attempt(conn, "ghost", "tok")
+    except jobs.StaleAttempt:
+        pass
+    else:
+        raise AssertionError("missing row must refuse")
+    # Unreadable table refuses too.
+    bare = sqlite3.connect(":memory:")
+    try:
+        jobs.require_live_attempt(bare, "ghost", "tok")
+    except jobs.StaleAttempt:
+        pass
+    else:
+        raise AssertionError("unreadable table must refuse")
+    finally:
+        bare.close()
+    job = jobs.enqueue(conn, "ask", {}, owner="e1")
+    claimed = jobs.claim(conn, job["id"], lease_owner="w1")
+    token = claimed["run_token"]
+    # Live attempt passes.
+    jobs.require_live_attempt(conn, job["id"], token)
+    # Another attempt's token refuses.
+    try:
+        jobs.require_live_attempt(conn, job["id"], "other-token")
+    except jobs.StaleAttempt:
+        pass
+    else:
+        raise AssertionError("token mismatch must refuse")
+    # Owner cancel keeps the row under our token: the guard passes
+    # so the cancellation path raises JobCancelled downstream.
+    jobs.cancel(conn, job["id"])
+    jobs.require_live_attempt(conn, job["id"], token)
+    # Terminal states refuse even with the old token.
+    conn.execute("UPDATE worker_jobs SET status='completed', run_token=''"
+                 " WHERE id=?", (job["id"],))
+    conn.commit()
+    try:
+        jobs.require_live_attempt(conn, job["id"], token)
+    except jobs.StaleAttempt:
+        pass
+    else:
+        raise AssertionError("completed job must refuse")
+    conn.close()

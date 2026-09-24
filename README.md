@@ -8,7 +8,7 @@
 
 ![Creative Intelligence dashboard](docs/screenshot-dashboard.png)
 
-Creative Intelligence is a local-first Performance + Creative Intelligence tool (MVP), built for Foap to turn advertising performance data into creative decisions. Upload Meta / TikTok / Excel / Sheets exports, build a canonical SQLite dataset, compute spend-weighted benchmarks, and annotate creatives through a gated pipeline: ingest → transcribe → frame-sample → vision-annotate → LLM-structure, with confidence scores and a HUMAN-VERIFIED gate before one-pager export.
+Creative Intelligence is a local-first tool that turns advertising performance data into creative decisions. Built for Foap, it unifies Meta, TikTok, and spreadsheet exports into one canonical dataset, benchmarks every creative against spend-weighted performance, and runs each asset through a gated AI pipeline — transcribe, frame-sample, vision-annotate, LLM-structure — where confidence is scored and nothing exports until a human verifies it.
 
 ## Features
 
@@ -20,7 +20,7 @@ Creative Intelligence is a local-first Performance + Creative Intelligence tool 
 - Fail-closed provider handling: live calls need keys, otherwise mock/fixture data
 - Full pytest suite plus analysis-library self checks
 
-## How machine-learning models fit into the system
+## How Machine-Learning Models Fit Into the System
 
 No model runs standalone here. Models are stages inside the gated pipeline:
 
@@ -93,5 +93,4 @@ report them privately rather than filing a public issue.
 
 ## Author
 
-Built by **Simran Dhillon** — AI Solutions Architect working across
-production voice-AI, integrations, and applied ML systems.
+Built by **Simran Dhillon**.

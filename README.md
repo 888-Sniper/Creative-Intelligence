@@ -25,8 +25,8 @@ Creative Intelligence is a local-first tool that turns advertising performance d
 No model runs standalone here. Models are stages inside the gated pipeline:
 
 - **Transcribe** — audio tracks go to a speech-to-text model, and transcripts carry confidence scores downstream.
-- **Frame-sample + vision-annotate** — sampled frames go to a vision model that records hook types, brand/product/logo seconds, and structure.
-- **LLM-structure** — transcripts plus vision notes go to a language model that returns structured creative analysis, released only after human verification.
+- **Frame-Sample + Vision-Annotate** — sampled frames go to a vision model that records hook types, brand/product/logo seconds, and structure.
+- **LLM-Structure** — transcripts plus vision notes go to a language model that returns structured creative analysis, released only after human verification.
 
 Every call flows through one provider layer (`Backend/creative_intel/providers.py` plus dispatcher) covering OpenAI, Gemini, Anthropic, NVIDIA, and others, so models are swappable without rewriting pipeline logic. Keys resolve environment-first; without them the system fails closed to fixture data and the suite still passes. Note: models are consumed as hosted APIs, not a self-hosted inference server.
 
@@ -78,13 +78,13 @@ closed to mock/fixture data when no key is present.
 
 ## Documentation
 
-- `docs/Architecture.md` — System Design
-- `docs/PROVIDERS.md` — Provider Setup and Keys
-- `docs/FRONTEND.md` — UI Guide
-- `docs/BACKUP.md` — Backup and Restore
-- `docs/ORACLE_ALWAYS_FREE.md` — Demo Deploy
-- `docs/Visual Review.md` — Visual Review Flow
-- `Schema/Canonical Schema V0.json` — Canonical Dataset Definition
+- `docs/Architecture.md` — <small>System Design</small>
+- `docs/PROVIDERS.md` — <small>Provider Setup and Keys</small>
+- `docs/FRONTEND.md` — <small>UI Guide</small>
+- `docs/BACKUP.md` — <small>Backup and Restore</small>
+- `docs/ORACLE_ALWAYS_FREE.md` — <small>Demo Deploy</small>
+- `docs/Visual Review.md` — <small>Visual Review Flow</small>
+- `Schema/Canonical Schema V0.json` — <small>Canonical Dataset Definition</small>
 
 ## Contributing
 

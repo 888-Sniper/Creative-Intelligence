@@ -20,7 +20,7 @@ Creative Intelligence is a local-first tool that turns advertising performance d
 - Fail-closed provider handling: live calls need keys, otherwise mock/fixture data
 - Full pytest suite plus analysis-library self checks
 
-## How Machine-Learning Models Fit Into the System
+## ML Integration
 
 No model runs standalone here. Models are stages inside the gated pipeline:
 
@@ -78,13 +78,13 @@ closed to mock/fixture data when no key is present.
 
 ## Documentation
 
-- `docs/Architecture.md` — system design
-- `docs/PROVIDERS.md` — provider setup and keys
-- `docs/FRONTEND.md` — UI guide
-- `docs/BACKUP.md` — backup and restore
-- `docs/ORACLE_ALWAYS_FREE.md` — demo deploy
-- `docs/Visual Review.md` — visual review flow
-- `Schema/Canonical Schema V0.json` — canonical dataset definition
+- `docs/Architecture.md` — System Design
+- `docs/PROVIDERS.md` — Provider Setup and Keys
+- `docs/FRONTEND.md` — UI Guide
+- `docs/BACKUP.md` — Backup and Restore
+- `docs/ORACLE_ALWAYS_FREE.md` — Demo Deploy
+- `docs/Visual Review.md` — Visual Review Flow
+- `Schema/Canonical Schema V0.json` — Canonical Dataset Definition
 
 ## Contributing
 

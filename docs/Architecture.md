@@ -1,5 +1,9 @@
 # Architecture
 
+> Status: this document describes the early local-first MVP (standard-library
+> Python backend, static page) and is retained for design history. The current
+> implementation is FastAPI plus React — see the README.
+
 Local-first MVP. One SQLite file, one stdlib Python backend, one static
 page. Mirrors Nextly AI trust boundaries: loopback only, Keychain-only
 secrets, mock-first.

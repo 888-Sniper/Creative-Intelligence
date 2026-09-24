@@ -17,7 +17,7 @@ Creative Intelligence is a local-first tool that turns advertising performance d
 - Spend-weighted benchmarks, comparisons, and performance trends
 - Human-verified gate before one-pager export — nothing ships unverified
 - AI Analyst and Ask The Data over the canonical dataset
-- Fail-closed provider handling: live calls need keys, otherwise mock/fixture data
+- Explicit mock mode for demos and tests without keys; live-mode failures raise errors instead of silently substituting mock results
 - Full pytest suite plus analysis-library self checks
 
 ## ML Integration
@@ -28,7 +28,7 @@ No model runs standalone here. Models are stages inside the gated pipeline:
 - **Frame-Sample + Vision-Annotate** — sampled frames go to a vision model that records hook types, brand/product/logo seconds, and structure.
 - **LLM-Structure** — transcripts plus vision notes go to a language model that returns structured creative analysis, released only after human verification.
 
-Every call flows through one provider layer (`Backend/creative_intel/providers.py` plus dispatcher) covering OpenAI, Gemini, Anthropic, NVIDIA, and others, so models are swappable without rewriting pipeline logic. Keys resolve environment-first; without them the system fails closed to fixture data and the suite still passes. Note: models are consumed as hosted APIs, not a self-hosted inference server.
+Every call flows through one provider layer (`Backend/creative_intel/providers.py` plus dispatcher) covering OpenAI, Gemini, Anthropic, NVIDIA, and others, so models are swappable without rewriting pipeline logic. Keys resolve environment-first; without them the system runs in explicit mock/fixture mode for demos and tests. In live mode, provider failures raise errors rather than silently returning mock results. Note: models are consumed as hosted APIs, not a self-hosted inference server.
 
 ## Stack
 

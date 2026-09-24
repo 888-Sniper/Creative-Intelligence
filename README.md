@@ -1,50 +1,53 @@
 # Creative Intelligence
 
-Local-first Performance + Creative Intelligence tool (MVP).
+![Python](https://img.shields.io/badge/Python-3.13-blue)
+![FastAPI](https://img.shields.io/badge/FastAPI-backend-green)
+![React](https://img.shields.io/badge/React-Vite-61dafb)
+![Docker](https://img.shields.io/badge/Docker-ready-2496ed)
+![SQLite](https://img.shields.io/badge/SQLite-canonical-lightgrey)
 
-Upload Meta / TikTok / Excel / Sheets exports, build a canonical SQLite
-dataset, compute spend-weighted benchmarks, and annotate creatives
-(hook types, brand/product/logo seconds, structure, creator-vs-branded)
-through a gated pipeline: ingest → transcribe → frame-sample →
-vision-annotate → LLM-structure, with confidence scores and a
-HUMAN-VERIFIED gate before one-pager export.
+![Creative Intelligence dashboard](docs/screenshot-dashboard.png)
 
-## Layout
+Creative Intelligence is a local-first Performance + Creative Intelligence tool (MVP), built for Foap to turn advertising performance data into creative decisions. Upload Meta / TikTok / Excel / Sheets exports, build a canonical SQLite dataset, compute spend-weighted benchmarks, and annotate creatives through a gated pipeline: ingest → transcribe → frame-sample → vision-annotate → LLM-structure, with confidence scores and a HUMAN-VERIFIED gate before one-pager export.
 
-```text
-Creative Intelligence/
-├── README.md                  # this file
-├── docs/                      # Architecture, PROVIDERS, BACKUP, FRONTEND, Oracle guide
-├── Backend/                   # FastAPI service (Nextly-aligned stack)
-│   ├── ci_backend/            # app, routers, SQLAlchemy store, WorkOS client
-│   ├── alembic/               # employee-access migrations
-│   └── creative_intel/        # importable analytics library
-├── apps/
-│   └── creative-intelligence-ui/  # React + Vite frontend (same-origin)
-├── deploy/
-│   └── oracle/                # install/update/verify/backup scripts + systemd units
-├── Source/                    # analysis library: adapters, benchmarks,
-│                              # creative analysis, Q&A, reports, dashboard,
-│                              # providers, deck export + self_check suite
-├── Schema/
-│   └── Canonical Schema V0.json  # canonical dataset definition (truth)
-├── fixtures/                  # sample CSVs (Title Case file names)
-├── pyproject.toml             # dependencies (uv.lock is the full graph)
-├── requirements.lock          # hashed pip export of uv.lock (CI + VM install this)
-├── uv.lock                    # complete resolved dependency graph with hashes
-└── tests/                     # pytest suite (unittest files run under both)
-```
+## Features
 
-## Quickstart
+- Upload Meta / TikTok / spreadsheet exports into one canonical dataset
+- Transcription, frame sampling, and vision/LLM annotation of creatives (hook types, brand/product/logo seconds, structure, creator-vs-branded)
+- Spend-weighted benchmarks, comparisons, and performance trends
+- Human-verified gate before one-pager export — nothing ships unverified
+- AI Analyst and Ask The Data over the canonical dataset
+- Fail-closed provider handling: live calls need keys, otherwise mock/fixture data
+- Full pytest suite plus analysis-library self checks
+
+## How machine-learning models fit into the system
+
+No model runs standalone here. Models are stages inside the gated pipeline:
+
+- **Transcribe** — audio tracks go to a speech-to-text model, and transcripts carry confidence scores downstream.
+- **Frame-sample + vision-annotate** — sampled frames go to a vision model that records hook types, brand/product/logo seconds, and structure.
+- **LLM-structure** — transcripts plus vision notes go to a language model that returns structured creative analysis, released only after human verification.
+
+Every call flows through one provider layer (`Backend/creative_intel/providers.py` plus dispatcher) covering OpenAI, Gemini, Anthropic, NVIDIA, and others, so models are swappable without rewriting pipeline logic. Keys resolve environment-first; without them the system fails closed to fixture data and the suite still passes. Note: models are consumed as hosted APIs, not a self-hosted inference server.
+
+## Stack
+
+- Python, FastAPI, SQLAlchemy, Alembic
+- React + Vite frontend (same-origin, served by the backend in production)
+- SQLite canonical store
+- Docker and systemd (Oracle demo deploy)
+- Provider integrations: OpenAI, Gemini, Anthropic, NVIDIA, DeepSeek, and more (bring your own keys)
+
+## Quick Start
+
+You need Python 3.13 and `uv` (or pip). No keys required — the app runs on fixture data out of the box.
 
 ```bash
-cd "/Users/simrandhillon/University Studies/Creative Intelligence"
 python3 -m venv .venv && . .venv/bin/activate
 python3 -m pip install --require-hashes -r requirements.lock   # exact CI-tested tree
-python3 -m pytest tests/ -q                        # full suite (Nextly stack)
-python3 -m unittest discover -s tests              # legacy runner (same tests)
-python3 Source/self_check.py                      # analysis-library checks
-python3 Backend/ci_backend/main.py --db Data/local.db   # serve on 127.0.0.1:4321
+python3 -m pytest tests/ -q                                    # full suite
+python3 Source/self_check.py                                   # analysis-library checks
+python3 Backend/ci_backend/main.py --db Data/local.db          # serve on 127.0.0.1:4321
 ```
 
 Frontend (same-origin React UI, served by the backend in production):
@@ -55,9 +58,6 @@ pnpm install --frozen-lockfile
 pnpm typecheck && pnpm test && pnpm build
 ```
 
-Free Oracle demo deploy: `docs/ORACLE_ALWAYS_FREE.md` (one command:
-`sudo DOMAIN=… EMAIL=… bash deploy/oracle/setup-demo.sh`).
-
 Open `http://127.0.0.1:4321`. Fixture load + replay:
 
 ```bash
@@ -65,41 +65,33 @@ python3 Backend/ci_backend/main.py --load-fixture --db Data/local.db
 curl -X POST http://127.0.0.1:4321/api/replay/run
 ```
 
-## Secrets
+## Run On A Server
 
-No secrets in the repo. Provider keys resolve environment-first
+Free Oracle demo deploy: `docs/ORACLE_ALWAYS_FREE.md` (one command:
+`sudo DOMAIN=… EMAIL=… bash deploy/oracle/setup-demo.sh`).
+
+Provider keys resolve environment-first
 (`CREATIVE_INTEL_KEY_<PROVIDER>`, see `docs/PROVIDERS.md`), falling
 back to the OS keychain on developer Macs only. The repo never
 contains `.env` files, keys, or tokens; live provider calls fail
-closed to mock/fixture data when no key is present. Google refresh
-tokens are encrypted in the server database under
-`CREATIVE_INTEL_MASTER_KEY`; the browser never sees any token.
+closed to mock/fixture data when no key is present.
 
-## Google Drive (private Sheets / Drive sync)
+## Documentation
 
-Public links keep working with no setup. For private files:
+- `docs/Architecture.md` — system design
+- `docs/PROVIDERS.md` — provider setup and keys
+- `docs/FRONTEND.md` — UI guide
+- `docs/BACKUP.md` — backup and restore
+- `docs/ORACLE_ALWAYS_FREE.md` — demo deploy
+- `docs/Visual Review.md` — visual review flow
+- `Schema/Canonical Schema V0.json` — canonical dataset definition
 
-1. Create an OAuth client (Desktop type) in Google Cloud Console with the
-   redirect URI `http://127.0.0.1:4321/api/auth/google/callback`, then set
-   `CREATIVE_INTEL_GOOGLE_CLIENT_ID` / `CREATIVE_INTEL_GOOGLE_REDIRECT_URI`
-   and store the client secret in the OS keychain (`creative-intel-google`)
-   or `CREATIVE_INTEL_GOOGLE_CLIENT_SECRET` for CI/non-macOS.
-2. Set `CREATIVE_INTEL_MASTER_KEY` (generate with `python3 -c "from
-   cryptography.fernet import Fernet;
-   print(Fernet.generate_key().decode())"`). It encrypts stored refresh
-   tokens; without it Google connect fails closed. Developer Macs
-   auto-provision a keychain key when it is unset.
-3. Open Settings → Google Drive → Connect Google Drive and approve
-   read-only access. Access tokens (short-lived) and refresh tokens
-   (encrypted) stay in the server database; the browser never sees either.
-   Only read-only Drive scope is requested, and the granted scope is
-   verified. Disconnect revokes at Google and wipes local state.
-4. Add `"google_auth": true` to a `sheets`/`drive` sync-job params object
-   (or a `/api/connect-*` payload). Without it, sync uses the public-link
-   path; without a connection it fails closed with "Connect Google Drive
-   in Settings". Disconnect anytime in Settings; the server wipes both tokens.
+## Contributing
 
-## Placement
+Issues and pull requests are welcome. For security vulnerabilities, please
+report them privately rather than filing a public issue.
 
-New product folder at the workspace root. Degree folders, the Nextly AI
-tree, and the Natively AI tree are untouched by design.
+## Author
+
+Built by **Simran Dhillon** — AI Solutions Architect working across
+production voice-AI, integrations, and applied ML systems.

@@ -266,14 +266,14 @@ describe("VideoUpload dashboard card", () => {
       </MemoryRouter>,
     );
     await waitFor(() => {
-      expect(screen.getByText(/Unfinished upload/)).toBeDefined();
+      expect(screen.getByText(/Unfinished Upload/)).toBeDefined();
     });
     fireEvent.click(screen.getByRole("button", { name: "Resume" }));
     // Recovery opens the panel on the furthest stage (review here).
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Review and analyze" })).toBeDefined();
+      expect(screen.getByRole("heading", { name: "Review And Analyze" })).toBeDefined();
     });
-    expect(screen.getByText(/3 records|No match confirmed yet/)).toBeDefined();
+    expect(screen.getByText(/3 Records|No Match Confirmed Yet/)).toBeDefined();
   });
 
   it("renders failed and cancelled drafts with text status", async () => {
@@ -335,21 +335,21 @@ describe("VideoUpload guided panel", () => {
   it("navigates all four stages with Back and Continue", async () => {
     openPanel();
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Upload your video" })).toBeDefined();
+      expect(screen.getByRole("heading", { name: "Upload Your Video" })).toBeDefined();
     });
     // Real limits text comes from GET /api/videos/limits.
-    expect(screen.getByText(".MP4 / .MOV only · up to 100 MB · up to 300s")).toBeDefined();
+    expect(screen.getByText("MP4 / MOV, Up To 100 MB, Up To 300 Seconds")).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-    expect(screen.getByRole("heading", { name: "Client and campaign" })).toBeDefined();
+    expect(screen.getByRole("heading", { name: "Client And Campaign" })).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-    expect(screen.getByRole("heading", { name: "Performance dataset" })).toBeDefined();
+    expect(screen.getByRole("heading", { name: "Performance Dataset" })).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-    expect(screen.getByRole("heading", { name: "Review and analyze" })).toBeDefined();
+    expect(screen.getByRole("heading", { name: "Review And Analyze" })).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
-    expect(screen.getByRole("heading", { name: "Performance dataset" })).toBeDefined();
+    expect(screen.getByRole("heading", { name: "Performance Dataset" })).toBeDefined();
   });
 
-  it("pins the new draft id for recovery and saves spec on Save draft", async () => {
+  it("pins the new draft id for recovery and saves spec on Save Draft", async () => {
     const { calls } = panelBackend();
     render(
       <MemoryRouter>
@@ -357,13 +357,13 @@ describe("VideoUpload guided panel", () => {
       </MemoryRouter>,
     );
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Upload your video" })).toBeDefined();
+      expect(screen.getByRole("heading", { name: "Upload Your Video" })).toBeDefined();
     });
     expect(window.localStorage.getItem("ci-video-draft:e7")).toBe("d-new");
-    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
     await waitFor(() => {
       // Announced twice by design: the polite status region + the toast.
-      expect(screen.getAllByText("Draft saved.").length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText("Draft Saved.").length).toBeGreaterThanOrEqual(1);
     });
     const patch = calls.find((c) => c.method === "PATCH" && c.url === "/api/drafts/d-new");
     expect(patch).toBeDefined();
@@ -392,13 +392,13 @@ describe("VideoUpload guided panel", () => {
       </MemoryRouter>,
     );
     await waitFor(() => {
-      expect(screen.getByLabelText("Video file")).toBeDefined();
+      expect(screen.getByLabelText("Video File")).toBeDefined();
     });
     const file = new File(["fake-bytes"], "sample.mp4", { type: "video/mp4" });
-    fireEvent.change(screen.getByLabelText("Video file"), { target: { files: [file] } });
+    fireEvent.change(screen.getByLabelText("Video File"), { target: { files: [file] } });
     fireEvent.click(screen.getByRole("button", { name: "Upload Video" }));
     await waitFor(() => {
-      expect(screen.getByText("Video valid — 1280×720, 15s.")).toBeDefined();
+      expect(screen.getByText("Video Valid. 1280×720, 15 Seconds.")).toBeDefined();
     });
     expect(screen.getByTestId("vu-video-preview")).toBeDefined();
     expect(screen.getByText("348.3 KB")).toBeDefined();
@@ -407,14 +407,14 @@ describe("VideoUpload guided panel", () => {
   it("keeps Analyze disabled without a video or a match, with reason text", async () => {
     openPanel();
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Upload your video" })).toBeDefined();
+      expect(screen.getByRole("heading", { name: "Upload Your Video" })).toBeDefined();
     });
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     const analyze = screen.getByRole("button", { name: "Analyze" });
     expect(analyze.hasAttribute("disabled")).toBe(true);
-    expect(screen.getByText("Add and validate a video to enable analysis.")).toBeDefined();
+    expect(screen.getByText("Add And Validate A Video To Enable Analysis.")).toBeDefined();
   });
 
   it("keeps Analyze disabled with a valid video but no confirmed match", async () => {
@@ -426,11 +426,11 @@ describe("VideoUpload guided panel", () => {
       </MemoryRouter>,
     );
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Review and analyze" })).toBeDefined();
+      expect(screen.getByRole("heading", { name: "Review And Analyze" })).toBeDefined();
     });
     const analyze = screen.getByRole("button", { name: "Analyze" });
     expect(analyze.hasAttribute("disabled")).toBe(true);
-    expect(screen.getByText("Confirm the dataset match to enable analysis.")).toBeDefined();
+    expect(screen.getByText("Confirm The Dataset Match To Enable Analysis.")).toBeDefined();
   });
 
   it("shows provider and sends readiness on the review stage", async () => {
@@ -454,12 +454,12 @@ describe("VideoUpload guided panel", () => {
       </MemoryRouter>,
     );
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Review and analyze" })).toBeDefined();
+      expect(screen.getByRole("heading", { name: "Review And Analyze" })).toBeDefined();
     });
     await waitFor(() => {
-      expect(screen.getByText("live mode · vision configured (gemini).")).toBeDefined();
+      expect(screen.getByText("Live Mode. Vision Configured (gemini).")).toBeDefined();
     });
-    expect(screen.getByText("Sends sampled frames. private store.")).toBeDefined();
+    expect(screen.getByText("Frames And Audio Only. The Raw Video Stays Private.")).toBeDefined();
   });
 
   it("confirms the match and queues analysis via the analyze endpoint", async () => {
@@ -488,11 +488,11 @@ describe("VideoUpload guided panel", () => {
       </MemoryRouter>,
     );
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Confirm match" })).toBeDefined();
+      expect(screen.getByRole("button", { name: "Confirm Match" })).toBeDefined();
     });
-    fireEvent.click(screen.getByRole("button", { name: "Confirm match" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Match" }));
     await waitFor(() => {
-      expect(screen.getByText("Match confirmed.")).toBeDefined();
+      expect(screen.getByText("Match Confirmed.")).toBeDefined();
     });
     const confirm = calls.find((c) => c.url === "/api/drafts/d1/matches/confirm");
     expect((confirm?.body as Record<string, unknown>)?.["ad_rowids"]).toEqual([11, 12]);
@@ -558,7 +558,7 @@ describe("VideoUpload guided panel", () => {
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Findings" })).toBeDefined();
     });
-    expect(screen.getByText("6000 impressions · 150 link clicks · pooled CTR 2.5%.")).toBeDefined();
+    expect(screen.getByText("6000 Impressions, 150 Link Clicks, Pooled CTR 2.5%.")).toBeDefined();
     expect(screen.getByText("Test an explicit CTA.")).toBeDefined();
     expect(screen.getByText("watch this")).toBeDefined();
   });
@@ -577,7 +577,7 @@ describe("VideoUpload guided panel", () => {
     );
     await waitFor(() => {
       // The pinned draft resumes at its furthest stage (review here).
-      expect(screen.getByRole("heading", { name: "Review and analyze" })).toBeDefined();
+      expect(screen.getByRole("heading", { name: "Review And Analyze" })).toBeDefined();
     });
     // No new draft created: the pinned draft is resumed in place.
     expect(calls.some((c) => c.method === "POST" && c.url === "/api/drafts")).toBe(false);
@@ -604,23 +604,23 @@ describe("VideoUpload guided panel", () => {
       </MemoryRouter>,
     );
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Upload your video" })).toBeDefined();
+      expect(screen.getByRole("heading", { name: "Upload Your Video" })).toBeDefined();
     });
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-    fireEvent.change(screen.getByLabelText("CSV data"), { target: { value: "a,b\n1,2" } });
-    fireEvent.click(screen.getByRole("button", { name: "Import dataset" }));
+    fireEvent.change(screen.getByLabelText("CSV Data"), { target: { value: "a,b\n1,2" } });
+    fireEvent.click(screen.getByRole("button", { name: "Import Dataset" }));
     await waitFor(() => {
-      expect(screen.getByLabelText("Workbook sheet")).toBeDefined();
+      expect(screen.getByLabelText("Workbook Sheet")).toBeDefined();
     });
-    const sheetSelect = screen.getByLabelText("Workbook sheet") as HTMLSelectElement;
+    const sheetSelect = screen.getByLabelText("Workbook Sheet") as HTMLSelectElement;
     const sheetOptions = [...sheetSelect.options].map((o) => o.text);
     expect(sheetOptions).toContain("Meta");
     expect(sheetOptions).toContain("Notes");
     expect(screen.queryByText(/Import failed \(409\)/)).toBeNull();
   });
 
-  it("replaces the video through the visible Replace action", async () => {
+  it("replaces the video through the visible Upload Video action", async () => {
     const { calls } = panelBackend([
       (m, u) => (u === "/api/media/upload" && m === "POST"
         ? { id: 13, creative_key: "video-upload-sample", filename: "sample2.mp4", mime: "video/mp4", bytes: 100, sha256: "def", created_at: "x", url: "/media/13" }
@@ -635,19 +635,17 @@ describe("VideoUpload guided panel", () => {
       </MemoryRouter>,
     );
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Review and analyze" })).toBeDefined();
+      expect(screen.getByRole("heading", { name: "Review And Analyze" })).toBeDefined();
     });
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
-    // Existing media staged for replacement: the action stays visible.
+    // A staged replacement uploads as Upload Video. The picker
+    // Replace stays hidden until that file is sent or cleared.
     const file = new File(["fake-bytes-2"], "sample2.mp4", { type: "video/mp4" });
-    fireEvent.change(screen.getByLabelText("Video file"), { target: { files: [file] } });
-    // Two Replace actions exist: the staged-file upload renders
-    // before the media block's pick-a-file trigger.
-    const replace = screen.getAllByRole("button", { name: "Replace" })[0];
-    expect(replace).toBeDefined();
-    fireEvent.click(replace);
+    fireEvent.change(screen.getByLabelText("Video File"), { target: { files: [file] } });
+    expect(screen.queryByRole("button", { name: "Replace" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Upload Video" }));
     await waitFor(() => {
       const patch = calls.find((c) => c.method === "PATCH" && c.url === "/api/drafts/d1");
       const spec = (patch?.body as Record<string, unknown>)?.["spec"] as Record<string, unknown>;
@@ -663,7 +661,7 @@ describe("VideoUpload guided panel", () => {
       </MemoryRouter>,
     );
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Review and analyze" })).toBeDefined();
+      expect(screen.getByRole("heading", { name: "Review And Analyze" })).toBeDefined();
     });
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
@@ -716,11 +714,11 @@ describe("VideoUpload guided panel", () => {
       </MemoryRouter>,
     );
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Mark reviewed" })).toBeDefined();
+      expect(screen.getByRole("button", { name: "Mark Reviewed" })).toBeDefined();
     });
-    expect(screen.getByText("Key moments")).toBeDefined();
-    fireEvent.change(screen.getByLabelText("Review note"), { target: { value: "ok" } });
-    fireEvent.click(screen.getByRole("button", { name: "Mark reviewed" }));
+    expect(screen.getByText("Key Moments")).toBeDefined();
+    fireEvent.change(screen.getByLabelText("Review Note"), { target: { value: "ok" } });
+    fireEvent.click(screen.getByRole("button", { name: "Mark Reviewed" }));
     await waitFor(() => {
       const review = calls.find((c) => c.method === "POST" && c.url === "/api/drafts/d2/review");
       expect((review?.body as Record<string, unknown>)?.["analysis_version"]).toBe("v1");
@@ -728,7 +726,7 @@ describe("VideoUpload guided panel", () => {
     });
     await waitFor(() => {
       // Announced twice by design: the polite status region + the toast.
-      expect(screen.getAllByText("Review recorded.").length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText("Review Recorded.").length).toBeGreaterThanOrEqual(1);
     });
   });
 
@@ -764,15 +762,15 @@ describe("VideoUpload guided panel", () => {
       </MemoryRouter>,
     );
     await waitFor(() => {
-      expect(screen.getByLabelText("Imported dataset")).toBeDefined();
+      expect(screen.getByLabelText("Imported Dataset")).toBeDefined();
     });
-    fireEvent.change(screen.getByLabelText("Imported dataset"), { target: { value: "v2" } });
+    fireEvent.change(screen.getByLabelText("Imported Dataset"), { target: { value: "v2" } });
     await waitFor(() => {
       const patch = calls.find((c) => c.method === "PATCH" && c.url === "/api/drafts/d3");
       expect((patch?.body as Record<string, unknown>)?.["dataset_version"]).toBe("v2");
     });
     await waitFor(() => {
-      expect(screen.getByText("Switched to b.csv: 0 records.")).toBeDefined();
+      expect(screen.getByText("Switched To b.csv: 0 Records.")).toBeDefined();
     });
   });
 
@@ -794,19 +792,19 @@ describe("VideoUpload guided panel", () => {
       </MemoryRouter>,
     );
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Confirm match" })).toBeDefined();
+      expect(screen.getByRole("button", { name: "Confirm Match" })).toBeDefined();
     });
-    fireEvent.click(screen.getByRole("button", { name: "Confirm match" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Match" }));
     await waitFor(() => {
-      expect(screen.getByText("Match confirmed.")).toBeDefined();
+      expect(screen.getByText("Match Confirmed.")).toBeDefined();
     });
     // Unticking a record drops the stale approval: Analyze blocks
     // until the visible selection is re-confirmed.
-    fireEvent.click(screen.getAllByRole("checkbox", { name: "Select record Sample Story V1" })[0]);
+    fireEvent.click(screen.getAllByRole("checkbox", { name: "Select Record Sample Story V1" })[0]);
     await waitFor(() => {
-      expect(screen.getByText("Changing the record selection clears the confirmed match.")).toBeDefined();
+      expect(screen.getByText("Changing The Record Selection Clears The Confirmed Match.")).toBeDefined();
     });
-    expect(screen.getByText("No match confirmed yet.")).toBeDefined();
+    expect(screen.getByText("No Match Confirmed Yet.")).toBeDefined();
     expect(screen.getByRole("button", { name: "Analyze" }).hasAttribute("disabled")).toBe(true);
   });
 
@@ -828,24 +826,24 @@ describe("VideoUpload guided panel", () => {
       </MemoryRouter>,
     );
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Confirm match" })).toBeDefined();
+      expect(screen.getByRole("button", { name: "Confirm Match" })).toBeDefined();
     });
-    fireEvent.click(screen.getByRole("button", { name: "Confirm match" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Match" }));
     await waitFor(() => {
-      expect(screen.getByText("Match confirmed.")).toBeDefined();
+      expect(screen.getByText("Match Confirmed.")).toBeDefined();
     });
     // Back to the video stage and rename the key.
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
-    fireEvent.change(screen.getByLabelText("Creative key"), { target: { value: "renamed-key" } });
-    expect(screen.getByText("Changing the creative key clears the confirmed match.")).toBeDefined();
+    fireEvent.change(screen.getByLabelText("Creative Key"), { target: { value: "renamed-key" } });
+    expect(screen.getByText("Changing The Creative Key Clears The Confirmed Match.")).toBeDefined();
     // Forward to review: the stale confirmation is gone, Analyze blocked.
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     await waitFor(() => {
-      expect(screen.getByText("No match confirmed yet.")).toBeDefined();
+      expect(screen.getByText("No Match Confirmed Yet.")).toBeDefined();
     });
     expect(screen.getByRole("button", { name: "Analyze" }).hasAttribute("disabled")).toBe(true);
   });
@@ -881,11 +879,11 @@ describe("VideoUpload guided panel", () => {
       </MemoryRouter>,
     );
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Review and analyze" })).toBeDefined();
+      expect(screen.getByRole("heading", { name: "Review And Analyze" })).toBeDefined();
     });
     const analyze = screen.getByRole("button", { name: "Analyze" });
     expect(analyze.hasAttribute("disabled")).toBe(true);
-    expect(screen.getByText("Confirm the client and campaign to enable analysis.")).toBeDefined();
+    expect(screen.getByText("Confirm The Client And Campaign To Enable Analysis.")).toBeDefined();
   });
 
   it("corrects transcript, hook, moments and test verdicts on the findings", async () => {
@@ -960,16 +958,16 @@ describe("VideoUpload guided panel", () => {
       expect((posted?.body as Record<string, unknown>)?.["revision"]).toBe("rev-0");
     });
     // Transcript + hook + moment corrections ride the same endpoint.
-    fireEvent.click(screen.getByRole("button", { name: "Correct findings" }));
-    fireEvent.change(screen.getByLabelText("Transcript text"), { target: { value: "fixed words" } });
-    fireEvent.click(screen.getAllByRole("button", { name: "Save correction" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Correct Findings" }));
+    fireEvent.change(screen.getByLabelText("Transcript Text"), { target: { value: "fixed words" } });
+    fireEvent.click(screen.getAllByRole("button", { name: "Save Correction" })[0]);
     await waitFor(() => {
       const posted = calls.filter((c) => c.url === "/api/drafts/d4/corrections");
       expect(posted.some((c) => (c.body as Record<string, unknown>)?.["transcript"] === "fixed words")).toBe(true);
     });
     await waitFor(() => {
       expect(
-        screen.getAllByText("Correction saved — the findings need re-review.").length,
+        screen.getAllByText("Correction Saved. The Findings Need Re-Review.").length,
       ).toBeGreaterThanOrEqual(1);
     });
   });

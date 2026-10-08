@@ -27,12 +27,16 @@ test("dashboard video upload: real file, data, match, honest analyze", async ({
   // Open the panel and upload the real fixture clip.
   await page.getByRole("button", { name: /Upload Video/ }).click();
   await expect(
-    page.getByRole("heading", { name: "Upload your video" }),
+    page.getByRole("heading", { name: "Upload Your Video" }),
   ).toBeVisible();
-  await page.getByLabel("Creative key").fill("video-upload-sample");
+  await expect(page.getByRole("button", { name: "Choose File" })).toBeVisible();
+  await expect(page.getByText("No File Chosen")).toBeVisible();
+  await expect(page.getByText(/MP4 \/ MOV, Up To .+ Seconds/)).toBeVisible();
+  await page.screenshot({ path: "test-results/screens/vu-video.png" });
+  await page.getByLabel("Creative Key").fill("video-upload-sample");
   await page.locator("#vu-file").setInputFiles(MP4);
   await page.getByRole("dialog").getByRole("button", { name: "Upload Video" }).click();
-  await expect(page.getByText(/Video valid — 1280×720, 15s/)).toBeVisible();
+  await expect(page.getByText(/Video Valid\. 1280×720, 15 Seconds/)).toBeVisible();
   await expect(page.getByTestId("vu-video-preview")).toBeVisible();
 
   // Client/campaign: confirm the destination through the custom
@@ -40,40 +44,41 @@ test("dashboard video upload: real file, data, match, honest analyze", async ({
   // confirmation; the campaign must match the fixture CSV grain.
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(
-    page.getByRole("heading", { name: "Client and campaign" }),
+    page.getByRole("heading", { name: "Client And Campaign" }),
   ).toBeVisible();
-  await page.getByRole("button", { name: /not in the catalogue/ }).click();
+  await page.getByRole("button", { name: /Not In The Catalogue/ }).click();
   await page.locator("#vu-client-custom").fill("E2E Client");
   await page.locator("#vu-campaign-custom").fill("Sample Launch");
-  await page.getByRole("button", { name: "Confirm selection" }).click();
-  await expect(page.getByText(/Selection confirmed/).first()).toBeVisible();
+  await page.getByRole("button", { name: "Confirm Selection" }).click();
+  await expect(page.getByText(/Selection Confirmed/).first()).toBeVisible();
 
   // Dataset: paste the real fixture CSV and import through the
   // ingestion pipeline (dedup, provenance, quarantine).
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(
-    page.getByRole("heading", { name: "Performance dataset" }),
+    page.getByRole("heading", { name: "Performance Dataset" }),
   ).toBeVisible();
-  await page.getByLabel("CSV data").fill(CSV);
-  await page.getByRole("button", { name: "Import dataset" }).click();
-  await expect(page.getByText("3 rows · 3 new · 0 updated").first()).toBeVisible();
+  await page.getByLabel("CSV Data").fill(CSV);
+  await page.getByRole("button", { name: "Import Dataset" }).click();
+  await expect(page.getByText("3 Rows, 3 New, 0 Updated").first()).toBeVisible();
+  await page.screenshot({ path: "test-results/screens/vu-dataset.png" });
 
   // Review: server-scoped candidate rows with checkboxes.
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(
-    page.getByRole("heading", { name: "Review and analyze" }),
+    page.getByRole("heading", { name: "Review And Analyze" }),
   ).toBeVisible();
   await expect(page.getByText("Sample Story V1").first()).toBeVisible();
   // Stage D shows provider readiness before Analyze is submitted
   // (mock mode here: vision missing, so the server will refuse).
-  await expect(page.getByText(/mock mode · vision missing/i)).toBeVisible();
-  await expect(page.getByText(/What analysis sends/i)).toBeVisible();
+  await expect(page.getByText(/Mock Mode\. Vision Missing/i)).toBeVisible();
+  await expect(page.getByText(/What Analysis Sends/i)).toBeVisible();
   await page.screenshot({ path: "test-results/screens/vu-review.png" });
 
   // Confirm the match, then Analyze: no live provider in E2E, so the
   // endpoint must refuse honestly instead of queueing or mocking.
-  await page.getByRole("button", { name: "Confirm match" }).click();
-  await expect(page.getByText("Match confirmed.")).toBeVisible();
+  await page.getByRole("button", { name: "Confirm Match" }).click();
+  await expect(page.getByText("Match Confirmed.")).toBeVisible();
   const analyze = page.getByRole("button", { name: "Analyze" });
   await expect(analyze).toBeEnabled();
   await analyze.click();
@@ -85,9 +90,13 @@ test("dashboard video upload: real file, data, match, honest analyze", async ({
   // Recent uploads lists the draft with its real status (under the
   // file's real uploaded name).
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("heading", { name: "Recent uploads" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Recent Uploads" })).toBeVisible();
   await expect(page.getByText("Video Upload Sample 720p.mp4", { exact: true })).toBeVisible();
   await expect(page.getByText("Draft", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Cancel: Video Upload Sample 720p.mp4" }).click();
+  await expect(page.getByText("Delete This Draft?")).toBeVisible();
+  await page.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(page.getByText("Draft Deleted.")).toBeVisible();
 });
 
 test("video remove drops the binding and never resurrects", async ({
@@ -97,27 +106,30 @@ test("video remove drops the binding and never resurrects", async ({
   await loginAs(context, page, seeds.employee, "/");
   await page.getByRole("button", { name: /Upload Video/ }).click();
   await expect(
-    page.getByRole("heading", { name: "Upload your video" }),
+    page.getByRole("heading", { name: "Upload Your Video" }),
   ).toBeVisible();
-  await page.getByLabel("Creative key").fill("video-upload-sample");
+  await expect(page.getByRole("button", { name: "Choose File" })).toBeVisible();
+  await expect(page.getByText("No File Chosen")).toBeVisible();
+  await expect(page.getByText(/MP4 \/ MOV, Up To .+ Seconds/)).toBeVisible();
+  await page.getByLabel("Creative Key").fill("video-upload-sample");
   await page.locator("#vu-file").setInputFiles(MP4);
   await page.getByRole("dialog").getByRole("button", { name: "Upload Video" }).click();
-  await expect(page.getByText(/Video valid — 1280×720, 15s/)).toBeVisible();
+  await expect(page.getByText(/Video Valid\. 1280×720, 15 Seconds/)).toBeVisible();
   // Explicit backend removal: the preview and stored binding go.
   await page.getByRole("button", { name: "Remove", exact: true }).click();
   await expect(page.getByTestId("vu-video-preview")).toBeHidden();
   // Reopen the pinned draft: the video stays gone (no resurrection
   // from the stored relationship), and re-upload works on the draft.
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("heading", { name: "Recent uploads" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Recent Uploads" })).toBeVisible();
   await page.getByRole("button", { name: "Resume" }).click();
   await expect(
-    page.getByRole("heading", { name: "Upload your video" }),
+    page.getByRole("heading", { name: "Upload Your Video" }),
   ).toBeVisible();
   await expect(page.getByTestId("vu-video-preview")).toBeHidden();
   await page.locator("#vu-file").setInputFiles(MP4);
   await page.getByRole("dialog").getByRole("button", { name: "Upload Video" }).click();
-  await expect(page.getByText(/Video valid — 1280×720, 15s/)).toBeVisible();
+  await expect(page.getByText(/Video Valid\. 1280×720, 15 Seconds/)).toBeVisible();
   await expect(page.getByTestId("vu-video-preview")).toBeVisible();
 });
 
@@ -134,5 +146,15 @@ test("video upload card stacks on a narrow viewport", async ({
     () => document.documentElement.scrollWidth - window.innerWidth,
   );
   expect(overflow).toBeLessThanOrEqual(1);
+  await page.getByRole("button", { name: /Upload Video/ }).click();
+  await expect(page.getByRole("heading", { name: "Upload Your Video" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Choose File" })).toBeVisible();
+  await expect(page.getByText("No File Chosen")).toBeVisible();
+  const dialogOverflow = await page.evaluate(() => {
+    const dialog = document.querySelector(".modal-card");
+    if (!(dialog instanceof HTMLElement)) return 999;
+    return dialog.scrollWidth - dialog.clientWidth;
+  });
+  expect(dialogOverflow).toBeLessThanOrEqual(1);
   await page.screenshot({ path: "test-results/screens/vu-mobile.png" });
 });

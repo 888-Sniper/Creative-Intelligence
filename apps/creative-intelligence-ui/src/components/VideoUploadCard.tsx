@@ -224,6 +224,7 @@ export function VideoUploadsProvider({ children }: { children: ReactNode }) {
         <VideoUploadPanel
           open={panel}
           employeeId={employeeId}
+          onNotify={setToast}
           onClose={(refresh) => {
             setPanel(null);
             if (refresh) void reload();
@@ -275,8 +276,8 @@ export function AnalyzeVideoSection() {
         </div>
         {cardMsg ? <p role="status" className="muted" style={{ marginBottom: 0 }}>{cardMsg}</p> : null}
         {resume ? (
-          <div className="chip-row" style={{ marginTop: 12 }}>
-            <span className="chip-static">
+          <div className="chip-row vu-resume-row" style={{ marginTop: 12 }}>
+            <span className="chip-static vu-resume">
               <strong>{vu("resumeTitle")}:&nbsp;</strong>
               {vu("resumeBody", {
                 name: draftName(resume),
@@ -340,7 +341,7 @@ export function RecentUploadsSection() {
                     </span>
                     <span className="cell-sub" style={{ display: "block" }}>
                       {[d.spec?.campaign, fmtDate(d.updated_at || d.created_at)]
-                        .filter(Boolean).join(" · ")}
+                        .filter(Boolean).join(", ")}
                     </span>
                   </span>
                   <span className="pill pill-info">{statusName(d.status)}</span>
@@ -353,7 +354,7 @@ export function RecentUploadsSection() {
                     </button>
                   ) : null}
                   {confirmDelete === d.id ? (
-                    <span className="row-actions" role="group" aria-label={vu("confirmCancelTitle")}>
+                    <span className="row-actions vu-confirm" role="group" aria-label={vu("confirmCancelTitle")}>
                       <span className="cell-sub">{vu("confirmCancelTitle")}</span>
                       <button
                         type="button" className="btn-outline btn-compact" disabled={busyDelete}

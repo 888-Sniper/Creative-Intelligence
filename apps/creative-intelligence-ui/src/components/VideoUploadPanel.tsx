@@ -50,6 +50,7 @@ interface PanelProps {
   open: PanelOpen | null;
   employeeId: string;
   onClose: (refresh: boolean) => void;
+  onNotify?: (message: string) => void;
 }
 
 const STAGES: UploadStage[] = ["video", "client", "dataset", "review"];
@@ -68,6 +69,19 @@ function slugKey(name: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 80);
+}
+
+const METHOD_LABELS: Record<string, string> = {
+  platform_id: "Platform ID",
+  exact_filename: "Exact Filename",
+  explicit_tag: "Explicit Tag",
+  fuzzy_filename: "Fuzzy Filename",
+  manual: "Manual",
+};
+
+function methodLabel(method: string): string {
+  return METHOD_LABELS[method]
+    || method.replace(/_/g, " ").replace(/\b\w/g, (ch) => ch.toUpperCase());
 }
 
 export function isVideoFile(file: File): boolean {
@@ -140,6 +154,14 @@ export function FindingsView({
   onSeek?: (t: number) => void;
   correction?: { onCorrect: (c: DraftCorrections) => Promise<void> };
 }) {
+  const { t } = useLocale();
+  const hookLabel = (code: string): string => {
+    const key = `filters.hooks.${code}`;
+    const hit = t(key);
+    return hit === key
+      ? code.replace(/_/g, " ").replace(/\b\w/g, (ch) => ch.toUpperCase())
+      : hit;
+  };
   const ann = (analysis.annotation ?? {}) as Record<string, unknown>;
   const block = (ann["analysis"] ?? {}) as Record<string, unknown>;
   const measured = (block["measured"] ?? {}) as Record<string, unknown>;
@@ -152,11 +174,11 @@ export function FindingsView({
     : [];
   const moments: FrameMoment[] = rawMoments.map((f) => {
     const flags: string[] = [];
-    if (f["brand_visible"]) flags.push("brand");
-    if (f["product_visible"]) flags.push("product");
-    if (f["logo_visible"]) flags.push("logo");
+    if (f["brand_visible"]) flags.push("Brand");
+    if (f["product_visible"]) flags.push("Product");
+    if (f["logo_visible"]) flags.push("Logo");
     if (f["cta_visible"]) flags.push("CTA");
-    if (f["end_frame"]) flags.push("end");
+    if (f["end_frame"]) flags.push("End");
     return {
       t: Number(f["t_sec"]),
       label: String(f["label"] ?? ""),
@@ -191,7 +213,7 @@ export function FindingsView({
     Array.isArray(coverage["platforms"]) ? (coverage["platforms"] as unknown[]).map(String).join(", ") : "",
     Array.isArray(coverage["currencies"]) ? (coverage["currencies"] as unknown[]).map(String).join(", ") : "",
     Array.isArray(coverage["date_range"]) ? (coverage["date_range"] as unknown[]).map(String).join(" – ") : "",
-  ].filter(Boolean).join(" · ");
+  ].filter(Boolean).join(", ");
   return (
     <div style={{ marginTop: 12 }}>
       <h4 className="panel-title" style={{ fontSize: 13 }}>{vu("findingsTitle")}</h4>
@@ -367,7 +389,7 @@ export function FindingsView({
                     <label htmlFor="vu-correct-hook">{vu("hookTypeEditLabel")}</label>
                     <select id="vu-correct-hook" name="hook_type" defaultValue={hookType}>
                       {HOOK_TYPE_OPTIONS.map((h) => (
-                        <option key={h} value={h}>{h}</option>
+                        <option key={h} value={h}>{hookLabel(h)}</option>
                       ))}
                     </select>
                   </div>
@@ -457,7 +479,7 @@ export function FindingsView({
   );
 }
 
-export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
+export function VideoUploadPanel({ open, employeeId, onClose, onNotify }: PanelProps) {
   const { t, locale } = useLocale();
   const vu = (key: string, vars?: Record<string, string | number>): string =>
     t(`dashboard.videoUpload.${key}`, vars);
@@ -1067,12 +1089,7 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
       // Fresh version, fresh row list: select everything by default.
       await loadRows(current.id, true);
       setSheets([]);
-      const summary = vu("rowsSummary", {
-        rows: res.rows, inserted: res.inserted, updated: res.updated,
-      });
-      setStatus(res.quarantined > 0
-        ? `${summary} · ${vu("quarantinedNote", { count: res.quarantined })}`
-        : summary);
+      setStatus("");
     } catch (e) {
       if (e instanceof SheetConflictError) {
         setSheets(e.sheets);
@@ -1097,7 +1114,9 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
       });
       applyServerMatch(proposed);
       const rows = parseSnapshots(proposed);
-      setStatus(vu("matchedMsg", { count: rows.length, method: proposed.method || method }));
+      setStatus(vu("matchedMsg", {
+        count: rows.length, method: methodLabel(proposed.method || method),
+      }));
     } catch (e) {
       setStatus(vu("errorGeneric", { error: e instanceof Error ? e.message : String(e) }));
     } finally {
@@ -1176,7 +1195,9 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
           : "";
   const limitsText = limits
     ? vu("limitsNote", {
-      containers: limits.containers.join(" / ").toUpperCase(),
+      containers: limits.containers
+        .map((item) => item.replace(/^\./, "").toUpperCase())
+        .join(" / "),
       size: formatBytes(limits.max_bytes, locale),
       duration: limits.max_duration_s,
     })
@@ -1205,7 +1226,9 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
       } catch {
         /* ignore */
       }
-      setToast(vu("queuedWithModel", { model: res.model || res.provider || "…" }));
+      const queued = vu("queuedWithModel", { model: res.model || res.provider || "…" });
+      if (onNotify) onNotify(queued);
+      else setToast(queued);
       setStatus(vu("queuedMsg"));
       onClose(true);
     } catch (e) {
@@ -1266,7 +1289,6 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
         {draft && stage === "video" ? (
           <section aria-labelledby="vu-stage-video">
             <h3 id="vu-stage-video" className="panel-title" style={{ marginBottom: 10 }}>{vu("stageVideoTitle")}</h3>
-            <p className="panel-sub" style={{ marginTop: 0 }}>{limitsText}</p>
             <div className="field" style={{ marginTop: 10 }}>
               <label htmlFor="vu-creative-key">{vu("creativeKeyLabel")}</label>
               <input
@@ -1274,27 +1296,36 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
                 onChange={(e) => pickCreativeKey(e.target.value)}
                 placeholder="video-upload-sample"
               />
-              <p className="panel-sub">{vu("creativeKeyHint")}</p>
             </div>
-            <div className="field">
+            <div className="field" style={{ marginTop: 10 }}>
               <label htmlFor="vu-file">{vu("fileLabel")}</label>
+              <div className="vu-file-row">
+                <button
+                  type="button" className="btn-outline"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  {vu("chooseFileBtn")}
+                </button>
+                <span className="vu-file-name">{stagedName || vu("noFileChosen")}</span>
+              </div>
               <input
-                id="vu-file" ref={fileInputRef} type="file" accept="video/mp4,video/quicktime,.mp4,.mov"
+                id="vu-file" className="sr-only" ref={fileInputRef} type="file"
+                accept="video/mp4,video/quicktime,.mp4,.mov"
                 onChange={(e) => {
                   stageFile(e.target.files?.[0] ?? null);
                   e.target.value = "";
                 }}
               />
+              <p className="panel-sub">{limitsText}</p>
             </div>
             {stagedName ? (
               <div className="chip-row" style={{ marginTop: 8 }}>
-                <span className="chip-static">{stagedName}</span>
                 <LoadingButton
                   type="button" className="btn-primary" loading={videoBusy}
                   loadingLabel={vu("uploadingLabel")} disabled={!creativeKey.trim()}
                   onClick={() => void uploadStaged()}
                 >
-                  {spec.media ? vu("replaceBtn") : vu("uploadButton")}
+                  {vu("uploadButton")}
                 </LoadingButton>
               </div>
             ) : null}
@@ -1312,7 +1343,7 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
                   </div>
                   <div>
                     <dt>{vu("durationLabel")}</dt>
-                    <dd>{spec.video ? `${Math.round(spec.video.duration_s * 10) / 10}s` : "—"}</dd>
+                    <dd>{spec.video ? `${Math.round(spec.video.duration_s * 10) / 10} Seconds` : "—"}</dd>
                   </div>
                   <div>
                     <dt>{vu("sizeLabel")}</dt>
@@ -1320,9 +1351,11 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
                   </div>
                 </dl>
                 <div className="chip-row" style={{ marginTop: 8 }}>
-                  <button type="button" className="btn-outline" onClick={() => fileInputRef.current?.click()}>
-                    {vu("replaceBtn")}
-                  </button>
+                  {stagedName ? null : (
+                    <button type="button" className="btn-outline" onClick={() => fileInputRef.current?.click()}>
+                      {vu("replaceBtn")}
+                    </button>
+                  )}
                   <button type="button" className="btn-outline" onClick={() => void removeVideo()}>
                     {vu("removeBtn")}
                   </button>
@@ -1336,47 +1369,8 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
           <section aria-labelledby="vu-stage-client">
             <h3 id="vu-stage-client" className="panel-title" style={{ marginBottom: 10 }}>{vu("stageClientTitle")}</h3>
             {meta.error ? <p className="muted">{vu("errorGeneric", { error: meta.error })}</p> : null}
-            <div className="detail-cols-2">
-              <MetaSelect
-                id="vu-client" label={vu("clientLabel")} allLabel={vu("allLabel")}
-                values={metaClients} value={client} onPick={pickClient}
-              />
-              <MetaSelect
-                id="vu-campaign" label={vu("campaignLabel")} allLabel={vu("allLabel")}
-                values={metaCampaigns} value={campaign} onPick={pickCampaign}
-              />
-            </div>
-            <div className="chip-row" style={{ marginTop: 10 }}>
-              <LoadingButton
-                type="button" className="btn-primary" loading={saving}
-                loadingLabel={vu("savingLabel")} disabled={!client.trim() || !campaign.trim()}
-                onClick={() => void confirmClientCampaign()}
-              >
-                {vu("confirmSelectionBtn")}
-              </LoadingButton>
-              {clientCampaignConfirmed ? (
-                <span className="pill pill-ok">
-                  <Icon name="check" size={14} />
-                  {vu("confirmedMsg", { client: client.trim(), campaign: campaign.trim() })}
-                </span>
-              ) : null}
-            </div>
-            <p className="panel-sub">{vu("clearsMatchNote")}</p>
-            {!customClient ? (
-              <p className="panel-sub">
-                <button type="button" className="link-teal" onClick={() => setCustomClient(true)}>
-                  {vu("customClientBtn")}
-                </button>
-              </p>
-            ) : (
-              <p className="panel-sub">
-                <button type="button" className="link-teal" onClick={() => setCustomClient(false)}>
-                  {vu("catalogueClientBtn")}
-                </button>
-              </p>
-            )}
             {customClient ? (
-              <div className="detail-cols-2" style={{ marginTop: 8 }}>
+              <div className="detail-cols-2">
                 <div className="field">
                   <label htmlFor="vu-client-custom">{vu("clientLabel")}</label>
                   <input
@@ -1394,14 +1388,54 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
                   />
                 </div>
               </div>
-            ) : null}
+            ) : (
+              <div className="detail-cols-2">
+                <MetaSelect
+                  id="vu-client" label={vu("clientLabel")} allLabel={vu("allLabel")}
+                  values={metaClients} value={client} onPick={pickClient}
+                />
+                <MetaSelect
+                  id="vu-campaign" label={vu("campaignLabel")} allLabel={vu("allLabel")}
+                  values={metaCampaigns} value={campaign} onPick={pickCampaign}
+                />
+              </div>
+            )}
+            <div className="chip-row" style={{ marginTop: 10 }}>
+              <LoadingButton
+                type="button" className="btn-primary" loading={saving}
+                loadingLabel={vu("savingLabel")} disabled={!client.trim() || !campaign.trim()}
+                onClick={() => void confirmClientCampaign()}
+              >
+                {vu("confirmSelectionBtn")}
+              </LoadingButton>
+              {clientCampaignConfirmed ? (
+                <span className="pill pill-ok">
+                  <Icon name="check" size={14} />
+                  {vu("confirmedPill")}
+                </span>
+              ) : null}
+            </div>
+            <p className="panel-sub">{vu("clearsMatchNote")}</p>
+            {!customClient ? (
+              <p className="panel-sub">
+                <button type="button" className="link-teal" onClick={() => setCustomClient(true)}>
+                  {vu("customClientBtn")}
+                </button>
+              </p>
+            ) : (
+              <p className="panel-sub">
+                <button type="button" className="link-teal" onClick={() => setCustomClient(false)}>
+                  {vu("catalogueClientBtn")}
+                </button>
+              </p>
+            )}
           </section>
         ) : null}
 
         {draft && stage === "dataset" ? (
           <section aria-labelledby="vu-stage-dataset">
             <h3 id="vu-stage-dataset" className="panel-title" style={{ marginBottom: 10 }}>{vu("stageDatasetTitle")}</h3>
-            <div className="detail-cols-2">
+            <div className="detail-cols-2 vu-dataset-top">
               <div className="field">
                 <label htmlFor="vu-platform">{vu("platformLabel")}</label>
                 <select id="vu-platform" value={platform} onChange={(e) => setPlatform(e.target.value)}>
@@ -1409,11 +1443,11 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
                   <option value="tiktok">TikTok</option>
                 </select>
               </div>
-              <div className="field">
-                <span className="field-label" aria-hidden="true">&nbsp;</span>
+              <div className="field vu-dataset-file">
                 <button type="button" className="btn-outline" onClick={() => datasetInputRef.current?.click()}>
-                  <Icon name="download" size={15} /> {vu("fileBtn")}
+                  {vu("fileBtn")}
                 </button>
+                {datasetFile ? <span className="vu-file-name">{datasetFile}</span> : null}
                 <input
                   ref={datasetInputRef} type="file" accept=".csv,.xlsx,text/csv" hidden
                   aria-label={vu("fileBtn")}
@@ -1431,7 +1465,6 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
                 placeholder={vu("csvPlaceholder")}
                 onChange={(e) => { setCsvText(e.target.value); setXlsxB64(""); }}
               />
-              {datasetFile ? <p className="panel-sub">{datasetFile}</p> : null}
             </div>
             {sheets.length ? (
               <div className="field">
@@ -1466,7 +1499,7 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
                       === (spec.dataset?.version || draft?.dataset_version || "");
                     return (
                       <option key={d.id} value={d.version}>
-                        {d.filename || d.version}{active ? " · current" : ""}
+                        {d.filename || d.version}{active ? " (Current)" : ""}
                       </option>
                     );
                   })}
@@ -1513,8 +1546,7 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
                 <dd>
                   {spec.client || spec.campaign
                     ? `${spec.client || "—"} / ${spec.campaign || "—"}`
-                    : "—"}
-                  {spec.clientConfirmed ? "" : ` (${vu("warnNoClient")})`}
+                    : vu("notConfirmed")}
                 </dd>
               </div>
               <div>
@@ -1525,13 +1557,11 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
                 <dt>{vu("candidatesTitle")}</dt>
                 <dd>
                   {matchConfirmed || snapshots.length
-                    ? vu("matchedMsg", { count: matchedCount, method: matchedMethod })
+                    ? vu("matchedMsg", {
+                      count: matchedCount, method: methodLabel(matchedMethod),
+                    })
                     : vu("noMatchNote")}
                 </dd>
-              </div>
-              <div>
-                <dt>{vu("methodLabel")}</dt>
-                <dd>{matchedMethod}</dd>
               </div>
               <div>
                 <dt>{vu("providerTitle")}</dt>
@@ -1541,7 +1571,8 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
                     : !providerStatus
                       ? vu("providerLoading")
                       : vu("providerSummary", {
-                        mode: providerStatus.mode || "—",
+                        mode: (providerStatus.mode || "—").replace(
+                          /^\w/, (ch) => ch.toUpperCase()),
                         vision: providerStatus.capabilities?.vision?.status === "configured"
                           ? `${vu("providerConfigured")}${(providerStatus.capabilities.vision.adapters ?? []).length ? ` (${(providerStatus.capabilities.vision.adapters ?? []).join(", ")})` : ""}`
                           : vu("providerMissing"),
@@ -1551,12 +1582,7 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
               {providerStatus?.analysis ? (
                 <div>
                   <dt>{vu("providerSendsTitle")}</dt>
-                  <dd>
-                    {vu("providerSendsSummary", {
-                      sends: providerStatus.analysis.sends,
-                      storage: providerStatus.analysis.storage,
-                    })}
-                  </dd>
+                  <dd>{vu("providerSendsBody")}</dd>
                 </div>
               ) : null}
             </dl>
@@ -1575,7 +1601,7 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
             ) : candidates.length ? (
               <div style={{ marginTop: 10 }}>
                 <h4 className="panel-title" style={{ fontSize: 13 }}>
-                  {vu("candidatesTitle")} · {vu("candidatesCount", { count: candidates.length })}
+                  {vu("candidatesTitle")} ({vu("candidatesCount", { count: candidates.length })})
                 </h4>
                 <p className="panel-sub">{vu("candidatesVisibleNote", { count: knownRowIds.length })}</p>
                 <div className="tbl-wrap">
@@ -1631,7 +1657,7 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
                             ) : null}
                             <td>{c.campaign || "—"}</td>
                             <td>{c.ad_name || c.creative_key || "—"}</td>
-                            <td>{c.impressions || c.clicks || "—"}</td>
+                            <td>{c.impressions ? c.impressions : "—"}</td>
                           </tr>
                         );
                       })}
@@ -1695,7 +1721,9 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
             <div className="field" style={{ marginTop: 10, maxWidth: 320 }}>
               <label htmlFor="vu-method">{vu("methodLabel")}</label>
               <select id="vu-method" value={method} onChange={(e) => setMethod(e.target.value)}>
-                {MATCH_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
+                {MATCH_METHODS.map((m) => (
+                  <option key={m} value={m}>{methodLabel(m)}</option>
+                ))}
               </select>
             </div>
             <div className="chip-row" style={{ marginTop: 10 }}>
@@ -1714,33 +1742,40 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
                 {vu("confirmMatchBtn")}
               </LoadingButton>
             </div>
-            {!canMatch ? <p className="panel-sub">{vu("matchNeedsIds")}</p> : null}
+            {candidates.length > 0 && knownRowIds.length === 0 ? (
+              <p className="panel-sub">{vu("matchNeedsIds")}</p>
+            ) : null}
           </section>
         ) : null}
 
         {draft ? (
-          <div style={{
-            display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
-            marginTop: 16, paddingTop: 12, borderTop: "1px solid var(--shell-line)",
-          }}>
-            <span style={{ flex: "1 1 auto" }} />
-            {stageIndex > 0 ? (
-              <button type="button" className="btn-outline" onClick={() => setStage(STAGES[stageIndex - 1])}>
-                {vu("backBtn")}
-              </button>
+          <div className="vu-footer">
+            {stageIndex === STAGES.length - 1 && !canAnalyze && analyzeReason ? (
+              <p className="panel-sub vu-footer-note" role="note">{analyzeReason}</p>
             ) : null}
-            <LoadingButton
-              type="button" className="btn-outline" loading={saving}
-              loadingLabel={vu("savingLabel")} onClick={() => void saveDraft()}
-            >
-              {vu("saveDraftBtn")}
-            </LoadingButton>
-            {stageIndex < STAGES.length - 1 ? (
-              <button type="button" className="btn-primary" onClick={() => setStage(STAGES[stageIndex + 1])}>
-                {vu("continueStepBtn")}
-              </button>
-            ) : (
-              <span style={{ display: "inline-flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
+            <div className="vu-footer-actions">
+              {stageIndex > 0 ? (
+                <button type="button" className="btn-outline" onClick={() => {
+                  setStatus("");
+                  setStage(STAGES[stageIndex - 1]);
+                }}>
+                  {vu("backBtn")}
+                </button>
+              ) : null}
+              <LoadingButton
+                type="button" className="btn-outline" loading={saving}
+                loadingLabel={vu("savingLabel")} onClick={() => void saveDraft()}
+              >
+                {vu("saveDraftBtn")}
+              </LoadingButton>
+              {stageIndex < STAGES.length - 1 ? (
+                <button type="button" className="btn-primary" onClick={() => {
+                  setStatus("");
+                  setStage(STAGES[stageIndex + 1]);
+                }}>
+                  {vu("continueStepBtn")}
+                </button>
+              ) : (
                 <LoadingButton
                   type="button" className="btn-primary" loading={analyzing}
                   loadingLabel={vu("analyzingLabel")} disabled={!canAnalyze}
@@ -1748,11 +1783,8 @@ export function VideoUploadPanel({ open, employeeId, onClose }: PanelProps) {
                 >
                   {vu("analyzeBtn")}
                 </LoadingButton>
-                {!canAnalyze && analyzeReason ? (
-                  <span className="panel-sub" role="note">{analyzeReason}</span>
-                ) : null}
-              </span>
-            )}
+              )}
+            </div>
           </div>
         ) : null}
         {toast ? <Toast message={toast} onClose={() => setToast("")} /> : null}

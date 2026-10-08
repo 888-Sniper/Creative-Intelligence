@@ -203,7 +203,7 @@ describe("SettingsPage", () => {
     await waitFor(() => {
       expect(window.localStorage.getItem("ci-settings-prefs:e1")).toContain("Night Shift");
     });
-    expect(screen.getByRole("status").textContent).toBe("All changes saved.");
+    expect(screen.getByRole("status").textContent).toBe("All Changes Saved.");
   });
 
   it("autosaves toggles and selects immediately with feedback", async () => {
@@ -216,7 +216,7 @@ describe("SettingsPage", () => {
     await waitFor(() => {
       expect(window.localStorage.getItem("ci-settings-prefs:e1")).toContain("Compact");
     });
-    expect(screen.getByRole("status").textContent).toBe("All changes saved.");
+    expect(screen.getByRole("status").textContent).toBe("All Changes Saved.");
     expect(document.body.dataset["density"]).toBe("compact");
   });
 
@@ -249,7 +249,7 @@ describe("SettingsPage", () => {
     await waitFor(() => {
       expect(store.get("ci-settings-prefs:e1")).toContain("Compact");
     });
-    expect(screen.getByRole("status").textContent).toBe("All changes saved.");
+    expect(screen.getByRole("status").textContent).toBe("All Changes Saved.");
   });
 
   it("validates the workspace name instead of saving blanks", async () => {
@@ -278,7 +278,7 @@ describe("SettingsPage", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Reset Defaults" }));
     await waitFor(() => {
-      expect(screen.getByText("Defaults restored.")).toBeDefined();
+      expect(screen.getByText("Defaults Restored.")).toBeDefined();
     });
     expect((screen.getByLabelText("Workspace Name") as HTMLInputElement).value).toBe("Foap Creative Intelligence");
     // Reset persists defaults under the employee key (never deletes it):
@@ -316,7 +316,7 @@ describe("SettingsPage", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Change Password" }));
     await waitFor(() => {
-      expect(screen.getByText("Password reset email sent.")).toBeDefined();
+      expect(screen.getByText("Password Reset Email Sent.")).toBeDefined();
     });
     expect(calls.some(([url, init]) => url === "/api/auth/email/reset" && init?.method === "POST")).toBe(true);
   });
@@ -330,7 +330,7 @@ describe("SettingsPage", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Log Out All Sessions" }));
     await waitFor(() => {
-      expect(screen.getByText("All sessions signed out.")).toBeDefined();
+      expect(screen.getByText("All Sessions Signed Out.")).toBeDefined();
     });
     expect(calls.some(([url, init]) => url === "/api/auth/sessions/revoke-all" && init?.method === "POST")).toBe(true);
   });
@@ -435,7 +435,7 @@ describe("SettingsPage", () => {
     fireEvent.change(screen.getByLabelText("Last Name"), { target: { value: "Lovelace" } });
     fireEvent.click(screen.getByRole("button", { name: "Save Profile" }));
     await waitFor(() => {
-      expect(screen.getByText("Profile saved.")).toBeDefined();
+      expect(screen.getByText("Profile Saved.")).toBeDefined();
     });
     const patch = calls.find(([url, init]) => url === "/api/auth/me" && init?.method === "PATCH");
     expect(patch).toBeDefined();
@@ -454,7 +454,7 @@ describe("SettingsPage", () => {
     const file = new File(["bytes"], "photo.png", { type: "image/png" });
     fireEvent.change(screen.getByLabelText("Upload Photo"), { target: { files: [file] } });
     await waitFor(() => {
-      expect(screen.getByText("Profile saved.")).toBeDefined();
+      expect(screen.getByText("Profile Saved.")).toBeDefined();
     });
     const up = calls.find(([url]) => url === "/api/auth/me/avatar");
     expect(up?.[1]?.method).toBe("POST");
@@ -473,7 +473,7 @@ describe("SettingsPage", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Remove Avatar" }));
     await waitFor(() => {
-      expect(screen.getByText("Avatar removed.")).toBeDefined();
+      expect(screen.getByText("Avatar Removed.")).toBeDefined();
     });
     const patch = calls.find(([url, init]) => url === "/api/auth/me" && init?.method === "PATCH");
     expect(JSON.parse(String(patch?.[1]?.body ?? "{}"))).toEqual({ avatar_url: "" });

@@ -2,30 +2,37 @@
 
 Review `origin/main` after `git fetch`. Confirm that `origin/main` and GitHub `main` name the same SHA. A behind local checkout or a missing local `main` branch is not a reason to stop; use `git show origin/main:PATH`. Stop only if the remote identities differ or the worktree is dirty.
 
-This is the product repo https://github.com/888-Sniper/Creative-Intelligence. The parent of this push is `7ea1fa734c494ab214e68ca5167dc011f6869627` (`Discard the audio cache when extraction fails`). This push closes the concurrent-extract collision. Do not call the product perfect. Do not edit, commit, push, build, install, start the server, or activate a provider. Do not treat an unrun live model, live browser, or a previously stored analysis as a source defect. Report only defects still present at the reviewed SHA, with severity, observed behavior, file and line, and the evidence that reproduces them. State checks not performed.
+This is the product repo https://github.com/888-Sniper/Creative-Intelligence. The parent of this push is `6af23f919d9fbb0f4c68597e79d2dd0c170de940` (`Isolate audio extracts so a failure keeps the published cache`). This push changes the Analyze Video wizard copy and layout, and the short success notices. Do not call the product perfect. Do not edit, commit, push, build, install, start the server, or activate a provider. Do not treat an unrun live model, live browser, or a previously stored analysis as a source defect. Report only defects still present at the reviewed SHA, with severity, observed behavior, file and line, and the evidence that reproduces them. State checks not performed.
 
 Confirm the push with both ends named:
 
 ```
-git diff --stat 7ea1fa734c494ab214e68ca5167dc011f6869627 origin/main
+git diff --stat 6af23f919d9fbb0f4c68597e79d2dd0c170de940 origin/main
 ```
 
-The diff is `Backend/creative_intel/video.py`, `tests/test_video.py`, `tests/test_video_analysis.py`, and `Audit.md`.
+The diff is the Analyze Video wizard, its English copy, the Spanish and Polish keys those screens need, the settings success notices, the wizard tests, and `Audit.md`.
 
-## WAV cache
+## Wizard copy
 
-Each `extract_audio` call writes a private temporary WAV (`.audio-` plus `.wav`). The cache path is replaced only after ffmpeg exits 0 and the data chunk contains samples. A failure deletes that temporary file only. It leaves the cache path in place, including a WAV another call has already published.
+English visible words in the Analyze Video wizard are title case. `Save Draft`, `Creative Key`, `Upload Your Video`, `Choose File`, and `No File Chosen` are the labels. The creative-key hint is gone. The format line sits under the file control and reads `MP4 / MOV, Up To {size}, Up To {duration} Seconds`, with no leading dot and no middle dot.
 
-Two simultaneous `video.prepare` calls for the same valid clip both return audio. The cache directory keeps one `_audio.wav` with samples and no `.audio-` temporary. Three trials of that pair succeed.
+The file control is a button plus the chosen name. The real input stays `#vu-file` and is visually hidden, and its label is still `Video File`.
 
-A header whose data chunk has zero samples is still not audio. The next `video.prepare` extracts again. Corrupt AAC (`0xA5` across `mdat`) still makes ffmpeg exit 69, both prepares raise, and no cache WAV remains. An empty disk-full file still raises on the retry. A missing audio stream stays silence.
+Success notices use a capital on each word. That includes `Draft Deleted.`, `Draft Saved.`, `Analysis Queued ({model}).`, `Defaults Restored.`, `Profile Saved.`, `Avatar Removed.`, `Password Reset Email Sent.`, `All Sessions Signed Out.`, `Workspace Data Exported.`, and `All Changes Saved.`
+
+The queued notice is raised on the uploads card before the dialog closes, so closing the panel does not drop it. `Draft Deleted.` is the card toast after confirm delete.
+
+## Layout
+
+The footer note sits on its own line above the actions. Back, Save Draft, and Continue or Analyze stay on the right. The dataset file button shares the platform row and shows the chosen filename beside the button. A staged replacement uploads with `Upload Video`. The picker `Replace` stays hidden while that file is staged. Catalogue selects hide while custom client and campaign names are open. The confirmed pill reads `Selection Confirmed`. The full sentence stays on the status line. The unfinished-upload chip wraps inside the card. The delete confirmation has a 10px gap. Review impressions do not fall back to the click count. Hook options show the existing hook labels and keep the stored codes.
+
+Spanish and Polish keep normal sentence case. They carry the new keys (`chooseFileBtn`, `noFileChosen`, `providerSendsBody`, `notConfirmed`, `confirmedPill`).
 
 ## Checks
 
 ```
-uv run --extra dev pytest tests/test_video_analysis.py tests/test_video.py tests/test_live_providers.py tests/test_pipeline.py tests/test_cohort_delete.py tests/test_admin_providers.py tests/test_acceptance_10.py -q --tb=line
+cd apps/creative-intelligence-ui && pnpm exec vitest run src/components/VideoUpload.test.tsx src/pages/SettingsPage.test.tsx src/i18n/parity.test.ts
+cd apps/creative-intelligence-ui && pnpm exec playwright test e2e/04-video-upload.spec.ts
 ```
 
-The locks for this push are `test_concurrent_prepares_keep_the_published_wav`, `test_failed_extract_keeps_a_published_cache`, and `test_extract_audio_temps_are_unique`.
-
-The five local Notino clips are not in this repo. Do not upload them. This push does not re-analyze them.
+Those were 52 unit tests and 3 browser tests on this machine, after a production UI build served by the isolated e2e backend. An unrun Render page is not a source defect. This push does not change video analysis, the audio cache, or the five local Notino clips. Do not upload them.

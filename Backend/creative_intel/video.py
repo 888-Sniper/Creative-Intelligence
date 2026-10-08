@@ -120,6 +120,20 @@ def probe_duration_s(path):
     return value
 
 
+def audio_track_missing(exc):
+    """True when the clip has no audio stream.
+
+    A disk-full write, a failed ffmpeg start, and any other
+    extraction error are not a silent clip.
+    """
+    text = str(exc).casefold()
+    return any(phrase in text for phrase in (
+        "no audio track",
+        "does not contain any stream",
+        "matches no streams",
+    ))
+
+
 def extract_audio(src_path, dst_wav):
     _run(["ffmpeg", "-y", "-v", "error", "-i", src_path,
           "-vn", "-ac", "1", "-ar", str(SAMPLE_RATE), "-c:a", "pcm_s16le",
@@ -202,7 +216,9 @@ def prepare(src_path, cache_dir, every_s=EVERY_S, duration_s=None):
     else:
         try:
             audio = extract_audio(src_path, wav_path)
-        except Exception:
+        except Exception as exc:
+            if not audio_track_missing(exc):
+                raise
             audio = None  # stills-only clip: vision can proceed
     probed = None
     if duration_s is None:

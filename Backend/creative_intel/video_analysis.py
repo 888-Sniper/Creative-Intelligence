@@ -191,8 +191,13 @@ def prepare_media(src_path, duration_s, want_audio=True):
             try:
                 audio = video_mod.extract_audio(
                     src_path, os.path.join(workdir, "a.wav"))
-            except Exception:
-                audio = None  # audio-free clip: STT is skipped, not faked
+            except Exception as exc:
+                # A missing stream is a silent clip. A failed extract
+                # (disk full, ffmpeg crash) must fail the job.
+                if not video_mod.audio_track_missing(exc):
+                    raise AnalysisUnavailable(
+                        "audio extraction failed: %s" % exc)
+                audio = None
         sampling = {"method": "dense-opening/even-middle/end-frame",
                     "frame_times": times,
                     "max_frames": video_mod.MAX_FRAMES,
@@ -211,6 +216,30 @@ def prepare_media(src_path, duration_s, want_audio=True):
             os.rmdir(workdir)
         except OSError:
             pass
+
+
+def saved_frame_labels(labels):
+    """Frame record stored on the annotation.
+
+    cut stays on each frame so pace_cuts_per_min can be recomputed
+    from the saved analysis. confidence stays off this record.
+    """
+    saved = []
+    for label in labels or []:
+        if not isinstance(label, dict):
+            continue
+        saved.append({
+            "t_sec": label.get("t_sec"),
+            "label": label.get("label"),
+            "brand_visible": label.get("brand_visible"),
+            "product_visible": label.get("product_visible"),
+            "logo_visible": label.get("logo_visible"),
+            "text_overlay": label.get("text_overlay"),
+            "cta_visible": label.get("cta_visible"),
+            "end_frame": label.get("end_frame"),
+            "cut": label.get("cut") is True,
+        })
+    return saved
 
 
 def measured_from_records(records):
@@ -524,15 +553,7 @@ def run(conn, snapshot, owner="", media_dir="", providers=None,
     measured = measured_from_records(fresh["records"])
     ann = report["annotation"]
     transcript = report.get("transcript") or ""
-    ann["frame_labels"] = [
-        {"t_sec": label.get("t_sec"), "label": label.get("label"),
-         "brand_visible": label.get("brand_visible"),
-         "product_visible": label.get("product_visible"),
-         "logo_visible": label.get("logo_visible"),
-         "text_overlay": label.get("text_overlay"),
-         "cta_visible": label.get("cta_visible"),
-         "end_frame": label.get("end_frame")}
-        for label in (report.get("frame_labels") or [])]
+    ann["frame_labels"] = saved_frame_labels(report.get("frame_labels"))
     ann["analysis"] = {
         "version": ANALYSIS_VERSION,
         "revision": uuid.uuid4().hex,

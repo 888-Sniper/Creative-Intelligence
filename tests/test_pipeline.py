@@ -192,6 +192,31 @@ class CreativeTest(unittest.TestCase):
         self.assertEqual(row[0], "")
         conn.close()
 
+    def test_vision_stage_records_cut_times(self):
+        import types
+
+        class CutVision:
+            def annotate(self, frames, images=None):
+                return [{"t_sec": frames[0]["t_sec"], "label": "woman",
+                         "cut": True, "text_overlay": "",
+                         "brand_visible": False, "product_visible": False,
+                         "logo_visible": False, "cta_visible": False,
+                         "end_frame": False, "confidence": 0.9}]
+
+        conn = fresh_db()
+        prov = providers.Providers()
+        ingest.insert_rows(conn, ingest.parse_csv(META_CSV, "meta"))
+        cut = types.SimpleNamespace(stt=prov.stt, vision=CutVision(),
+                                    llm=prov.llm)
+        report = creative.run_pipeline(
+            conn, "hook-a", cut,
+            media={"images": [b"\xff\xd8\xff-fake"], "image_times": [1.0],
+                   "duration_s": 15.0})
+        stages = {s["stage"]: s for s in report["stages"]}
+        self.assertEqual(stages["vision-annotate"]["cuts"], [1.0])
+        self.assertEqual(report["annotation"]["pace_cuts_per_min"], 4.0)
+        conn.close()
+
 
 class RetentionTest(unittest.TestCase):
     def test_join_segments(self):

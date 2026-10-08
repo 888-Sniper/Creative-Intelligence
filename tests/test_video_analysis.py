@@ -182,6 +182,67 @@ def test_promotion_cues_do_not_match_inside_unrelated_words():
     assert classified("€12") == ("price", "promotional")
 
 
+def test_product_span_matches_the_flagged_frame():
+    from creative_intel import creative as creative_mod
+    ann = creative_mod.blank_annotation()
+    ann["product_seconds"] = [{"start_s": 9.0, "end_s": 12.0}]
+    labels = [{"t_sec": 0.0, "label": "Card", "product_visible": True,
+               "text_overlay": "AI foundation models", "cut": True},
+              {"t_sec": 15.0, "label": "Card", "product_visible": False,
+               "text_overlay": "", "cut": False}]
+    got = creative_mod.apply_observation_facts(
+        ann, labels, duration_s=15.0, transcript="")
+    assert got["execution"]["product_first_s"] == 0.0
+    assert got["product_seconds"] == [{"start_s": 0.0, "end_s": 0.0}]
+    assert got["narrative"] == "unknown"
+    assert got["pace_cuts_per_min"] == 4.0
+    spoken = creative_mod.blank_annotation()
+    peer = creative_mod.apply_observation_facts(
+        spoken, [{"t_sec": 0.0, "label": "Card",
+                  "text_overlay": "I found this"}],
+        duration_s=1.0, transcript="")
+    assert peer["narrative"] == "peer_recommendation"
+    slovene = creative_mod.blank_annotation()
+    kept = creative_mod.apply_observation_facts(
+        slovene, [{"t_sec": 0.0, "label": "Card",
+                   "text_overlay": "sem našla"}],
+        duration_s=1.0, transcript="")
+    assert kept["narrative"] == "peer_recommendation"
+
+
+def test_saved_frames_keep_cut_flags():
+    saved = va.saved_frame_labels(
+        [{"t_sec": 1.0, "label": "cut", "cut": True},
+         {"t_sec": 4.0, "label": "hold", "cut": False}])
+    assert [row["cut"] for row in saved] == [True, False]
+
+
+def test_audio_extraction_failure_is_not_silence(monkeypatch):
+    from creative_intel import video as video_mod
+    from creative_intel.providers import ProviderUnavailable
+    monkeypatch.setattr(video_mod, "have_ffmpeg", lambda: True)
+    monkeypatch.setattr(video_mod, "sample_times", lambda duration_s: [0.0])
+    monkeypatch.setattr(video_mod, "extract_frame_at",
+                        lambda *args, **kwargs: b"\xff\xd8\xff")
+
+    def disk_full(*args, **kwargs):
+        raise ProviderUnavailable(
+            "ffmpeg exited 1: No space left on device")
+
+    monkeypatch.setattr(video_mod, "extract_audio", disk_full)
+    with pytest.raises(va.AnalysisUnavailable, match="audio extraction failed"):
+        va.prepare_media("clip.mp4", 15.0)
+
+    def no_stream(*args, **kwargs):
+        raise ProviderUnavailable(
+            "ffmpeg produced no audio track for clip.mp4")
+
+    monkeypatch.setattr(video_mod, "extract_audio", no_stream)
+    prepared = va.prepare_media("clip.mp4", 15.0)
+    assert prepared["audio"] is None
+    assert prepared["sampling"]["audio"] == "absent"
+
+
 def bound_db(tmp_path):
     """Product db with a fully confirmable draft (no providers)."""
     db = str(tmp_path / "va.db")

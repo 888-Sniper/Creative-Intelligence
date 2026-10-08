@@ -256,6 +256,11 @@ _SCREEN_WORD = re.compile(r"\b(phone|screen|app)\b", re.IGNORECASE)
 _ENGLISH_RETAIL_WORD = re.compile(
     r"\b(?:apps?|shops?|baskets?|buy|orders?)\b")
 _ENGLISH_DISCOUNT_WORD = re.compile(r"\b(?:discounts?|off)\b")
+# "i found" sits inside "ai foundation". Slovenian cues stay
+# substrings because they are inflected on purpose.
+_ENGLISH_NARRATIVE = re.compile(
+    r"\b(?:i found|my favorite|my favourite)\b")
+_NARRATIVE_CUES = ("jaz ", "jaz,", "sem našla", "sem nasla")
 _RETAIL_STEMS = ("aplikac", "košar", "kosar", "nakup")
 _DISCOUNT_STEMS = ("popust", "akcij")
 # Imperative shop or app lines. A narrative mention of the app
@@ -364,6 +369,32 @@ def _flag_span(rows, pred):
     return {"start_s": min(times), "end_s": max(times), "confidence": 0.8}
 
 
+def _reconcile_observed_span(ann, rows, key, flag):
+    """Pull a model span forward to a flagged frame.
+
+    Benchmarks read product_seconds. Suggested tests read
+    execution.product_first_s. A frame at 0s and a model span at 9s
+    must not both stand. A model span that already starts at or
+    before the frame is kept.
+    """
+    observed = _flag_span(rows, lambda row: row.get(flag))
+    if not observed:
+        return
+    spans = ann.get(key) if isinstance(ann.get(key), list) else []
+    starts = []
+    for span in spans:
+        if not isinstance(span, dict):
+            continue
+        try:
+            starts.append(float(span.get("start_s")))
+        except (TypeError, ValueError):
+            continue
+    earliest = min(starts) if starts else None
+    if earliest is None or earliest > observed["start_s"]:
+        ann[key] = [{"start_s": observed["start_s"],
+                     "end_s": observed["end_s"]}]
+
+
 def reconcile_creator_mode(labels, current):
     """A person on camera is never a brand-only spot.
 
@@ -439,9 +470,9 @@ def _derive_promotion(rows):
 def _derive_narrative(rows, transcript):
     blob = (str(transcript or "") + " " + " ".join(
         str(row.get("text_overlay") or "") for row in rows)).casefold()
-    if any(token in blob for token in (
-            "jaz ", "jaz,", "sem našla", "sem nasla", "i found",
-            "my favorite", "my favourite")):
+    if _ENGLISH_NARRATIVE.search(blob):
+        return "peer_recommendation"
+    if any(token in blob for token in _NARRATIVE_CUES):
         return "peer_recommendation"
     return ""
 
@@ -498,6 +529,9 @@ def apply_observation_facts(ann, labels, duration_s=None, transcript=""):
     execution = dict(ann.get("execution") or {})
     execution["product_first_s"] = _first_time(rows, "product_visible")
     execution["logo_first_s"] = _first_time(rows, "logo_visible")
+    _reconcile_observed_span(ann, rows, "product_seconds", "product_visible")
+    _reconcile_observed_span(ann, rows, "logo_seconds", "logo_visible")
+    _reconcile_observed_span(ann, rows, "brand_seconds", "brand_visible")
     execution["has_cta"] = (any(row.get("cta_visible") for row in rows)
                             if rows else None)
     ends = [row for row in rows if row.get("end_frame")]
@@ -1031,11 +1065,20 @@ def run_pipeline(conn, creative_key, providers, media=None, brand_terms=None,
     checkpoint(40, "frame-sample")
     labels = providers.vision.annotate(frames, images=media.get("images"))
     labels = normalize_frame_flags(labels)
+    cut_times = []
+    for lbl in labels:
+        if not isinstance(lbl, dict) or lbl.get("cut") is not True:
+            continue
+        try:
+            cut_times.append(round(float(lbl.get("t_sec")), 3))
+        except (TypeError, ValueError):
+            continue
     if persist and media.get("duration_s"):
         _require_live_attempt(conn, job_id, run_token)
         conn.execute("UPDATE creatives SET duration_s=? WHERE creative_key=?",
                      (media["duration_s"], creative_key))
     stages.append({"stage": "vision-annotate", "labels": len(labels),
+                   "cuts": cut_times,
                    "confidence": sum(lbl.get("confidence", 0) for lbl in labels)
                    / len(labels) if labels else 0.0})
     checkpoint(55, "vision-annotate")

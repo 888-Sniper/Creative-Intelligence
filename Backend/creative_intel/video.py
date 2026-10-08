@@ -135,10 +135,11 @@ def audio_track_missing(exc):
 
 
 def _read_cached_wav(path):
-    """A finished WAV from cache, or None.
+    """A WAV with samples from cache, or None.
 
-    An empty or truncated file left by a failed extract is removed.
-    It is not a silent clip.
+    An empty file, a truncated file, and a header-only RIFF are
+    removed. A failed extract can leave a complete RIFF whose data
+    chunk has zero samples. That file is not a silent clip.
     """
     if not os.path.isfile(path):
         return None
@@ -147,48 +148,68 @@ def _read_cached_wav(path):
             blob = fh.read()
     except OSError:
         blob = b""
-    if _complete_wav(blob):
+    if _wav_has_samples(blob):
         return blob
-    try:
-        os.remove(path)
-    except OSError:
-        pass
+    _discard_wav(path)
     return None
 
 
-def _complete_wav(blob):
-    if len(blob) < 12 or not blob.startswith(b"RIFF"):
+def _wav_has_samples(blob):
+    """True when blob is a complete WAVE and its data chunk is non-empty."""
+    if (len(blob) < 12 or not blob.startswith(b"RIFF")
+            or blob[8:12] != b"WAVE"):
         return False
     declared = int.from_bytes(blob[4:8], "little")
-    return declared + 8 == len(blob)
+    if declared + 8 != len(blob):
+        return False
+    pos = 12
+    while pos + 8 <= len(blob):
+        chunk_id = blob[pos:pos + 4]
+        size = int.from_bytes(blob[pos + 4:pos + 8], "little")
+        if chunk_id == b"data":
+            return size > 0 and pos + 8 + size <= len(blob)
+        step = 8 + size + (size & 1)
+        if step <= 0:
+            return False
+        pos += step
+    return False
 
 
-def _drop_incomplete_wav(path):
-    if not os.path.isfile(path):
-        return
-    try:
-        with open(path, "rb") as fh:
-            blob = fh.read()
-    except OSError:
-        blob = b""
-    if _complete_wav(blob):
-        return
+def _discard_wav(path):
+    """Remove an extract output. Failure must not leave a cache file."""
     try:
         os.remove(path)
     except OSError:
         pass
 
 
+def _partial_wav(dst_wav):
+    """A .wav path ffmpeg will open. The cache name is untouched."""
+    return dst_wav + ".partial.wav"
+
+
 def extract_audio(src_path, dst_wav):
-    _run(["ffmpeg", "-y", "-v", "error", "-i", src_path,
-          "-vn", "-ac", "1", "-ar", str(SAMPLE_RATE), "-c:a", "pcm_s16le",
-          dst_wav])
-    with open(dst_wav, "rb") as fh:
-        blob = fh.read()
-    if not blob.startswith(b"RIFF"):
-        raise _unavailable("ffmpeg produced no audio track for %s" %
-                           os.path.basename(src_path))
-    return blob
+    """16 kHz mono WAV. The destination is replaced only after success.
+
+    ffmpeg can exit non-zero after writing a RIFF header with a
+    zero-length data chunk. That output is deleted. It is not audio.
+    """
+    partial = _partial_wav(dst_wav)
+    try:
+        _run(["ffmpeg", "-y", "-v", "error", "-i", src_path,
+              "-vn", "-ac", "1", "-ar", str(SAMPLE_RATE),
+              "-c:a", "pcm_s16le", partial])
+        with open(partial, "rb") as fh:
+            blob = fh.read()
+        if not _wav_has_samples(blob):
+            raise _unavailable("ffmpeg produced no audio track for %s" %
+                               os.path.basename(src_path))
+        os.replace(partial, dst_wav)
+        return blob
+    except Exception:
+        _discard_wav(partial)
+        _discard_wav(dst_wav)
+        raise
 
 
 def extract_frames(src_path, out_pattern, every_s=EVERY_S, max_frames=MAX_FRAMES):
@@ -260,7 +281,11 @@ def prepare(src_path, cache_dir, every_s=EVERY_S, duration_s=None):
         try:
             audio = extract_audio(src_path, wav_path)
         except Exception as exc:
-            _drop_incomplete_wav(wav_path)
+            # Discard even a complete RIFF. Exit 69 can leave a
+            # 78-byte header whose declared size matches and whose
+            # data chunk has zero samples.
+            _discard_wav(wav_path)
+            _discard_wav(_partial_wav(wav_path))
             if not audio_track_missing(exc):
                 raise
             audio = None  # stills-only clip: vision can proceed

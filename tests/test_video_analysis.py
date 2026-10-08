@@ -288,6 +288,38 @@ def test_failed_wav_cache_is_not_silence(tmp_path, monkeypatch):
     assert calls["n"] == 2
 
 
+def test_header_only_wav_from_failed_extract_is_not_audio(tmp_path, monkeypatch):
+    import struct
+
+    from creative_intel.providers import ProviderUnavailable
+    src = tmp_path / "clip.mp4"
+    src.write_bytes(b"fake-video-bytes")
+    cache = tmp_path / "cache"
+    calls = {"n": 0}
+    fmt = struct.pack("<HHIIHH", 1, 1, 16000, 32000, 2, 16)
+    body = (b"WAVE" + b"fmt " + struct.pack("<I", 16) + fmt
+            + b"data" + struct.pack("<I", 0))
+    header = b"RIFF" + struct.pack("<I", len(body)) + body
+    assert int.from_bytes(header[4:8], "little") + 8 == len(header)
+
+    def exit_69(_src, dst_wav):
+        calls["n"] += 1
+        with open(dst_wav, "wb") as fh:
+            fh.write(header)
+        raise ProviderUnavailable(
+            "ffmpeg exited 69: Invalid data found when processing input")
+
+    monkeypatch.setattr(video_mod, "have_ffmpeg", lambda: True)
+    monkeypatch.setattr(video_mod, "extract_audio", exit_69)
+    with pytest.raises(ProviderUnavailable):
+        video_mod.prepare(str(src), str(cache), duration_s=1.0)
+    assert list(cache.glob("*_audio.wav")) == []
+    with pytest.raises(ProviderUnavailable):
+        video_mod.prepare(str(src), str(cache), duration_s=1.0)
+    assert calls["n"] == 2
+    assert list(cache.glob("*_audio.wav")) == []
+
+
 def bound_db(tmp_path):
     """Product db with a fully confirmable draft (no providers)."""
     db = str(tmp_path / "va.db")

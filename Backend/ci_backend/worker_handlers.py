@@ -241,7 +241,9 @@ def run_video_analysis(conn, payload, owner, ctx, job_id=None,
         return video_analysis.run(
             conn, snapshot, owner=owner or "", media_dir=media_dir or "",
             progress=progress, cancelled=cancelled, queued_at=queued_at,
-            job_id=job_id, run_token=attempt_token)
+            job_id=job_id, run_token=attempt_token,
+            brand_terms=payload.get("brand_terms") or None,
+            speech_language=payload.get("speech_language") or None)
     except jobs_mod.JobCancelled:
         # Owner cancel: the draft returns to cancelled (re-analysable),
         # never strands in analyzing — unless a replacement owns it.

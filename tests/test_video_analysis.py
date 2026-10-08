@@ -97,6 +97,68 @@ def test_suggest_tests_grounded_in_absences():
         {"t_sec": 1.0, "cta_visible": True}],
         "execution": {"product_first_s": 1.0}}
     assert va.suggest_tests(ann2, {}, transcript="hello") == []
+    # A product on screen is not "no product", even when the
+    # execution field was never filled.
+    shown = {"hook_confidence": 0.9, "frame_labels": [
+        {"t_sec": 0.0, "product_visible": True, "cta_visible": False,
+         "text_overlay": "Nakupuj svoje znamke v aplikaciji"}],
+             "execution": {"product_first_s": None}}
+    assert [t["id"] for t in va.suggest_tests(shown, {}, "hello")] == []
+    late = {"hook_confidence": 0.9, "frame_labels": [
+        {"t_sec": 6.0, "product_visible": True, "cta_visible": True}],
+            "execution": {"product_first_s": None}}
+    late_ids = [t["id"] for t in va.suggest_tests(late, {}, "hello")]
+    assert late_ids == ["product-timing"]
+
+
+def test_observation_facts_use_frames_and_probed_duration():
+    from creative_intel import creative as creative_mod
+    labels = [
+        {"t_sec": 0.0, "label": "Woman holding phone",
+         "brand_visible": True, "product_visible": True,
+         "logo_visible": False, "cta_visible": False,
+         "text_overlay": "Naj ugibam: Beauty girlie", "cut": False},
+        {"t_sec": 9.0, "label": "App page", "brand_visible": True,
+         "product_visible": True, "cta_visible": False,
+         "text_overlay": "Nakupuj svoje najljubše znamke", "cut": True},
+        {"t_sec": 9.86, "label": "Lipstick swatch", "brand_visible": True,
+         "product_visible": True, "cta_visible": False,
+         "text_overlay": "Nakupuj svoje najljubše znamke", "cut": False},
+    ]
+    creative_mod.normalize_frame_flags(labels)
+    assert labels[1]["cta_visible"] is True
+    assert labels[1]["end_frame"] is False
+    assert labels[2]["end_frame"] is True
+    ann = creative_mod.blank_annotation()
+    ann["hook_type"] = "question"
+    ann["hook_modality"] = "text"
+    ann["hook_confidence"] = 0.9
+    ann["creator_confidence"] = 0.9
+    ann["creator_vs_branded"] = "branded"
+    ann["duration_s"] = 9.86
+    ann["pace_cuts_per_min"] = 305
+    # Empty transcript: the voiceover slot must not invent speech.
+    ann["structure"]["voiceover"] = {"start_s": 0.0, "end_s": 9.86,
+                                     "confidence": 0.8}
+    got = creative_mod.apply_observation_facts(
+        ann, labels, duration_s=10.36, transcript="")
+    assert got["creator_vs_branded"] == "hybrid"
+    assert got["edit_style"] == "ugc"
+    assert got["opening_delivery"] == "text_led"
+    assert got["message_class"] == "promotional"
+    assert got["promotion_kind"] == "retail_offer"
+    assert got["format_kind"] == "hybrid"
+    assert got["duration_s"] == 10.36
+    assert got["pace_cuts_per_min"] == 5.79
+    assert got["execution"]["product_first_s"] == 0.0
+    assert got["execution"]["has_cta"] is True
+    assert got["structure"]["voiceover"]["confidence"] == 0.0
+    assert creative_mod.language_from_overlays(labels) == "sl"
+    assert creative_mod.language_from_overlays(
+        [{"text_overlay": "Shop now"}]) == ""
+    assert creative_mod.language_from_overlays(
+        [{"text_overlay": "čaša ć"}]) == "hr"
+    assert creative_mod.validate(got) == []
 
 
 def bound_db(tmp_path):
@@ -152,7 +214,7 @@ def test_bind_snapshot_guards(tmp_path):
 
 class StubStt:
     def transcribe(self, creative_key, audio_bytes=None, mime=None,
-                   timings_out=None):
+                   timings_out=None, language=None):
         words = [{"word": "watch", "start": 1.0, "end": 1.4}]
         if timings_out is not None:
             timings_out.extend(

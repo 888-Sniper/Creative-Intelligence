@@ -13,6 +13,7 @@ field. The two axes are complementary, never interchangeable.
 
 import datetime
 import json
+import re
 
 SCHEMA_VERSION = "v0"
 
@@ -51,6 +52,18 @@ MEDIA_KINDS = ("video", "image", "audio", "unknown")
 CONFIRMABLE_DIMS = ("opening_delivery", "hook_type", "hook_modality",
                     "narrative", "message_class", "promotion_kind",
                     "format_kind", "creator_vs_branded", "edit_style")
+
+# Keys copied from the structurer JSON. Analyst dimensions are in
+# this list so a value the model returns is stored; omitting one
+# leaves the blank "unknown" for apply_observation_facts to fill.
+STRUCTURE_COPY_KEYS = ("hook_type", "hook_modality", "hook_confidence",
+                       "brand_seconds", "product_seconds", "logo_seconds",
+                       "structure", "creator_vs_branded",
+                       "creator_confidence", "edit_style",
+                       "edit_confidence", "duration_s",
+                       "pace_cuts_per_min", "opening_delivery",
+                       "narrative", "message_class", "promotion_kind",
+                       "format_kind")
 
 MAX_BRAND_TERMS = 20
 
@@ -231,6 +244,283 @@ def validate(ann):
             errors.append("evidence confidence must be numeric")
             break
     return errors
+
+
+_SPEECH_LANGUAGE = re.compile(r"^[a-z]{2,3}(-[A-Za-z0-9]{2,8})?$")
+_PERSON_WORD = re.compile(
+    r"\b(man|woman|person|creator|guy|girl|people|face|unboxing)\b",
+    re.IGNORECASE)
+_SCREEN_WORD = re.compile(r"\b(phone|screen|app)\b", re.IGNORECASE)
+# Imperative shop or app lines. A narrative mention of the app
+# ("vrnem v aplikacijo") is not in this list. "nakupuj" also matches
+# "nakupuješ", which is the spoken form of the same call to action.
+_CTA_PHRASES = (
+    "shop now", "buy now", "add to basket", "add to cart",
+    "go to shopping", "order now", "swipe up",
+    "nakupuj", "ujemi ponudb", "skoči", "skociti", "skočiti",
+    "poskrbi", "preveri ponudb", "v košarico", "v kosarico",
+    "pojdi v ko",
+)
+
+
+def clean_speech_language(value):
+    """A BCP-47 tag safe to put on a speech request, or ""."""
+    text = str(value or "").strip()
+    if _SPEECH_LANGUAGE.match(text):
+        return text
+    return ""
+
+
+def language_from_overlays(labels):
+    """Nova-3 language tag implied by on-screen copy, or "".
+
+    Detection without a tag mislabels Slovenian as Bulgarian.
+    Slovenian, Czech, and Croatian are Nova-3 languages that the
+    detector does not return, and each has letters the others lack.
+    Latin copy with none of those letters returns "" so the caller
+    can detect the language instead of forcing English.
+    """
+    parts = []
+    for label in labels or []:
+        if isinstance(label, dict):
+            parts.append(str(label.get("text_overlay") or ""))
+    text = " ".join(parts).casefold()
+    if not text:
+        return ""
+    if any(ch in text for ch in "ěřů"):
+        return "cs"
+    if any(ch in text for ch in "ćđ"):
+        return "hr"
+    if any(ch in text for ch in "čšž"):
+        return "sl"
+    return ""
+
+
+def overlay_is_cta(text):
+    """True when the overlay tells the viewer to shop or open the app."""
+    folded = str(text or "").casefold()
+    return any(phrase in folded for phrase in _CTA_PHRASES)
+
+
+def _frame_rows(labels):
+    return [label for label in (labels or []) if isinstance(label, dict)]
+
+
+def normalize_frame_flags(labels):
+    """Mark imperative overlays as calls to action.
+
+    Only the last sampled time is the end frame. A product page in
+    the middle of the clip is not the closing card.
+    """
+    rows = _frame_rows(labels)
+    if not rows:
+        return labels
+    last_t = max(float(row.get("t_sec") or 0) for row in rows)
+    for row in rows:
+        if overlay_is_cta(row.get("text_overlay")):
+            row["cta_visible"] = True
+        try:
+            t_sec = float(row.get("t_sec") or 0)
+        except (TypeError, ValueError):
+            t_sec = 0.0
+        row["end_frame"] = abs(t_sec - last_t) <= 0.05
+    return labels
+
+
+def _label_has_person(row):
+    return _PERSON_WORD.search(str(row.get("label") or "")) is not None
+
+
+def _first_time(rows, flag):
+    times = []
+    for row in rows:
+        if not row.get(flag):
+            continue
+        try:
+            times.append(float(row.get("t_sec")))
+        except (TypeError, ValueError):
+            continue
+    return min(times) if times else None
+
+
+def _flag_span(rows, pred):
+    times = []
+    for row in rows:
+        if not pred(row):
+            continue
+        try:
+            times.append(float(row.get("t_sec")))
+        except (TypeError, ValueError):
+            continue
+    if not times:
+        return None
+    return {"start_s": min(times), "end_s": max(times), "confidence": 0.8}
+
+
+def reconcile_creator_mode(labels, current):
+    """A person on camera is never a brand-only spot.
+
+    branded means the brand is the speaker. A creator plus brand or
+    app screens is hybrid. With no person in the frame labels, the
+    model's value stands.
+    """
+    rows = _frame_rows(labels)
+    person = any(_label_has_person(row) for row in rows)
+    brandish = any(row.get("brand_visible") or row.get("logo_visible")
+                   or row.get("cta_visible") or overlay_is_cta(
+                       row.get("text_overlay"))
+                   for row in rows)
+    if person and brandish:
+        return "hybrid"
+    if person:
+        return "creator"
+    if current in CREATOR_MODES:
+        return current
+    return "branded"
+
+
+def _derive_edit_style(rows):
+    person = any(_label_has_person(row) for row in rows)
+    screen = any(_SCREEN_WORD.search(str(row.get("label") or ""))
+                 for row in rows)
+    if person and screen:
+        return "ugc"
+    if screen:
+        return "screen_recording"
+    if person:
+        return "talking_head"
+    return ""
+
+
+def _derive_opening(rows, transcript):
+    if not rows:
+        return ""
+    first = min(rows, key=lambda row: float(row.get("t_sec") or 0))
+    text = str(first.get("text_overlay") or "").strip()
+    if text:
+        return "text_led"
+    if _label_has_person(first):
+        return "direct_to_camera"
+    if first.get("product_visible"):
+        return "product_first"
+    if str(transcript or "").strip():
+        return "voiceover"
+    return ""
+
+
+def _retail_cta(text):
+    folded = text.casefold()
+    return any(phrase in folded for phrase in (
+        "aplikac", "app", "shop", "basket", "košar", "kosar",
+        "nakup", "buy", "order"))
+
+
+def _derive_promotion(rows):
+    text = " ".join(str(row.get("text_overlay") or "") for row in rows)
+    folded = text.casefold()
+    if any(token in folded for token in ("%", "popust", "akcij",
+                                         "discount")) or " off" in folded:
+        return "discount"
+    has_price = any(mark in text for mark in ("€", "$", "£"))
+    if _retail_cta(folded):
+        return "retail_offer"
+    if has_price:
+        return "price"
+    return ""
+
+
+def _derive_narrative(rows, transcript):
+    blob = (str(transcript or "") + " " + " ".join(
+        str(row.get("text_overlay") or "") for row in rows)).casefold()
+    if any(token in blob for token in (
+            "jaz ", "jaz,", "sem našla", "sem nasla", "i found",
+            "my favorite", "my favourite")):
+        return "peer_recommendation"
+    return ""
+
+
+def _derive_format(rows):
+    person = any(_label_has_person(row) for row in rows)
+    screen = any(_SCREEN_WORD.search(str(row.get("label") or ""))
+                 for row in rows)
+    if person and screen:
+        return "hybrid"
+    if person:
+        return "creator_led"
+    if screen:
+        return "branded"
+    return ""
+
+
+def apply_observation_facts(ann, labels, duration_s=None, transcript=""):
+    """Fill facts the frames and the probed duration already decide.
+
+    The structurer is still asked for these fields. This pass
+    replaces a branded label when a person is on camera, replaces
+    an untouched edit style, fills analyst dimensions left unknown,
+    and stores the probed clip length instead of the last frame time.
+    Pace is cuts per minute from the cut flags, not a model guess.
+    """
+    rows = _frame_rows(labels)
+    ann = dict(ann) if isinstance(ann, dict) else blank_annotation()
+    ann["creator_vs_branded"] = reconcile_creator_mode(
+        rows, ann.get("creator_vs_branded"))
+    try:
+        edit_conf = float(ann.get("edit_confidence") or 0)
+    except (TypeError, ValueError):
+        edit_conf = 0.0
+    if ann.get("edit_style") in (None, "", "other") and edit_conf == 0.0:
+        derived_edit = _derive_edit_style(rows)
+        if derived_edit:
+            ann["edit_style"] = derived_edit
+            ann["edit_confidence"] = 0.6
+    derived = {
+        "opening_delivery": _derive_opening(rows, transcript),
+        "narrative": _derive_narrative(rows, transcript),
+        "promotion_kind": _derive_promotion(rows),
+        "format_kind": _derive_format(rows),
+    }
+    if derived["promotion_kind"] or any(
+            row.get("cta_visible") for row in rows):
+        derived["message_class"] = "promotional"
+    else:
+        derived["message_class"] = ""
+    for key, value in derived.items():
+        if value and ann.get(key) in (None, "", "unknown"):
+            ann[key] = value
+    execution = dict(ann.get("execution") or {})
+    execution["product_first_s"] = _first_time(rows, "product_visible")
+    execution["logo_first_s"] = _first_time(rows, "logo_visible")
+    execution["has_cta"] = (any(row.get("cta_visible") for row in rows)
+                            if rows else None)
+    ends = [row for row in rows if row.get("end_frame")]
+    if ends:
+        execution["end_frame"] = str(
+            ends[-1].get("text_overlay") or ends[-1].get("label") or "")
+    ann["execution"] = execution
+    structure = ann.get("structure")
+    if isinstance(structure, dict):
+        cta = _flag_span(rows, lambda row: row.get("cta_visible"))
+        if cta:
+            structure["cta"] = cta
+        end = _flag_span(rows, lambda row: row.get("end_frame"))
+        if end:
+            structure["endframe"] = end
+        if not str(transcript or "").strip():
+            voice = structure.get("voiceover")
+            if isinstance(voice, dict):
+                voice["start_s"] = 0.0
+                voice["end_s"] = 0.0
+                voice["confidence"] = 0.0
+    try:
+        duration = float(duration_s) if duration_s is not None else 0.0
+    except (TypeError, ValueError):
+        duration = 0.0
+    if duration > 0:
+        ann["duration_s"] = round(duration, 3)
+        cuts = sum(1 for row in rows if row.get("cut") is True)
+        ann["pace_cuts_per_min"] = round(cuts * 60.0 / duration, 2)
+    return ann
 
 
 def _confirmed_of(ann):
@@ -659,7 +949,7 @@ def _require_live_attempt(conn, job_id, run_token):
 
 def run_pipeline(conn, creative_key, providers, media=None, brand_terms=None,
                  progress=None, cancelled=None, persist=True, job_id=None,
-                 run_token=None):
+                 run_token=None, speech_language=None):
     """Run all five stages with the given provider bundle; returns stage report.
 
     media is optional: {"audio": (bytes, mime), "images": [jpeg bytes]}.
@@ -698,26 +988,10 @@ def run_pipeline(conn, creative_key, providers, media=None, brand_terms=None,
 
     audio_blob, audio_mime = media.get("audio") or (None, None)
     timings = []
-    if audio_blob is None and (media.get("images") or
-                               media.get("image_times")):
-        # Silent clip (or image-only upload): no audio track to
-        # transcribe. Skip STT with an explicit stage note and continue
-        # through vision instead of failing the whole pipeline.
-        transcript, conf = "", 0.0
-        stages.append({"stage": "transcribe", "confidence": conf,
-                       "skipped": "silent: no audio track"})
-    else:
-        checkpoint(20, "transcribe")
-        transcript, conf = providers.stt.transcribe(
-            creative_key, audio_bytes=audio_blob, mime=audio_mime,
-            timings_out=timings)
-        stages.append({"stage": "transcribe", "confidence": conf})
-        checkpoint(40, "transcribe")
-    if persist:
-        _require_live_attempt(conn, job_id, run_token)
-        conn.execute("UPDATE creatives SET transcript=? WHERE creative_key=?",
-                     (transcript, creative_key))
-
+    # Frames before speech: on-screen copy chooses the language.
+    # Deepgram's default is English, and detect_language labels
+    # Slovenian as Bulgarian, so a tag from the overlays is required
+    # before the audio is sent.
     times = media.get("image_times")
     if times:
         # Frames extracted for these exact seconds (full-video plan:
@@ -747,8 +1021,9 @@ def run_pipeline(conn, creative_key, providers, media=None, brand_terms=None,
                    "covers_s": max([f["t_sec"] for f in frames] + [0]),
                    "confidence": 1.0 if frames else 0.0})
 
-    checkpoint(55, "frame-sample")
+    checkpoint(40, "frame-sample")
     labels = providers.vision.annotate(frames, images=media.get("images"))
+    labels = normalize_frame_flags(labels)
     if persist and media.get("duration_s"):
         _require_live_attempt(conn, job_id, run_token)
         conn.execute("UPDATE creatives SET duration_s=? WHERE creative_key=?",
@@ -756,9 +1031,35 @@ def run_pipeline(conn, creative_key, providers, media=None, brand_terms=None,
     stages.append({"stage": "vision-annotate", "labels": len(labels),
                    "confidence": sum(lbl.get("confidence", 0) for lbl in labels)
                    / len(labels) if labels else 0.0})
+    checkpoint(55, "vision-annotate")
 
-    checkpoint(75, "vision-annotate")
+    if audio_blob is None and (media.get("images") or
+                               media.get("image_times")):
+        # Silent clip (or image-only upload): no audio track to
+        # transcribe. Skip STT with an explicit stage note and continue
+        # through structure instead of failing the whole pipeline.
+        transcript, conf = "", 0.0
+        stages.append({"stage": "transcribe", "confidence": conf,
+                       "skipped": "silent: no audio track"})
+    else:
+        speech = (clean_speech_language(speech_language)
+                  or language_from_overlays(labels))
+        checkpoint(60, "transcribe")
+        transcript, conf = providers.stt.transcribe(
+            creative_key, audio_bytes=audio_blob, mime=audio_mime,
+            timings_out=timings, language=speech or None)
+        stages.append({"stage": "transcribe", "confidence": conf,
+                       "language": speech or "detect"})
+        checkpoint(75, "transcribe")
+    if persist:
+        _require_live_attempt(conn, job_id, run_token)
+        conn.execute("UPDATE creatives SET transcript=? WHERE creative_key=?",
+                     (transcript, creative_key))
+
+    checkpoint(80, "vision-annotate")
     ann = providers.llm.structure(transcript, labels)
+    ann = apply_observation_facts(
+        ann, labels, media.get("duration_s"), transcript)
     checkpoint(90, "llm-structure")
     ann["schema_version"] = SCHEMA_VERSION
     ann["status"] = "auto"

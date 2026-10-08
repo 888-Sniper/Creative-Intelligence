@@ -622,6 +622,20 @@ class MatchBody(BaseModel):
 
 class AnalyzeBody(BaseModel):
     brand_terms: list[str] = Field(default_factory=list, max_length=20)
+    speech_language: str = Field(default="", max_length=16)
+
+    @field_validator("speech_language", mode="before")
+    @classmethod
+    def _speech_language(cls, value):
+        from creative_intel.creative import clean_speech_language
+        text = "" if value is None else str(value).strip()
+        if not text:
+            return ""
+        cleaned = clean_speech_language(text)
+        if not cleaned:
+            raise ValueError(
+                "speech_language must be a BCP-47 tag such as sl or en")
+        return cleaned
 
 
 class ConnectorSheetsBody(BaseModel):
@@ -2402,7 +2416,8 @@ async def draft_analyze(draft_id: str, request: Request,
         conn, "video_analysis",
         {"snapshot": snapshot,
          "brand_terms": [t for t in body.brand_terms
-                         if isinstance(t, str)][:20]},
+                         if isinstance(t, str)][:20],
+         "speech_language": body.speech_language},
         owner=who.id)
     # Submitted as queued; the worker flips to analyzing when work
     # actually starts (and to ready_for_review / failed / cancelled

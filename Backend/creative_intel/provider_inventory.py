@@ -606,6 +606,9 @@ def resolve(name: str) -> dict | None:
 #                     (covers future/fictional catalog ids, which must
 #                     never be presented as video-capable)
 # Checked 2026-09-14 against the doc URLs recorded below.
+# Gemini 3.5 Flash-Lite and 3.7 Flash were checked live on
+# 2026-10-08: generateContent accepts a JPEG. Native video-file
+# input was not checked, so those two ids stay image-level.
 # ---------------------------------------------------------------------------
 
 VIDEO_SUPPORT_DOCS = {
@@ -628,6 +631,8 @@ VIDEO_MODEL_SUPPORT = {
     ("gemini", "gemini-2.5-flash"): ("native-video", "google-gemini"),
     ("gemini", "gemini-2.5-flash-lite"): ("native-video", "google-gemini"),
     ("gemini", "gemini-2.5-pro"): ("native-video", "google-gemini"),
+    ("gemini", "gemini-3.5-flash-lite"): ("image", "google-gemini"),
+    ("gemini", "gemini-3.7-flash"): ("image", "google-gemini"),
     # Anthropic: all Claude 3/3.5/4 models take image input; Claude
     # takes no video or audio input (image-only -> not eligible).
     ("anthropic", "claude-haiku-4-5"): ("image", "anthropic"),

@@ -13,6 +13,7 @@ import os
 import subprocess
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 LIVE_MODEL_IDS = {
@@ -232,7 +233,7 @@ def race(active, fallback, call, timeout=FALLBACK_TIMEOUT_S):
 
 class MockStt:
     def transcribe(self, creative_key, audio_bytes=None, mime=None,
-                   timings_out=None):
+                   timings_out=None, language=None):
         return ("mock transcript for %s: hook in first three seconds, demo, offer cta"
                 % creative_key, 0.5)
 
@@ -465,7 +466,10 @@ VISION_PROMPT = (
     "One entry per supplied image, in order; t_sec values are: %s. "
     "Flag product shots, logo appearances, overlaid text, calls to "
     "action and the end frame explicitly — do not leave that to "
-    "guesswork downstream.")
+    "guesswork downstream. cta_visible is true when the overlay "
+    "tells the viewer to open an app, shop, buy, or claim an offer, "
+    "even when the frame has no button. end_frame is true only for "
+    "the closing card, not for a product page in the middle.")
 
 STRUCTURE_PROMPT = (
     "You structure ad-creative analysis. Reply with ONE JSON object only "
@@ -481,11 +485,28 @@ STRUCTURE_PROMPT = (
     "(object with hook, body, demo, supers, cta, endframe, voiceover "
     "each {start_s, end_s, confidence} — set cta/endframe from the "
     "cta_visible/end_frame flags and text_overlay copy), "
-    "creator_vs_branded (creator|branded|hybrid), "
+    "creator_vs_branded (creator when a person presents and the brand "
+    "does not take over the picture, branded only when no creator is "
+    "on camera, hybrid when a creator is on camera and brand or app "
+    "screens also carry the ad), "
     "creator_confidence (0..1), edit_style (one of talking_head, ugc, "
     "product_demo, montage, slideshow_static, cinematic, testimonial, "
     "screen_recording, mixed, other), edit_confidence (0..1), "
-    "duration_s, pace_cuts_per_min (count the frames with cut=true). "
+    "duration_s (full clip length in seconds, not the last frame time), "
+    "pace_cuts_per_min (cuts per minute: frames with cut=true, divided "
+    "by duration_s, times 60), "
+    "opening_delivery (one of direct_to_camera, voiceover, text_led, "
+    "product_first, demonstration, silent_aesthetic, mixed, unknown), "
+    "narrative (one of peer_recommendation, first_use, educational, "
+    "demonstration, testimonial, story, other, unknown), "
+    "message_class (one of promotional, neutral, mixed, unknown), "
+    "promotion_kind (one of discount, price, retail_offer, "
+    "subtle_mention, explicit_sales, absent, unknown), "
+    "format_kind (one of creator_led, branded, hybrid, b_roll, "
+    "graphics_remix, dialogue, solo_creator, other, unknown). "
+    "Use unknown only when the frames and transcript do not support "
+    "a value. Leave voiceover at 0 confidence when the transcript is "
+    "empty. "
     "Transcript: %s\nVision labels: %s")
 
 
@@ -643,6 +664,23 @@ def _image_part(jpeg_bytes):
                                 + base64.b64encode(jpeg_bytes).decode()}}
 
 
+def deepgram_listen_query(model, language=None):
+    """Prerecorded query string.
+
+    A language tag is sent as language=. With no tag, detection is
+    on so the request is not forced to English. Callers that already
+    know the language (from the upload or from on-screen copy) pass
+    it: Nova-3 transcribes Slovenian when language=sl, and detection
+    alone labels that audio as Bulgarian.
+    """
+    params = [("model", model), ("smart_format", "true")]
+    if language:
+        params.append(("language", language))
+    else:
+        params.append(("detect_language", "true"))
+    return urllib.parse.urlencode(params)
+
+
 class LiveStt:
     """Transcription over configured STT adapters (Active then Fallback)."""
 
@@ -650,18 +688,21 @@ class LiveStt:
         self.adapters = adapters  # [(name, kind, model), ...]
 
     def transcribe(self, creative_key, audio_bytes=None, mime=None,
-                   timings_out=None):
+                   timings_out=None, language=None):
         if not audio_bytes:
             raise ProviderUnavailable(
                 "no audio for %r: upload media first" % creative_key)
         mime = mime or "audio/wav"
+        # None keeps detection on. An empty string is the same as None.
+        speech = language or None
 
         def call(item):
             name, kind, model, _tier = item
             if kind == "deepgram":
                 return self._deepgram(name, model, audio_bytes, mime,
-                                      timings_out)
-            return self._groq(name, model, audio_bytes, mime, timings_out)
+                                      timings_out, language=speech)
+            return self._groq(name, model, audio_bytes, mime, timings_out,
+                              language=speech)
 
         winner, value = race(
             [a for a in self.adapters if a[3] == "active"],
@@ -705,7 +746,8 @@ class LiveStt:
                                    "whisper")
 
     @staticmethod
-    def _deepgram(name, model, audio, mime, timings_out=None):
+    def _deepgram(name, model, audio, mime, timings_out=None,
+                  language=None):
         base = live_base("deepgram", ENDPOINTS["deepgram"]["base"])
         key = live_secret(ENDPOINTS["deepgram"]["key"])
         if not key:
@@ -718,7 +760,7 @@ class LiveStt:
                 % (model,
                    ", ".join(LiveStt.DEEPGRAM_PRERECORDED_MODELS)))
         url = base.rstrip("/") + LiveStt.DEEPGRAM_PRERECORDED_PATH + \
-            "?model=" + model + "&smart_format=true"
+            "?" + deepgram_listen_query(model, language)
         req = urllib.request.Request(url, data=bytes(audio),
                                      headers={"Authorization": "Token " + key,
                                               "Content-Type": mime},
@@ -739,15 +781,17 @@ class LiveStt:
             raise ProviderUnavailable("unexpected deepgram response shape")
 
     @staticmethod
-    def _groq(name, model, audio, mime, timings_out=None):
+    def _groq(name, model, audio, mime, timings_out=None, language=None):
         base = live_base("groq-whisper", ENDPOINTS["groq-whisper"]["base"])
         key = live_secret(ENDPOINTS["groq-whisper"]["key"])
         if not key:
             raise ProviderUnavailable("missing key for groq-whisper")
         boundary = "----cilive%d" % abs(hash((name, model)))
         body = b""
-        for field, value in (("model", model),
-                             ("response_format", "verbose_json")):
+        fields = [("model", model), ("response_format", "verbose_json")]
+        if language:
+            fields.append(("language", language))
+        for field, value in fields:
             body += ("--%s\r\nContent-Disposition: form-data; name=\"%s\"\r\n\r\n%s\r\n"
                      % (boundary, field, value)).encode()
         body += ("--%s\r\nContent-Disposition: form-data; name=\"file\"; "
@@ -901,7 +945,7 @@ class LiveLlm:
         return value
 
     def structure(self, transcript, labels):
-        from .creative import blank_annotation, validate
+        from .creative import STRUCTURE_COPY_KEYS, blank_annotation, validate
         prompt = STRUCTURE_PROMPT % (
             (transcript or "")[:4000], json.dumps(labels or [])[:4000])
 
@@ -914,11 +958,7 @@ class LiveLlm:
                                max_tokens=cue_cap_tokens(model))
             data = _extract_json(text)
             ann = blank_annotation()
-            for key in ("hook_type", "hook_modality", "hook_confidence",
-                        "brand_seconds", "product_seconds", "logo_seconds",
-                        "structure", "creator_vs_branded",
-                        "creator_confidence", "duration_s",
-                        "pace_cuts_per_min"):
+            for key in STRUCTURE_COPY_KEYS:
                 if key in data:
                     ann[key] = data[key]
             errors = validate(ann)

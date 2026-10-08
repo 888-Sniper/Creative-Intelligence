@@ -50,8 +50,11 @@ def eligible_vision_roster():
         bundle = prov_mod.LiveBundle()
     except prov_mod.ProviderUnavailable:
         return []
+    # Frame-eligible and actually configured. An unverified roster
+    # id stays out, and so does a verified id whose key is missing:
+    # otherwise readiness names a model the worker cannot call.
     return [(p, m, t) for p, m, t in bundle.VISION_ROSTER
-            if inv.frame_eligible(p, m)]
+            if inv.frame_eligible(p, m) and prov_mod._configured(p)]
 
 
 def readiness():
@@ -346,6 +349,33 @@ def measured_from_records(records):
             "coverage": coverage, "warnings": warnings}
 
 
+def _frames_have_cta(labels):
+    from creative_intel.creative import overlay_is_cta
+    for label in labels:
+        if not isinstance(label, dict):
+            continue
+        if label.get("cta_visible") or overlay_is_cta(label.get("text_overlay")):
+            return True
+    return False
+
+
+def _product_first_s(ann, labels):
+    execution = ann.get("execution") if isinstance(ann.get("execution"), dict) \
+        else {}
+    raw = execution.get("product_first_s")
+    if isinstance(raw, (int, float)):
+        return float(raw)
+    times = []
+    for label in labels:
+        if not isinstance(label, dict) or not label.get("product_visible"):
+            continue
+        try:
+            times.append(float(label.get("t_sec")))
+        except (TypeError, ValueError):
+            continue
+    return min(times) if times else None
+
+
 def suggest_tests(annotation, measured, transcript=""):
     """Small set of hypotheses grounded in observed absences.
 
@@ -372,19 +402,23 @@ def suggest_tests(annotation, measured, transcript=""):
             [{"kind": "annotation", "field": "hook_confidence"}])
     labels = [] if not isinstance(ann.get("frame_labels"), list) \
         else ann["frame_labels"]
-    if labels and not any(isinstance(l, dict) and l.get("cta_visible")
-                          for l in labels):
+    if labels and not _frames_have_cta(labels):
         add("cta-presence",
             "Test a version with an explicit on-screen call to action.",
             "no sampled frame shows a call to action",
             [{"kind": "frames", "note": "cta_visible absent in all "
                                         "sampled frames"}])
-    first_product = ((ann.get("execution") or {}).get("product_first_s")
-                     if isinstance(ann.get("execution"), dict) else None)
+    first_product = _product_first_s(ann, labels)
     if first_product is None:
         add("product-timing",
             "Test showing the product within the first 3 seconds.",
             "no product appearance was identified in sampled frames",
+            [{"kind": "annotation", "field": "execution.product_first_s"}])
+    elif first_product > 3:
+        add("product-timing",
+            "Test showing the product within the first 3 seconds.",
+            "first sampled product appearance is at %.1f seconds"
+            % first_product,
             [{"kind": "annotation", "field": "execution.product_first_s"}])
     if not (ann.get("transcript_words") or transcript):
         add("silent-cut",
@@ -397,7 +431,7 @@ def suggest_tests(annotation, measured, transcript=""):
 
 def run(conn, snapshot, owner="", media_dir="", providers=None,
         progress=None, cancelled=None, queued_at="", job_id=None,
-        run_token=None):
+        run_token=None, brand_terms=None, speech_language=None):
     """Execute the bound analysis. Returns the persisted result.
 
     job_id/run_token bind this execution to one claimed worker
@@ -472,7 +506,8 @@ def run(conn, snapshot, owner="", media_dir="", providers=None,
     # before publish leaves no trace and needs no repair.
     report = creative_mod.run_pipeline(
         conn, key, prov, media=media, progress=progress,
-        cancelled=cancelled, persist=False)
+        cancelled=cancelled, persist=False, brand_terms=brand_terms,
+        speech_language=speech_language)
     # Post-pipeline re-verification (M2): provider calls take
     # minutes, during which inputs may have changed or a concurrent
     # job may have finished. Re-bind the snapshot, re-run the
@@ -490,14 +525,14 @@ def run(conn, snapshot, owner="", media_dir="", providers=None,
     ann = report["annotation"]
     transcript = report.get("transcript") or ""
     ann["frame_labels"] = [
-        {"t_sec": l.get("t_sec"), "label": l.get("label"),
-         "brand_visible": l.get("brand_visible"),
-         "product_visible": l.get("product_visible"),
-         "logo_visible": l.get("logo_visible"),
-         "text_overlay": l.get("text_overlay"),
-         "cta_visible": l.get("cta_visible"),
-         "end_frame": l.get("end_frame")}
-        for l in (report.get("frame_labels") or [])]
+        {"t_sec": label.get("t_sec"), "label": label.get("label"),
+         "brand_visible": label.get("brand_visible"),
+         "product_visible": label.get("product_visible"),
+         "logo_visible": label.get("logo_visible"),
+         "text_overlay": label.get("text_overlay"),
+         "cta_visible": label.get("cta_visible"),
+         "end_frame": label.get("end_frame")}
+        for label in (report.get("frame_labels") or [])]
     ann["analysis"] = {
         "version": ANALYSIS_VERSION,
         "revision": uuid.uuid4().hex,

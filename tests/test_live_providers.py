@@ -148,6 +148,15 @@ class LiveProviderTest(unittest.TestCase):
         os.environ.clear()
         os.environ.update(self._saved)
 
+    def test_deepgram_query_detects_unless_language_is_known(self):
+        detect = providers.deepgram_listen_query("nova-3")
+        self.assertIn("model=nova-3", detect)
+        self.assertIn("detect_language=true", detect)
+        self.assertNotIn("&language=", detect)
+        slovenian = providers.deepgram_listen_query("nova-3", "sl")
+        self.assertIn("language=sl", slovenian)
+        self.assertNotIn("detect_language", slovenian)
+
     def test_live_stt_parses_deepgram(self):
         stt = providers.LiveStt([("deepgram", "deepgram", "nova-3",
                                   "active")])

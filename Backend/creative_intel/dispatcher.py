@@ -486,7 +486,7 @@ class ManagedLlm:
 
     def structure(self, transcript, labels):
         """Annotation structuring (LiveLlm.structure contract)."""
-        from creative_intel.creative import blank_annotation, validate
+        from creative_intel.creative import STRUCTURE_COPY_KEYS, blank_annotation, validate
 
         prompt = providers_mod.STRUCTURE_PROMPT % (
             (transcript or "")[:4000], json.dumps(labels or [])[:4000])
@@ -499,11 +499,7 @@ class ManagedLlm:
                                    model_id))
             data = providers_mod._extract_json(text)
             ann = blank_annotation()
-            for key in ("hook_type", "hook_modality", "hook_confidence",
-                        "brand_seconds", "product_seconds", "logo_seconds",
-                        "structure", "creator_vs_branded",
-                        "creator_confidence", "duration_s",
-                        "pace_cuts_per_min"):
+            for key in STRUCTURE_COPY_KEYS:
                 if key in data:
                     ann[key] = data[key]
             errors = validate(ann)

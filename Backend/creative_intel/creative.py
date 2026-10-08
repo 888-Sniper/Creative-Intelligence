@@ -251,6 +251,13 @@ _PERSON_WORD = re.compile(
     r"\b(man|woman|person|creator|guy|girl|people|face|unboxing)\b",
     re.IGNORECASE)
 _SCREEN_WORD = re.compile(r"\b(phone|screen|app)\b", re.IGNORECASE)
+# Whole English words. "app" sits inside "happy", and "off" sits
+# inside "officer". Inflected stems stay substrings below.
+_ENGLISH_RETAIL_WORD = re.compile(
+    r"\b(?:apps?|shops?|baskets?|buy|orders?)\b")
+_ENGLISH_DISCOUNT_WORD = re.compile(r"\b(?:discounts?|off)\b")
+_RETAIL_STEMS = ("aplikac", "košar", "kosar", "nakup")
+_DISCOUNT_STEMS = ("popust", "akcij")
 # Imperative shop or app lines. A narrative mention of the app
 # ("vrnem v aplikacijo") is not in this list. "nakupuj" also matches
 # "nakupuješ", which is the spoken form of the same call to action.
@@ -409,17 +416,17 @@ def _derive_opening(rows, transcript):
 
 
 def _retail_cta(text):
-    folded = text.casefold()
-    return any(phrase in folded for phrase in (
-        "aplikac", "app", "shop", "basket", "košar", "kosar",
-        "nakup", "buy", "order"))
+    folded = str(text or "").casefold()
+    if _ENGLISH_RETAIL_WORD.search(folded):
+        return True
+    return any(stem in folded for stem in _RETAIL_STEMS)
 
 
 def _derive_promotion(rows):
     text = " ".join(str(row.get("text_overlay") or "") for row in rows)
     folded = text.casefold()
-    if any(token in folded for token in ("%", "popust", "akcij",
-                                         "discount")) or " off" in folded:
+    if ("%" in folded or _ENGLISH_DISCOUNT_WORD.search(folded)
+            or any(stem in folded for stem in _DISCOUNT_STEMS)):
         return "discount"
     has_price = any(mark in text for mark in ("€", "$", "£"))
     if _retail_cta(folded):

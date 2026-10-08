@@ -161,6 +161,27 @@ def test_observation_facts_use_frames_and_probed_duration():
     assert creative_mod.validate(got) == []
 
 
+def test_promotion_cues_do_not_match_inside_unrelated_words():
+    from creative_intel import creative as creative_mod
+
+    def classified(overlay):
+        ann = creative_mod.blank_annotation()
+        labels = [{"t_sec": 0.0, "label": "Card", "text_overlay": overlay,
+                   "cta_visible": False}]
+        got = creative_mod.apply_observation_facts(
+            ann, labels, duration_s=1.0, transcript="")
+        return got["promotion_kind"], got["message_class"]
+
+    assert classified("Happy birthday") == ("unknown", "unknown")
+    assert classified("Meet our officer") == ("unknown", "unknown")
+    assert classified("Download the application") == ("unknown", "unknown")
+    assert classified("Open the app") == ("retail_offer", "promotional")
+    assert classified("20% off today") == ("discount", "promotional")
+    assert classified("Nakupuj v aplikaciji") == ("retail_offer", "promotional")
+    assert classified("Velik popust") == ("discount", "promotional")
+    assert classified("€12") == ("price", "promotional")
+
+
 def bound_db(tmp_path):
     """Product db with a fully confirmable draft (no providers)."""
     db = str(tmp_path / "va.db")

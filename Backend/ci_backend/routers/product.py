@@ -186,6 +186,23 @@ def recommendations(request: Request, conn=Depends(get_product_conn),
         raise _conflict(exc)
 
 
+@router.get("/api/campaigns/{name}")
+def campaign_detail(name: str, request: Request, conn=Depends(get_product_conn),
+                    who=Depends(get_current_employee)):
+    """Drawer payload for one campaign. Static /meta and /recommendations
+    routes are registered above this path parameter."""
+    try:
+        detail = legacy.campaign_detail_payload(
+            conn, unquote(name), query_multidict(request),
+            owner=who.id, admin=(who.role or "") == "admin")
+    except (ValueError, export_gate.ExportBlocked, emp.StoreError) as exc:
+        raise _conflict(exc)
+    if detail is None:
+        raise HTTPException(status_code=404, detail={
+            "error": "No campaign matches the current filters."})
+    return detail
+
+
 @router.get("/api/benchmarks")
 def benchmark_route(request: Request, conn=Depends(get_product_conn),
                     _emp=Depends(get_current_employee)):
@@ -417,6 +434,35 @@ class AskBody(BaseModel):
 
 class ReviewsMarkBody(BaseModel):
     review_id: int = Field(gt=0, le=2 ** 31)
+
+
+class TableExportBody(BaseModel):
+    """CSV export of the rows the screen is showing."""
+
+    names: list[str] = Field(default_factory=list, max_length=500)
+    creative_keys: list[str] = Field(default_factory=list, max_length=500)
+    group_by: str = "platform"
+    filters: dict = Field(default_factory=dict)
+
+    @field_validator("names", "creative_keys", mode="before")
+    @classmethod
+    def _check_items(cls, values):
+        return _str_list(values or [], what="export", max_items=500,
+                         allow_empty=True)
+
+    @field_validator("filters", mode="before")
+    @classmethod
+    def _check_filters(cls, values):
+        return _filter_dict(values, what="export")
+
+    @field_validator("group_by", mode="before")
+    @classmethod
+    def _check_group(cls, value):
+        text = str(value or "platform")
+        if text not in benchmarks.GROUPABLE:
+            raise ValueError("group_by must be one of %s"
+                             % (sorted(benchmarks.GROUPABLE),))
+        return text
 
 
 class ExportBody(BaseModel):
@@ -1406,6 +1452,58 @@ async def reviews_mark(request: Request, conn=Depends(get_product_conn),
                          action="annotation_verified",
                          target=str(body.review_id))
     return {"ok": True, "pending": pending}
+
+
+def _csv_attachment(filename: str, text: str) -> Response:
+    return Response(
+        content=text,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="%s"' % filename})
+
+
+@router.post("/api/exports/campaigns")
+async def export_campaigns(request: Request, conn=Depends(get_product_conn),
+                           who=Depends(get_current_employee)):
+    body = _validated(TableExportBody, await json_payload(request), "export")
+    if not body.names:
+        raise _conflict(ValueError("names must not be empty"))
+    try:
+        text = legacy.campaigns_csv(conn, body.names, body.filters or None)
+    except (ValueError, export_gate.ExportBlocked, emp.StoreError) as exc:
+        raise _conflict(exc)
+    paudit.audit_request(request, conn, employee_id=who.id,
+                         action="report_exported", target="campaigns.csv")
+    return _csv_attachment("campaigns.csv", text)
+
+
+@router.post("/api/exports/creatives")
+async def export_creatives(request: Request, conn=Depends(get_product_conn),
+                           who=Depends(get_current_employee)):
+    body = _validated(TableExportBody, await json_payload(request), "export")
+    if not body.creative_keys:
+        raise _conflict(ValueError("creative_keys must not be empty"))
+    try:
+        text = legacy.creatives_csv(
+            conn, body.creative_keys, body.filters or None,
+            owner=who.id, admin=(who.role or "") == "admin")
+    except (ValueError, export_gate.ExportBlocked, emp.StoreError) as exc:
+        raise _conflict(exc)
+    paudit.audit_request(request, conn, employee_id=who.id,
+                         action="report_exported", target="creatives.csv")
+    return _csv_attachment("creatives.csv", text)
+
+
+@router.post("/api/exports/benchmarks")
+async def export_benchmarks(request: Request, conn=Depends(get_product_conn),
+                            who=Depends(get_current_employee)):
+    body = _validated(TableExportBody, await json_payload(request), "export")
+    try:
+        text = legacy.benchmarks_csv(conn, body.group_by, body.filters or None)
+    except (ValueError, export_gate.ExportBlocked, emp.StoreError) as exc:
+        raise _conflict(exc)
+    paudit.audit_request(request, conn, employee_id=who.id,
+                         action="report_exported", target="benchmarks.csv")
+    return _csv_attachment("benchmarks.csv", text)
 
 
 @router.post("/api/export")

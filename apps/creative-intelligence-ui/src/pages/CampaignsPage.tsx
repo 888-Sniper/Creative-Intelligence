@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { api, ApiError } from "@/api/client";
+import { api, ApiError, scopedPath } from "@/api/client";
 import { useFilters } from "@/state/FilterContext";
 import { useLocale } from "@/i18n";
 import { Icon } from "@/components/icons";
@@ -24,6 +24,7 @@ import {
   kpiDisplay,
   kpiPlaceholderNote,
   platformLabel,
+  scopeBody,
   useCompareState,
   useDaily,
   useScopedApi,
@@ -98,7 +99,7 @@ export function CampaignsPage() {
   };
   const location = useLocation();
   const navigate = useNavigate();
-  const { filters, setFilter, clearFilters } = useFilters();
+  const { filters, setFilter, clearFilters, scope } = useFilters();
   const [applied, setApplied] = useState(0);
   const [moreFilters, setMoreFilters] = useState(false);
   const [platMetric, setPlatMetric] = useState<(typeof PLATFORM_METRICS)[number]["value"]>("spend");
@@ -336,7 +337,7 @@ export function CampaignsPage() {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ names }),
+        body: JSON.stringify({ names, filters: scopeBody(scope) }),
       });
       if (!res.ok) throw new Error("Export Failed");
       const blob = await res.blob();
@@ -354,20 +355,30 @@ export function CampaignsPage() {
     }
   };
 
+  const scopeKey = scope.toString();
   useEffect(() => {
     const name = expanded;
-    if (!name || details[name]) return;
+    if (!name) return;
     let live = true;
-    api<CampaignDetail>("GET", `/api/campaigns/${encodeURIComponent(name)}`)
-      .then((r) => live && setDetails((prev) => ({ ...prev, [name]: r })))
+    setDetails((prev) => ({ ...prev, [name]: null }));
+    api<CampaignDetail>("GET", scopedPath(`/api/campaigns/${encodeURIComponent(name)}`, scope))
+      .then((r) => {
+        if (!live) return;
+        setDetails((prev) => ({ ...prev, [name]: r }));
+        setDetailErr((prev) => {
+          if (!prev[name]) return prev;
+          const next = { ...prev };
+          delete next[name];
+          return next;
+        });
+      })
       .catch((e: unknown) => {
         if (!live) return;
         const msg = e instanceof ApiError ? e.message : "Could Not Load Campaign Details.";
         setDetailErr((prev) => ({ ...prev, [name]: msg }));
       });
     return () => { live = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [expanded]);
+  }, [expanded, scope, scopeKey]);
 
   const kpiKey = !filters.kpi || filters.kpi === "all" ? "roas" : filters.kpi;
   const benchName = initial.name ?? [...selected][0] ?? rows[0]?.name ?? null;

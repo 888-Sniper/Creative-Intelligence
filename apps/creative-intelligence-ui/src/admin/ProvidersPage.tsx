@@ -378,7 +378,6 @@ export function ProvidersPage() {
               setBusy={setBusy}
               onReload={reload}
               onToast={setToast}
-              onConflict={fail409}
               onActivate={runActivate}
               onDeactivate={runDeactivate}
             />
@@ -389,7 +388,7 @@ export function ProvidersPage() {
   );
 }
 
-function ProviderCard({ entry, active, activeName, revision, busy, setBusy, onReload, onToast, onConflict, onActivate, onDeactivate }: {
+function ProviderCard({ entry, active, activeName, revision, busy, setBusy, onReload, onToast, onActivate, onDeactivate }: {
   entry: ProviderEntry;
   active: ActiveSelection | null;
   activeName: string;
@@ -398,7 +397,6 @@ function ProviderCard({ entry, active, activeName, revision, busy, setBusy, onRe
   setBusy: Dispatch<SetStateAction<string | null>>;
   onReload: () => Promise<ProvidersList | null>;
   onToast: (message: string) => void;
-  onConflict: (e: unknown, action: RetryAction) => Promise<void>;
   onActivate: (providerId: string, modelId: string, revision: number) => Promise<void>;
   onDeactivate: (revision: number) => Promise<void>;
 }) {
@@ -496,8 +494,10 @@ function ProviderCard({ entry, active, activeName, revision, busy, setBusy, onRe
       await onReload();
       onToast(t("providers.notices.saved", { provider: entry.display }));
     } catch (e) {
-      if (isConflict(e)) await onConflict(e, { kind: "deactivate" });
-      else setCardError(msg(e));
+      // A 409 here is a rejected secret (too long, or a failed check
+      // of the active key), not a selection revision. Retry must not
+      // deactivate the live model.
+      setCardError(msg(e));
     } finally {
       setBusy((cur) => (cur === key ? null : cur));
     }
@@ -519,8 +519,7 @@ function ProviderCard({ entry, active, activeName, revision, busy, setBusy, onRe
       await onReload();
       onToast(t("providers.notices.baseSaved", { provider: entry.display }));
     } catch (e) {
-      if (isConflict(e)) await onConflict(e, { kind: "deactivate" });
-      else setCardError(msg(e));
+      setCardError(msg(e));
     } finally {
       setBusy((cur) => (cur === key ? null : cur));
     }
@@ -546,8 +545,7 @@ function ProviderCard({ entry, active, activeName, revision, busy, setBusy, onRe
       await onReload();
       onToast(t("providers.notices.removed", { provider: entry.display }));
     } catch (e) {
-      if (isConflict(e)) await onConflict(e, { kind: "deactivate" });
-      else setCardError(msg(e));
+      setCardError(msg(e));
     } finally {
       setBusy((cur) => (cur === key ? null : cur));
     }
@@ -595,8 +593,7 @@ function ProviderCard({ entry, active, activeName, revision, busy, setBusy, onRe
       await onReload();
       onToast(t("providers.notices.refreshed", { provider: entry.display }));
     } catch (e) {
-      if (isConflict(e)) await onConflict(e, { kind: "deactivate" });
-      else setRefreshError(msg(e));
+      setRefreshError(msg(e));
     } finally {
       setBusy((cur) => (cur === key ? null : cur));
     }

@@ -102,8 +102,13 @@ export async function api<T>(method: string, path: string, body?: unknown, opts?
 /** Append the shared top-filter-bar scope to scoped analytics endpoints,
  *  mirroring the legacy filtered_path() behaviour. */
 export function scopedPath(path: string, scope: URLSearchParams): string {
+  const isCampaignDetail =
+    path.startsWith("/api/campaigns/") &&
+    !path.startsWith("/api/campaigns/meta") &&
+    !path.startsWith("/api/campaigns/recommendations");
   const isScoped =
     path === "/api/campaigns" ||
+    isCampaignDetail ||
     path.startsWith("/api/benchmarks") ||
     path === "/api/creatives" ||
     path.startsWith("/api/compare") ||

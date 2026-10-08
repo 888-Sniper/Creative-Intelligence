@@ -103,6 +103,7 @@ interface FetchState {
   activateCalls: number;
   conflictFirstActivate: boolean;
   testFails: boolean;
+  saveKeyConflict: boolean;
 }
 
 function setupFetch(state: FetchState): Call[] {
@@ -150,6 +151,12 @@ function setupFetch(state: FetchState): Call[] {
         return Response.json({ ok: true, active: null, current_revision: 4 });
       }
       if (method === "PUT" && url.startsWith("/api/admin/providers/")) {
+        if (state.saveKeyConflict) {
+          return Response.json(
+            { error: "secret too long (max 4096 characters)" },
+            { status: 409 },
+          );
+        }
         return Response.json({
           ok: true, configured: true, has_secret: true, offered_count: 0,
           active: state.list.active, current_revision: state.list.current_revision,
@@ -170,6 +177,7 @@ function freshState(admin = true): FetchState {
     activateCalls: 0,
     conflictFirstActivate: false,
     testFails: false,
+    saveKeyConflict: false,
   };
 }
 
@@ -448,6 +456,23 @@ describe("ProvidersPage", () => {
     expect(calls.filter((c) => c.url.endsWith("/deactivate"))).toHaveLength(0);
     // The unsaved typed value is cleared on submit.
     expect((within(card).getByLabelText("API Key For OpenAI") as HTMLInputElement).value).toBe("");
+  });
+
+  it("shows a rejected key on the card and does not deactivate", async () => {
+    const state = freshState();
+    state.saveKeyConflict = true;
+    const calls = setupFetch(state);
+    renderPage();
+    await screen.findByText("Active Provider: Groq · llama-3.3-70b-versatile");
+    const card = screen.getByText("OpenAI").closest("section") as HTMLElement;
+    fireEvent.change(within(card).getByLabelText("API Key For OpenAI"), {
+      target: { value: "sk-too-long" },
+    });
+    fireEvent.click(within(card).getByRole("button", { name: "Save Key" }));
+    const alert = await within(card).findByRole("alert");
+    expect(alert.textContent).toContain("secret too long");
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+    expect(calls.filter((c) => c.url.endsWith("/deactivate"))).toHaveLength(0);
   });
 });
 

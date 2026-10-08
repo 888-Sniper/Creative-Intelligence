@@ -8,7 +8,7 @@ from .analyst_metrics import UNSUPPORTED as _FIELD_UNSUPPORTED
 from .analyst_metrics import field_state as _field_state
 
 GROUPABLE = ("platform", "campaign", "hook_type", "creator_vs_branded",
-             "edit_style")
+             "edit_style", "format", "vertical")
 
 
 def _weight(rows, metric):

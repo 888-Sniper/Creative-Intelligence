@@ -23,6 +23,7 @@ import {
   kpiDisplay,
   kpiPlaceholderNote,
   platformLabel,
+  scopeBody,
   titleCase,
   useCompareState,
   useScopedApi,
@@ -170,7 +171,7 @@ function RetentionSpark({ creativeKey }: { creativeKey: string }) {
 }
 
 export function CreativesPage() {
-  const { clearFilters } = useFilters();
+  const { clearFilters, scope } = useFilters();
   const { t, tp, locale, fmtNum } = useLocale();
   const unavailable = t("common.unavailable");
   const emptyNote = t("creatives.emptyKpiNote");
@@ -400,7 +401,7 @@ export function CreativesPage() {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ creative_keys: keys }),
+        body: JSON.stringify({ creative_keys: keys, filters: scopeBody(scope) }),
       });
       if (!res.ok) throw new Error(t("creatives.banner.exportFailed"));
       const blob = await res.blob();

@@ -2,19 +2,26 @@
 
 Review `origin/main` after `git fetch`. Confirm that `origin/main` and GitHub `main` name the same SHA. A behind local checkout or a missing local `main` branch is not a reason to stop. Use `git show origin/main:PATH`. Stop only if the remote identities differ or the worktree is dirty.
 
-This is the product repo https://github.com/888-Sniper/Creative-Intelligence. The parent of this push is `6cdf4380f56e43edecc9e35748e1be0a6efd2a1c` (`Resume the video upload wizard on the step it left`). This push replaces `Audit.md` only. It does not change product code. Do not call the product perfect. Do not edit, commit, push, build, install, start the server, or activate a provider. Do not treat an unrun live model, live browser, Playwright run, Render click-through, or the five Notino clips as a source defect. Report only defects still present at the reviewed SHA, with severity, observed behavior, file and line, and the evidence that reproduces them.
+This is the product repo https://github.com/888-Sniper/Creative-Intelligence. The parent of this push is `9ff0d780ec2c1c0fef9177bb71c9e091ac9fd063` (`Record the full feature audit of every tab`). This push fixes the campaign drawer, the three table exports, format and vertical grouping, and the provider validation retry. It also replaces `Audit.md`. Do not call the product perfect. Do not edit, commit, push, build, install, start the server, or activate a provider. Do not treat an unrun live model, live browser, Playwright run, Render click-through, or the five Notino clips as a source defect. Report only defects still present at the reviewed SHA, with severity, observed behavior, file and line, and the evidence that reproduces them.
 
 Confirm the push with both ends named:
 
 ```
-git diff --stat 6cdf4380f56e43edecc9e35748e1be0a6efd2a1c origin/main
+git diff --stat 9ff0d780ec2c1c0fef9177bb71c9e091ac9fd063 origin/main
 ```
 
-The diff is this file. Re-read the cited files at `origin/main`. Line numbers below were opened at the parent SHA. If a later commit moves a line, follow the symbol, not the stale number.
+What this push makes true:
 
-Four source reads covered the routed app: shell, sign-in, Dashboard, Campaigns, and Creatives; Compare, Benchmarks, Insights, Reports, and Workbook; Ask, Analyst, Settings, Admin, and the Providers screen; the model path and the Analyze Video wizard, including resume. Unrouted files are not live tabs: `OverviewPage.tsx`, `layouts/AppLayout.tsx`, `components/FilterBar.tsx`, `components/AskBar.tsx`, `components/SyncJobs.tsx`. `router.tsx` does not mount them.
+- `GET /api/campaigns/{name}` returns the drawer payload for a campaign that is inside the current filters. An unknown name is 404 with `error` set to `No campaign matches the current filters.`
+- `POST /api/exports/campaigns`, `POST /api/exports/creatives`, and `POST /api/exports/benchmarks` return CSV for the names, keys, or group the screen sent, inside the filters it sent. `POST /api/export` is still the one-pager.
+- `format` and `vertical` are in `GROUPABLE`. Group By Format and the vertical count both use real `ads` columns.
+- A 409 from Save Key, Save Base URL, Remove Key, or Refresh Models stays on that card. Retry on those failures does not deactivate the live model. Activate and deactivate still retry a revision conflict.
 
-The UI suite was not re-run for this file. On the parent, `pnpm exec vitest run` from `apps/creative-intelligence-ui` passed 306 tests across 38 files, `pnpm exec tsc --noEmit` exited 0, and `VideoUpload.test.tsx` passed 28. The backend suite was last run before the resume commit, which did not change Python: 861 passed, 1 skipped, 4 failed. Those four are named under Checks not performed. Playwright, the live Render site, live providers, and the five Notino clips were not used.
+How to confirm that from source: `tests/test_table_exports.py` and `ProvidersPage.test.tsx` (`shows a rejected key on the card and does not deactivate`, and `retries a 409 conflict against the refetched revision`). This push ran `uv run --extra dev pytest tests/test_table_exports.py` (3 passed) and, from `apps/creative-intelligence-ui`, `pnpm exec vitest run` on `CampaignsPage.test.tsx`, `CreativesPage.test.tsx`, `BenchmarksPage.test.tsx`, and `ProvidersPage.test.tsx` (43 passed in 4 files). `pnpm exec tsc --noEmit` exited 0. `ruff check --select E,F,I tests/test_table_exports.py` passed. The full UI suite and the full backend suite were not re-run.
+
+Re-read the cited files at `origin/main`. Line numbers below were opened on this push. If a later commit moves a line, follow the symbol, not the stale number.
+
+Four source reads on the parent covered the routed app: shell, sign-in, Dashboard, Campaigns, and Creatives; Compare, Benchmarks, Insights, Reports, and Workbook; Ask, Analyst, Settings, Admin, and the Providers screen; the model path and the Analyze Video wizard, including resume. This push re-checked the lines those reads cited in the files it edited. Unrouted files are not live tabs: `OverviewPage.tsx`, `layouts/AppLayout.tsx`, `components/FilterBar.tsx`, `components/AskBar.tsx`, `components/SyncJobs.tsx`. `router.tsx` does not mount them.
 
 ## Resume
 
@@ -33,7 +40,7 @@ Continue does not require those gates. The Continue button (`VideoUploadPanel.ts
 
 The chosen stage is written in the same synchronous block as `setDraft` (lines 775–795), before `await loadRows` (line 812). A render cannot record the default `video` step over a stored later step.
 
-A step-only leave does not PATCH. `persistLeaveFields` (lines 960–998) patches only when the client, campaign, creative key, or platform differs from the last saved spec. A confirmed match returns first unless the client, campaign, or creative key changed (lines 975–976), because any spec PATCH clears matches (`product.py` lines 1893–1896). `fieldSnap` treats a missing platform as `meta` on both sides (lines 75–86), so the default does not count as a change. Closing an unchanged wizard sends no PATCH and leaves a confirmed match in place.
+A step-only leave does not PATCH. `persistLeaveFields` (lines 960–998) patches only when the client, campaign, creative key, or platform differs from the last saved spec. A confirmed match returns first unless the client, campaign, or creative key changed (lines 975–976), because any spec PATCH clears matches (`product.py` lines 1991–1995). `fieldSnap` treats a missing platform as `meta` on both sides (lines 75–86), so the default does not count as a change. Closing an unchanged wizard sends no PATCH and leaves a confirmed match in place.
 
 Typed client, campaign, creative key, and platform are included when they differ, so Resume can show them again. `wizardStage` is stamped on `persistSpec` (line 907), upload (line 1082), import (line 1218), and the leave body (line 985). A video file that was chosen and never uploaded is not restored. CSV or XLSX text that was never imported is not restored. Boot clears that staged file and text (lines 728–740). An uploaded video and an imported dataset come back from the draft.
 
@@ -82,7 +89,7 @@ Controls:
 - Left Trend Metric and Right Trend Metric (lines 596 and 600): Impressions, Clicks, Spend, Conversions. Local, over the daily series.
 - Benchmark Metric and Benchmark Baseline (lines 623 and 627): CTR, ROAS, CPA, CPC, versus Scope Average or Top Performer. Local.
 - See All (line 663) goes to `/creatives`.
-- Open {name} in Creatives (line 707) goes to `/creatives` with no `?find=` and no creative key. Creatives already honors `?find=` (`CreativesPage.tsx` lines 199–206).
+- Open {name} in Creatives (line 707) goes to `/creatives` with no `?find=` and no creative key. Creatives already honors `?find=` (`CreativesPage.tsx` lines 200–207).
 - Insight Type (line 725): Audience Retention, Hook Analysis, Video Length, Format Comparison. Local.
 - Recommendation links in `InsightList` (`product.tsx` line 721) are plain `<a href>`: View Creatives and Explore Creatives go to `/creatives`, View Campaigns to `/campaigns`, See Recommendations to `/insights`.
 - See All on recommendations (line 801) goes to `/insights`.
@@ -96,26 +103,32 @@ Top Creatives, the benchmark chart, and the recommendation rail stay on `Skeleto
 
 Campaigns loads the campaign list, benchmarks, meta, compare, and daily endpoints. Status and spend bands are real scope axes. The backend resolves them into a campaign allowlist. The name search is local.
 
+`GET /api/campaigns/{name}` (`product.py` lines 189–203) is the drawer. `campaign_detail_payload` (`actions.py` lines 648–695) strips the name, resolves the query as a scope, and reads `benchmark(..., "campaign")`. A name that is not in that grouping returns `None`. The route then answers 404 with `error` set to `No campaign matches the current filters.` `app.py` lines 39–42 unwrap a dict `detail`, so the JSON body is that `error` field. Creatives are the `build_creatives_list` rows whose `campaigns` contain the name, which is the same confirmed-match rule as the Creatives page. Each row has `creative_key`, `campaigns`, `platform`, `format`, `metrics`, `brand_seconds`, and `product_seconds`. They sort by impressions descending and stop at 25. Recommendations are the CPA bullet texts from `campaign_recommendations`, flattened to strings. An empty name is 409.
+
+`/api/campaigns/meta` (line 157) and `/api/campaigns/recommendations` (line 171) are registered before `/{name}`. A campaign whose name is exactly `meta` or `recommendations` still hits those static routes. `scopedPath` (`client.ts` lines 104–118) appends the shared filter scope to `/api/campaigns/{name}` and leaves the meta and recommendations paths on their own rules.
+
+The three table exports are registered before the catch-all `POST /api/{action:path}` (`product.py` lines 2594–2600). They are not entries in `_ACTION_ROUTES` (lines 937–948). `POST /api/export` (line 1509) is still the one-pager and still requires 1–50 creative keys.
+
 Controls:
 
-- Apply Filters and Reset Filters (lines 400 and 403). Reset also clears the name search.
-- Client, Spend Range, KPI Focus, Campaign Objective, Team, Market, Campaign Status, Platform (lines 416–490). KPI Focus is not sent. Objective options are raw meta strings, not `filters.objectives.*`.
-- How Campaign Status Is Determined is an `InfoTip` (line 473). Local.
-- More Filters / Fewer Filters (line 494) reveals Project, Vertical, and Funnel Stage. Those selects write the shared scope.
-- Platform Metric (line 574): Spend, Impressions, or Clicks. Local.
-- Search Campaigns (line 595). `?find=` is copied only into the initial state (lines 107–108). A later navigation to the same route does not update the box. Global search uses that query (`GlobalSearch.tsx` lines 130–132).
-- Compare Selected (line 602) goes to `/compare` with the selected names. One campaign is enough. An empty selection only sets a status line. The compare page asks for two to four.
-- Export (line 605) posts `/api/exports/campaigns` (line 335) and surfaces “Export Failed”. That path is not registered. The action table (`product.py` lines 891–902) does not contain it, so `POST /api/{action:path}` returns 404 (lines 2502–2503). The only export route is `POST /api/export` (line 1411), which builds a one-pager from creative keys.
+- Apply Filters and Reset Filters (lines 411 and 414). Reset also clears the name search.
+- Client, Spend Range, KPI Focus, Campaign Objective, Team, Market, Campaign Status, Platform (lines 425–502). KPI Focus is not sent. Objective options are raw meta strings, not `filters.objectives.*`.
+- How Campaign Status Is Determined is an `InfoTip` (line 484). Local.
+- More Filters / Fewer Filters (line 505) reveals Project, Vertical, and Funnel Stage. Those selects write the shared scope.
+- Platform Metric (line 585): Spend, Impressions, or Clicks. Local.
+- Search Campaigns (line 606). `?find=` is copied only into the initial state (lines 108–109). A later navigation to the same route does not update the box. Global search uses that query (`GlobalSearch.tsx` lines 130–132).
+- Compare Selected (line 614) goes to `/compare` with the selected names. One campaign is enough. An empty selection only sets a status line. The compare page asks for two to four.
+- Export (line 616) posts `/api/exports/campaigns` (lines 336–340) with `{ names, filters: scopeBody(scope) }` and downloads `campaigns.csv`. The route (`product.py` lines 1464–1476) requires a non-empty name list. An empty list is 409. Names absent from the scoped campaign group are omitted. A header-only file is still 200. The response is `text/csv; charset=utf-8` with `Content-Disposition: attachment; filename="campaigns.csv"`. A string cell that starts with `=`, `+`, `-`, or `@` is prefixed with a quote (`actions.py` lines 698–708). Numbers stay numbers. At most 500 names.
 - Select All and the row checkbox are the compare selection.
-- Details (line 658) opens the drawer, which calls `GET /api/campaigns/${name}` (line 361). The backend exposes `/api/campaigns` (line 146), `/api/campaigns/meta` (line 157), and `/api/campaigns/recommendations` (line 171). No per-name route. The client turns a body without `error` into `Request failed (${status})` (`client.ts` lines 32–33). The drawer prints that in `EmptyState` (lines 723–724). A stock 404 is “Request failed (404)”. The recommendations route is never called.
+- Details (line 669) opens the drawer. The effect (lines 358–381) clears that name’s payload, then calls `GET` `scopedPath(/api/campaigns/${encodeURIComponent(name)}, scope)`. It runs again when the open name or the scope changes. Success stores the detail and clears that name’s error. Failure stores `ApiError.message` (lines 375–378). `EmptyState` prints it (lines 734–735). A 404 from this route carries `error`, so the drawer shows `No campaign matches the current filters.` The client’s `Request failed (${status})` (`client.ts` lines 32–33) is only for a non-OK body that has no `error` field.
 - Delete Sample, Confirm Delete, and Cancel (`SampleDelete.tsx` lines 105–123) are admin-only and sample-campaign-only. They call the demo-pack impact and campaign-delete routes.
-- Retry (line 675) refetches a failed campaign list.
-- See All (line 731) goes to `/insights`.
-- Rail links (lines 229–266) are `<a href>`: View Campaigns reloads `/campaigns`, View Recommendations goes to `/creatives`, See Insights to `/insights`, View Details to `/compare` with no campaign state.
+- Retry (line 686) refetches a failed campaign list.
+- See All (line 742) goes to `/insights`.
+- Rail links (lines 230–267) are `<a href>`: View Campaigns reloads `/campaigns`, View Recommendations goes to `/creatives`, See Insights to `/insights`, View Details to `/compare` with no campaign state.
 
-“vs. Benchmark” is one shared number. `benchVal` comes from `focus.metrics[kpiKey].current` (lines 372–376). `focus` is filled only from `location.state` (lines 127–140). Every row prints that same value (line 655). With no navigation state the cell is Unavailable.
+“vs. Benchmark” is one shared number. `benchVal` comes from `focus.metrics[kpiKey].current` (lines 385–387). `focus` is filled only from `location.state` (lines 126–144). Every row prints that same value (line 666). With no navigation state the cell is Unavailable.
 
-A failed daily series becomes the empty state (lines 560–569). Platform bars stay on `Skeleton` when data is null (lines 580–588).
+A failed daily series becomes `[]` (`useDaily` in `product.tsx` line 190). That array is truthy, so the trend still mounts `TrendChart` (lines 571–579). The skeleton at line 580 is only while `daily` is null. Platform bars stay on `Skeleton` when `benchPlatform.data` is null (line 599) and use `EmptyState` when the groups are empty (line 598).
 
 ## Creatives
 
@@ -123,19 +136,19 @@ Creatives loads `/api/creatives`, compare KPIs, and a retention curve for the op
 
 Controls:
 
-- Apply Filters and Reset Filters (lines 430 and 433). Reset also clears sort, view, length, benchmark, selection, and the open detail.
+- Apply Filters and Reset Filters (lines 431 and 434). Reset also clears sort, view, length, benchmark, selection, and the open detail.
 - Video Length and Benchmark (lines 457 and 466) are local. Length filters the rows already returned. Benchmark only changes the badge.
-- See All on Top Creatives (line 526) navigates to `/creatives`, the current page.
-- List View and Grid View (lines 563 and 568). Grid cards are not buttons and do not open the detail (lines 648–668).
+- See All on Top Creatives (line 527) navigates to `/creatives`, the current page.
+- List View and Grid View (lines 564 and 569). Grid cards are not buttons and do not open the detail (lines 650–669).
 - Sort By (line 575): Top Performing, Highest CTR, Highest ROAS, Most Impressions. Local.
-- Export (line 578) posts `/api/exports/creatives` (line 399) with every visible key. The checkboxes are ignored. The route is not registered. Same 404 path as the campaign export.
-- Select All and the row checkbox write `selected` (lines 187 and 616). `selected` is only read to paint the checkbox (line 388). `creatives.compareSelected` exists in `en.ts` and is not rendered.
-- The creative name (line 622) toggles the detail panel and loads `GET /api/retention/curve`.
-- See All on Top Learnings and on Next Tests (lines 684 and 705) go to `/insights`. Next Tests are three fixed sentences (lines 375–379) whenever any creative is in scope.
+- Export (line 579) posts `/api/exports/creatives` (line 404) with `{ creative_keys: keys, filters: scopeBody(scope) }` for every visible key. The checkboxes are ignored. The route (`product.py` lines 1479–1493) requires a non-empty key list, keeps request order, skips a key that is not in the scoped list, and downloads `creatives.csv`. An empty list is 409. A header-only file is still 200. At most 500 keys.
+- Select All and the row checkbox write `selected` (lines 188 and 618). `selected` is only read to paint the checkbox (line 389). `creatives.compareSelected` exists in `en.ts` and is not rendered.
+- The creative name (line 623) toggles the detail panel and loads `GET /api/retention/curve`.
+- See All on Top Learnings and on Next Tests (lines 685 and 706) go to `/insights`. Next Tests are three fixed sentences (lines 376–380) whenever any creative is in scope.
 
-`secondsOf` returns a real zero (`CreativesPage.tsx` lines 71–72). The detail then uses a truthiness check: `secondsOf(datum) ? ... : "—"` (line 119). The length column does the same (`s ? \`${s}s\` : "—"` at line 635). The short, sweet, and long filters require `s > 0` (lines 218–220). A zero-length creative looks unmeasured and is excluded from every length bucket.
+`secondsOf` returns a real zero (`CreativesPage.tsx` lines 72–73). The detail then uses a truthiness check: `secondsOf(datum) ? ... : "—"` (line 120). The length column does the same (`s ? \`${s}s\` : "—"` at line 636). The short, sweet, and long filters require `s > 0` (lines 219–221). A zero-length creative looks unmeasured and is excluded from every length bucket.
 
-A failed creatives table has no Retry (lines 671–672). The campaign table does.
+A failed creatives table has no Retry (lines 672–673). The campaign table does.
 
 ## Compare
 
@@ -147,9 +160,9 @@ Controls:
 - Add and remove chips (lines 682–694). At most four. Local until Apply.
 - Rank By (lines 698–701) stores the metric. Apply (line 708) sends it (lines 626–628). Apply is disabled while loading or when fewer than two are picked.
 - Trend metric (line 749), comparison metric (line 780), and baseline (line 795) are local.
-- Period disclosure (line 895), A/B From and To (lines 907–919), and Compare Periods (line 923). Compare Periods calls scoped `GET /api/compare/periods`. It does not send `label_a` or `label_b`, so the API default is Period A / Period B (`product.py` lines 275–278). Empty dates set an error and do not call the API.
+- Period disclosure (line 895), A/B From and To (lines 907–919), and Compare Periods (line 923). Compare Periods calls scoped `GET /api/compare/periods`. It does not send `label_a` or `label_b`, so the API default is Period A / Period B (`product.py` lines 292–295). Empty dates set an error and do not call the API.
 
-Campaign trends call scoped `GET /api/kpis/daily?days=30` per ranked campaign. The daily effect depends on `[mode, campaignData]` (line 434) and reads `scope` inside (line 420). Creative curves call unscoped `GET /api/retention/curve`. Creative mode replaces the attribute table with backend rows whose labels are English (`actions.py` lines 647–670, used at lines 593–596).
+Campaign trends call scoped `GET /api/kpis/daily?days=30` per ranked campaign. The daily effect depends on `[mode, campaignData]` (line 434) and reads `scope` inside (line 420). Creative curves call unscoped `GET /api/retention/curve`. Creative mode replaces the attribute table with backend rows whose labels are English (`actions.py` lines 804–827, used at lines 593–596).
 
 `daily_series` (`benchmarks.py` lines 208–231) keeps only dates that have rows, then the last `days` of those dates. Compare does not join series on the date. Each campaign’s points are its own day order (`ComparePage.tsx` lines 517–523). `trendLabels` come from the first non-empty series (lines 527–530). `TrendChart` plots point `i` at `x(i)` (`charts.tsx` lines 51–52) and places a label with `labels.indexOf` (lines 85–86). Different date sets, or a repeated `MM-DD` after `date.slice(5)`, misalign the lines. A missing daily response becomes `[]` (lines 426–428) and then `compare.noDaily`, with no error. The trend chart draws an uncomputable ROAS, CTR, CPA, or CPM as `0` (lines 518–521).
 
@@ -165,8 +178,8 @@ Controls:
 - Platform options are only Meta and TikTok (lines 291–295).
 - View All (line 329) goes to `/insights`.
 - Open Benchmark (line 341) and Delete (line 344).
-- Group By (lines 375–378). The select offers `platform`, `hook_type`, `format`, and `creator_vs_branded` (`AXES` at lines 31–33). `GROUPABLE` is only `platform`, `campaign`, `hook_type`, `creator_vs_branded`, and `edit_style` (`benchmarks.py` lines 10–11). `format` raises `ValueError` (lines 236–237). The panel then renders `benchmarks.error` (line 428) instead of rows. The same invalid call with `group_by=vertical` (line 112) never fills the vertical count, so lines 474–476 stay `0` even when verticals exist.
-- Export, desktop (line 380) and overflow (line 371), posts `{}` to `/api/exports/benchmarks` (lines 236–246). No backend route registers that path. The unit test mocks the missing URL.
+- Group By (lines 375–378). The select offers `platform`, `hook_type`, `format`, and `creator_vs_branded` (`AXES` at lines 31–33). `GROUPABLE` is `platform`, `campaign`, `hook_type`, `creator_vs_branded`, `edit_style`, `format`, and `vertical` (`benchmarks.py` lines 10–11). `format` and `vertical` are `ads` columns, so both groupings return rows. `benchmark()` still raises `ValueError` for a name outside that tuple (lines 236–237), and the panel then renders `benchmarks.error` (line 428). The vertical count uses `group_by=vertical` (line 112) and fills lines 474–476 from that response.
+- Export, desktop (line 380) and overflow (line 371), posts `{ group_by: axis, filters: scopeBody(scope) }` to `/api/exports/benchmarks` (line 244). The route (`product.py` lines 1496–1506) returns `benchmarks.csv`. `group_by` must be in `GROUPABLE` (`TableExportBody`, lines 458–464). Anything else is 409. An empty filter object is unrestricted.
 - Select All (lines 393–395) checks every row. The three-benchmark cap and `benchmarks.maxCompare` exist only in `toggle` (lines 159–165). Charts still use `compared.slice(0, 3)` (lines 134–137), so extra checked rows are omitted with no status. Clear All (line 434) clears the local selection.
 - Open AI Analyst (line 498) and Open Reports (line 499).
 
@@ -174,7 +187,7 @@ Coverage and Platform cells are canned `filters.allVerticals` or `filters.allPla
 
 ## Insights
 
-Insights loads reach-objective cards from scoped `GET /api/analyst/creatives?objective=reach`. The backend treats that `objective` as the analysis objective and does not use it as a campaign filter (`product.py` lines 1048–1056). Page search, client, platform, market, type, and date are local state. Save Insight posts the global `scopeBody(scope)` plus `filters.kpi` and `view: "main"` (`InsightsPage.tsx` lines 213–215). It ignores the page’s own client, platform, and market. Conversations and views load once (lines 94–103, deps `[]`).
+Insights loads reach-objective cards from scoped `GET /api/analyst/creatives?objective=reach`. The backend treats that `objective` as the analysis objective and does not use it as a campaign filter (`product.py` lines 1094–1101). Page search, client, platform, market, type, and date are local state. Save Insight posts the global `scopeBody(scope)` plus `filters.kpi` and `view: "main"` (`InsightsPage.tsx` lines 213–215). It ignores the page’s own client, platform, and market. Conversations and views load once (lines 94–103, deps `[]`).
 
 Controls:
 
@@ -193,9 +206,9 @@ Reports builds `POST /api/report` for PPTX, XLSX, or a one-pager. The catalog is
 Controls:
 
 - Save as Template (line 610) writes `ci-report-template`. Nothing reads that key.
-- Campaign checklist (line 617). The empty label is All Campaigns. Generate then sends `campaigns: null` (line 447). `expert2_report_route` (`actions.py` line 1217) turns a missing or empty list into `None`. `campaign_kpis` (`benchmarks.py` lines 839–841) then keeps every campaign still in the filter scope.
+- Campaign checklist (line 617). The empty label is All Campaigns. Generate then sends `campaigns: null` (line 447). `expert2_report_route` (`actions.py` line 1374) turns a missing or empty list into `None`. `campaign_kpis` (`benchmarks.py` lines 839–841) then keeps every campaign still in the filter scope.
 - KPI checklist (line 626). An empty selection still sends `["cpa", "ctr"]` (line 448) while the control reads Select KPIs.
-- Benchmarks (line 637). The id `industry` is sent as `hook_type` (line 449). The English label is Scope Average (`en.ts` line 241). `rank_by` is always `cpa`.
+- Benchmarks (line 637). The id `industry` is sent as `hook_type` (line 449). The English label is Scope Average (`en.ts` line 241). `rank_by` is always `cpa`. A benchmark name that is in `GROUPABLE`, which now includes `format` and `vertical`, is grouped by that column (`benchmarks.py` lines 1936–1937). The Reports screen still sends `hook_type` for Scope Average.
 - Date range, From, To, Clear, and Done (lines 265–286) are the report’s own range. They are sent inside `filters` on top of the global scope (lines 454–458). `match_filters` applies an exact day and a range together (`benchmarks.py` lines 553–571).
 - PPTX, XLSX, and One-Pager (lines 648–663). The titles are the English literals `PPTX`, `XLSX`, and `One-Pager`.
 - Generate Report (line 667).
@@ -209,7 +222,7 @@ History is local storage plus sample files and, in a demo workspace, synthetic r
 
 ## Workbook
 
-The nav label is Blank Workbook. Preview uses scoped creatives and `/api/kpis/compare` through `useCompare`, which refetches on the whole filters object, including `kpi`. Create downloads `GET /api/analyst/workbook` with name, description, modules, and KPIs only. The handler builds a cover plus seven blank sheets (`product.py` lines 1114–1133). The about copy says that on purpose (`en.ts` lines 1550 and 1576). Module cards other than summary and breakdown do not change the file.
+The nav label is Blank Workbook. Preview uses scoped creatives and `/api/kpis/compare` through `useCompare`, which refetches on the whole filters object, including `kpi`. Create downloads `GET /api/analyst/workbook` with name, description, modules, and KPIs only. The handler builds a cover plus seven blank sheets (`product.py` lines 1160–1186). The about copy says that on purpose (`en.ts` lines 1550 and 1576). Module cards other than summary and breakdown do not change the file.
 
 Controls:
 
@@ -229,7 +242,7 @@ There is no error branch. `previewFailedTitle` exists in `en.ts` (line 1563) and
 
 Ask submits `POST /api/ask` with the filter scope captured at send time (`scopeRef` in `AskPage.tsx` lines 101–102 and 130–133). Prompt chips, suggested questions, and follow-ups call the same `ask()`. Production does not auto-send. A demo workspace, `useCampaignMeta().data?.demo === true`, sends the current composer text once (lines 110–153).
 
-When the managed LLM is paused, the ask job fails with `AI is not configured. Contact your administrator.` (`provider_inventory.py` lines 43–44, `providers.py` lines 1105–1106, `qa.py` lines 490–500). `product.py` lines 923–930 return that string as `detail.error` through `_conflict`, because the paused text has no `[provider=` marker. Ask shows `ApiError.message` (lines 135–136 and 244–245). A chosen-model transport failure marked `[provider=` becomes 502 through `_provider_failure` (`product.py` lines 74–88).
+When the managed LLM is paused, the ask job fails with `AI is not configured. Contact your administrator.` (`provider_inventory.py` lines 43–44, `providers.py` lines 1105–1106, `qa.py` lines 490–500). `product.py` lines 969–976 return that string as `detail.error` through `_conflict`, because the paused text has no `[provider=` marker. Ask shows `ApiError.message` (lines 135–136 and 244–245). A chosen-model transport failure marked `[provider=` becomes 502 through `_provider_failure` (`product.py` lines 74–88).
 
 Controls: the composer and Ask button (lines 220–227); prompt chips `ask.prompts.p0`–`p3` (lines 231–239); suggested questions `s0`–`s5` (lines 332–344); follow-ups `f0`–`f2` after an answer (lines 304–313); recent chats (lines 346–363) from `GET /api/analyst/conversations`, linking to `/analyst?conversation=`. The destination does not load the transcript. See Analyst. KPI, trend, and source blocks render the answer plus scoped compare, daily, and benchmark calls (lines 249–302). Ask money uses the USD formatter in `product.tsx`.
 
@@ -248,12 +261,12 @@ Controls:
 - Campaign, platform, client, and project (lines 1004–1069) write the shared filters.
 - Date range (lines 1022–1036) is local state, initial `"all"` (line 347). Charts use `FilterContext` through `useScopedApi`. A range chosen on another page stays in effect while this select says All Time, until the user changes it.
 - Objective (lines 1038–1047) is page-local and is sent on the ask body. It is not written back to the shared filters.
-- Language (lines 1050–1054). `auto` omits language. The options are the hardcoded strings Auto, Polski, and English. The backend rejects anything else (`product.py` lines 1260–1267). Spanish is not offered.
+- Language (lines 1050–1054). `auto` omits language. The options are the hardcoded strings Auto, Polski, and English. The backend rejects anything else (`product.py` lines 1306–1313). Spanish is not offered.
 - New Conversation (lines 1072–1075) posts `/api/analyst/conversations`.
 - Report (lines 1077–1080) posts `/api/analyst/report` through the API client.
 - Report XLSX (lines 1082–1085) fetches the same route with a raw `fetch` (lines 150–161). A 401 does not run the API client’s login gate.
-- Blank Workbook (lines 1087–1090) is `GET /api/analyst/workbook` through a raw `fetch` (lines 513–541). The comment at lines 514–516 claims session re-gating that this fetch does not do. The server builds a blank workbook (`product.py` lines 1114–1139).
-- Previous analyses (lines 1093–1110) set `activeId` and `setMessages([])` (lines 1101–1104). The Ask deep link only calls `setActiveId` (lines 375–378). Nothing calls `GET /api/analyst/conversations/{id}` (`product.py` lines 1016–1030 returns messages). The next ask still sends `conversation_id`, so the server thread continues while the screen stays empty.
+- Blank Workbook (lines 1087–1090) is `GET /api/analyst/workbook` through a raw `fetch` (lines 513–541). The comment at lines 514–516 claims session re-gating that this fetch does not do. The server builds a blank workbook (`product.py` lines 1160–1186).
+- Previous analyses (lines 1093–1110) set `activeId` and `setMessages([])` (lines 1101–1104). The Ask deep link only calls `setActiveId` (lines 375–378). Nothing calls `GET /api/analyst/conversations/{id}` (`product.py` lines 1062–1076 returns messages). The next ask still sends `conversation_id`, so the server thread continues while the screen stays empty.
 - Save To Next-Flight Plan and Dismiss (lines 903–913) post accepted or rejected while the finding is proposed.
 - Follow-up chips (lines 1179–1186) send the returned follow-up text.
 
@@ -334,25 +347,25 @@ Provider screen controls (`ProvidersPage.tsx`):
 
 - Reload Provider List (lines 307–309) calls `GET /api/admin/providers`.
 - The active and paused banner (lines 327–359). The paused body says AI Analyst is paused (`en.ts` lines 778–779). Analyst does not check the provider. Ask does fail closed.
-- Use as active (lines 605–655) confirms, then posts activate or deactivate with `current_revision`.
-- Save Key and Replace Key (lines 481–503 and 700–709). The input is cleared and never prefilled. Any HTTP 409 calls `onConflict` with `kind: "deactivate"` (line 499).
-- Show Key and Hide Key (lines 690–698).
-- Remove Key (lines 529–553) confirms, then PUTs `secret: ""` and `confirm: true`. The backend deactivates if that provider is active (lines 337–364). A 409 is also sent to deactivate-retry (line 549).
-- Save Base URL (lines 506–526). A 409 is sent to deactivate-retry (line 523). The backend uses 409 for an unsafe base URL (lines 322–324) and for a failed validation of a new active key (lines 386–392).
-- Test Connection and Cancel Test (lines 556–583 and 757–774). The test does not change activation.
-- Search models (lines 784–796) filters the offered list. Refresh Models (lines 586–602) posts `.../refresh` and does not activate. A 409, including “no secret stored” (`admin_providers.py` lines 488–491), is sent to deactivate-retry (line 598).
-- The model select (lines 837–863) uses the exact offered id.
-- Conflict Retry (lines 246–259). Activate and deactivate retry the same action with the fresh revision. Every other 409 stored a `deactivate` action, so Retry calls `runDeactivate` (lines 255–258) with no second confirm. `isConflict` is any `ApiError` with status 409 (lines 108–109). A secret over 4096 characters is also 409 (`admin_providers.py` lines 331–334).
+- Use as active (lines 648–652) confirms in `requestActivate` or `requestDeactivate` (lines 602–629), then posts activate or deactivate with `current_revision`.
+- Save Key and Replace Key (lines 479–500 and 703–706). The input is cleared and never prefilled. A 409, including a secret over 4096 characters (`admin_providers.py` lines 331–334) and a failed check of the active key (lines 386–392), calls `setCardError` (line 500). It does not store a deactivate retry.
+- Show Key and Hide Key (lines 687–696).
+- Remove Key (lines 528–548) confirms, then PUTs `secret: ""` and `confirm: true`. The backend deactivates if that provider is active (lines 337–364). A 409 on this request calls `setCardError` (line 548). It does not call `runDeactivate`.
+- Save Base URL (lines 506–522). A 409, including an unsafe base URL (`admin_providers.py` lines 322–324), calls `setCardError` (line 522).
+- Test Connection and Cancel Test (lines 554–581 and 754–771). The test does not change activation.
+- Search models (lines 781–794) filters the offered list. Refresh Models (function lines 584–596, button line 801) posts `.../refresh` and does not activate. A 409, including “no secret stored” (`admin_providers.py` lines 488–491), calls `setRefreshError` (line 596). The alert under the search box (lines 821–827) retries that refresh. It does not deactivate.
+- The model select (lines 834–861) uses the exact offered id.
+- Conflict Retry (lines 246–260, button at line 319). Only activate and deactivate store a retry action (`runActivate` line 222, `runDeactivate` line 239). Retry then repeats that action against the refetched revision (lines 251–258). `isConflict` is still any `ApiError` with status 409 (lines 108–109). Save Key, Save Base URL, Remove Key, and Refresh Models do not pass an action into it. The card prints their message in `role="alert"` (line 671).
 
-Any in-flight provider action shows “Activating…” on every card. The shared `busy` flag is rendered inside each card, and only the exact string `"deactivate"` selects the other label (lines 668–671).
+Any in-flight provider action shows “Activating…” on every card. The shared `busy` flag is rendered inside each card, and only the exact string `"deactivate"` selects the other label (lines 665–668).
 
-`POST /api/drafts/{id}/analyze` (`product.py` lines 2381–2432) calls `bind_snapshot`, then `readiness()`, and returns 409 when not ready. The job payload stores that snapshot. The draft becomes `queued`.
+`POST /api/drafts/{id}/analyze` (`product.py` lines 2479–2532) calls `bind_snapshot`, then `readiness()`, and returns 409 when not ready. The job payload stores that snapshot. The draft becomes `queued`.
 
 One Analyse press binds the snapshot in `bind_snapshot` (`video_analysis.py` lines 88–135). The worker re-checks in `check_snapshot` (lines 145–158) at the start of `run` (line 485), after the pipeline (line 546), and again inside the publish transaction (line 585). A changed input raises and does not publish. Metrics come from `measured_from_records` (line 553, function at 245–378) using the confirmed match records, not the LLM. A total with no known contributor becomes `None` (lines 367–371). A zero impression pool leaves CTR null and adds `missing is not zero` (lines 354–359). Silent clips set `audio` to `None` in `prepare_media` (lines 189–200). `run_pipeline` then skips STT (`creative.py` lines 1106–1113) and still calls `llm.structure` (line 1130). That skip is reached only if the vision-roster gate has already passed. Draft success status is `ready_for_review` (`video_analysis.py` lines 627–628). `jobs.complete` sets the job row to `completed` (`jobs.py` lines 203–217), and the worker applies that after the handler returns (`worker.py` lines 110–119). The worker sets `analyzing` at start and `failed` or `cancelled` on the way out (`worker_handlers.py` lines 233–270). The provider receives JPEG bytes and WAV bytes, not the file path (`video_analysis.py` lines 526–539). Frames require a JPEG magic header (`video.py` lines 256–268). Audio is 16 kHz mono PCM (`video.py` lines 19 and 200–218). `readiness` labels the send as `sampled JPEG frames + 16kHz mono WAV` (lines 73–74).
 
 Annotate runs before `llm.structure` (`creative.py` line 1086, then 1130). With no managed selection, the LLM slot is already the not-configured error. Publish does not happen. The draft is marked `failed` (`worker_handlers.py` lines 261–270). The vision call still ran.
 
-`POST /api/ask` is the model call on the ask surface (`product.py` lines 905–936). `run_ask` passes `prov.llm` only in live mode (`worker_handlers.py` lines 125–138). Analyst ask, analyst creatives, and the analyst report do not call the model.
+`POST /api/ask` is the model call on the ask surface (`product.py` lines 951–982). `run_ask` passes `prov.llm` only in live mode (`worker_handlers.py` lines 125–138). Analyst ask, analyst creatives, and the analyst report do not call the model.
 
 ## Analyze Video wizard
 
@@ -378,27 +391,28 @@ The step chips (lines 1404–1417) are text, not buttons.
 
 ## Assets
 
-`GET /assets/{name}` (`product.py` lines 2849–2870) serves `.png` from `REACT_ASSETS_DIR` first, because `.png` is in `_ALLOWED_DIST_EXTS` (lines 2796–2797). A missing dist file raises 404 (lines 2856–2858) and does not fall through to `ASSETS_DIR`. Brand files live in `Web/assets` and are served by `/foap-logo.png`, `/foap-mark.png`, and `/favicon.png` (lines 2880–2900). The React shell uses those dedicated paths. `GET /assets/favicon.png` and `GET /assets/foap-logo.png` 404 unless a hashed build has copied those exact names into the dist assets directory.
+`GET /assets/{name}` (`product.py` lines 2947–2968) serves `.png` from `REACT_ASSETS_DIR` first, because `.png` is in `_ALLOWED_DIST_EXTS` (lines 2894–2895). A missing dist file raises 404 (lines 2954–2956) and does not fall through to `ASSETS_DIR`. Brand files live in `Web/assets` and are served by `/foap-logo.png`, `/foap-mark.png`, and `/favicon.png` (lines 2978–2990). The React shell uses those dedicated paths. `GET /assets/favicon.png` and `GET /assets/foap-logo.png` 404 unless a hashed build has copied those exact names into the dist assets directory.
+
+## Fixed on this push
+
+The four items below were defects at the parent. They are the behavior named at the top of this file. Do not report them again unless the cited lines no longer do what this file says.
+
+- Campaign drawer: `GET /api/campaigns/{name}` (`product.py` lines 189–203, `CampaignsPage.tsx` lines 358–381).
+- Table CSV: `POST /api/exports/campaigns`, `/api/exports/creatives`, and `/api/exports/benchmarks` (`product.py` lines 1464–1506).
+- Group By Format and the vertical count: `format` and `vertical` are in `GROUPABLE` (`benchmarks.py` lines 10–11). `BenchmarksPage.tsx` lines 31–33 and 112 call those names.
+- Provider validation 409: Save Key, Save Base URL, Remove Key, and Refresh Models set the card or refresh error (`ProvidersPage.tsx` lines 500, 522, 548, and 596). They do not call `runDeactivate`.
 
 ## Defects still true
-
-P1. The campaign drawer calls `GET /api/campaigns/${name}` (`CampaignsPage.tsx` line 361). No such route exists. The drawer shows the client’s “Request failed (404)”.
-
-P1. Campaign Export, Creative Export, and Benchmark Export post to `/api/exports/campaigns`, `/api/exports/creatives`, and `/api/exports/benchmarks`. Those routes are not registered. The only export route is `POST /api/export`.
-
-P1. Group By Format asks for `group_by=format` (`BenchmarksPage.tsx` lines 31–33). `GROUPABLE` does not include `format` (`benchmarks.py` lines 10–11). The results panel shows the benchmark error.
-
-P1. On Providers, a 409 from Save Key, Save Base URL, Remove Key, or Refresh Models is stored as a deactivate retry (`ProvidersPage.tsx` lines 499, 523, 549, and 598). Retry then calls `runDeactivate` (lines 246–259) with no second confirm. The backend uses 409 for a long secret, an unsafe base URL, a failed validation of the active key, and a refresh with no stored secret, not only for a revision conflict.
 
 P2. Compare does not redraw results when the shared scope changes while the page stays mounted (`ComparePage.tsx` lines 377–409 and 411–434). The trend chart aligns days by index (`ComparePage.tsx` lines 517–531, `charts.tsx` lines 51–58 and 85–86).
 
 P2. Compare copy listed in that section stays English in Spanish and Polish.
 
-P2. Reports with every campaign unchecked send `campaigns: null` (`ReportsPage.tsx` line 447), and the report then includes every campaign still in scope (`actions.py` line 1217, `benchmarks.py` lines 839–841).
+P2. Reports with every campaign unchecked send `campaigns: null` (`ReportsPage.tsx` line 447), and the report then includes every campaign still in scope (`actions.py` line 1374, `benchmarks.py` lines 839–841).
 
 P2. Creative checkboxes do not change Export or open a compare. Grid view cannot open a creative. Dashboard “Open in Creatives” drops the creative key. Campaign “vs. Benchmark” is one shared number, or Unavailable. Campaign search ignores a later `?find=` while the page stays mounted.
 
-P2. Dashboard length bars compare each bucket with itself, and duration `0` is dropped. Creatives shows duration `0` as “—” (`CreativesPage.tsx` line 119). Money on Dashboard, Campaigns, and Ask is USD. The dashboard date window is the first and last day of the latest 30 dates with rows, written into the shared scope, not Settings’ Default Date Range.
+P2. Dashboard length bars compare each bucket with itself, and duration `0` is dropped. Creatives shows duration `0` as “—” (`CreativesPage.tsx` line 120). Money on Dashboard, Campaigns, and Ask is USD. The dashboard date window is the first and last day of the latest 30 dates with rows, written into the shared scope, not Settings’ Default Date Range.
 
 P2. Several failures render as a skeleton or as an empty state: dashboard charts and recommendations, campaign platform bars, daily series, Insights cards, and the Workbook preview. Insights filters do not filter the panels their labels name. Saved Analyst conversations and the Ask deep link do not load messages.
 
@@ -420,4 +434,4 @@ P3. Provider cards show “Activating…” for every in-flight action. Workbook
 
 ## Checks not performed
 
-No server, browser, Playwright, Render click-through, live provider, ffmpeg run, or the five Notino clips. The UI suite and the backend suite were not re-run for this file. The four backend failures from the last full run, on Python that this push does not change, were `tests/test_ci_app.py::test_security_headers_health_readiness` (`ModuleNotFoundError: No module named 'tests'`), `tests/test_ci_app.py::test_no_licensing_concepts` (the walker does not skip `.venv`), and `tests/test_web_shell.py` `test_favicon_asset_serves` plus `test_logo_and_mark_assets_serve` (404 on `/assets/favicon.png` and `/assets/foap-logo.png`). The 404 string for the campaign drawer is what `client.ts` produces for a non-OK response whose JSON has no `error` field. It was not observed on a running API. Export failure is from the missing route, not from a captured HTTP response. Spanish and Polish catalogs were checked for missing keys on the Ask, Analyst, Settings, Admin, and Providers slice only. They were not opened line by line for Compare.
+No server, browser, Playwright, Render click-through, live provider, ffmpeg run, or the five Notino clips. The full UI suite and the full backend suite were not re-run. This push ran only `tests/test_table_exports.py` (3 passed), the four Vitest files named at the top (43 passed), `pnpm exec tsc --noEmit` (exit 0), and ruff on `tests/test_table_exports.py`. The four backend failures from the last full run, before this push changed Python, were `tests/test_ci_app.py::test_security_headers_health_readiness` (`ModuleNotFoundError: No module named 'tests'`), `tests/test_ci_app.py::test_no_licensing_concepts` (the walker does not skip `.venv`), and `tests/test_web_shell.py` `test_favicon_asset_serves` plus `test_logo_and_mark_assets_serve` (404 on `/assets/favicon.png` and `/assets/foap-logo.png`). Those four were not re-run. `client.ts` lines 32–33 still turn a non-OK body with no `error` field into `Request failed (${status})`. This drawer route puts `error` on the 404, so that fallback is not the drawer copy. Spanish and Polish catalogs were checked for missing keys on the Ask, Analyst, Settings, Admin, and Providers slice only. They were not opened line by line for Compare. Pre-existing ruff findings in `product.py` and `benchmarks.py` were left as they were.

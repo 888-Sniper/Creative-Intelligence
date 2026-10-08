@@ -631,6 +631,163 @@ def build_creatives_list(conn, q, owner=None, admin=False):
     return kept
 
 
+def _mark_seconds(ann, key):
+    """Start times from an annotation span list, in stored order."""
+    spans = (ann or {}).get(key) or []
+    out = []
+    for span in spans:
+        if not isinstance(span, dict):
+            continue
+        start = span.get("start_s")
+        if isinstance(start, bool) or not isinstance(start, (int, float)):
+            continue
+        out.append(start)
+    return out
+
+
+def campaign_detail_payload(conn, name, query, owner=None, admin=False):
+    """Scoped campaign drawer: totals, creatives in that campaign, recommendations.
+
+    ``None`` means the name is absent from the scoped campaign roll-up.
+    Totals use the same ``benchmark(..., "campaign")`` grouping as the
+    table. Creatives use ``build_creatives_list`` so a confirmed match
+    replaces key equality the same way the Creatives page does.
+    """
+    from creative_intel import benchmarks as bench
+
+    label = (name or "").strip()
+    if not label:
+        raise ValueError("campaign name is required")
+    scoped = bench.Scope.from_query(query or {}).resolve(conn)
+    grouped = bench.benchmark(conn, "campaign", scoped.normalized())
+    if label not in grouped:
+        return None
+    creatives = []
+    for row in build_creatives_list(conn, query or {}, owner=owner, admin=admin):
+        if label not in (row.get("campaigns") or []):
+            continue
+        ann = row.get("annotation") if isinstance(row.get("annotation"), dict) else {}
+        creatives.append({
+            "creative_key": row.get("creative_key") or "",
+            "campaigns": list(row.get("campaigns") or []),
+            "platform": row.get("platform") or "",
+            "format": row.get("format") or "",
+            "metrics": row.get("metrics") or {},
+            "brand_seconds": _mark_seconds(ann, "brand_seconds"),
+            "product_seconds": _mark_seconds(ann, "product_seconds"),
+        })
+    creatives.sort(
+        key=lambda item: (item["metrics"].get("impressions") or 0),
+        reverse=True)
+    reco = bench.campaign_recommendations(
+        conn, label, scoped, "cpa", owner=owner, admin=admin)
+    texts = []
+    for section in reco.get("sections") or []:
+        for bullet in section.get("bullets") or []:
+            text = bullet.get("text") if isinstance(bullet, dict) else ""
+            if text:
+                texts.append(text)
+    return {
+        "name": label,
+        "totals": grouped[label],
+        "top_creatives": creatives[:25],
+        "recommendations": texts,
+    }
+
+
+def _csv_cell(value):
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return value
+    text = str(value)
+    if text[:1] in ("=", "+", "-", "@"):
+        return "'" + text
+    return text
+
+
+def _csv_text(headers, rows):
+    import csv
+    import io
+
+    buf = io.StringIO()
+    writer = csv.writer(buf, lineterminator="\n")
+    writer.writerow(headers)
+    for row in rows:
+        writer.writerow([_csv_cell(cell) for cell in row])
+    return buf.getvalue()
+
+
+def campaigns_csv(conn, names, filters=None):
+    """CSV of the named campaigns inside ``filters`` (the visible table)."""
+    from creative_intel import benchmarks as bench
+
+    scope = None
+    if filters:
+        scope = bench.Scope(filters).resolve(conn).normalized()
+    grouped = bench.benchmark(conn, "campaign", scope)
+    headers = ("name", "spend", "impressions", "clicks", "conversions",
+               "revenue", "ctr", "cpc", "cpa", "roas")
+    rows = []
+    for name in names:
+        totals = grouped.get(name)
+        if totals is None:
+            continue
+        rows.append((name, totals.get("spend"), totals.get("impressions"),
+                     totals.get("clicks"), totals.get("conversions"),
+                     totals.get("revenue"), totals.get("ctr"),
+                     totals.get("cpc"), totals.get("cpa"), totals.get("roas")))
+    return _csv_text(headers, rows)
+
+
+def creatives_csv(conn, keys, filters=None, owner=None, admin=False):
+    """CSV of the requested creatives, scoped the same way as the list."""
+    rows_by_key = {
+        row.get("creative_key"): row
+        for row in build_creatives_list(
+            conn, filters or {}, owner=owner, admin=admin)
+    }
+    headers = ("creative_key", "name", "platform", "format", "campaigns",
+               "impressions", "clicks", "spend", "conversions", "ctr",
+               "cpa", "roas")
+    out = []
+    for key in keys:
+        row = rows_by_key.get(key)
+        if row is None:
+            continue
+        metrics = row.get("metrics") or {}
+        out.append((
+            key, row.get("name") or "", row.get("platform") or "",
+            row.get("format") or "", "; ".join(row.get("campaigns") or []),
+            metrics.get("impressions"), metrics.get("clicks"),
+            metrics.get("spend"), metrics.get("conversions"),
+            metrics.get("ctr"), metrics.get("cpa"), metrics.get("roas"),
+        ))
+    return _csv_text(headers, out)
+
+
+def benchmarks_csv(conn, group_by, filters=None):
+    """CSV of one benchmark grouping. ``group_by`` must be GROUPABLE."""
+    from creative_intel import benchmarks as bench
+
+    scope = None
+    if filters:
+        scope = bench.Scope(filters).resolve(conn).normalized()
+    grouped = bench.benchmark(conn, group_by, scope)
+    headers = ("group", "n_ads", "spend", "impressions", "clicks",
+               "conversions", "ctr", "cpc", "cpa", "roas")
+    rows = []
+    for key in sorted(grouped):
+        totals = grouped[key]
+        rows.append((key, totals.get("n_ads"), totals.get("spend"),
+                     totals.get("impressions"), totals.get("clicks"),
+                     totals.get("conversions"), totals.get("ctr"),
+                     totals.get("cpc"), totals.get("cpa"), totals.get("roas")))
+    return _csv_text(headers, rows)
+
+
 COMPARE_RANK_METRICS = ("cpm", "vtr", "ctr", "cpc", "cpa", "roas")
 
 COMPARE_RANK_DIRECTIONS = {"cpm": "lower", "vtr": "higher", "ctr": "higher",

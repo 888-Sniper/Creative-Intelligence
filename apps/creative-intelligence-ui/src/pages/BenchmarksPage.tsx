@@ -241,7 +241,7 @@ export function BenchmarksPage() {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ group_by: axis, filters: scopeBody(scope) }),
       });
       if (!res.ok) throw new Error(t("benchmarks.exportFailed"));
       const blob = await res.blob();

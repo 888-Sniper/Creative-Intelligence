@@ -134,6 +134,51 @@ def audio_track_missing(exc):
     ))
 
 
+def _read_cached_wav(path):
+    """A finished WAV from cache, or None.
+
+    An empty or truncated file left by a failed extract is removed.
+    It is not a silent clip.
+    """
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, "rb") as fh:
+            blob = fh.read()
+    except OSError:
+        blob = b""
+    if _complete_wav(blob):
+        return blob
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+    return None
+
+
+def _complete_wav(blob):
+    if len(blob) < 12 or not blob.startswith(b"RIFF"):
+        return False
+    declared = int.from_bytes(blob[4:8], "little")
+    return declared + 8 == len(blob)
+
+
+def _drop_incomplete_wav(path):
+    if not os.path.isfile(path):
+        return
+    try:
+        with open(path, "rb") as fh:
+            blob = fh.read()
+    except OSError:
+        blob = b""
+    if _complete_wav(blob):
+        return
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
 def extract_audio(src_path, dst_wav):
     _run(["ffmpeg", "-y", "-v", "error", "-i", src_path,
           "-vn", "-ac", "1", "-ar", str(SAMPLE_RATE), "-c:a", "pcm_s16le",
@@ -210,13 +255,12 @@ def prepare(src_path, cache_dir, every_s=EVERY_S, duration_s=None):
         digest = hashlib.sha256(fh.read()).hexdigest()
     os.makedirs(cache_dir, exist_ok=True)
     wav_path = os.path.join(cache_dir, "%s_audio.wav" % digest[:16])
-    if os.path.isfile(wav_path):
-        with open(wav_path, "rb") as fh:
-            audio = fh.read()
-    else:
+    audio = _read_cached_wav(wav_path)
+    if audio is None:
         try:
             audio = extract_audio(src_path, wav_path)
         except Exception as exc:
+            _drop_incomplete_wav(wav_path)
             if not audio_track_missing(exc):
                 raise
             audio = None  # stills-only clip: vision can proceed

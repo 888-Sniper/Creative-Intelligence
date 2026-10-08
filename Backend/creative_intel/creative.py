@@ -369,30 +369,50 @@ def _flag_span(rows, pred):
     return {"start_s": min(times), "end_s": max(times), "confidence": 0.8}
 
 
-def _reconcile_observed_span(ann, rows, key, flag):
-    """Pull a model span forward to a flagged frame.
+def _observed_runs(rows, flag):
+    """One span per contiguous run of frames where flag is true.
 
-    Benchmarks read product_seconds. Suggested tests read
-    execution.product_first_s. A frame at 0s and a model span at 9s
-    must not both stand. A model span that already starts at or
-    before the frame is kept.
+    An explicit false frame ends the run. True at 0, false at 3,
+    and true at 6 stay two spans, so second 3 is not inside one.
     """
-    observed = _flag_span(rows, lambda row: row.get(flag))
-    if not observed:
-        return
-    spans = ann.get(key) if isinstance(ann.get(key), list) else []
-    starts = []
-    for span in spans:
-        if not isinstance(span, dict):
+    timed = []
+    for row in rows:
+        if not isinstance(row, dict) or flag not in row:
             continue
         try:
-            starts.append(float(span.get("start_s")))
+            t_sec = float(row.get("t_sec"))
         except (TypeError, ValueError):
             continue
-    earliest = min(starts) if starts else None
-    if earliest is None or earliest > observed["start_s"]:
-        ann[key] = [{"start_s": observed["start_s"],
-                     "end_s": observed["end_s"]}]
+        timed.append((t_sec, row.get(flag) is True))
+    timed.sort(key=lambda item: item[0])
+    spans = []
+    start = None
+    end = None
+    for t_sec, visible in timed:
+        if visible:
+            if start is None:
+                start = t_sec
+            end = t_sec
+        elif start is not None:
+            spans.append({"start_s": start, "end_s": end})
+            start = None
+            end = None
+    if start is not None:
+        spans.append({"start_s": start, "end_s": end})
+    return spans
+
+
+def _reconcile_observed_span(ann, rows, key, flag):
+    """Store the frame runs in place of the model spans.
+
+    Benchmarks and retention read the span list. Execution reads
+    the first true flag. A model span at 0s cannot stand when the
+    frame at 0s is false and the first true frame is later.
+    """
+    if not any(isinstance(row, dict) and row.get(flag) is True
+               for row in rows):
+        return
+    ann[key] = _observed_runs(rows, flag)
 
 
 def reconcile_creator_mode(labels, current):

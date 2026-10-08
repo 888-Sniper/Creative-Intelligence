@@ -194,6 +194,27 @@ def test_product_span_matches_the_flagged_frame():
         ann, labels, duration_s=15.0, transcript="")
     assert got["execution"]["product_first_s"] == 0.0
     assert got["product_seconds"] == [{"start_s": 0.0, "end_s": 0.0}]
+    early = creative_mod.blank_annotation()
+    early["product_seconds"] = [{"start_s": 0.0, "end_s": 12.0}]
+    later = creative_mod.apply_observation_facts(
+        early, [{"t_sec": 0.0, "label": "Card", "product_visible": False},
+                {"t_sec": 9.0, "label": "Card", "product_visible": True}],
+        duration_s=15.0, transcript="")
+    assert later["execution"]["product_first_s"] == 9.0
+    assert later["product_seconds"] == [{"start_s": 9.0, "end_s": 9.0}]
+    gapped = creative_mod.blank_annotation()
+    gapped["product_seconds"] = [{"start_s": 0.0, "end_s": 6.0}]
+    split = creative_mod.apply_observation_facts(
+        gapped, [{"t_sec": 0.0, "label": "Card", "product_visible": True},
+                 {"t_sec": 3.0, "label": "Card", "product_visible": False},
+                 {"t_sec": 6.0, "label": "Card", "product_visible": True}],
+        duration_s=15.0, transcript="")
+    assert split["product_seconds"] == [
+        {"start_s": 0.0, "end_s": 0.0},
+        {"start_s": 6.0, "end_s": 6.0}]
+    from creative_intel.retention import _span_covers
+    assert _span_covers(split["product_seconds"], 3.0) is False
+    assert _span_covers(split["product_seconds"], 0.0) is True
     assert got["narrative"] == "unknown"
     assert got["pace_cuts_per_min"] == 4.0
     spoken = creative_mod.blank_annotation()
@@ -241,6 +262,30 @@ def test_audio_extraction_failure_is_not_silence(monkeypatch):
     prepared = va.prepare_media("clip.mp4", 15.0)
     assert prepared["audio"] is None
     assert prepared["sampling"]["audio"] == "absent"
+
+
+def test_failed_wav_cache_is_not_silence(tmp_path, monkeypatch):
+    from creative_intel import video as video_mod
+    from creative_intel.providers import ProviderUnavailable
+    src = tmp_path / "clip.mp4"
+    src.write_bytes(b"fake-video-bytes")
+    cache = tmp_path / "cache"
+    calls = {"n": 0}
+
+    def disk_full(_src, dst_wav):
+        calls["n"] += 1
+        with open(dst_wav, "wb") as fh:
+            fh.write(b"")
+        raise ProviderUnavailable(
+            "ffmpeg exited 1: No space left on device")
+
+    monkeypatch.setattr(video_mod, "have_ffmpeg", lambda: True)
+    monkeypatch.setattr(video_mod, "extract_audio", disk_full)
+    with pytest.raises(ProviderUnavailable):
+        video_mod.prepare(str(src), str(cache), duration_s=1.0)
+    with pytest.raises(ProviderUnavailable):
+        video_mod.prepare(str(src), str(cache), duration_s=1.0)
+    assert calls["n"] == 2
 
 
 def bound_db(tmp_path):

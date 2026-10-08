@@ -14,6 +14,7 @@ import hashlib
 import os
 import shutil
 import subprocess
+import tempfile
 
 SAMPLE_RATE = 16000
 EVERY_S = 3.0
@@ -183,18 +184,28 @@ def _discard_wav(path):
         pass
 
 
-def _partial_wav(dst_wav):
-    """A .wav path ffmpeg will open. The cache name is untouched."""
-    return dst_wav + ".partial.wav"
+def _private_wav(dst_wav):
+    """One temporary WAV for this extraction.
+
+    The name ends in .wav so ffmpeg will open it, and it is unique
+    so two prepares of the same clip do not share a file.
+    """
+    directory = os.path.dirname(dst_wav) or "."
+    fd, path = tempfile.mkstemp(
+        prefix=".audio-", suffix=".wav", dir=directory)
+    os.close(fd)
+    return path
 
 
 def extract_audio(src_path, dst_wav):
-    """16 kHz mono WAV. The destination is replaced only after success.
+    """16 kHz mono WAV. Publish dst_wav only after success.
 
     ffmpeg can exit non-zero after writing a RIFF header with a
-    zero-length data chunk. That output is deleted. It is not audio.
+    zero-length data chunk. That temporary file is deleted. A
+    failure does not remove dst_wav: another call may already have
+    published the cache there.
     """
-    partial = _partial_wav(dst_wav)
+    partial = _private_wav(dst_wav)
     try:
         _run(["ffmpeg", "-y", "-v", "error", "-i", src_path,
               "-vn", "-ac", "1", "-ar", str(SAMPLE_RATE),
@@ -208,7 +219,6 @@ def extract_audio(src_path, dst_wav):
         return blob
     except Exception:
         _discard_wav(partial)
-        _discard_wav(dst_wav)
         raise
 
 
@@ -281,11 +291,8 @@ def prepare(src_path, cache_dir, every_s=EVERY_S, duration_s=None):
         try:
             audio = extract_audio(src_path, wav_path)
         except Exception as exc:
-            # Discard even a complete RIFF. Exit 69 can leave a
-            # 78-byte header whose declared size matches and whose
-            # data chunk has zero samples.
-            _discard_wav(wav_path)
-            _discard_wav(_partial_wav(wav_path))
+            # The temporary file is already gone. Leave wav_path
+            # alone: a peer prepare may have published it.
             if not audio_track_missing(exc):
                 raise
             audio = None  # stills-only clip: vision can proceed

@@ -20,7 +20,8 @@ def _cached_audio(cache):
     if not os.path.isdir(cache):
         return []
     return [name for name in os.listdir(cache)
-            if name.endswith("_audio.wav") or name.endswith(".partial.wav")]
+            if name.endswith("_audio.wav") or name.endswith(".partial.wav")
+            or name.startswith(".audio-")]
 
 
 def _corrupt_mdat(path):
@@ -112,6 +113,41 @@ class DecomposeTest(unittest.TestCase):
                 video.prepare(bad, cache)
             self.assertIn("ffmpeg exited", str(ctx.exception))
             self.assertFalse(_cached_audio(cache))
+
+    def test_concurrent_prepares_keep_the_published_wav(self):
+        import threading
+        for trial in range(3):
+            cache = os.path.join(self.tmp, "race-%d" % trial)
+            errors = []
+            results = []
+            lock = threading.Lock()
+
+            def run():
+                try:
+                    out = video.prepare(self.clip, cache)
+                except Exception as exc:
+                    with lock:
+                        errors.append(exc)
+                else:
+                    with lock:
+                        results.append(out)
+
+            threads = [threading.Thread(target=run) for _ in range(2)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+            self.assertEqual(errors, [], trial)
+            self.assertEqual(len(results), 2, trial)
+            for out in results:
+                self.assertTrue(video._wav_has_samples(out["audio"][0]))
+            published = [name for name in os.listdir(cache)
+                         if name.endswith("_audio.wav")]
+            self.assertEqual(len(published), 1, trial)
+            with open(os.path.join(cache, published[0]), "rb") as fh:
+                self.assertTrue(video._wav_has_samples(fh.read()))
+            self.assertFalse([name for name in os.listdir(cache)
+                              if name.startswith(".audio-")])
 
     def test_duration_probe(self):
         dur = video.probe_duration_s(self.clip)

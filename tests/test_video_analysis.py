@@ -313,11 +313,63 @@ def test_header_only_wav_from_failed_extract_is_not_audio(tmp_path, monkeypatch)
     monkeypatch.setattr(video_mod, "extract_audio", exit_69)
     with pytest.raises(ProviderUnavailable):
         video_mod.prepare(str(src), str(cache), duration_s=1.0)
-    assert list(cache.glob("*_audio.wav")) == []
     with pytest.raises(ProviderUnavailable):
         video_mod.prepare(str(src), str(cache), duration_s=1.0)
     assert calls["n"] == 2
-    assert list(cache.glob("*_audio.wav")) == []
+    leftover = list(cache.glob("*_audio.wav"))
+    assert len(leftover) == 1
+    assert video_mod._wav_has_samples(leftover[0].read_bytes()) is False
+
+
+def test_failed_extract_keeps_a_published_cache(tmp_path, monkeypatch):
+    import hashlib
+    import struct
+
+    src = tmp_path / "clip.mp4"
+    payload = b"fake-video-bytes"
+    src.write_bytes(payload)
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    digest = hashlib.sha256(payload).hexdigest()[:16]
+    published = cache / ("%s_audio.wav" % digest)
+    samples = struct.pack("<h", 1) * 8
+    fmt = struct.pack("<HHIIHH", 1, 1, 16000, 32000, 2, 16)
+    body = (b"WAVE" + b"fmt " + struct.pack("<I", 16) + fmt
+            + b"data" + struct.pack("<I", len(samples)) + samples)
+    good = b"RIFF" + struct.pack("<I", len(body)) + body
+
+    def collide(_src, dst_wav):
+        with open(dst_wav, "wb") as fh:
+            fh.write(good)
+        raise FileNotFoundError(dst_wav)
+
+    monkeypatch.setattr(video_mod, "have_ffmpeg", lambda: True)
+    monkeypatch.setattr(video_mod, "extract_audio", collide)
+    with pytest.raises(FileNotFoundError):
+        video_mod.prepare(str(src), str(cache), duration_s=1.0)
+    assert published.read_bytes() == good
+
+
+def test_extract_audio_temps_are_unique(tmp_path, monkeypatch):
+    from creative_intel.providers import ProviderUnavailable
+    paths = []
+
+    def fail_run(argv):
+        paths.append(argv[-1])
+        raise video_mod._unavailable("ffmpeg exited 69: boom")
+
+    monkeypatch.setattr(video_mod, "_run", fail_run)
+    dst = tmp_path / "out.wav"
+    dst.write_bytes(b"published-cache")
+    for _ in range(2):
+        with pytest.raises(ProviderUnavailable):
+            video_mod.extract_audio("clip.mp4", str(dst))
+    assert paths[0] != paths[1]
+    assert os.path.basename(paths[0]).startswith(".audio-")
+    assert paths[0].endswith(".wav")
+    assert os.path.exists(paths[0]) is False
+    assert os.path.exists(paths[1]) is False
+    assert dst.read_bytes() == b"published-cache"
 
 
 def bound_db(tmp_path):

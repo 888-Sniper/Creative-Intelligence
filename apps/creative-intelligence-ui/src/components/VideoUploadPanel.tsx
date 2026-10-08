@@ -1343,7 +1343,13 @@ export function VideoUploadPanel({ open, employeeId, onClose, onNotify }: PanelP
                   </div>
                   <div>
                     <dt>{vu("durationLabel")}</dt>
-                    <dd>{spec.video ? `${Math.round(spec.video.duration_s * 10) / 10} Seconds` : "—"}</dd>
+                    <dd>
+                      {spec.video
+                        ? vu("durationValue", {
+                          duration: Math.round(spec.video.duration_s * 10) / 10,
+                        })
+                        : "—"}
+                    </dd>
                   </div>
                   <div>
                     <dt>{vu("sizeLabel")}</dt>
@@ -1497,9 +1503,10 @@ export function VideoUploadPanel({ open, employeeId, onClose, onNotify }: PanelP
                   {(draft?.datasets ?? []).map((d) => {
                     const active = d.version
                       === (spec.dataset?.version || draft?.dataset_version || "");
+                    const name = d.filename || d.version;
                     return (
                       <option key={d.id} value={d.version}>
-                        {d.filename || d.version}{active ? " (Current)" : ""}
+                        {active ? vu("datasetCurrent", { name }) : name}
                       </option>
                     );
                   })}

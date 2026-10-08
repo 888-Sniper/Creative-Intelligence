@@ -4,6 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 import { DashboardPage } from "@/pages/DashboardPage";
 import { VideoUploadCard } from "@/components/VideoUploadCard";
 import { VideoUploadPanel } from "@/components/VideoUploadPanel";
+import { LocaleProvider } from "@/i18n";
 import { FilterProvider } from "@/state/FilterContext";
 import type { DraftView } from "@/components/videoUploadApi";
 
@@ -970,5 +971,67 @@ describe("VideoUpload guided panel", () => {
         screen.getAllByText("Correction Saved. The Findings Need Re-Review.").length,
       ).toBeGreaterThanOrEqual(1);
     });
+  });
+
+  it("localizes the duration value and the current dataset name", async () => {
+    const localized = baseDraft({
+      id: "d-loc",
+      dataset_version: "v1",
+      spec: {
+        creative_key: "video-upload-sample",
+        media: { id: 12, filename: "sample.mp4", bytes: 356681, sha256: "abc", url: "/media/12" },
+        video: { video_id: "vid1", duration_s: 15, width: 1280, height: 720, status: "valid" },
+        dataset: {
+          dataset_id: "ds1", version: "v1", rows: 3, inserted: 3,
+          updated: 0, quarantined: 0, filename: "data.csv",
+        },
+      },
+      datasets: [
+        { id: "ds1", draft_id: "d-loc", filename: "data.csv", rows: 3, version: "v1", sha256: "", created_at: "" },
+        { id: "ds2", draft_id: "d-loc", filename: "b.csv", rows: 5, version: "v2", sha256: "", created_at: "" },
+      ],
+    });
+    const cases = [
+      { lang: "en", duration: "15 Seconds", current: "data.csv (Current)", datasetLabel: "Imported Dataset" },
+      { lang: "es", duration: "15 s", current: "data.csv (actual)", datasetLabel: "Conjunto importado" },
+      { lang: "pl", duration: "15 s", current: "data.csv (bieżący)", datasetLabel: "Zaimportowany zbiór" },
+    ] as const;
+    for (const row of cases) {
+      window.localStorage.setItem("ci-settings-prefs", JSON.stringify({ language: row.lang }));
+      panelBackend([
+        (m, u) => (u === "/api/drafts/d-loc" && m === "GET" ? { draft: localized } : undefined),
+      ]);
+      render(
+        <MemoryRouter>
+          <LocaleProvider>
+            <VideoUploadPanel open={{ draftId: "d-loc", stage: "video" }} employeeId="e7" onClose={() => undefined} />
+          </LocaleProvider>
+        </MemoryRouter>,
+      );
+      await waitFor(() => {
+        expect(screen.getByText(row.duration)).toBeDefined();
+      });
+      cleanup();
+
+      window.localStorage.setItem("ci-settings-prefs", JSON.stringify({ language: row.lang }));
+      panelBackend([
+        (m, u) => (u === "/api/drafts/d-loc" && m === "GET" ? { draft: localized } : undefined),
+      ]);
+      render(
+        <MemoryRouter>
+          <LocaleProvider>
+            <VideoUploadPanel open={{ draftId: "d-loc", stage: "dataset" }} employeeId="e7" onClose={() => undefined} />
+          </LocaleProvider>
+        </MemoryRouter>,
+      );
+      await waitFor(() => {
+        expect(screen.getByLabelText(row.datasetLabel)).toBeDefined();
+      });
+      const select = screen.getByLabelText(row.datasetLabel) as HTMLSelectElement;
+      expect([...select.options].find((o) => o.value === "v1")?.textContent).toBe(row.current);
+      expect([...select.options].find((o) => o.value === "v2")?.textContent).toBe("b.csv");
+      cleanup();
+      window.localStorage.clear();
+    }
   });
 });

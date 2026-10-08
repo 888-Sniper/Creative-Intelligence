@@ -585,6 +585,141 @@ describe("VideoUpload guided panel", () => {
     expect(window.localStorage.getItem("ci-video-draft:e7")).toBe("d1");
   });
 
+  function videoOnlyDraft(id: string): DraftView {
+    return baseDraft({
+      id,
+      spec: {
+        creative_key: "clip",
+        media: { id: 12, filename: "clip.mp4", bytes: 1000, sha256: "abc", url: "/media/12" },
+        video: { video_id: "vid", duration_s: 8, width: 720, height: 1280, status: "valid" },
+      },
+    });
+  }
+
+  it("resumes the step the wizard was left on, ahead of the saved gate", async () => {
+    const draft = videoOnlyDraft("d4");
+    window.localStorage.setItem("ci-video-draft:e7", "d4");
+    window.localStorage.setItem("ci-video-draft-stage:e7", JSON.stringify({ d4: "review" }));
+    panelBackend([
+      (m, u) => (u === "/api/drafts" && m === "GET" ? { drafts: [draft] } : undefined),
+      (m, u) => (u === "/api/drafts/d4" && m === "GET" ? { draft } : undefined),
+    ]);
+    render(
+      <MemoryRouter>
+        <VideoUploadCard />
+      </MemoryRouter>,
+    );
+    await waitFor(() => {
+      expect(screen.getByText(/Unfinished Upload/)).toBeDefined();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+    // The saved spec only proves the client step. Resume still opens
+    // the step that was left open.
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Review And Analyze" })).toBeDefined();
+    });
+    expect(screen.queryByRole("heading", { name: "Client And Campaign" })).toBeNull();
+  });
+
+  it("records the open step when Continue moves ahead of the saved spec", async () => {
+    const draft = videoOnlyDraft("d4");
+    panelBackend([
+      (m, u) => (u === "/api/drafts/d4" && m === "GET" ? { draft } : undefined),
+    ]);
+    const { unmount } = render(
+      <MemoryRouter>
+        <VideoUploadPanel open={{ draftId: "d4" }} employeeId="e7" onClose={() => undefined} />
+      </MemoryRouter>,
+    );
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Client And Campaign" })).toBeDefined();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(screen.getByRole("heading", { name: "Performance Dataset" })).toBeDefined();
+    expect(window.localStorage.getItem("ci-video-draft-stage:e7")).toBe(
+      JSON.stringify({ d4: "dataset" }),
+    );
+    unmount();
+    render(
+      <MemoryRouter>
+        <VideoUploadPanel open={{ draftId: "d4" }} employeeId="e7" onClose={() => undefined} />
+      </MemoryRouter>,
+    );
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Performance Dataset" })).toBeDefined();
+    });
+  });
+
+  it("keeps typed client and campaign when the wizard is closed and resumed", async () => {
+    let current = videoOnlyDraft("d4");
+    panelBackend([
+      (m, u, b) => {
+        if (u !== "/api/drafts/d4") return undefined;
+        if (m === "GET") return { draft: current };
+        if (m === "PATCH") {
+          const spec = ((b ?? {}) as { spec?: DraftView["spec"] }).spec ?? current.spec;
+          current = { ...current, spec };
+          return { draft: current };
+        }
+        return undefined;
+      },
+    ]);
+    let closed = false;
+    const { unmount } = render(
+      <MemoryRouter>
+        <VideoUploadPanel
+          open={{ draftId: "d4" }} employeeId="e7"
+          onClose={() => { closed = true; }}
+        />
+      </MemoryRouter>,
+    );
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Client And Campaign" })).toBeDefined();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Use Names Not In The Catalogue" }));
+    fireEvent.change(screen.getByLabelText("Client"), { target: { value: "Northwind" } });
+    fireEvent.change(screen.getByLabelText("Campaign"), { target: { value: "Spring" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(screen.getByRole("heading", { name: "Performance Dataset" })).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Close Guided Upload" }));
+    await waitFor(() => {
+      expect(closed).toBe(true);
+    });
+    unmount();
+    render(
+      <MemoryRouter>
+        <VideoUploadPanel open={{ draftId: "d4" }} employeeId="e7" onClose={() => undefined} />
+      </MemoryRouter>,
+    );
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Performance Dataset" })).toBeDefined();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect((screen.getByLabelText("Client") as HTMLInputElement).value).toBe("Northwind");
+    expect((screen.getByLabelText("Campaign") as HTMLInputElement).value).toBe("Spring");
+  });
+
+  it("does not rewrite the draft when an unchanged wizard is closed", async () => {
+    const { calls } = panelBackend();
+    let closed = false;
+    render(
+      <MemoryRouter>
+        <VideoUploadPanel
+          open={{ draftId: "d1", stage: "review" }} employeeId="e7"
+          onClose={() => { closed = true; }}
+        />
+      </MemoryRouter>,
+    );
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Review And Analyze" })).toBeDefined();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Close Guided Upload" }));
+    await waitFor(() => {
+      expect(closed).toBe(true);
+    });
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false);
+  });
+
   it("shows the sheet picker on a top-level sheet conflict", async () => {
     const { calls } = panelBackend();
     const base = window.fetch;

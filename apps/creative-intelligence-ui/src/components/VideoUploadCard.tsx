@@ -11,8 +11,10 @@ import {
 } from "@/components/VideoUploadPanel";
 import {
   cancelAnalysisJob,
+  clearDraftStage,
   deleteDraft,
   draftKey,
+  forgetDraftStage,
   getDraft,
   listDrafts,
   patchDraft,
@@ -108,11 +110,14 @@ export function VideoUploadsProvider({ children }: { children: ReactNode }) {
       const recovered = await getDraft(pinned);
       setResume(recovered);
     } catch {
+      let pinned = "";
       try {
+        pinned = window.localStorage.getItem(draftKey(employeeId)) || "";
         window.localStorage.removeItem(draftKey(employeeId));
       } catch {
         /* ignore */
       }
+      if (pinned) forgetDraftStage(employeeId, pinned);
       setResume(null);
     }
   };
@@ -128,6 +133,7 @@ export function VideoUploadsProvider({ children }: { children: ReactNode }) {
       } catch {
         /* ignore */
       }
+      clearDraftStage(prevEmployee.current);
     }
     prevEmployee.current = employeeId;
     void reload();
@@ -176,6 +182,7 @@ export function VideoUploadsProvider({ children }: { children: ReactNode }) {
         if (window.localStorage.getItem(draftKey(employeeId)) === id) {
           window.localStorage.removeItem(draftKey(employeeId));
         }
+        forgetDraftStage(employeeId, id);
       } catch {
         /* ignore */
       }

@@ -32,6 +32,77 @@ export function draftKey(employeeId: string): string {
   return `${DRAFT_KEY_PREFIX}${employeeId || ""}`;
 }
 
+/** Last wizard step for the pinned draft. The step the user was
+ *  looking at is not a field the server can infer: Continue moves
+ *  ahead of the saved video, client, and dataset gates, and closing
+ *  the dialog drops that React state. Resume reads this pin. */
+export const DRAFT_STAGE_KEY_PREFIX = "ci-video-draft-stage:";
+
+const DRAFT_STAGES = ["video", "client", "dataset", "review"] as const;
+export type DraftWizardStage = (typeof DRAFT_STAGES)[number];
+
+export function draftStageKey(employeeId: string): string {
+  return `${DRAFT_STAGE_KEY_PREFIX}${employeeId || ""}`;
+}
+
+function stageMap(employeeId: string): Record<string, string> {
+  try {
+    const raw = window.localStorage.getItem(draftStageKey(employeeId));
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const out: Record<string, string> = {};
+    for (const [id, stage] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof stage === "string") out[id] = stage;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function writeStageMap(employeeId: string, map: Record<string, string>): void {
+  try {
+    const ids = Object.keys(map);
+    if (!ids.length) {
+      window.localStorage.removeItem(draftStageKey(employeeId));
+      return;
+    }
+    window.localStorage.setItem(draftStageKey(employeeId), JSON.stringify(map));
+  } catch {
+    /* recovery pin is best-effort */
+  }
+}
+
+export function readDraftStage(employeeId: string, draftId: string): DraftWizardStage | null {
+  const stage = stageMap(employeeId)[draftId];
+  return stage && (DRAFT_STAGES as readonly string[]).includes(stage)
+    ? stage as DraftWizardStage
+    : null;
+}
+
+export function writeDraftStage(employeeId: string, draftId: string, stage: string): void {
+  if (!draftId || !(DRAFT_STAGES as readonly string[]).includes(stage)) return;
+  const map = stageMap(employeeId);
+  map[draftId] = stage;
+  writeStageMap(employeeId, map);
+}
+
+export function forgetDraftStage(employeeId: string, draftId: string): void {
+  const map = stageMap(employeeId);
+  if (!map[draftId]) return;
+  delete map[draftId];
+  writeStageMap(employeeId, map);
+}
+
+export function clearDraftStage(employeeId: string): void {
+  try {
+    window.localStorage.removeItem(draftStageKey(employeeId));
+  } catch {
+    /* ignore */
+  }
+}
+
 export interface MediaRecord {
   id: number;
   creative_key: string;
@@ -120,6 +191,9 @@ export interface DatasetCandidate {
 }
 
 export interface VideoUploadSpec {
+  /** Last step the wizard was left on. Resume prefers this over the
+   *  earliest incomplete gate. Absent on drafts saved before the pin. */
+  wizardStage?: "video" | "client" | "dataset" | "review";
   client?: string;
   campaign?: string;
   clientConfirmed?: boolean;

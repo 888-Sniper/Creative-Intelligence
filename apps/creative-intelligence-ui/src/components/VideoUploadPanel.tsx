@@ -11,6 +11,7 @@ import {
   createDraft,
   deleteDraftVideos,
   draftKey,
+  forgetDraftStage,
   formatBytes,
   getAnalysis,
   getCandidates,
@@ -23,10 +24,12 @@ import {
   parseSnapshots,
   patchDraft,
   proposeMatch,
+  readDraftStage,
   reviewDraft,
   SheetConflictError,
   uploadMedia,
   validateVideo,
+  writeDraftStage,
   type DatasetCandidate,
   type DraftAnalysis,
   type DraftCorrections,
@@ -60,6 +63,27 @@ function stageForSpec(spec: VideoUploadSpec): UploadStage {
   if (!spec.clientConfirmed) return "client";
   if (!spec.dataset) return "dataset";
   return "review";
+}
+
+/** A stored step wins over the earliest incomplete gate. Continue is
+ *  allowed to move ahead of those gates, and Resume must reopen that
+ *  step rather than walking the spec backwards. */
+function storedStage(spec: VideoUploadSpec): UploadStage | null {
+  return spec.wizardStage && STAGES.includes(spec.wizardStage) ? spec.wizardStage : null;
+}
+
+function fieldSnap(fields: {
+  client?: string;
+  campaign?: string;
+  creative_key?: string;
+  platform?: string;
+}): { client: string; campaign: string; creative_key: string; platform: string } {
+  return {
+    client: (fields.client || "").trim(),
+    campaign: (fields.campaign || "").trim(),
+    creative_key: (fields.creative_key || "").trim(),
+    platform: (fields.platform || "meta").trim() || "meta",
+  };
 }
 
 function slugKey(name: string): string {
@@ -531,8 +555,23 @@ export function VideoUploadPanel({ open, employeeId, onClose, onNotify }: PanelP
   const stagedFileRef = useRef<File | null>(null);
   const draftRef = useRef<DraftView | null>(null);
   const specRef = useRef<VideoUploadSpec>({});
+  const savedSpecRef = useRef<VideoUploadSpec>({});
+  const stageRef = useRef<UploadStage>("video");
+  const clientRef = useRef("");
+  const campaignRef = useRef("");
+  const creativeKeyRef = useRef("");
+  const platformRef = useRef("meta");
+  const matchRef = useRef<DraftMatch | null>(null);
+  const leavingRef = useRef(false);
+  const closeRef = useRef<() => void>(() => undefined);
   draftRef.current = draft;
   specRef.current = spec;
+  stageRef.current = stage;
+  clientRef.current = client;
+  campaignRef.current = campaign;
+  creativeKeyRef.current = creativeKey;
+  platformRef.current = platform;
+  matchRef.current = match;
   const meta = useCampaignMeta();
 
   const snapshots: MatchSnapshot[] = useMemo(() => parseSnapshots(match), [match]);
@@ -703,8 +742,9 @@ export function VideoUploadPanel({ open, employeeId, onClose, onNotify }: PanelP
       try {
         let existing = open.draftId ? await getDraft(open.draftId) : null;
         if (!existing && !open.draftId) {
+          let pinned = "";
           try {
-            const pinned = window.localStorage.getItem(draftKey(employeeId));
+            pinned = window.localStorage.getItem(draftKey(employeeId)) || "";
             if (pinned) {
               const recovered = await getDraft(pinned);
               const resumable = recovered.owner_employee_id === employeeId
@@ -721,6 +761,7 @@ export function VideoUploadPanel({ open, employeeId, onClose, onNotify }: PanelP
             } catch {
               /* recovery pin is best-effort */
             }
+            if (pinned) forgetDraftStage(employeeId, pinned);
           }
         }
         const created = existing ?? await createDraft({});
@@ -731,8 +772,36 @@ export function VideoUploadPanel({ open, employeeId, onClose, onNotify }: PanelP
           /* recovery pin is best-effort */
         }
         const next = specFromDraft(created);
+        // Choose the step before any await. A render between setDraft
+        // and setStage would otherwise record the default video step
+        // over the step the user left.
+        const resumeStage = open.stage
+          ?? readDraftStage(employeeId, created.id)
+          ?? storedStage(next)
+          ?? stageForSpec(next);
+        savedSpecRef.current = next;
+        stageRef.current = resumeStage;
+        clientRef.current = next.client || "";
+        campaignRef.current = next.campaign || "";
+        creativeKeyRef.current = next.creative_key || "";
+        platformRef.current = next.platform || "meta";
+        writeDraftStage(employeeId, created.id, resumeStage);
         setDraft(created);
         setSpec(next);
+        setCreativeKey(creativeKeyRef.current);
+        setClient(clientRef.current);
+        setCampaign(campaignRef.current);
+        setPlatform(platformRef.current);
+        setStage(resumeStage);
+        if (open.file) {
+          stagedFileRef.current = open.file;
+          setStagedName(open.file.name);
+          if (!next.creative_key) {
+            const key = slugKey(open.file.name);
+            creativeKeyRef.current = key;
+            setCreativeKey(key);
+          }
+        }
         // Hydrate the server's match rows (proposed or confirmed) so a
         // reopened draft recovers without re-doing the match.
         const serverMatch = created.matches?.[0] ?? null;
@@ -747,16 +816,6 @@ export function VideoUploadPanel({ open, employeeId, onClose, onNotify }: PanelP
         if (created.status === "ready_for_review" || created.status === "reviewed") {
           const reading = await getAnalysis(created.id).catch(() => null);
           if (live && reading) setFindings(reading);
-        }
-        setCreativeKey(next.creative_key || "");
-        setClient(next.client || "");
-        setCampaign(next.campaign || "");
-        setPlatform(next.platform || "meta");
-        setStage(open.stage ?? stageForSpec(next));
-        if (open.file) {
-          stagedFileRef.current = open.file;
-          setStagedName(open.file.name);
-          if (!next.creative_key) setCreativeKey(slugKey(open.file.name));
         }
       } catch (e) {
         if (live) setBootError(e instanceof Error ? e.message : String(e));
@@ -790,7 +849,7 @@ export function VideoUploadPanel({ open, employeeId, onClose, onNotify }: PanelP
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();
-        onClose(true);
+        closeRef.current();
         return;
       }
       if (e.key !== "Tab" || !card) return;
@@ -844,12 +903,16 @@ export function VideoUploadPanel({ open, employeeId, onClose, onNotify }: PanelP
     // The server clears confirmed matches on any spec change, so the
     // local mirror goes with it — otherwise the UI would offer Analyze
     // on a confirmation the server just dropped.
-    const clean: VideoUploadSpec = { ...next, match: undefined };
+    const clean: VideoUploadSpec = {
+      ...next, match: undefined, wizardStage: stageRef.current,
+    };
     setSaving(true);
     try {
       const updated = await patchDraft(current.id, { spec: clean });
+      const adopted = { ...(updated.spec ?? clean) };
+      savedSpecRef.current = adopted;
       setDraft(updated);
-      setSpec({ ...(updated.spec ?? clean) });
+      setSpec(adopted);
       setMatch(null);
       if (!opts?.silent) {
         setToast(t("dashboard.videoUpload.savedMsg"));
@@ -888,6 +951,74 @@ export function VideoUploadPanel({ open, employeeId, onClose, onNotify }: PanelP
       }
     }
   };
+
+  /** Write unsaved client, campaign, creative key, and platform onto
+   *  the draft. A confirmed match is left untouched unless the client,
+   *  campaign, or creative key actually changed: any spec patch clears
+   *  matches server-side. The open step itself lives in the stage pin,
+   *  so a step-only leave does not patch. */
+  const persistLeaveFields = async (): Promise<void> => {
+    const current = draftRef.current;
+    if (!current) return;
+    const saved = savedSpecRef.current;
+    const nextSnap = fieldSnap({
+      client: clientRef.current,
+      campaign: campaignRef.current,
+      creative_key: creativeKeyRef.current,
+      platform: platformRef.current,
+    });
+    const savedSnap = fieldSnap(saved);
+    const destinationChanged = nextSnap.client !== savedSnap.client
+      || nextSnap.campaign !== savedSnap.campaign;
+    const keyChanged = nextSnap.creative_key !== savedSnap.creative_key;
+    const platformChanged = nextSnap.platform !== savedSnap.platform;
+    const matchHeld = matchRef.current?.confirmed === 1;
+    if (matchHeld && !destinationChanged && !keyChanged) return;
+    if (!destinationChanged && !keyChanged && !platformChanged) return;
+    const outgoing: VideoUploadSpec = {
+      ...saved,
+      client: nextSnap.client || undefined,
+      campaign: nextSnap.campaign || undefined,
+      creative_key: nextSnap.creative_key || undefined,
+      platform: platformChanged ? nextSnap.platform : saved.platform,
+      clientConfirmed: destinationChanged ? false : Boolean(saved.clientConfirmed),
+      wizardStage: stageRef.current,
+      match: undefined,
+    };
+    try {
+      const updated = await patchDraft(current.id, { spec: outgoing });
+      if (!updated) return;
+      const adopted = { ...(updated.spec ?? outgoing) };
+      savedSpecRef.current = adopted;
+      setDraft(updated);
+      setSpec(adopted);
+      if (destinationChanged || keyChanged) setMatch(null);
+    } catch {
+      /* the step pin is already stored */
+    }
+  };
+
+  const goStage = (next: UploadStage): void => {
+    setStatus("");
+    stageRef.current = next;
+    const id = draftRef.current?.id;
+    if (id) writeDraftStage(employeeId, id, next);
+    setStage(next);
+    void persistLeaveFields();
+  };
+
+  const leaveAndClose = async (): Promise<void> => {
+    if (leavingRef.current) return;
+    leavingRef.current = true;
+    const id = draftRef.current?.id;
+    if (id) writeDraftStage(employeeId, id, stageRef.current);
+    try {
+      await persistLeaveFields();
+    } finally {
+      onClose(true);
+    }
+  };
+  closeRef.current = () => { void leaveAndClose(); };
 
   /** Creative-key edit writes through to the working spec and drops
    *  any confirmed/proposed match: the server binds confirmations to
@@ -948,9 +1079,12 @@ export function VideoUploadPanel({ open, employeeId, onClose, onNotify }: PanelP
       };
       stagedFileRef.current = null;
       setStagedName("");
-      const updated = await patchDraft(current.id, { spec: next });
+      const stamped: VideoUploadSpec = { ...next, wizardStage: stageRef.current };
+      const updated = await patchDraft(current.id, { spec: stamped });
+      const adopted = { ...(updated.spec ?? stamped) };
+      savedSpecRef.current = adopted;
       setDraft(updated);
-      setSpec({ ...(updated.spec ?? next) });
+      setSpec(adopted);
       setMatch(null);
       const video = (updated.spec ?? next).video;
       if (video?.status === "valid") {
@@ -998,7 +1132,6 @@ export function VideoUploadPanel({ open, employeeId, onClose, onNotify }: PanelP
     };
     const ok = await persistSpec(next, { silent: true });
     if (ok) {
-      setSpec({ ...next });
       setStatus(vu("confirmedMsg", { client: c, campaign: camp }));
     }
   };
@@ -1082,9 +1215,12 @@ export function VideoUploadPanel({ open, employeeId, onClose, onNotify }: PanelP
         },
         match: undefined,
       };
-      const updated = await patchDraft(current.id, { spec: next });
+      const stamped: VideoUploadSpec = { ...next, wizardStage: stageRef.current };
+      const updated = await patchDraft(current.id, { spec: stamped });
+      const adopted = { ...(updated.spec ?? stamped) };
+      savedSpecRef.current = adopted;
       setDraft(updated);
-      setSpec({ ...(updated.spec ?? next) });
+      setSpec(adopted);
       setMatch(null);
       // Fresh version, fresh row list: select everything by default.
       await loadRows(current.id, true);
@@ -1226,6 +1362,7 @@ export function VideoUploadPanel({ open, employeeId, onClose, onNotify }: PanelP
       } catch {
         /* ignore */
       }
+      forgetDraftStage(employeeId, current.id);
       const queued = vu("queuedWithModel", { model: res.model || res.provider || "…" });
       if (onNotify) onNotify(queued);
       else setToast(queued);
@@ -1247,7 +1384,7 @@ export function VideoUploadPanel({ open, employeeId, onClose, onNotify }: PanelP
     : vu("stepReview");
 
   return (
-    <div className="modal-overlay" onClick={() => onClose(true)}>
+    <div className="modal-overlay" onClick={() => { void leaveAndClose(); }}>
       <div
         className="modal-card"
         role="dialog"
@@ -1260,7 +1397,7 @@ export function VideoUploadPanel({ open, employeeId, onClose, onNotify }: PanelP
           <div style={{ flex: "1 1 auto", minWidth: 0 }}>
             <h2 className="panel-title" id="vu-panel-title">{vu("panelTitle")}</h2>
           </div>
-          <button type="button" className="icon-btn" aria-label={vu("closeBtn")} onClick={() => onClose(true)}>
+          <button type="button" className="icon-btn" aria-label={vu("closeBtn")} onClick={() => { void leaveAndClose(); }}>
             <Icon name="x" size={18} />
           </button>
         </div>
@@ -1762,10 +1899,7 @@ export function VideoUploadPanel({ open, employeeId, onClose, onNotify }: PanelP
             ) : null}
             <div className="vu-footer-actions">
               {stageIndex > 0 ? (
-                <button type="button" className="btn-outline" onClick={() => {
-                  setStatus("");
-                  setStage(STAGES[stageIndex - 1]);
-                }}>
+                <button type="button" className="btn-outline" onClick={() => goStage(STAGES[stageIndex - 1])}>
                   {vu("backBtn")}
                 </button>
               ) : null}
@@ -1776,10 +1910,7 @@ export function VideoUploadPanel({ open, employeeId, onClose, onNotify }: PanelP
                 {vu("saveDraftBtn")}
               </LoadingButton>
               {stageIndex < STAGES.length - 1 ? (
-                <button type="button" className="btn-primary" onClick={() => {
-                  setStatus("");
-                  setStage(STAGES[stageIndex + 1]);
-                }}>
+                <button type="button" className="btn-primary" onClick={() => goStage(STAGES[stageIndex + 1])}>
                   {vu("continueStepBtn")}
                 </button>
               ) : (

@@ -662,8 +662,13 @@ def campaign_detail_payload(conn, name, query, owner=None, admin=False):
     grouped = bench.benchmark(conn, "campaign", scoped.normalized())
     if label not in grouped:
         return None
+    # Creative cards on the Creatives page pool every campaign. The
+    # drawer is one campaign, so the same builder must see that name
+    # as its campaign allowlist. Other axes (platform, date) stay.
+    detail_query = dict(query or {})
+    detail_query["campaign"] = [label]
     creatives = []
-    for row in build_creatives_list(conn, query or {}, owner=owner, admin=admin):
+    for row in build_creatives_list(conn, detail_query, owner=owner, admin=admin):
         if label not in (row.get("campaigns") or []):
             continue
         ann = row.get("annotation") if isinstance(row.get("annotation"), dict) else {}
@@ -743,12 +748,21 @@ def campaigns_csv(conn, names, filters=None):
 
 
 def creatives_csv(conn, keys, filters=None, owner=None, admin=False):
-    """CSV of the requested creatives, scoped the same way as the list."""
-    rows_by_key = {
-        row.get("creative_key"): row
-        for row in build_creatives_list(
+    """CSV of the requested creatives, scoped the same way as the list.
+
+    An explicit empty campaign allowlist matches nothing, same as the
+    campaign CSV. The list builder's query parser treats that shape as
+    unrestricted, so it is applied here before the lookup.
+    """
+    from creative_intel import benchmarks as bench
+
+    scope = bench.Scope(filters or {})
+    if "campaign" in scope.axes and not scope.axes["campaign"]:
+        listed = []
+    else:
+        listed = build_creatives_list(
             conn, filters or {}, owner=owner, admin=admin)
-    }
+    rows_by_key = {row.get("creative_key"): row for row in listed}
     headers = ("creative_key", "name", "platform", "format", "campaigns",
                "impressions", "clicks", "spend", "conversions", "ctr",
                "cpa", "roas")

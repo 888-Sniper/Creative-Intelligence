@@ -186,14 +186,31 @@ def recommendations(request: Request, conn=Depends(get_product_conn),
         raise _conflict(exc)
 
 
-@router.get("/api/campaigns/{name}")
+def _campaign_path_name(request: Request, routed: str) -> str:
+    """Name after one decode of the request target.
+
+    The path converter keeps a slash. A literal ``%20`` must survive.
+    Uvicorn has already decoded the routed value once, and the test
+    client decodes it again before routing. The raw path is still the
+    encoded target, so one decode of that raw path is the name on both.
+    """
+    raw = request.scope.get("raw_path") or b""
+    text = raw.decode("latin-1").split("?", 1)[0]
+    prefix = "/api/campaigns/"
+    if text.startswith(prefix):
+        return unquote(text[len(prefix):])
+    return routed
+
+
+@router.get("/api/campaigns/{name:path}")
 def campaign_detail(name: str, request: Request, conn=Depends(get_product_conn),
                     who=Depends(get_current_employee)):
     """Drawer payload for one campaign. Static /meta and /recommendations
-    routes are registered above this path parameter."""
+    routes are registered above this path parameter.
+    """
     try:
         detail = legacy.campaign_detail_payload(
-            conn, unquote(name), query_multidict(request),
+            conn, _campaign_path_name(request, name), query_multidict(request),
             owner=who.id, admin=(who.role or "") == "admin")
     except (ValueError, export_gate.ExportBlocked, emp.StoreError) as exc:
         raise _conflict(exc)

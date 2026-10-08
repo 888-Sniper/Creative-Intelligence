@@ -27,6 +27,26 @@ describe("scopedPath", () => {
     const scope = new URLSearchParams({ platform: "tiktok" });
     expect(scopedPath("/api/sync/status", scope)).toBe("/api/sync/status");
   });
+
+  it("keeps filters on a campaign whose name starts with meta", () => {
+    const scope = new URLSearchParams({ platform: "meta", date_from: "2026-08-01" });
+    const url = scopedPath("/api/campaigns/meta-launch", scope);
+    const params = new URLSearchParams(url.split("?")[1] ?? "");
+    expect(params.get("platform")).toBe("meta");
+    expect(params.get("date_from")).toBe("2026-08-01");
+  });
+
+  it("does not append filters to the campaign metadata path", () => {
+    const scope = new URLSearchParams({ platform: "meta" });
+    expect(scopedPath("/api/campaigns/meta", scope)).toBe("/api/campaigns/meta");
+  });
+
+  it("keeps filters on a campaign whose name starts with recommendations", () => {
+    const scope = new URLSearchParams({ platform: "meta" });
+    const url = scopedPath("/api/campaigns/recommendations-q3", scope);
+    const params = new URLSearchParams(url.split("?")[1] ?? "");
+    expect(params.get("platform")).toBe("meta");
+  });
 });
 
 describe("api timeout lifecycle", () => {

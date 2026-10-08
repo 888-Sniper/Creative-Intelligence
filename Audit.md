@@ -2,22 +2,20 @@
 
 Review `origin/main` after `git fetch`. Confirm that `origin/main` and GitHub `main` name the same SHA. A behind local checkout or a missing local `main` branch is not a reason to stop. Use `git show origin/main:PATH`. Stop only if the remote identities differ or the worktree is dirty.
 
-This is the product repo https://github.com/888-Sniper/Creative-Intelligence. The parent of this push is `2604ffa77084a5bc900c5243708b7cae60bed972` (`Fix the campaign drawer, exports, format grouping, and provider retry`). This push keeps drawer creative metrics, campaign names, and creative CSV rows inside the scope that was requested. It also replaces `Audit.md`. The parent already returns the drawer, the three table CSVs, format and vertical grouping, and a provider validation 409 that stays on the card. Do not call the product perfect. Do not edit, commit, push, build, install, start the server, or activate a provider. Do not treat an unrun live model, live browser, Playwright run, Render click-through, or the five Notino clips as a source defect. Report only defects still present at the reviewed SHA, with severity, observed behavior, file and line, and the evidence that reproduces them.
+This is the product repo https://github.com/888-Sniper/Creative-Intelligence. The parent of this push is `2a0b9575c9f41df12f6465642c24a5e4df09798a` (`Keep campaign drawer metrics, names, and creative exports inside the requested scope`). This push makes a string filter on the creative CSV mean the same thing as a one-item list. It also replaces `Audit.md`. The parent already keeps drawer metrics, campaign names, and an empty campaign export inside the requested scope. Do not call the product perfect. Do not edit, commit, push, build, install, start the server, or activate a provider. Do not treat an unrun live model, live browser, Playwright run, Render click-through, or the five Notino clips as a source defect. Report only defects still present at the reviewed SHA, with severity, observed behavior, file and line, and the evidence that reproduces them.
 
 Confirm the push with both ends named:
 
 ```
-git diff --stat 2604ffa77084a5bc900c5243708b7cae60bed972 origin/main
+git diff --stat 2a0b9575c9f41df12f6465642c24a5e4df09798a origin/main
 ```
 
 What this push makes true:
 
-- A creative with 100 impressions in one campaign and 900 in another shows 100 on that campaign's drawer row. The campaign total was already 100. `campaign_detail_payload` passes that one name as the campaign allowlist before `build_creatives_list` (`actions.py` lines 668–671).
-- A campaign whose name starts with `meta` or `recommendations` still receives the shared platform and date filters. Only the exact paths `/api/campaigns/meta` and `/api/campaigns/recommendations` are excluded from the drawer check (`client.ts` lines 105–111). The recommendations route itself still receives the filters (line 121).
-- `GET /api/campaigns/{name:path}` opens an existing campaign whose name contains a slash, and an existing campaign whose name contains the characters `%20`. The name is one decode of the raw request target (`product.py` lines 189–214). A second decode is not applied. A campaign named exactly `meta` still hits the metadata route (line 157).
-- `POST /api/exports/creatives` with `filters: {"campaign": []}` returns a header and no creative rows (`actions.py` lines 759–761). The campaign CSV already returned no rows for that filter. An empty filter object is still unrestricted. A blank `campaign` query on `GET /api/creatives` is still unrestricted.
+- `POST /api/exports/creatives` treats a string filter as one value. `"platform": "meta"` returns the Meta creative with 100 impressions, the same row as `["meta"]`. `"date_from": "2026-09-01"` returns 200 and drops the August rows, the same file as `["2026-09-01"]`. `_list_filters` (`actions.py` lines 750–758) wraps each string before `build_creatives_list` (line 771).
+- `{"campaign": []}` is still a header with no creative rows (`actions.py` lines 773–774). An empty filter object is still unrestricted. A blank `campaign` query on `GET /api/creatives` is still unrestricted.
 
-How to confirm that from source: `tests/test_table_exports.py` (`test_drawer_metrics_stay_inside_one_campaign`, `test_campaign_names_with_slash_or_percent`, `test_meta_prefix_campaign_keeps_platform_filter`, `test_empty_campaign_filter_exports_no_creatives`) and `apps/creative-intelligence-ui/src/api/client.test.ts` (`meta-launch` keeps `platform`; the exact `/api/campaigns/meta` path does not). This push ran `uv run --extra dev pytest tests/test_table_exports.py` (7 passed) and, from `apps/creative-intelligence-ui`, `pnpm exec vitest run src/api/client.test.ts` (9 passed) and `pnpm exec tsc --noEmit` (exit 0). `ruff check --select E,F,I tests/test_table_exports.py` passed. The full UI suite and the full backend suite were not re-run. The parent's provider card tests were not re-run.
+How to confirm that from source: `test_creative_csv_accepts_string_filters` in `tests/test_table_exports.py`. This push ran `uv run --extra dev pytest tests/test_table_exports.py` (8 passed) and `ruff check --select E,F,I` on `tests/test_table_exports.py` and `Backend/ci_backend/actions.py`. No UI file changed, so the UI tests and `tsc` were not re-run. The full backend suite was not re-run.
 
 Re-read the cited files at `origin/main`. Line numbers below were opened on this push. If a later commit moves a line, follow the symbol, not the stale number.
 
@@ -141,7 +139,7 @@ Controls:
 - See All on Top Creatives (line 527) navigates to `/creatives`, the current page.
 - List View and Grid View (lines 564 and 569). Grid cards are not buttons and do not open the detail (lines 650–669).
 - Sort By (line 575): Top Performing, Highest CTR, Highest ROAS, Most Impressions. Local.
-- Export (line 579) posts `/api/exports/creatives` (line 404) with `{ creative_keys: keys, filters: scopeBody(scope) }` for every visible key. The checkboxes are ignored. The route (`product.py` lines 1496–1510) requires a non-empty key list, keeps request order, skips a key that is not in the scoped list, and downloads `creatives.csv`. An empty list is 409. A header-only file is still 200. At most 500 keys. An explicit empty campaign list matches nothing, so the file is header-only (`actions.py` lines 759–761). An empty filter object is still unrestricted.
+- Export (line 579) posts `/api/exports/creatives` (line 404) with `{ creative_keys: keys, filters: scopeBody(scope) }` for every visible key. The checkboxes are ignored. The route (`product.py` lines 1496–1510) requires a non-empty key list, keeps request order, skips a key that is not in the scoped list, and downloads `creatives.csv`. An empty list is 409. A header-only file is still 200. At most 500 keys. An explicit empty campaign list matches nothing, so the file is header-only (`actions.py` lines 773–774). A string value is one filter. `_list_filters` (lines 750–758) wraps it into a one-item list before the lookup at line 771. An empty filter object is still unrestricted.
 - Select All and the row checkbox write `selected` (lines 188 and 618). `selected` is only read to paint the checkbox (line 389). `creatives.compareSelected` exists in `en.ts` and is not rendered.
 - The creative name (line 623) toggles the detail panel and loads `GET /api/retention/curve`.
 - See All on Top Learnings and on Next Tests (lines 685 and 706) go to `/insights`. Next Tests are three fixed sentences (lines 376–380) whenever any creative is in scope.
@@ -162,7 +160,7 @@ Controls:
 - Trend metric (line 749), comparison metric (line 780), and baseline (line 795) are local.
 - Period disclosure (line 895), A/B From and To (lines 907–919), and Compare Periods (line 923). Compare Periods calls scoped `GET /api/compare/periods`. It does not send `label_a` or `label_b`, so the API default is Period A / Period B (`product.py` lines 309–312). Empty dates set an error and do not call the API.
 
-Campaign trends call scoped `GET /api/kpis/daily?days=30` per ranked campaign. The daily effect depends on `[mode, campaignData]` (line 434) and reads `scope` inside (line 420). Creative curves call unscoped `GET /api/retention/curve`. Creative mode replaces the attribute table with backend rows whose labels are English (`actions.py` lines 818–841, used at lines 593–596).
+Campaign trends call scoped `GET /api/kpis/daily?days=30` per ranked campaign. The daily effect depends on `[mode, campaignData]` (line 434) and reads `scope` inside (line 420). Creative curves call unscoped `GET /api/retention/curve`. Creative mode replaces the attribute table with backend rows whose labels are English (`actions.py` lines 831–854, used at lines 593–596).
 
 `daily_series` (`benchmarks.py` lines 208–231) keeps only dates that have rows, then the last `days` of those dates. Compare does not join series on the date. Each campaign’s points are its own day order (`ComparePage.tsx` lines 517–523). `trendLabels` come from the first non-empty series (lines 527–530). `TrendChart` plots point `i` at `x(i)` (`charts.tsx` lines 51–52) and places a label with `labels.indexOf` (lines 85–86). Different date sets, or a repeated `MM-DD` after `date.slice(5)`, misalign the lines. A missing daily response becomes `[]` (lines 426–428) and then `compare.noDaily`, with no error. The trend chart draws an uncomputable ROAS, CTR, CPA, or CPM as `0` (lines 518–521).
 
@@ -206,7 +204,7 @@ Reports builds `POST /api/report` for PPTX, XLSX, or a one-pager. The catalog is
 Controls:
 
 - Save as Template (line 610) writes `ci-report-template`. Nothing reads that key.
-- Campaign checklist (line 617). The empty label is All Campaigns. Generate then sends `campaigns: null` (line 447). `expert2_report_route` (`actions.py` line 1388) turns a missing or empty list into `None`. `campaign_kpis` (`benchmarks.py` lines 839–841) then keeps every campaign still in the filter scope.
+- Campaign checklist (line 617). The empty label is All Campaigns. Generate then sends `campaigns: null` (line 447). `expert2_report_route` (`actions.py` line 1401) turns a missing or empty list into `None`. `campaign_kpis` (`benchmarks.py` lines 839–841) then keeps every campaign still in the filter scope.
 - KPI checklist (line 626). An empty selection still sends `["cpa", "ctr"]` (line 448) while the control reads Select KPIs.
 - Benchmarks (line 637). The id `industry` is sent as `hook_type` (line 449). The English label is Scope Average (`en.ts` line 241). `rank_by` is always `cpa`. A benchmark name that is in `GROUPABLE`, which now includes `format` and `vertical`, is grouped by that column (`benchmarks.py` lines 1936–1937). The Reports screen still sends `hook_type` for Scope Average.
 - Date range, From, To, Clear, and Done (lines 265–286) are the report’s own range. They are sent inside `filters` on top of the global scope (lines 454–458). `match_filters` applies an exact day and a range together (`benchmarks.py` lines 553–571).
@@ -395,14 +393,18 @@ The step chips (lines 1404–1417) are text, not buttons.
 
 ## Fixed on this push
 
-The four items below were defects at the parent. They are the behavior named at the top of this file. Do not report them again unless the cited lines no longer do what this file says.
+The item below was a defect at the parent. It is the behavior named at the top of this file. Do not report it again unless the cited lines no longer do what this file says.
+
+- A string filter on the creative CSV is one value (`actions.py` lines 750–758 and 771). `"platform": "meta"` and `"date_from": "2026-09-01"` match the one-item list form. An empty campaign list is still a header only (lines 773–774).
+
+These were already true at the parent and stay true:
 
 - Drawer creative metrics stay inside the open campaign (`actions.py` lines 668–671). Totals still come from `benchmark(..., "campaign")` (lines 661–663).
 - `scopedPath` treats only the exact `/api/campaigns/meta` and `/api/campaigns/recommendations` bases as static (`client.ts` lines 105–111). A name such as `meta-launch` keeps the shared filters.
 - A campaign name that contains `/` or a literal `%20` opens through `GET /api/campaigns/{name:path}` (`product.py` lines 189–220). The handler decodes the raw target once.
-- An explicit empty campaign list exports no creative rows (`actions.py` lines 759–761). The campaign CSV already omitted every requested name for that filter.
+- An explicit empty campaign list exports no creative rows (`actions.py` lines 773–774). The campaign CSV already omitted every requested name for that filter.
 
-These four were already true at the parent and stay true:
+These four were already true before that parent and stay true:
 
 - The drawer route exists (`product.py` lines 205–220, `CampaignsPage.tsx` lines 358–381). An unknown name is 404 with `error` set to `No campaign matches the current filters.`
 - Table CSV: `POST /api/exports/campaigns`, `/api/exports/creatives`, and `/api/exports/benchmarks` (`product.py` lines 1481–1523). `POST /api/export` (line 1526) is still the one-pager.
@@ -415,7 +417,7 @@ P2. Compare does not redraw results when the shared scope changes while the page
 
 P2. Compare copy listed in that section stays English in Spanish and Polish.
 
-P2. Reports with every campaign unchecked send `campaigns: null` (`ReportsPage.tsx` line 447), and the report then includes every campaign still in scope (`actions.py` line 1388, `benchmarks.py` lines 839–841).
+P2. Reports with every campaign unchecked send `campaigns: null` (`ReportsPage.tsx` line 447), and the report then includes every campaign still in scope (`actions.py` line 1401, `benchmarks.py` lines 839–841).
 
 P2. Creative checkboxes do not change Export or open a compare. Grid view cannot open a creative. Dashboard “Open in Creatives” drops the creative key. Campaign “vs. Benchmark” is one shared number, or Unavailable. Campaign search ignores a later `?find=` while the page stays mounted.
 
@@ -441,4 +443,4 @@ P3. Provider cards show “Activating…” for every in-flight action. Workbook
 
 ## Checks not performed
 
-No server, browser, Playwright, Render click-through, live provider, ffmpeg run, or the five Notino clips. The full UI suite and the full backend suite were not re-run. This push ran `tests/test_table_exports.py` (7 passed), `src/api/client.test.ts` (9 passed), `pnpm exec tsc --noEmit` (exit 0), and ruff on `tests/test_table_exports.py`. The four backend failures from the last full run, before the parent changed Python, were `tests/test_ci_app.py::test_security_headers_health_readiness` (`ModuleNotFoundError: No module named 'tests'`), `tests/test_ci_app.py::test_no_licensing_concepts` (the walker does not skip `.venv`), and `tests/test_web_shell.py` `test_favicon_asset_serves` plus `test_logo_and_mark_assets_serve` (404 on `/assets/favicon.png` and `/assets/foap-logo.png`). Those four were not re-run. `client.ts` lines 32–33 still turn a non-OK body with no `error` field into `Request failed (${status})`. This drawer route puts `error` on the 404, so that fallback is not the drawer copy. Spanish and Polish catalogs were checked for missing keys on the Ask, Analyst, Settings, Admin, and Providers slice only, on an earlier push. They were not opened line by line for Compare. Pre-existing ruff findings in `product.py` were left as they were. `benchmarks.py` was not edited.
+No server, browser, Playwright, Render click-through, live provider, ffmpeg run, or the five Notino clips. The full UI suite and the full backend suite were not re-run. This push ran `tests/test_table_exports.py` (8 passed) and ruff on `tests/test_table_exports.py` and `Backend/ci_backend/actions.py`. No UI file changed, so the UI tests and `tsc` were not re-run. The four backend failures from the last full run, before the parent changed Python, were `tests/test_ci_app.py::test_security_headers_health_readiness` (`ModuleNotFoundError: No module named 'tests'`), `tests/test_ci_app.py::test_no_licensing_concepts` (the walker does not skip `.venv`), and `tests/test_web_shell.py` `test_favicon_asset_serves` plus `test_logo_and_mark_assets_serve` (404 on `/assets/favicon.png` and `/assets/foap-logo.png`). Those four were not re-run. `client.ts` lines 32–33 still turn a non-OK body with no `error` field into `Request failed (${status})`. This drawer route puts `error` on the 404, so that fallback is not the drawer copy. Spanish and Polish catalogs were checked for missing keys on the Ask, Analyst, Settings, Admin, and Providers slice only, on an earlier push. They were not opened line by line for Compare. Pre-existing ruff findings in `product.py` were left as they were. `benchmarks.py` was not edited.

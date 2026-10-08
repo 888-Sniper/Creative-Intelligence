@@ -211,3 +211,24 @@ def test_empty_campaign_filter_exports_no_creatives(tmp_path, monkeypatch):
     assert campaigns.status_code == 200, campaigns.text
     assert "Alpha" not in campaigns.text
     assert "Beta" not in campaigns.text
+
+
+def test_creative_csv_accepts_string_filters(tmp_path, monkeypatch):
+    http = _authed_client(tmp_path, _db(tmp_path), monkeypatch)
+
+    def export(filters):
+        response = http.post("/api/exports/creatives", json={
+            "creative_keys": ["clip-a"],
+            "filters": filters,
+        })
+        assert response.status_code == 200, response.text
+        return response.text.splitlines()
+
+    platform = export({"platform": "meta"})
+    assert platform[1].split(",")[0] == "clip-a"
+    assert platform[1].split(",")[5] == "100"
+    assert export({"platform": ["meta"]})[1].split(",")[5] == "100"
+
+    assert len(export({"date_from": "2026-09-01"})) == 1
+    assert len(export({"date_from": ["2026-09-01"]})) == 1
+    assert export({"date_from": "2026-08-01"})[1].split(",")[0] == "clip-a"

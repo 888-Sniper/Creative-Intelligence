@@ -747,21 +747,34 @@ def campaigns_csv(conn, names, filters=None):
     return _csv_text(headers, rows)
 
 
+def _list_filters(filters):
+    """Export filters in the shape the list builder's query parser walks.
+
+    The body accepts a string or a list. A bare string would be walked
+    one character at a time, so ``meta`` matches nothing and a date
+    raises on the hyphen.
+    """
+    return {key: [value] if isinstance(value, str) else value
+            for key, value in (filters or {}).items()}
+
+
 def creatives_csv(conn, keys, filters=None, owner=None, admin=False):
     """CSV of the requested creatives, scoped the same way as the list.
 
     An explicit empty campaign allowlist matches nothing, same as the
     campaign CSV. The list builder's query parser treats that shape as
-    unrestricted, so it is applied here before the lookup.
+    unrestricted, and it walks a string one character at a time, so
+    both are normalized before the lookup.
     """
     from creative_intel import benchmarks as bench
 
-    scope = bench.Scope(filters or {})
+    query = _list_filters(filters)
+    scope = bench.Scope(query)
     if "campaign" in scope.axes and not scope.axes["campaign"]:
         listed = []
     else:
         listed = build_creatives_list(
-            conn, filters or {}, owner=owner, admin=admin)
+            conn, query, owner=owner, admin=admin)
     rows_by_key = {row.get("creative_key"): row for row in listed}
     headers = ("creative_key", "name", "platform", "format", "campaigns",
                "impressions", "clicks", "spend", "conversions", "ctr",

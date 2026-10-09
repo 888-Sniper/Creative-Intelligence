@@ -354,7 +354,7 @@ export const en = {
     threePointsHint: "3 Points condenses the latest answer — numbers and caveats kept.",
     threePointsEmpty: "Ask something first — 3 Points will condense the answer to 3 key points.",
     tryAria: "Try Asking",
-    tryLabel: "Try asking:",
+    tryLabel: "Try Asking:",
     tryAsking: {
       t0: "Which hook types drive the highest CTR?",
       t1: "What video length performs best?",

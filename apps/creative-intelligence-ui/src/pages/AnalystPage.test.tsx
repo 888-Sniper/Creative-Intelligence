@@ -78,6 +78,7 @@ describe("AnalystPage", () => {
     mockFetch();
     renderPage();
     expect(screen.getByLabelText("Ask Foap Analyst")).toBeDefined();
+    expect(screen.getByText("Try Asking:")).toBeDefined();
     expect(screen.getByText("Objective")).toBeDefined();
     expect(screen.getByText("Language")).toBeDefined();
     openMore();

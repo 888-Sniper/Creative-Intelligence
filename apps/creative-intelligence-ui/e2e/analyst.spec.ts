@@ -10,6 +10,7 @@ test.describe("analyst journey", () => {
     await loginAs(context, page, seeds.employee, "/analyst");
     await expect(page.getByRole("link", { name: "Analyst" })).toBeVisible();
     await expect(page.getByLabel("Ask Foap Analyst")).toBeVisible();
+    await expect(page.getByText("Try Asking:", { exact: true })).toBeVisible();
     const controls = page.locator(".panel", {
       has: page.getByRole("heading", { name: "Analyst Controls" }),
     });

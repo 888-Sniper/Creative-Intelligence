@@ -87,7 +87,7 @@ test.describe("employee journey", () => {
     await expect(page.getByText("Ada L")).toBeVisible();
 
     await page.getByRole("link", { name: "Settings" }).click();
-    await expect(page.getByRole("heading", { name: "Settings", exact: true }).first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Profile Settings", exact: true }).first()).toBeVisible();
     // Email is shown read-only (bare address, no verified suffix): hero,
     // Workspace, and Connections surfaces carry it, never an editable field.
     await expect(page.getByText("ada@foap.test", { exact: true })).toHaveCount(3);
@@ -95,7 +95,7 @@ test.describe("employee journey", () => {
     // The old Profile route redirects to the merged Settings page.
     await page.goto("/profile");
     await expect(page).toHaveURL(/\/settings$/);
-    await expect(page.getByRole("heading", { name: "Settings", exact: true }).first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Profile Settings", exact: true }).first()).toBeVisible();
 
     // The account menu ships collapsed; expand it to reach Log Out
     // (scoped: Settings Security carries its own adaptive Log Out now).
@@ -155,7 +155,7 @@ test.describe("employee journey", () => {
   test("settings shows Google Drive card unconnected (item 31)", async ({ page, context }) => {
     const seeds = readSeeds();
     await loginAs(context, page, seeds.admin, "/settings");
-    await expect(page.getByRole("heading", { name: "Settings", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Profile Settings", exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Google Drive" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Connect", exact: true })).toBeVisible();
     // E2E has no Google credentials: the server says so instead of bouncing.
@@ -169,7 +169,7 @@ test.describe("employee journey", () => {
     // NOTE: the admin session (the employee session is destroyed by the
     // logout step of the first journey in this file).
     await loginAs(context, page, seeds.admin, "/settings");
-    await expect(page.getByRole("heading", { name: "Settings", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Profile Settings", exact: true })).toBeVisible();
     // Merged page: the account identity lives here (hero, Workspace,
     // Connections) with no separate Profile destination.
     await expect(page.getByText("boss@foap.test", { exact: true }).first()).toBeVisible();

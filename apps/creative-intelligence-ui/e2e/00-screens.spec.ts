@@ -37,9 +37,9 @@ const ROUTES: Route[] = [
   ["09-workbook", "/workbook", "Blank Workbook"],
   ["10-ask", "/ask", "Ask The Data"],
   ["11-analyst", "/analyst", "Your Creative Partner"],
-  ["12-admin", "/admin", "Admin"],
-  ["13-profile-redirect", "/profile", "Settings"],
-  ["14-settings", "/settings", "Settings"],
+  ["12-admin", "/admin", "Admin Settings"],
+  ["13-profile-redirect", "/profile", "Profile Settings"],
+  ["14-settings", "/settings", "Profile Settings"],
 ];
 
 async function expectNoOverflow(page: Page) {
@@ -145,9 +145,9 @@ test.describe("approved screens at mobile viewport", () => {
     ["m-workbook", "/workbook", "Blank Workbook"],
     ["m-ask", "/ask", "Ask The Data"],
     ["m-analyst", "/analyst", "Your Creative Partner"],
-    ["m-admin", "/admin", "Admin"],
-    ["m-profile-redirect", "/profile", "Settings"],
-    ["m-settings", "/settings", "Settings"],
+    ["m-admin", "/admin", "Admin Settings"],
+    ["m-profile-redirect", "/profile", "Profile Settings"],
+    ["m-settings", "/settings", "Profile Settings"],
   ];
 
   test("all routes fit without overflow", async ({ page, context }) => {

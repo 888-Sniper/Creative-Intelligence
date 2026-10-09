@@ -628,7 +628,7 @@ export const en = {
     primaryNav: "Primary",
   },
   admin: {
-    title: "Admin",
+    title: "Admin Settings",
     sub: "Access is server-decided and applies instantly, even live.",
     exportReport: "Export Access Report",
     createTeam: "Create Team",
@@ -1651,7 +1651,7 @@ export const en = {
     disconnectFailed: "Could Not Disconnect Google Drive.",
   },
   settings: {
-    title: "Settings",
+    title: "Profile Settings",
     sub: "Your profile, workspace, and app preferences in one place.",
     accountStatus: "Account Status",
     signInMethod: "Sign-In Method",

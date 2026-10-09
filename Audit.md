@@ -2,20 +2,21 @@
 
 Review `origin/main` after `git fetch`. Confirm that `origin/main` and GitHub `main` name the same SHA. A behind local checkout or a missing local `main` branch is not a reason to stop. Use `git show origin/main:PATH`. Stop only if the remote identities differ or the worktree is dirty.
 
-This is the product repo https://github.com/888-Sniper/Creative-Intelligence. The parent of this push is `fb2b75beeb5d88c2685c170528b1e9b6ad1e60d6` (`Hide the standing analyze video notes`). This push draws the video file-limit line one step smaller. It also replaces `Audit.md`. The parent already hides the three standing notes. It already makes an earlier step chip a button that opens that step. It already treats a string creative-CSV filter as one value, and it already keeps drawer metrics, campaign names, and an empty campaign export inside the requested scope. Do not call the product perfect. Do not edit, commit, push, build, install, start the server, or activate a provider. Do not treat an unrun live model, live browser, Playwright run, Render click-through, or the five Notino clips as a source defect. Report only defects still present at the reviewed SHA, with severity, observed behavior, file and line, and the evidence that reproduces them.
+This is the product repo https://github.com/888-Sniper/Creative-Intelligence. The parent of this push is `0ffd7bd53f7edf2270e2f7b8fd85352010078bd8` (`Make the video file limit line a touch smaller`). This push renames the Admin and Settings page titles. It also replaces `Audit.md`. The parent already draws the video file-limit line at 12px. It already hides the three standing notes, makes an earlier step chip a button, treats a string creative-CSV filter as one value, and keeps drawer metrics, campaign names, and an empty campaign export inside the requested scope. Do not call the product perfect. Do not edit, commit, push, build, install, start the server, or activate a provider. Do not treat an unrun live model, live browser, Playwright run, Render click-through, or the five Notino clips as a source defect. Report only defects still present at the reviewed SHA, with severity, observed behavior, file and line, and the evidence that reproduces them.
 
 Confirm the push with both ends named:
 
 ```
-git diff --stat fb2b75beeb5d88c2685c170528b1e9b6ad1e60d6 origin/main
+git diff --stat 0ffd7bd53f7edf2270e2f7b8fd85352010078bd8 origin/main
 ```
 
 What this push makes true:
 
-- The line under Choose File, “MP4 / MOV, Up To 100 MB, Up To 600 Seconds”, is 12px. The element is `p.panel-sub.vu-limits` (`VideoUploadPanel.tsx` line 1469). `.vu-limits` sets `font-size: 12px` (`theme.css` line 1037). Other `.panel-sub` text stays 13px (`theme.css` line 341).
-- The three standing notes stay hidden, from the parent. An earlier step chip is still a button that calls `goStage` (lines 1406–1415 and 1001–1008).
+- The `/admin` page heading is “Admin Settings” (`en.ts` `admin.title`, line 631). Spanish is “Ajustes de administración” (`es.ts` line 631). Polish is “Ustawienia administracji” (`pl.ts` line 645). The sidebar link stays “Admin” (`nav.admin`, `en.ts` line 619).
+- The `/settings` page heading, including the `/profile` redirect, is “Profile Settings” (`en.ts` `settings.title`, line 1654). Spanish is “Ajustes del perfil” (`es.ts` line 1654). Polish is “Ustawienia profilu” (`pl.ts` line 1668). The sidebar link stays “Settings” (`nav.settings`, `en.ts` line 620).
+- The video file-limit line stays 12px, from the parent (`VideoUploadPanel.tsx` line 1469, `theme.css` line 1037).
 
-How to confirm from source: `review step chips return to earlier steps` in `e2e/04-video-upload.spec.ts` expects that limits line to have `font-size` `12px` on the desktop dialog and again at 390px wide. This push ran that Playwright test (1 passed) and `pnpm build` (`tsc --noEmit` and the Vite build). The Video Upload unit file was not re-run. The full UI suite and the full backend suite were not re-run. Render was not clicked.
+How to confirm from source: `e2e/admin.spec.ts` expects the heading “Admin Settings”. `e2e/auth.spec.ts` expects “Profile Settings”. `e2e/00-screens.spec.ts` and `e2e/02-full-demo.spec.ts` expect those headings on `/admin`, `/settings`, and `/profile`. This push ran `pnpm exec vitest run src/pages/SettingsPage.test.tsx src/admin/AdminEmployeesPage.test.tsx src/i18n/parity.test.ts src/layouts/AppShell.test.tsx` (50 passed) and `pnpm exec playwright test e2e/admin.spec.ts e2e/auth.spec.ts -g "add, approve|settings shows"` (3 passed). `pnpm build` ran `tsc --noEmit` and the Vite build. The full UI suite and the full backend suite were not re-run. Render was not clicked.
 
 Re-read the cited files at `origin/main`. Line numbers below were opened on this push. If a later commit moves a line, follow the symbol, not the stale number.
 
@@ -272,6 +273,8 @@ Charts on this page use `/api/benchmarks`, `/api/campaigns`, and `/api/creatives
 
 ## Settings
 
+The page heading is “Profile Settings” (`en.ts` line 1654). The sidebar link stays “Settings” (`en.ts` line 620).
+
 `applyLive` (`SettingsPage.tsx` lines 232–237) applies theme, accent, density, language, and timezone on each autosave commit. Language and timezone are also restored for the signed-in employee by `LocalePrefsSync` (`i18n/index.tsx` lines 160–162). Accent and density CSS variables are rewritten when Settings is mounted (lines 314–316) and then left on `documentElement`.
 
 The prefs key is `ci-settings-prefs:<employeeId>` (`prefs.ts` lines 106–147), with a one-time read of the legacy global key. `src/state/notificationPrefs.ts` is unused. Nothing imports it.
@@ -308,7 +311,7 @@ No key this slice calls is missing in `es.ts` or `pl.ts`. Extra keys in Spanish 
 
 ## Admin
 
-`/admin` renders only for `me.is_admin`.
+`/admin` renders only for `me.is_admin`. The page heading is “Admin Settings” (`en.ts` line 631). The sidebar link stays “Admin” (`en.ts` line 619).
 
 Controls on `AdminEmployeesPage.tsx`:
 
@@ -396,7 +399,7 @@ A step chip earlier than the open step is a button (lines 1406–1415) and calls
 
 The item below was a defect at the parent. It is the behavior named at the top of this file. Do not report it again unless the cited lines no longer do what this file says.
 
-- The video file-limit line is 12px (`VideoUploadPanel.tsx` line 1469, `theme.css` line 1037). The three standing notes stay hidden, from the parent. Earlier step chips stay buttons, from the parent (lines 1406–1415).
+- The Admin page heading is “Admin Settings” and the Settings page heading is “Profile Settings” (`en.ts` lines 631 and 1654). The sidebar labels stay “Admin” and “Settings”. The video file-limit line stays 12px, from the parent.
 
 These were already true at the parent and stay true:
 
@@ -444,4 +447,4 @@ P3. Provider cards show “Activating…” for every in-flight action. Workbook
 
 ## Checks not performed
 
-No Render click-through, live provider, ffmpeg run, or the five Notino clips. The full UI suite, the Video Upload unit file, and the full backend suite were not re-run. This push ran the step-chip Playwright test (1 passed; it checks the limit line is 12px at desktop and at 390px) and `tsc --noEmit` through `pnpm build`. `tests/test_table_exports.py` was not re-run. The four backend failures from the last full run, before the parent changed Python, were `tests/test_ci_app.py::test_security_headers_health_readiness` (`ModuleNotFoundError: No module named 'tests'`), `tests/test_ci_app.py::test_no_licensing_concepts` (the walker does not skip `.venv`), and `tests/test_web_shell.py` `test_favicon_asset_serves` plus `test_logo_and_mark_assets_serve` (404 on `/assets/favicon.png` and `/assets/foap-logo.png`). Those four were not re-run. `client.ts` lines 32–33 still turn a non-OK body with no `error` field into `Request failed (${status})`. This drawer route puts `error` on the 404, so that fallback is not the drawer copy. Spanish and Polish catalogs were checked for missing keys on the Ask, Analyst, Settings, Admin, and Providers slice only, on an earlier push. They were not opened line by line for Compare. Pre-existing ruff findings in `product.py` were left as they were. `benchmarks.py` was not edited.
+No Render click-through, live provider, ffmpeg run, or the five Notino clips. The full UI suite and the full backend suite were not re-run. This push ran Settings, Admin, locale parity, and shell unit tests (50 passed), the admin journey plus two settings Playwright tests (3 passed), and `tsc --noEmit` through `pnpm build`. `tests/test_table_exports.py` was not re-run. The four backend failures from the last full run, before the parent changed Python, were `tests/test_ci_app.py::test_security_headers_health_readiness` (`ModuleNotFoundError: No module named 'tests'`), `tests/test_ci_app.py::test_no_licensing_concepts` (the walker does not skip `.venv`), and `tests/test_web_shell.py` `test_favicon_asset_serves` plus `test_logo_and_mark_assets_serve` (404 on `/assets/favicon.png` and `/assets/foap-logo.png`). Those four were not re-run. `client.ts` lines 32–33 still turn a non-OK body with no `error` field into `Request failed (${status})`. This drawer route puts `error` on the 404, so that fallback is not the drawer copy. Spanish and Polish catalogs were checked for missing keys on the Ask, Analyst, Settings, Admin, and Providers slice only, on an earlier push. They were not opened line by line for Compare. Pre-existing ruff findings in `product.py` were left as they were. `benchmarks.py` was not edited.

@@ -196,9 +196,9 @@ test.describe("full demo visuals", () => {
       ["d-campaigns", "/campaigns", "Campaigns"],
       ["d-benchmarks", "/benchmarks", "Benchmarks"],
       ["d-analyst", "/analyst", "Your Creative Partner"],
-      ["d-admin", "/admin", "Admin"],
-      ["d-profile-redirect", "/profile", "Settings"],
-      ["d-settings", "/settings", "Settings"],
+      ["d-admin", "/admin", "Admin Settings"],
+      ["d-profile-redirect", "/profile", "Profile Settings"],
+      ["d-settings", "/settings", "Profile Settings"],
     ];
     for (const [shot, path, heading] of routes) {
       await loginAs(context, page, seeds.admin, path);

@@ -642,7 +642,7 @@ export const pl = {
     primaryNav: "Główna",
   },
   admin: {
-    title: "Administracja",
+    title: "Ustawienia administracji",
     sub: "O dostępie decyduje serwer; zmiany działają natychmiast.",
     exportReport: "Eksportuj raport dostępu",
     createTeam: "Utwórz zespół",
@@ -1665,7 +1665,7 @@ export const pl = {
     disconnectFailed: "Nie można odłączyć Dysku Google.",
   },
   settings: {
-    title: "Ustawienia",
+    title: "Ustawienia profilu",
     sub: "Twój profil, obszar roboczy i preferencje w jednym miejscu.",
     accountStatus: "Stan konta",
     signInMethod: "Metoda logowania",

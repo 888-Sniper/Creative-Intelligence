@@ -628,7 +628,7 @@ export const es = {
     primaryNav: "Principal",
   },
   admin: {
-    title: "Administración",
+    title: "Ajustes de administración",
     sub: "El acceso se decide en el servidor y se aplica al instante.",
     exportReport: "Exportar informe de acceso",
     createTeam: "Crear equipo",
@@ -1651,7 +1651,7 @@ export const es = {
     disconnectFailed: "No se pudo desconectar Google Drive.",
   },
   settings: {
-    title: "Ajustes",
+    title: "Ajustes del perfil",
     sub: "Tu perfil, espacio y preferencias de la app en un solo lugar.",
     accountStatus: "Estado de la cuenta",
     signInMethod: "Método de inicio de sesión",

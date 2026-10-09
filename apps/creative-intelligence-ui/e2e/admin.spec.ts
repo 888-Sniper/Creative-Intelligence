@@ -9,7 +9,7 @@ test.describe("admin journey", () => {
     // Vitest component tests).
     page.on("dialog", (d) => void d.accept());
     await loginAs(context, page, seeds.admin, "/admin");
-    await expect(page.getByRole("heading", { name: "Admin", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Admin Settings", exact: true })).toBeVisible();
 
     const email = `e2e-${Date.now()}@foap.test`;
     // Employee creation lives in the Add Employee dialog, not inline.

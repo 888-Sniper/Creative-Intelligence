@@ -71,9 +71,8 @@ function num(v: unknown): number {
 
 function secondsOf(c: CreativeRowDatum): number | null {
   const raw = c.annotation?.duration_s ?? c.duration_s;
-  if (raw == null || raw === "") return null;
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : null;
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return null;
+  return raw;
 }
 
 function shortHook(t: TFn, hook: string | null | undefined): string {
@@ -220,8 +219,8 @@ export function CreativesPage() {
   const lengthRows = useMemo(() => (creatives.data ?? []).filter((c) => {
     const s = secondsOf(c);
     if (length === "short" && !(s != null && s < 15)) return false;
-    if (length === "sweet" && !(s >= 15 && s <= 30)) return false;
-    if (length === "long" && !(s > 30)) return false;
+    if (length === "sweet" && !(s != null && s >= 15 && s <= 30)) return false;
+    if (length === "long" && !(s != null && s > 30)) return false;
     return true;
   }), [creatives.data, length]);
 
@@ -341,6 +340,7 @@ export function CreativesPage() {
     ].map((b) => ({ ...b, clicks: 0, impr: 0 }));
     for (const c of lengthRows) {
       const s = secondsOf(c);
+      if (s == null) continue;
       const b = buckets.find((x) => x.test(s));
       if (b) {
         b.clicks += num(c.metrics.clicks);

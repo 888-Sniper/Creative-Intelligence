@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { FilterProvider, useFilters } from "@/state/FilterContext";
 import { ComparePage } from "@/pages/ComparePage";
 
@@ -111,6 +111,43 @@ describe("ComparePage", () => {
         .map((c) => String(c[0]));
       expect(called.some((u) => u.includes("/api/compare/campaigns") && u.includes("platform=meta"))).toBe(true);
     });
+  });
+
+  it("keeps the newer filtered comparison when an older request finishes later", async () => {
+    let releaseFirst: (r: Response) => void = () => {};
+    const filtered = {
+      ...campaignPayload,
+      winner: "Camp B",
+      ranking: ["Camp B", "Camp A"],
+      why: { top: "Camp B leads on ROAS", differences: ["Camp B leads after the filter"] },
+    };
+    window.fetch = vi.fn((input: string | URL | Request) => {
+      const url = String(input);
+      if (url.startsWith("/api/compare/campaigns")) {
+        if (url.includes("platform=meta")) return Promise.resolve(Response.json(filtered));
+        return new Promise<Response>((resolve) => { releaseFirst = resolve; });
+      }
+      if (url.startsWith("/api/kpis/daily")) return Promise.resolve(Response.json({ days: [] }));
+      if (url.startsWith("/api/retention/curve")) return Promise.resolve(Response.json({ points: [] }));
+      if (url.startsWith("/api/creatives")) return Promise.resolve(Response.json(creativeOptions));
+      if (url.startsWith("/api/campaigns")) return Promise.resolve(Response.json(campaignOptions));
+      return Promise.resolve(Response.json({ error: "not found" }, { status: 404 }));
+    }) as unknown as typeof fetch;
+    renderPage();
+    await waitFor(() => {
+      const called = (window.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls
+        .map((c) => String(c[0]));
+      expect(called.some((u) => u.startsWith("/api/compare/campaigns") && !u.includes("platform=meta"))).toBe(true);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Set Platform" }));
+    await waitFor(() => {
+      expect(screen.getByText("Camp B leads after the filter")).toBeDefined();
+    });
+    await act(async () => {
+      releaseFirst(Response.json(campaignPayload));
+    });
+    expect(screen.queryByText("Camp A leads Camp B on ROAS (2 vs 1)")).toBeNull();
+    expect(screen.getByText("Camp B leads after the filter")).toBeDefined();
   });
 
   it("places trend days on a shared date axis", async () => {

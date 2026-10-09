@@ -319,10 +319,8 @@ export function DashboardPage() {
     ].map((b) => ({ ...b, clicks: 0, impr: 0 }));
     for (const c of creatives.data ?? []) {
       const raw = c.annotation?.duration_s ?? c.duration_s;
-      if (raw == null || raw === "") continue;
-      const seconds = Number(raw);
-      if (!Number.isFinite(seconds) || seconds < 0) continue;
-      const bucket = buckets.find((b) => b.test(seconds));
+      if (typeof raw !== "number" || !Number.isFinite(raw) || raw < 0) continue;
+      const bucket = buckets.find((b) => b.test(raw));
       if (bucket) {
         bucket.clicks += num(c.metrics?.clicks);
         bucket.impr += num(c.metrics?.impressions);

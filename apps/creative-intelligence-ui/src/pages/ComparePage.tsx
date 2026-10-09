@@ -288,6 +288,9 @@ export function ComparePage() {
 
   const campaignOptions = useScopedApi<Record<string, Record<string, number>>>("/api/campaigns");
   const creativeOptions = useScopedApi<CreativeMeta[]>("/api/creatives");
+  // A newer compare invalidates an older in-flight response, including
+  // one started before the shared filters changed.
+  const compareGen = useRef(0);
 
   const rank = mode === "campaigns" ? campaignRank : creativeRank;
   const activeKeys = mode === "campaigns"
@@ -296,9 +299,11 @@ export function ComparePage() {
 
   async function runCampaigns(list: string[], rankBy: string): Promise<void> {
     const names = [...new Set(list.filter(Boolean))].slice(0, 4);
+    const gen = ++compareGen.current;
     if (names.length < 2) {
       setCampaignData(null);
       setError("Select at least two campaigns to compare.");
+      setLoading(false);
       return;
     }
     setLoading(true);
@@ -310,23 +315,27 @@ export function ComparePage() {
       const r = await api<CampaignCompareResponse>(
         "GET", scopedPath(`/api/compare/campaigns?${params.toString()}`, scope),
       );
+      if (gen !== compareGen.current) return;
       setCampaignData(r);
       setCreativeData(null);
       setBaseName(r.winner ?? r.ranking[0] ?? "");
     } catch (e) {
+      if (gen !== compareGen.current) return;
       setCampaignData(null);
       setError(e instanceof Error ? e.message : "Request Failed");
     } finally {
-      setLoading(false);
+      if (gen === compareGen.current) setLoading(false);
     }
   }
 
   async function runCreatives(keys: string[], rankBy: string): Promise<void> {
     const seen = [...new Set(keys.filter(Boolean))].slice(0, 4);
+    const gen = ++compareGen.current;
     if (seen.length < 2) {
       setCreativeData(null);
       setCreativeKeys([]);
       setError("Select at least two creatives to compare.");
+      setLoading(false);
       return;
     }
     setLoading(true);
@@ -336,6 +345,7 @@ export function ComparePage() {
       seen.forEach((k) => params.append("key", k));
       params.set("rank_by", rankBy);
       const r = await api<CompareResponse>("GET", scopedPath(`/api/compare?${params.toString()}`, scope));
+      if (gen !== compareGen.current) return;
       const ranked = Array.isArray(r.ranking) ? r.ranking : [];
       const sameSet = ranked.length === seen.length && ranked.every((k) => seen.includes(k));
       setCreativeKeys(sameSet ? ranked : seen);
@@ -343,10 +353,11 @@ export function ComparePage() {
       setCampaignData(null);
       setBaseName(r.winner ?? (sameSet ? ranked[0] : seen[0]) ?? "");
     } catch (e) {
+      if (gen !== compareGen.current) return;
       setCreativeData(null);
       setError(e instanceof Error ? e.message : "Request Failed");
     } finally {
-      setLoading(false);
+      if (gen === compareGen.current) setLoading(false);
     }
   }
 

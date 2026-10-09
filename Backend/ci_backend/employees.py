@@ -2,11 +2,12 @@
 
 Identical semantics to the legacy sqlite3 implementation it replaces:
 verified WorkOS identities link by immutable ``workos_user_id`` (or by
-verified email for pre-added staff — never a duplicate); unknown
-identities become ``pending``; only the configured bootstrap email can
-mint the first admin; suspend/revoke destroy sessions immediately; no
-operation may leave zero active admins; enforcement is unconditional
-(no setup bypass).
+verified email for pre-added staff whose address was not later edited).
+A different WorkOS user never inherits an account because its email
+was rewritten. Unknown identities become ``pending``; only the
+configured bootstrap email can mint the first admin; suspend/revoke
+destroy sessions immediately; no operation may leave zero active
+admins; enforcement is unconditional (no setup bypass).
 """
 
 from __future__ import annotations
@@ -238,12 +239,34 @@ def bootstrap_admin_email(settings=None) -> str:
     return os.environ.get("CREATIVE_INTEL_ADMIN_EMAIL", "").strip().lower()
 
 
+def _profile_changed_email(db: Session, employee_id: str) -> bool:
+    """True when this employee saved a different address on their profile.
+
+    That edit is not proof that a WorkOS user of the new address owns
+    the account. First sign-in may still claim a pre-added row whose
+    address was never rewritten.
+    """
+    rows = db.scalars(select(EmployeeAudit).where(
+        EmployeeAudit.target_id == employee_id,
+        EmployeeAudit.action == "PROFILE_UPDATED")).all()
+    for row in rows:
+        for part in (row.prev_value or "").split("; "):
+            if part.startswith("email:"):
+                return True
+    return False
+
+
 def ensure_identity(db: Session, identity: dict, settings=None) -> tuple[Employee, bool]:
     """Link a verified WorkOS identity to an employee record.
 
     Returns (employee, created). Unknown identities become pending
     requests, except the configured bootstrap admin email, which
     becomes the first admin when no admin exists yet.
+
+    An email match is not ownership. A stored WorkOS id must be the
+    one signing in. A row with no WorkOS id can be claimed by the
+    verified address it was given, and not by an address a profile
+    edit wrote later.
     """
     email = (identity.get("email") or "").strip().lower()
     wid = identity.get("workos_user_id") or ""
@@ -252,7 +275,15 @@ def ensure_identity(db: Session, identity: dict, settings=None) -> tuple[Employe
         provider = ""
     if not wid and not email:
         raise StoreError("WorkOS did not return a user.")
-    emp = find_employee(db, wid, email if identity.get("verified") else "")
+    emp = find_employee(db, wid, "") if wid else None
+    if emp is None and email and identity.get("verified"):
+        by_email = find_employee(db, "", email)
+        if by_email is not None:
+            stored = by_email.workos_user_id or ""
+            if (stored and stored != wid) or (
+                    not stored and _profile_changed_email(db, by_email.id)):
+                raise StoreError("That email is already registered.")
+            emp = by_email
     now = utcnow()
     if emp is None:
         n_admins = db.scalar(select(func.count()).select_from(Employee).where(

@@ -56,6 +56,22 @@ def _pending_name(provider: str) -> str:
     return "integration-%s" % provider
 
 
+def _bind_owner(employee_id: str, verifier: str) -> str:
+    """Keep the PKCE verifier and the employee who started the flow.
+
+    The state cookie travels with the browser. The callback must not
+    store tokens for whoever happens to be signed in later.
+    """
+    return "%s %s" % ((employee_id or "").strip(), verifier or "")
+
+
+def _unbind_owner(packed: str) -> tuple[str, str]:
+    owner, sep, verifier = (packed or "").partition(" ")
+    if not sep:
+        return "", packed or ""
+    return owner, verifier
+
+
 def configured(provider: str, settings=None) -> bool:
     if provider == "meta":
         return bool(_clean(settings, "meta_client_id")
@@ -83,13 +99,17 @@ def _require(provider: str, settings) -> None:
         raise emp.StoreError("%s is not configured." % label(provider))
 
 
-def start(db: Session, provider: str, settings=None) -> dict[str, str]:
+def start(db: Session, provider: str, settings=None,
+          employee_id: str = "") -> dict[str, str]:
     """Begin OAuth. Returns {url, state} for a top-level navigation."""
     _require(provider, settings)
+    if not (employee_id or "").strip():
+        raise emp.StoreError("Sign in to connect %s." % label(provider))
     emp.sweep_pending(db)
     verifier, challenge = workos_mod.pkce_pair()
     state = secrets.token_urlsafe(16)
-    emp.pending_put(db, state, _pending_name(provider), verifier)
+    emp.pending_put(db, state, _pending_name(provider),
+                    _bind_owner(employee_id, verifier))
     if provider == "meta":
         query = urllib.parse.urlencode({
             "client_id": _clean(settings, "meta_client_id"),
@@ -284,9 +304,12 @@ def finish(db: Session, provider: str, code: str, state: str,
     if row is None or row.provider != _pending_name(provider) \
             or not emp.pending_valid(row):
         raise emp.StoreError("That connection expired. Try again.")
+    owner, verifier = _unbind_owner(row.verifier)
+    if not owner or owner != employee_id:
+        raise emp.StoreError("That connection expired. Try again.")
     # TikTok's callback names the code auth_code; callers pass whichever
     # query value they found.
-    token = _exchange(provider, code, row.verifier, settings)
+    token = _exchange(provider, code, verifier, settings)
     account = token.get("account") or _discover(provider, token["access_token"])
     _store(db, provider, employee_id, token, settings, account=account)
     return {"ok": "connected", "account": account}

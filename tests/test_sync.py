@@ -424,7 +424,7 @@ class ServerSyncTest(unittest.TestCase):
         try:
             import creative_intel.sync as sync_mod
             orig = sync_mod.fetch_job
-            sync_mod.fetch_job = lambda source, params: (
+            sync_mod.fetch_job = lambda source, params, bearer=None: (
                 ingest.parse_csv(CSV, "meta"), [])
             try:
                 out1 = server.apply_action(
@@ -590,6 +590,43 @@ class TickBearerTest(unittest.TestCase):
             sync.fetch_job = real
         self.assertFalse(out[job["id"]]["ok"])
         self.assertIn("not connected", out[job["id"]]["error"])
+
+    def test_tick_passes_ads_bearer_and_skips_a_public_sheet(self):
+        conn = _conn()
+        seen = []
+        real = sync.fetch_job
+
+        def fake(source, params, bearer=None):
+            seen.append((source, bearer))
+            return ([], [])
+
+        sync.fetch_job = fake
+        try:
+            meta = sync.create_job(
+                conn, "meta", "Meta", {"ad_account_id": "1"}, "owner-1")
+            quiet = sync.create_job(
+                conn, "tiktok", "TikTok", {"advertiser_id": "9"}, "owner-2")
+            public = sync.create_job(
+                conn, "sheets", "Public",
+                {"platform": "meta", "url": "https://y"}, "owner-1")
+
+            def resolve(job):
+                if job["source"] == "meta":
+                    return "ads-for-%s" % job["owner_employee_id"]
+                if job["source"] == "tiktok":
+                    return None
+                raise AssertionError(job["source"])
+
+            out = sync.tick(conn, bearer_for=resolve)
+        finally:
+            sync.fetch_job = real
+        by_source = {source: bearer for source, bearer in seen}
+        self.assertEqual(by_source["meta"], "ads-for-owner-1")
+        self.assertIsNone(by_source["tiktok"])
+        self.assertIsNone(by_source["sheets"])
+        self.assertTrue(out[meta["id"]]["ok"])
+        self.assertTrue(out[quiet["id"]]["ok"])
+        self.assertTrue(out[public["id"]]["ok"])
 
 
 class SyncKeyConcurrencyTest(unittest.TestCase):

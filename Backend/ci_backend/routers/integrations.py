@@ -44,7 +44,7 @@ def integration_start(provider: str, request: Request, db=Depends(get_db),
     provider = _known(provider)
     employee = _actor(request, db)
     try:
-        flow = integ.start(db, provider, settings)
+        flow = integ.start(db, provider, settings, employee.id)
     except emp.StoreError as exc:
         raise HTTPException(status_code=409, detail={"error": str(exc)})
     response = JSONResponse({"url": flow["url"]})

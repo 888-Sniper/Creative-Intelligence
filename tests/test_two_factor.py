@@ -57,6 +57,83 @@ def _code_for(secret: str) -> str:
     return totp_mod._hotp(totp_mod._decode_b32(secret), step)
 
 
+def test_recovery_code_opens_one_session_when_two_checks_overlap(
+        tmp_path, monkeypatch):
+    import datetime
+    import json
+    import threading
+
+    from ci_backend import token_crypto
+    from ci_backend.db import EmployeeTotp, TotpChallenge, init_db
+
+    db_path = tmp_path / "race.db"
+    settings = Settings(master_key=TEST_MASTER_KEY, admin_email="ada@foap.test")
+    engine = make_engine(db_path)
+    init_db(engine)
+    factory = make_session_factory(engine)
+    code = "ABCD-EFGH"
+    token = "race-token"
+    try:
+        with factory() as sess:
+            admin = emp_store.admin_create(
+                sess, "root", "ada@foap.test", role="admin")
+            now = totp_mod._now()
+            sess.add(EmployeeTotp(
+                employee_id=admin.id,
+                secret_enc=token_crypto.encrypt_secret(
+                    "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", settings),
+                enabled=1,
+                recovery_hashes=json.dumps([totp_mod._recovery_hash(code)]),
+                last_step=0,
+                updated_at=now.isoformat(timespec="seconds")))
+            sess.add(TotpChallenge(
+                token_hash=totp_mod._hash(token),
+                employee_id=admin.id,
+                attempts=0,
+                created_at=now.isoformat(timespec="seconds"),
+                expires_at=(now + datetime.timedelta(seconds=300)
+                            ).isoformat(timespec="seconds")))
+            sess.commit()
+            employee_id = admin.id
+        gate = threading.Barrier(2)
+        real_hashes = totp_mod._hashes
+
+        def wait_for_both(row):
+            parsed = real_hashes(row)
+            gate.wait(timeout=5)
+            return parsed
+
+        monkeypatch.setattr(totp_mod, "_hashes", wait_for_both)
+        results = []
+
+        def once():
+            with factory() as sess:
+                try:
+                    employee = totp_mod.take_challenge(
+                        sess, token, code, settings)
+                    emp_store.create_session(
+                        sess, employee.id, employee.workos_user_id or "")
+                    results.append("ok")
+                except emp_store.StoreError:
+                    results.append("denied")
+                except Exception as exc:  # noqa: BLE001 - the assertion prints it
+                    results.append("%s: %s" % (type(exc).__name__, exc))
+
+        threads = [threading.Thread(target=once), threading.Thread(target=once)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(10)
+        assert results.count("ok") == 1, results
+        assert results.count("denied") == 1, results
+        with factory() as sess:
+            assert emp_store.count_live_sessions(sess, employee_id) == 1
+            row = sess.get(EmployeeTotp, employee_id)
+            assert totp_mod._recovery_hash(code) not in (row.recovery_hashes or "")
+    finally:
+        engine.dispose()
+
+
 def test_rfc_vector():
     # RFC 6238 appendix B, SHA1, the well-known 20-byte secret.
     secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"

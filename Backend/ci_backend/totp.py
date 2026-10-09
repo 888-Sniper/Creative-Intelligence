@@ -18,7 +18,7 @@ import struct
 import time
 import urllib.parse
 
-from sqlalchemy import delete
+from sqlalchemy import delete, update
 from sqlalchemy.orm import Session
 
 from ci_backend import employees as emp
@@ -191,6 +191,55 @@ def _accept_code(row: EmployeeTotp, code: str, settings=None) -> bool:
     return _consume_recovery(row, code)
 
 
+def _changed_one(result) -> bool:
+    count = result.rowcount
+    return count == 1
+
+
+def _claim_recovery(db: Session, row: EmployeeTotp, code: str) -> bool:
+    """Remove one recovery hash only if that exact list is still stored.
+
+    Two overlapping checks can both see the hash. The update matches
+    the list they both read, so the second write changes nothing.
+    """
+    digest = _recovery_hash(code)
+    kept = _hashes(row)
+    if not any(hmac.compare_digest(digest, item) for item in kept):
+        return False
+    new_hashes = json.dumps(
+        [item for item in kept if not hmac.compare_digest(digest, item)])
+    result = db.execute(
+        update(EmployeeTotp)
+        .where(EmployeeTotp.employee_id == row.employee_id)
+        .where(EmployeeTotp.recovery_hashes == (row.recovery_hashes or ""))
+        .values(recovery_hashes=new_hashes, updated_at=emp.utcnow()))
+    db.expire(row)
+    return _changed_one(result)
+
+
+def _claim_step(db: Session, row: EmployeeTotp, step: int) -> bool:
+    old = int(row.last_step or 0)
+    if old >= step and old != 0:
+        return False
+    result = db.execute(
+        update(EmployeeTotp)
+        .where(EmployeeTotp.employee_id == row.employee_id)
+        .where(EmployeeTotp.last_step == old)
+        .values(last_step=step, updated_at=emp.utcnow()))
+    db.expire(row)
+    return _changed_one(result)
+
+
+def _consume_for_login(db: Session, row: EmployeeTotp, code: str,
+                       settings=None) -> bool:
+    """Accept a sign-in code by a compare-and-swap, not a later commit."""
+    secret = _plain_secret(row, settings)
+    step = matching_step(secret, code)
+    if step is not None:
+        return _claim_step(db, row, step)
+    return _claim_recovery(db, row, code)
+
+
 def confirm_setup(db: Session, employee: emp.Employee, code: str,
                   settings=None) -> dict:
     row = _row(db, employee.id)
@@ -300,12 +349,21 @@ def take_challenge(db: Session, token: str, code: str,
         db.delete(row)
         db.commit()
         raise emp.StoreError("That sign-in expired. Sign in again.")
-    if not (code or "").strip() or not _accept_code(totp, code, settings):
-        row.attempts = int(row.attempts or 0) + 1
-        if row.attempts >= MAX_ATTEMPTS:
-            db.delete(row)
-        db.commit()
+    token_hash = row.token_hash
+    if not (code or "").strip() or not _consume_for_login(
+            db, totp, code, settings):
+        db.rollback()
+        fresh = db.get(TotpChallenge, token_hash)
+        if fresh is not None:
+            fresh.attempts = int(fresh.attempts or 0) + 1
+            if fresh.attempts >= MAX_ATTEMPTS:
+                db.delete(fresh)
+            db.commit()
         raise emp.StoreError("That code is not valid.")
-    db.delete(row)
+    gone = db.execute(delete(TotpChallenge).where(
+        TotpChallenge.token_hash == token_hash))
+    if not _changed_one(gone):
+        db.rollback()
+        raise emp.StoreError("That code is not valid.")
     db.commit()
     return employee

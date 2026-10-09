@@ -370,6 +370,36 @@ def test_email_change_keeps_the_same_domain(session):
     assert named.email == "ada.desk+tag@gmail.com"
 
 
+def test_changed_email_does_not_sign_in_a_different_identity(session):
+    admin = emp.admin_create(session, "root", "ada@foap.test", role="admin")
+    emp.update_profile(session, admin.id, email="other@foap.test")
+    other = {"workos_user_id": "w-other", "email": "other@foap.test",
+             "verified": True, "provider": "google",
+             "first_name": "Other", "last_name": "Person"}
+    with pytest.raises(emp.StoreError, match="already registered"):
+        emp.login_identity(session, other)
+    kept = emp.get_employee(session, admin.id)
+    assert kept.role == "admin"
+    assert kept.email == "other@foap.test"
+    assert kept.workos_user_id is None
+    assert emp.count_live_sessions(session, admin.id) == 0
+
+
+def test_linked_email_change_rejects_the_other_workos_user(session):
+    admin = emp.admin_create(session, "root", "ada@foap.test", role="admin")
+    _token, linked, _created = emp.login_identity(session, dict(IDENT))
+    assert linked.id == admin.id
+    emp.update_profile(session, admin.id, email="ada.new@foap.test")
+    other = dict(IDENT, workos_user_id="w-other", email="ada.new@foap.test")
+    with pytest.raises(emp.StoreError, match="already registered"):
+        emp.login_identity(session, other)
+    _token2, again, _created2 = emp.login_identity(
+        session, dict(IDENT, email="ada.new@foap.test"))
+    assert again.id == admin.id
+    assert again.workos_user_id == "w-ada"
+    assert again.email == "ada.new@foap.test"
+
+
 def test_email_change_keeps_the_workos_login(session):
     admin = emp.admin_create(session, "root", "ada@foap.test", role="admin")
     _token, linked, _created = emp.login_identity(session, dict(IDENT))

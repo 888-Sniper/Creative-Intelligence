@@ -190,6 +190,39 @@ def test_tiktok_and_ga4_connect(http, monkeypatch):
             == "ga-refresh"
 
 
+def test_callback_does_not_store_under_a_different_employee(http, monkeypatch):
+    client, engine, _settings = http
+    calls = []
+    _fake_http(monkeypatch, calls)
+    started_as = client.cookies.get("ci_session")
+    started = client.post("/api/auth/integrations/meta/start")
+    assert started.status_code == 200, started.text
+    state = client.cookies.get("ci_integration_state")
+    with make_session_factory(engine)() as sess:
+        other = emp_store.admin_create(
+            sess, "root", "other@example.com", role="employee")
+        other_token = emp_store.create_session(sess, other.id, "w-other")
+        other_id = other.id
+    client.cookies.set("ci_session", other_token)
+    response = client.get(
+        "/api/auth/integrations/meta/callback?code=auth-code&state=%s" % state,
+        follow_redirects=False)
+    assert response.status_code == 302
+    assert "result=failed" in response.headers["location"]
+    assert "meta-access" not in response.headers["location"]
+    with make_session_factory(engine)() as sess:
+        rows = sess.scalars(sqlalchemy.select(OAuthToken).where(
+            OAuthToken.provider == "meta")).all()
+    assert rows == []
+    client.cookies.set("ci_session", started_as)
+    assert client.get("/api/auth/integrations/meta/status").json() == {
+        "connected": False}
+    client.cookies.set("ci_session", other_token)
+    assert client.get("/api/auth/integrations/meta/status").json() == {
+        "connected": False}
+    _ = other_id
+
+
 def test_callback_rejects_a_foreign_state(http):
     client, _engine, _settings = http
     client.post("/api/auth/integrations/meta/start")
@@ -205,3 +238,35 @@ def test_callback_rejects_a_foreign_state(http):
 def test_unknown_provider_is_not_found(http):
     client, _engine, _settings = http
     assert client.get("/api/auth/integrations/snap/status").status_code == 404
+
+
+def test_scheduler_resolver_uses_a_connected_ads_token(tmp_path, monkeypatch):
+    import ci_backend.google_oauth as goog
+    from ci_backend.main import _google_bearer_resolver
+
+    def status(_db, provider, employee_id):
+        if employee_id == "off":
+            return {"connected": False}
+        return {"connected": True, "account": "1", "provider": provider}
+
+    def access(_db, provider, employee_id, settings=None):
+        assert provider == "meta"
+        assert employee_id == "on"
+        _ = settings
+        return "meta-access"
+
+    def google(_db, employee_id, settings=None):
+        assert employee_id == "sheet-owner"
+        _ = settings
+        return "goog-access"
+
+    monkeypatch.setattr(integ, "status", status)
+    monkeypatch.setattr(integ, "access_token_for", access)
+    monkeypatch.setattr(goog, "access_token_for", google)
+    resolve = _google_bearer_resolver(
+        str(tmp_path / "sched.db"), Settings(master_key=TEST_MASTER_KEY))
+    assert resolve({"owner_employee_id": "on", "source": "meta"}) == "meta-access"
+    assert resolve({"owner_employee_id": "off", "source": "tiktok"}) is None
+    assert resolve({
+        "owner_employee_id": "sheet-owner", "source": "sheets",
+    }) == "goog-access"

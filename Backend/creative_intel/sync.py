@@ -401,9 +401,11 @@ def tick(conn, bearer_for=None):
     its exception text is returned under that job's "error" key.
 
     bearer_for is an optional callable taking a job dict and returning
-    a Google access token (or raising) for sheets/drive jobs whose
-    params opt in with google_auth. Without it, private-file jobs fail
-    closed on their own schedule instead of silently using public links.
+    an access token (or raising). Sheets and Drive jobs ask only when
+    params opt in with google_auth. Meta and TikTok jobs ask on every
+    run; None means the job still uses its workspace token. Without a
+    resolver, private-file jobs fail closed on their own schedule
+    instead of silently using public links.
     """
     results = {}
     for job in list_jobs(conn, include_disabled=False):
@@ -430,14 +432,23 @@ def tick(conn, bearer_for=None):
 
 
 def _job_bearer(job, bearer_for):
-    """Google access token for an opted-in sheets/drive job, else None."""
+    """Access token for a scheduled job, or None to keep the env path.
+
+    Sheets and Drive ask only when the job opted into Google auth.
+    Meta and TikTok always ask, so a connected ad account is used on
+    the schedule and not only on a manual run. A resolver that returns
+    None leaves the workspace token in place.
+    """
     if bearer_for is None:
         return None
-    if job["source"] not in ("sheets", "drive"):
-        return None
-    if not (job["params"] or {}).get("google_auth"):
-        return None
-    return bearer_for(job)
+    source = job["source"]
+    if source in ("sheets", "drive"):
+        if not (job["params"] or {}).get("google_auth"):
+            return None
+        return bearer_for(job)
+    if source in ("meta", "tiktok"):
+        return bearer_for(job)
+    return None
 
 
 def daemon(db_path, interval_s, stop_event=None, sleep=time.sleep,
@@ -446,8 +457,9 @@ def daemon(db_path, interval_s, stop_event=None, sleep=time.sleep,
 
     Opens a fresh connection per tick (SQLite connections are not
     shared across threads). Returns when stop_event is set.
-    bearer_for is passed through to tick() so private Google jobs
-    refresh credentials on schedule, not just on manual runs.
+    bearer_for is passed through to tick() so private Google jobs and
+    connected Meta or TikTok jobs refresh credentials on schedule, not
+    just on manual runs.
     """
     stop = stop_event or threading.Event()
     while not stop.is_set():

@@ -13,20 +13,29 @@ from ci_backend.config import Settings  # noqa: E402
 
 
 def _google_bearer_resolver(db_path, settings):
-    """Per-job Google access tokens for the scheduler thread.
+    """Per-job access tokens for the scheduler thread.
 
-    Opens employee sessions against the same database file, so
-    private sheets/drive jobs transparently refresh expired access
-    tokens on schedule. Resolution failures propagate to tick(),
-    which records them against the job instead of stopping others.
+    Opens employee sessions against the same database file. Private
+    sheets/drive jobs refresh the owner's Google token. Meta and
+    TikTok jobs use that owner's connected ad token when there is
+    one, and return None when there is not, so the workspace key
+    still applies. A connected token that cannot be read raises.
+    Resolution failures propagate to tick(), which records them
+    against the job instead of stopping others.
     """
     from ci_backend import google_oauth as goog
+    from ci_backend import integrations_oauth as integ
     from ci_backend.db import make_engine, make_session_factory
     sessions = make_session_factory(make_engine(db_path))
 
     def resolve(job):
         owner = (job or {}).get("owner_employee_id", "")
+        source = (job or {}).get("source", "")
         with sessions() as sess:
+            if source in ("meta", "tiktok"):
+                if not integ.status(sess, source, owner).get("connected"):
+                    return None
+                return integ.access_token_for(sess, source, owner, settings)
             return goog.access_token_for(sess, owner, settings)
 
     return resolve

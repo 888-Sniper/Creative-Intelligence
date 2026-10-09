@@ -46,7 +46,7 @@ const adminMe: MeResponse = {
 
 let failGoogleStatus = false;
 
-function mockFetch(opts?: { googleConnected?: boolean; me?: MeResponse; sessions?: number; cohorts?: typeof cohortsData; deleteFails?: number }) {
+function mockFetch(opts?: { googleConnected?: boolean; me?: MeResponse; sessions?: number; cohorts?: typeof cohortsData; deleteFails?: number; rejectEmail?: boolean }) {
   const calls: Array<[string, RequestInit | undefined]> = [];
   const googleConnected = opts?.googleConnected ?? false;
   // Stateful cohort list: DELETE removes the row so a re-fetched
@@ -58,6 +58,12 @@ function mockFetch(opts?: { googleConnected?: boolean; me?: MeResponse; sessions
     const method = init?.method ?? "GET";
     if (url === "/api/auth/me" && method === "PATCH") {
       const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, string>;
+      if (opts?.rejectEmail && typeof body.email === "string") {
+        return Response.json(
+          { detail: { error: "That email is already registered." } },
+          { status: 409 },
+        );
+      }
       return Response.json({ employee: { ...(opts?.me ?? authed).employee, ...body } });
     }
     if (url === "/api/auth/me") return Response.json(opts?.me ?? authed);
@@ -443,6 +449,62 @@ describe("SettingsPage", () => {
       first_name: "Ada",
       last_name: "Lovelace",
     });
+  });
+
+  it("edits the email only inside the current domain", async () => {
+    const calls = mockFetch();
+    renderSettings();
+    await screen.findByRole("button", { name: "Edit Email" });
+    expect(screen.queryByRole("button", { name: "Edit Profile" })).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "Email Address" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Edit Email" }));
+    const field = screen.getByRole("textbox", { name: "Email Address" });
+    expect((field as HTMLInputElement).value).toBe("ada@foap.test");
+    expect(screen.getByText("You can change this to another foap.test address.")).toBeDefined();
+    fireEvent.change(field, { target: { value: "ada@gmail.com" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Email" }));
+    expect(screen.getByRole("alert").textContent).toBe("Use another foap.test address.");
+    expect(calls.some(([url, init]) => url === "/api/auth/me" && init?.method === "PATCH" && String(init.body).includes("email"))).toBe(false);
+    fireEvent.change(screen.getByRole("textbox", { name: "Email Address" }), { target: { value: "ada" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Email" }));
+    expect(screen.getByRole("alert").textContent).toBe("Enter a valid email address.");
+    fireEvent.change(screen.getByRole("textbox", { name: "Email Address" }), { target: { value: "Ada.Desk@Foap.Test" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Email" }));
+    await waitFor(() => {
+      expect(screen.getByText("Email Saved.")).toBeDefined();
+    });
+    const patch = calls.find(([url, init]) => url === "/api/auth/me" && init?.method === "PATCH" && String(init.body).includes("email"));
+    expect(JSON.parse(String(patch?.[1]?.body ?? "{}"))).toEqual({ email: "ada.desk@foap.test" });
+    expect(screen.getAllByText("ada.desk@foap.test")).toHaveLength(3);
+    expect(screen.queryByRole("textbox", { name: "Email Address" })).toBeNull();
+  });
+
+  it("keeps the current email when the edit is cancelled or unchanged", async () => {
+    const calls = mockFetch();
+    renderSettings();
+    await screen.findByRole("button", { name: "Edit Email" });
+    fireEvent.click(screen.getByRole("button", { name: "Edit Email" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Email Address" }), { target: { value: "other@foap.test" } });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("textbox", { name: "Email Address" })).toBeNull();
+    expect(screen.getAllByText("ada@foap.test")).toHaveLength(3);
+    fireEvent.click(screen.getByRole("button", { name: "Edit Email" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save Email" }));
+    expect(screen.queryByRole("textbox", { name: "Email Address" })).toBeNull();
+    expect(calls.some(([url, init]) => url === "/api/auth/me" && init?.method === "PATCH")).toBe(false);
+  });
+
+  it("shows a server rejection for an email that is already registered", async () => {
+    mockFetch({ rejectEmail: true });
+    renderSettings();
+    await screen.findByRole("button", { name: "Edit Email" });
+    fireEvent.click(screen.getByRole("button", { name: "Edit Email" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Email Address" }), { target: { value: "taken@foap.test" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Email" }));
+    await waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toBe("That email is already registered.");
+    });
+    expect(screen.getAllByText("ada@foap.test")).toHaveLength(2);
   });
 
   it("uploads an avatar file as multipart FormData", async () => {

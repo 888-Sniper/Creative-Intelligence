@@ -77,7 +77,8 @@ async def update_me(request: Request, db=Depends(get_db)):
     try:
         updated = emp.update_profile(
             db, employee.id, first_name=body.first_name,
-            last_name=body.last_name, avatar_url=body.avatar_url)
+            last_name=body.last_name, avatar_url=body.avatar_url,
+            email=body.email)
     except emp.StoreError as exc:
         raise HTTPException(status_code=409, detail={"error": str(exc)})
     return {"ok": True,

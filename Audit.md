@@ -2,21 +2,22 @@
 
 Review `origin/main` after `git fetch`. Confirm that `origin/main` and GitHub `main` name the same SHA. A behind local checkout or a missing local `main` branch is not a reason to stop. Use `git show origin/main:PATH`. Stop only if the remote identities differ or the worktree is dirty.
 
-This is the product repo https://github.com/888-Sniper/Creative-Intelligence. The parent of this push is `0ffd7bd53f7edf2270e2f7b8fd85352010078bd8` (`Make the video file limit line a touch smaller`). This push renames the Admin and Settings page titles. It also replaces `Audit.md`. The parent already draws the video file-limit line at 12px. It already hides the three standing notes, makes an earlier step chip a button, treats a string creative-CSV filter as one value, and keeps drawer metrics, campaign names, and an empty campaign export inside the requested scope. Do not call the product perfect. Do not edit, commit, push, build, install, start the server, or activate a provider. Do not treat an unrun live model, live browser, Playwright run, Render click-through, or the five Notino clips as a source defect. Report only defects still present at the reviewed SHA, with severity, observed behavior, file and line, and the evidence that reproduces them.
+This is the product repo https://github.com/888-Sniper/Creative-Intelligence. The parent of this push is `97a1df87e8f30e1ba95c132b8ea3d78a77843327` (`Rename the admin and settings page titles`). This push lets an employee change the part of their email before `@` and keep the domain. It also replaces `Audit.md`. The parent already names the page headings Admin Settings and Profile Settings. It already draws the video file-limit line at 12px, hides the three standing notes, makes an earlier step chip a button, treats a string creative-CSV filter as one value, and keeps drawer metrics, campaign names, and an empty campaign export inside the requested scope. Do not call the product perfect. Do not edit, commit, push, build, install, start the server, or activate a provider. Do not treat an unrun live model, live browser, Playwright run, Render click-through, or the five Notino clips as a source defect. Report only defects still present at the reviewed SHA, with severity, observed behavior, file and line, and the evidence that reproduces them.
 
 Confirm the push with both ends named:
 
 ```
-git diff --stat 0ffd7bd53f7edf2270e2f7b8fd85352010078bd8 origin/main
+git diff --stat 97a1df87e8f30e1ba95c132b8ea3d78a77843327 origin/main
 ```
 
 What this push makes true:
 
-- The `/admin` page heading is “Admin Settings” (`en.ts` `admin.title`, line 631). Spanish is “Ajustes de administración” (`es.ts` line 631). Polish is “Ustawienia administracji” (`pl.ts` line 645). The sidebar link stays “Admin” (`nav.admin`, `en.ts` line 619).
-- The `/settings` page heading, including the `/profile` redirect, is “Profile Settings” (`en.ts` `settings.title`, line 1654). Spanish is “Ajustes del perfil” (`es.ts` line 1654). Polish is “Ustawienia profilu” (`pl.ts` line 1668). The sidebar link stays “Settings” (`nav.settings`, `en.ts` line 620).
-- The video file-limit line stays 12px, from the parent (`VideoUploadPanel.tsx` line 1469, `theme.css` line 1037).
+- Profile Settings replaces Edit Profile with Edit Email (`en.ts` line 1673). Spanish is “Editar correo” (`es.ts` line 1673). Polish is “Edytuj e-mail” (`pl.ts` line 1687). The button opens an address field. Save Email sends that address to `PATCH /api/auth/me`. The stored domain must stay the same: a `gmail.com` address can become another `gmail.com` address, and a `foap.com` address can become another `foap.com` address. `employees.py` lines 686–690 refuse a different domain with `Use another {domain} address.` The page shows that sentence before the request (`SettingsPage.tsx` lines 403–405). Cancel closes the field. The same address does not send a patch. A duplicate address is refused. The WorkOS id is not rewritten.
+- The `/admin` page heading stays “Admin Settings” (`en.ts` `admin.title`, line 631). Spanish stays “Ajustes de administración” (`es.ts` line 631). Polish stays “Ustawienia administracji” (`pl.ts` line 645). The sidebar link stays “Admin” (`nav.admin`, `en.ts` line 619).
+- The `/settings` page heading, including the `/profile` redirect, stays “Profile Settings” (`en.ts` `settings.title`, line 1655). Spanish stays “Ajustes del perfil” (`es.ts` line 1655). Polish stays “Ustawienia profilu” (`pl.ts` line 1669). The sidebar link stays “Settings” (`nav.settings`, `en.ts` line 620). Personal Info still edits the name.
+- The video file-limit line stays 12px, from an earlier parent (`VideoUploadPanel.tsx` line 1469, `theme.css` line 1037).
 
-How to confirm from source: `e2e/admin.spec.ts` expects the heading “Admin Settings”. `e2e/auth.spec.ts` expects “Profile Settings”. `e2e/00-screens.spec.ts` and `e2e/02-full-demo.spec.ts` expect those headings on `/admin`, `/settings`, and `/profile`. This push ran `pnpm exec vitest run src/pages/SettingsPage.test.tsx src/admin/AdminEmployeesPage.test.tsx src/i18n/parity.test.ts src/layouts/AppShell.test.tsx` (50 passed) and `pnpm exec playwright test e2e/admin.spec.ts e2e/auth.spec.ts -g "add, approve|settings shows"` (3 passed). `pnpm build` ran `tsc --noEmit` and the Vite build. The full UI suite and the full backend suite were not re-run. Render was not clicked.
+How to confirm from source: `e2e/auth.spec.ts` expects Edit Email, refuses `kpi@gmail.com` for a `foap.test` account, saves `kay.desk@foap.test`, and puts `kpi@foap.test` back. `tests/test_ci_auth.py` covers the domain, a duplicate, an invalid address, and a later WorkOS login on the same row. `e2e/admin.spec.ts` expects the heading “Admin Settings”. `e2e/auth.spec.ts` expects “Profile Settings”. This push ran `pnpm exec vitest run src/pages/SettingsPage.test.tsx src/i18n/parity.test.ts` (32 passed) and `python -m pytest tests/test_ci_auth.py::test_email_change_keeps_the_same_domain tests/test_ci_auth.py::test_email_change_keeps_the_workos_login tests/test_ci_app.py::test_profile_edit_flow` (3 passed). `pnpm exec playwright test e2e/auth.spec.ts -g "edit email|signed out sees login, employee|settings shows"` passed 4, including the email editor at 1280px and at 390px wide. `pnpm build` ran `tsc --noEmit` and the Vite build. The full UI suite and the full backend suite were not re-run. Render was not clicked.
 
 Re-read the cited files at `origin/main`. Line numbers below were opened on this push. If a later commit moves a line, follow the symbol, not the stale number.
 
@@ -273,37 +274,37 @@ Charts on this page use `/api/benchmarks`, `/api/campaigns`, and `/api/creatives
 
 ## Settings
 
-The page heading is “Profile Settings” (`en.ts` line 1654). The sidebar link stays “Settings” (`en.ts` line 620).
+The page heading is “Profile Settings” (`en.ts` line 1655). The sidebar link stays “Settings” (`en.ts` line 620).
 
-`applyLive` (`SettingsPage.tsx` lines 232–237) applies theme, accent, density, language, and timezone on each autosave commit. Language and timezone are also restored for the signed-in employee by `LocalePrefsSync` (`i18n/index.tsx` lines 160–162). Accent and density CSS variables are rewritten when Settings is mounted (lines 314–316) and then left on `documentElement`.
+`applyLive` (`SettingsPage.tsx` lines 246–251) applies theme, accent, density, language, and timezone on each autosave commit. Language and timezone are also restored for the signed-in employee by `LocalePrefsSync` (`i18n/index.tsx` lines 160–162). Accent and density CSS variables are rewritten when Settings is mounted (line 329) and then left on `documentElement`.
 
 The prefs key is `ci-settings-prefs:<employeeId>` (`prefs.ts` lines 106–147), with a one-time read of the legacy global key. `src/state/notificationPrefs.ts` is unused. Nothing imports it.
 
 Live on commit: theme, accent, density, language, timezone.
 
-Saved on this page and not read by Dashboard, the router, or Ask: workspace name, Default View, Default Currency, Default Date Range, Default Campaign View, Email Reports, Campaign Updates, AI Insights, Product Updates, Data Usage, Share Analytics, and the retention select. Workspace name autosaves after 450 ms, trims, caps at 80, and rejects a blank (lines 270–288). No other page reads `prefs.workspace`. Unmount clears the debounce without flushing (lines 291–293), so a name typed and left within 450 ms is dropped. Default View, currency, date-range, and campaign-view option labels are English arrays (lines 66–69 and 840–878). The retention hint says the browser preference is not workspace retention (`en.ts` line 1783).
+Saved on this page and not read by Dashboard, the router, or Ask: workspace name, Default View, Default Currency, Default Date Range, Default Campaign View, Email Reports, Campaign Updates, AI Insights, Product Updates, Data Usage, Share Analytics, and the retention select. Workspace name autosaves after 450 ms, trims, caps at 80, and rejects a blank (lines 284–302). No other page reads `prefs.workspace`. Unmount clears the debounce without flushing (lines 305–307), so a name typed and left within 450 ms is dropped. Default View, currency, date-range, and campaign-view option labels are English arrays (lines 66–69 and 937–973). The retention hint says the browser preference is not workspace retention (`en.ts` line 1790).
 
 Theme is saved per employee, but the painted mode is the global `ci-theme` key (`useTheme.ts` lines 6–18 and 45–51). The live tree mounts `useTheme` only from Settings. Account switch applies language and timezone and does not call `setThemeMode` for the new employee. Accent and density update only when Settings mounts.
 
 Backend actions, not prefs:
 
-- Retry (lines 516–519) re-saves the prefs already on screen, and only after a local save failed.
-- Reset Defaults (lines 521–523) writes `DEFAULTS` and applies them. No confirm.
-- Edit Profile focuses the first-name field.
-- Upload Photo posts `/api/auth/me/avatar` with a raw `fetch` (lines 387–414).
-- Save Profile patches `/api/auth/me` (lines 345–367). The avatar URL is included only if it changed.
-- Remove Avatar patches `avatar_url: ""` (lines 370–384). The fallback error is the English sentence “Could not remove avatar.” (line 381).
-- Change Password posts `/api/auth/email/reset` (lines 417–429). It sends a reset email. The form does not set a new password.
-- Log Out (lines 742–746) posts `/api/auth/logout` and is shown only when the session count is under 2.
-- Log Out Everywhere (lines 735–740) confirms, then posts `/api/auth/sessions/revoke-all`. The handler destroys every session and clears the cookie (`auth.py` lines 378–391). It is shown only when the count is at least 2, in place of Log Out.
-- Export Data posts `/api/auth/export` (lines 462–473).
+- Retry (lines 575–577) re-saves the prefs already on screen, and only after a local save failed.
+- Reset Defaults (lines 579–581) writes `DEFAULTS` and applies them. No confirm.
+- Edit Email (lines 641–643) opens the address field (lines 601–623). Save Email (lines 394–425) patches `{ email }` to `/api/auth/me`. The domain after `@` must match the stored address (`employees.py` lines 682–695, route at `auth.py` line 81). A different domain shows `Use another {domain} address.` and does not send the patch (lines 403–405). That sentence stays in a `role="alert"` (lines 620–622). Cancel closes the field. The same address closes it without a patch (lines 407–410). An invalid address is refused. A duplicate returns `That email is already registered.` The WorkOS id is left unchanged. Personal Info still edits the first and last name.
+- Upload Photo posts `/api/auth/me/avatar` with a raw `fetch` (lines 445–472).
+- Save Profile patches `/api/auth/me` (lines 359–382). The avatar URL is included only if it changed.
+- Remove Avatar patches `avatar_url: ""` (lines 428–442). The fallback error is the English sentence “Could not remove avatar.” (line 439).
+- Change Password posts `/api/auth/email/reset` (lines 475–487). It sends a reset email. The form does not set a new password.
+- Log Out (lines 839–843) posts `/api/auth/logout` and is shown only when the session count is under 2.
+- Log Out Everywhere (lines 833–837) confirms, then posts `/api/auth/sessions/revoke-all`. The handler destroys every session and clears the cookie (`auth.py` lines 378–391). It is shown only when the count is at least 2, in place of Log Out.
+- Export Data posts `/api/auth/export` (lines 520–531).
 - Google Drive Connect and Disconnect live on `GoogleDriveCard.tsx` lines 35–89.
 
-The only `status` output requires `op !== null` (line 619). Save Profile, avatar upload and remove, Change Password, Log Out Everywhere, and Export Data set `status` in `catch` and clear `op` or `sessionOp` in `finally` (lines 363–366, 381–383, 410–413, 425–428, 455–458, 469–472). Those updates land in one paint, so the error never shows. A rejected photo sets `status` without setting `op` (lines 389–391). Success still uses the toast.
+The only `status` output requires `op !== null` (line 716). Save Profile, avatar upload and remove, Change Password, Log Out Everywhere, and Export Data set `status` in `catch` and clear `op` or `sessionOp` in `finally` (lines 377–381, 438–442, 468–472, 483–487, 513–517, 527–531). Those updates land in one paint, so the error never shows. A rejected photo sets `status` without setting `op` (lines 447–449). Success still uses the toast. Edit Email does not use that `status` line. Its error stays on the alert above.
 
-The Google SSO row shows Connected unless the check is still loading or `connected === false` (lines 694–700). `useGoogleStatus` sets `connected` to null and `error` to true on failure (`useGoogleStatus.ts` lines 54–57). The Drive card shows a retry for that state (`GoogleDriveCard.tsx` lines 76–81). The SSO row does not.
+The Google SSO row shows Connected unless the check is still loading or `connected === false` (lines 791–797). `useGoogleStatus` sets `connected` to null and `error` to true on failure (`useGoogleStatus.ts` lines 54–57). The Drive card shows a retry for that state (`GoogleDriveCard.tsx` lines 76–81). The SSO row does not.
 
-Unavailable, with no connect button: two-factor (lines 750–757), Meta Ads, TikTok Ads, and Google Analytics 4 (lines 937–967). Not-connected and those integration pills use `pill-ok` (lines 697, 946, 955, 964). Two-factor uses `pill-info` (line 754). `theme.css` line 916 paints both classes as the brand teal. The words still differ.
+Unavailable, with no connect button: two-factor (lines 847–856), Meta Ads, TikTok Ads, and Google Analytics 4 (lines 1040–1063). Not-connected and those integration pills use `pill-ok` (lines 780, 794, 796, 1043, 1053, 1063). Two-factor uses `pill-info` (line 851). `theme.css` line 916 paints both classes as the brand teal. The words still differ.
 
 Data tools on this page: retention patterns call `GET /api/retention/patterns`. Create Cohort posts `/api/cohorts` with the current filter scope (`DataTools.tsx` lines 272–346) and has no in-flight lock. Build calls `GET /api/cohorts/build`. Delete confirms and is rendered only for admins.
 
@@ -399,10 +400,11 @@ A step chip earlier than the open step is a button (lines 1406–1415) and calls
 
 The item below was a defect at the parent. It is the behavior named at the top of this file. Do not report it again unless the cited lines no longer do what this file says.
 
-- The Admin page heading is “Admin Settings” and the Settings page heading is “Profile Settings” (`en.ts` lines 631 and 1654). The sidebar labels stay “Admin” and “Settings”. The video file-limit line stays 12px, from the parent.
+- Edit Email changes only the part before `@`. `update_profile` (`employees.py` lines 682–695) stores another address when the domain matches and refuses a different domain, a duplicate, and an invalid address. The page shows the same domain sentence before the request (`SettingsPage.tsx` lines 403–405 and 620–622).
 
 These were already true at the parent and stay true:
 
+- The Admin page heading is “Admin Settings” and the Settings page heading is “Profile Settings” (`en.ts` lines 631 and 1655). The sidebar labels stay “Admin” and “Settings”. The video file-limit line stays 12px, from an earlier parent.
 - Drawer creative metrics stay inside the open campaign (`actions.py` lines 668–671). Totals still come from `benchmark(..., "campaign")` (lines 661–663).
 - `scopedPath` treats only the exact `/api/campaigns/meta` and `/api/campaigns/recommendations` bases as static (`client.ts` lines 105–111). A name such as `meta-launch` keeps the shared filters.
 - A campaign name that contains `/` or a literal `%20` opens through `GET /api/campaigns/{name:path}` (`product.py` lines 189–220). The handler decodes the raw target once.
@@ -431,7 +433,7 @@ P2. Several failures render as a skeleton or as an empty state: dashboard charts
 
 P2. The Analyst date select can read All Time while the shared date filter is still applied. Reset does not clear Objective or Language. Clear does not clear shared filters.
 
-P2. Settings action failures are stored and then not rendered (`SettingsPage.tsx` line 619). A failed Google status check paints the SSO row as Connected. Theme follows the global `ci-theme` key, not the employee whose prefs stored it. Workspace name, default view, currency, date range, campaign view, notification toggles, and privacy toggles stay on Settings.
+P2. Settings action failures other than Edit Email are stored and then not rendered (`SettingsPage.tsx` line 716). Edit Email errors use the alert at lines 620–622 and do show. A failed Google status check paints the SSO row as Connected. Theme follows the global `ci-theme` key, not the employee whose prefs stored it. Workspace name, default view, currency, date range, campaign view, notification toggles, and privacy toggles stay on Settings.
 
 P2. The paused-provider banner says AI Analyst is paused. Analyst does not check the provider. Ask does fail closed with the administrator sentence.
 
@@ -447,4 +449,4 @@ P3. Provider cards show “Activating…” for every in-flight action. Workbook
 
 ## Checks not performed
 
-No Render click-through, live provider, ffmpeg run, or the five Notino clips. The full UI suite and the full backend suite were not re-run. This push ran Settings, Admin, locale parity, and shell unit tests (50 passed), the admin journey plus two settings Playwright tests (3 passed), and `tsc --noEmit` through `pnpm build`. `tests/test_table_exports.py` was not re-run. The four backend failures from the last full run, before the parent changed Python, were `tests/test_ci_app.py::test_security_headers_health_readiness` (`ModuleNotFoundError: No module named 'tests'`), `tests/test_ci_app.py::test_no_licensing_concepts` (the walker does not skip `.venv`), and `tests/test_web_shell.py` `test_favicon_asset_serves` plus `test_logo_and_mark_assets_serve` (404 on `/assets/favicon.png` and `/assets/foap-logo.png`). Those four were not re-run. `client.ts` lines 32–33 still turn a non-OK body with no `error` field into `Request failed (${status})`. This drawer route puts `error` on the 404, so that fallback is not the drawer copy. Spanish and Polish catalogs were checked for missing keys on the Ask, Analyst, Settings, Admin, and Providers slice only, on an earlier push. They were not opened line by line for Compare. Pre-existing ruff findings in `product.py` were left as they were. `benchmarks.py` was not edited.
+No Render click-through, live provider, ffmpeg run, or the five Notino clips. The full UI suite and the full backend suite were not re-run. This push ran Settings and locale-parity unit tests (32 passed), three auth tests (`test_email_change_keeps_the_same_domain`, `test_email_change_keeps_the_workos_login`, `test_profile_edit_flow`, 3 passed), four Playwright tests in `e2e/auth.spec.ts` (the signed-in settings journey, the Google Drive card, identity and logout-all, and the same-domain email edit at 1280px and 390px), and `tsc --noEmit` through `pnpm build`. `tests/test_table_exports.py` was not re-run. The four backend failures from the last full run, before an earlier parent changed Python, were `tests/test_ci_app.py::test_security_headers_health_readiness` (`ModuleNotFoundError: No module named 'tests'`), `tests/test_ci_app.py::test_no_licensing_concepts` (the walker does not skip `.venv`), and `tests/test_web_shell.py` `test_favicon_asset_serves` plus `test_logo_and_mark_assets_serve` (404 on `/assets/favicon.png` and `/assets/foap-logo.png`). Those four were not re-run. `client.ts` lines 32–33 still turn a non-OK body with no `error` field into `Request failed (${status})`. This drawer route puts `error` on the 404, so that fallback is not the drawer copy. Spanish and Polish catalogs were checked for missing keys by `parity.test.ts` on this push. They were not opened line by line for Compare. Pre-existing ruff findings in `product.py` were left as they were. `benchmarks.py` was not edited.

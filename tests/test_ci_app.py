@@ -267,6 +267,14 @@ def test_profile_edit_flow(tmp_path, monkeypatch):
     audit = http.get("/api/admin/audit").json()["events"]
     assert any(e["action"] == "PROFILE_UPDATED" for e in audit)
 
+    r = http.patch("/api/auth/me", json={"email": "chief@gmail.com"})
+    assert r.status_code == 409
+    assert r.json()["error"] == "Use another foap.test address."
+    r = http.patch("/api/auth/me", json={"email": "  Chief@Foap.Test "})
+    assert r.status_code == 200, r.text
+    assert r.json()["employee"]["email"] == "chief@foap.test"
+    assert http.get("/api/auth/me").json()["employee"]["email"] == "chief@foap.test"
+
 
 def test_profile_requires_active_login(tmp_path, monkeypatch, client):
     r = client.patch("/api/auth/me", json={"first_name": "No"})

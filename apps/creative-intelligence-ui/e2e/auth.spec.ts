@@ -88,10 +88,11 @@ test.describe("employee journey", () => {
 
     await page.getByRole("link", { name: "Settings" }).click();
     await expect(page.getByRole("heading", { name: "Profile Settings", exact: true }).first()).toBeVisible();
-    // Email is shown read-only (bare address, no verified suffix): hero,
-    // Workspace, and Connections surfaces carry it, never an editable field.
+    // The address is shown in the hero, Workspace, and Connections.
+    // Edit Email stays closed, so no email field is on screen yet.
     await expect(page.getByText("ada@foap.test", { exact: true })).toHaveCount(3);
     await expect(page.getByRole("textbox", { name: /email/i })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Edit Email" })).toBeVisible();
     // The old Profile route redirects to the merged Settings page.
     await page.goto("/profile");
     await expect(page).toHaveURL(/\/settings$/);
@@ -192,5 +193,48 @@ test.describe("employee journey", () => {
       await logoutOne.click();
     }
     await expect(page.getByRole("heading", { name: "Welcome Back" })).toBeVisible();
+  });
+
+  test("edit email keeps the current domain", async ({ page, context }) => {
+    const seeds = readSeeds();
+    // The admin token is revoked by the logout-all step above. This
+    // account keeps its own session, and the address is put back.
+    const original = "kpi@foap.test";
+    const changed = "kay.desk@foap.test";
+    await loginAs(context, page, seeds.kpi, "/settings");
+    await expect(page.getByRole("heading", { name: "Profile Settings", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Edit Email" })).toBeVisible();
+    await page.getByRole("button", { name: "Edit Email" }).click();
+    const field = page.getByRole("textbox", { name: "Email Address" });
+    await expect(field).toBeVisible();
+    await expect(field).toHaveValue(original);
+    await expect(page.getByText("You can change this to another foap.test address.")).toBeVisible();
+    await field.fill("kpi@gmail.com");
+    await page.getByRole("button", { name: "Save Email" }).click();
+    await expect(page.getByRole("alert")).toHaveText("Use another foap.test address.");
+    await expect(page.getByText(original, { exact: true })).toHaveCount(2);
+    try {
+      await field.fill(changed);
+      await page.getByRole("button", { name: "Save Email" }).click();
+      await expect(page.getByText("Email Saved.")).toBeVisible();
+      await expect(page.getByText(changed, { exact: true })).toHaveCount(3);
+    } finally {
+      if (await page.getByText(changed, { exact: true }).count()) {
+        await page.getByRole("button", { name: "Edit Email" }).click();
+        await page.getByRole("textbox", { name: "Email Address" }).fill(original);
+        await page.getByRole("button", { name: "Save Email" }).click();
+        await expect(page.getByText(original, { exact: true })).toHaveCount(3);
+      }
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByRole("button", { name: "Edit Email" }).click();
+    await expect(page.getByRole("textbox", { name: "Email Address" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Save Email" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Cancel" })).toBeVisible();
+    await expect(page.locator("button.btn-primary", { hasText: "Upload Photo" })).toBeVisible();
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    expect(overflow).toBeLessThanOrEqual(0);
+    await page.getByRole("button", { name: "Cancel" }).click();
+    await expect(page.getByRole("button", { name: "Edit Email" })).toBeVisible();
   });
 });

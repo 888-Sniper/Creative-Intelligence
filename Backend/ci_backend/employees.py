@@ -114,6 +114,8 @@ class ProfileUpdate(BaseModel):
     first_name: str | None = None
     last_name: str | None = None
     avatar_url: str | None = None
+    # None leaves the address unchanged. A value must keep the current domain.
+    email: str | None = None
 
 
 _EMP_NO_RE = re.compile(r"EMP-(\d+)")
@@ -595,6 +597,7 @@ def list_accounts(db: Session, container_id: str = "") -> list[dict]:
 MAX_NAME_CHARS = 120
 MAX_AVATAR_URL_CHARS = 2048
 MAX_AVATAR_BYTES = 2 * 1024 * 1024
+MAX_EMAIL_CHARS = 254
 AVATAR_TYPES = {".jpg", ".jpeg", ".png", ".webp"}
 
 
@@ -621,12 +624,36 @@ def _clean_avatar_url(value) -> str:
                      )
 
 
+def _email_domain(value: str) -> str:
+    """Full domain after the single @, lowercased. Empty when invalid."""
+    text = (value or "").strip().lower()
+    if text.count("@") != 1 or any(ch.isspace() for ch in text):
+        return ""
+    local, domain = text.split("@", 1)
+    if not local or not domain:
+        return ""
+    return domain
+
+
+def _clean_email(value) -> str:
+    """A stored address: one @, a dotted domain, no spaces, at most 254."""
+    text = (value or "").strip().lower()
+    domain = _email_domain(text)
+    if not domain or "." not in domain or domain.startswith(".") \
+            or domain.endswith(".") or len(text) > MAX_EMAIL_CHARS:
+        raise StoreError("Enter a valid email address.")
+    return text
+
+
 def update_profile(db: Session, employee_id: str, first_name=None,
-                   last_name=None, avatar_url=None) -> Employee:
+                   last_name=None, avatar_url=None, email=None) -> Employee:
     """Self-service profile edit for an active employee.
 
     None means "leave unchanged"; empty avatar_url clears the avatar.
-    Every change is audit-logged as PROFILE_UPDATED (admin_id=self).
+    An email may change the local part only. The domain after @ must
+    match the address already stored, so gmail.com stays gmail.com.
+    The WorkOS id is left as it is. Every change is audit-logged as
+    PROFILE_UPDATED (admin_id=self).
     """
     emp = get_employee(db, employee_id)
     if emp is None:
@@ -652,9 +679,28 @@ def update_profile(db: Session, employee_id: str, first_name=None,
             # Clearing is a deliberate removal choice (do not refill
             # from the provider later); any new URL revokes it.
             emp.avatar_removed = "1" if not cleaned else ""
+    if email is not None:
+        cleaned = _clean_email(email)
+        current = (emp.email or "").strip().lower()
+        if cleaned != current:
+            current_domain = _email_domain(current)
+            if not current_domain:
+                raise StoreError("Enter a valid email address.")
+            if _email_domain(cleaned) != current_domain:
+                raise StoreError("Use another %s address." % current_domain)
+            other = find_employee(db, "", cleaned)
+            if other is not None and other.id != emp.id:
+                raise StoreError("That email is already registered.")
+            changes.append(("email", emp.email or "", cleaned))
+            emp.email = cleaned
     if changes:
         emp.updated_at = utcnow()
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError as exc:
+            db.rollback()
+            raise StoreError(
+                "That email is already registered.") from exc
         _audit(db, emp.id, emp.id, "PROFILE_UPDATED",
                "; ".join("%s: %s" % (field, prev)
                            for field, prev, _new in changes),

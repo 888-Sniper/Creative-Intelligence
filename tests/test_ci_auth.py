@@ -346,6 +346,42 @@ def test_alembic_migration_builds_tables(tmp_path):
         engine.dispose()
 
 
+def test_email_change_keeps_the_same_domain(session):
+    admin = emp.admin_create(session, "root", "ada@gmail.com", role="admin")
+    updated = emp.update_profile(session, admin.id, email="  Ada.Desk+tag@Gmail.COM ")
+    assert updated.email == "ada.desk+tag@gmail.com"
+    assert updated.workos_user_id is None
+    same = emp.update_profile(session, admin.id, email="ADA.DESK+TAG@gmail.com")
+    assert same.email == "ada.desk+tag@gmail.com"
+    with pytest.raises(emp.StoreError, match="gmail.com"):
+        emp.update_profile(session, admin.id, email="ada.desk@foap.com")
+    with pytest.raises(emp.StoreError, match="gmail.com"):
+        emp.update_profile(session, admin.id, email="ada.desk@mail.gmail.com")
+    assert emp.get_employee(session, admin.id).email == "ada.desk+tag@gmail.com"
+    emp.admin_create(session, admin.id, "boss@gmail.com")
+    with pytest.raises(emp.StoreError, match="already registered"):
+        emp.update_profile(session, admin.id, email="boss@gmail.com")
+    for bad in ("", "ada", "@gmail.com", "ada@", "ada@gmail",
+                "a@b@gmail.com", "ada @gmail.com", "ada@gmail.com."):
+        with pytest.raises(emp.StoreError, match="valid email"):
+            emp.update_profile(session, admin.id, email=bad)
+    named = emp.update_profile(session, admin.id, first_name="Ada")
+    assert named.first_name == "Ada"
+    assert named.email == "ada.desk+tag@gmail.com"
+
+
+def test_email_change_keeps_the_workos_login(session):
+    admin = emp.admin_create(session, "root", "ada@foap.test", role="admin")
+    _token, linked, _created = emp.login_identity(session, dict(IDENT))
+    assert linked.id == admin.id
+    wid = linked.workos_user_id
+    emp.update_profile(session, admin.id, email="ada.new@foap.test")
+    _token2, again, _created2 = emp.login_identity(session, dict(IDENT))
+    assert again.id == admin.id
+    assert again.workos_user_id == wid
+    assert again.email == "ada.new@foap.test"
+
+
 def test_avatar_removal_survives_provider_relogin(session):
     """Provider photos fill a blank once, never overwrite a chosen
     photo, and never restore a deliberately cleared avatar."""

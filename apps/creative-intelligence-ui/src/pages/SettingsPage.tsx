@@ -74,6 +74,16 @@ function cap(v: string): string {
   return v ? v.charAt(0).toUpperCase() + v.slice(1) : v;
 }
 
+/** Full domain after the only @. Empty when the address is not usable. */
+function emailDomain(value: string): string {
+  const text = value.trim().toLowerCase();
+  const at = text.indexOf("@");
+  if (at <= 0 || at !== text.lastIndexOf("@") || /\s/.test(text)) return "";
+  const domain = text.slice(at + 1);
+  if (!domain || !domain.includes(".") || domain.startsWith(".") || domain.endsWith(".")) return "";
+  return domain;
+}
+
 /** Load prefs, honoring an explicit legacy `ci-theme` choice until the
  *  stored prefs carry their own theme (useTheme owns that key and stays
  *  the live source of truth; every autosave commit re-syncs both). */
@@ -147,7 +157,7 @@ function AppearancePreview({ accent, density, mode }: { accent: string; density:
 }
 
 export function SettingsPage() {
-  const { me, logout: authLogout } = useAuth();
+  const { me, logout: authLogout, refresh } = useAuth();
   const { mode: liveThemeMode, theme: liveTheme, set: setThemeMode } = useTheme();
   const { t, tp, fmtDate, setLang, setTimezone } = useLocale();
 
@@ -178,7 +188,11 @@ export function SettingsPage() {
   const [avatarOpen, setAvatarOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const firstRef = useRef<HTMLInputElement | null>(null);
+  const emailRef = useRef<HTMLInputElement | null>(null);
   const [op, setOp] = useState<string | null>(null);
+  const [emailOpen, setEmailOpen] = useState(false);
+  const [emailDraft, setEmailDraft] = useState("");
+  const [emailError, setEmailError] = useState("");
 
   // Session actions (bounded hook, §11).
   const sessions = useSessionCount();
@@ -367,6 +381,50 @@ export function SettingsPage() {
     }
   };
 
+  const openEmailEditor = () => {
+    setEmailDraft(employee?.email || "");
+    setEmailError("");
+    setEmailOpen(true);
+  };
+
+  useEffect(() => {
+    if (emailOpen) emailRef.current?.focus();
+  }, [emailOpen]);
+
+  const saveEmail = async () => {
+    if (!employee) return;
+    const next = emailDraft.trim().toLowerCase();
+    const domain = emailDomain(employee.email || "");
+    const nextDomain = emailDomain(next);
+    if (!nextDomain || next.length > 254) {
+      setEmailError(t("settings.personalInfo.emailInvalid"));
+      return;
+    }
+    if (nextDomain !== domain) {
+      setEmailError(t("settings.personalInfo.emailDomain", { domain }));
+      return;
+    }
+    if (next === (employee.email || "").trim().toLowerCase()) {
+      setEmailOpen(false);
+      setEmailError("");
+      return;
+    }
+    setOp("email");
+    setEmailError("");
+    try {
+      const r = await api<{ employee: PublicEmployee }>("PATCH", "/api/auth/me", { email: next });
+      setEmployee(r.employee);
+      setEmailDraft(r.employee.email || next);
+      setEmailOpen(false);
+      notifyOk(t("toast.emailSaved"));
+      void refresh();
+    } catch (err) {
+      setEmailError(err instanceof ApiError ? err.message : t("settings.personalInfo.emailFailed"));
+    } finally {
+      setOp(null);
+    }
+  };
+
   const removeAvatar = async () => {
     // No DELETE route exists; an empty avatar_url in PATCH clears the avatar.
     setOp("avatar");
@@ -541,11 +599,50 @@ export function SettingsPage() {
               <p className="panel-sub" style={{ marginTop: 4 }}>
                 {`${codeLabel(t, "roles", employee.role)} · ${codeLabel(t, "statuses", employee.status)}`}
               </p>
-              <p className="panel-sub" style={{ marginTop: 2 }}>{employee.email}</p>
+              {emailOpen ? (
+                <div className="field" style={{ marginTop: 8, maxWidth: 360 }}>
+                  <label htmlFor="s-email">{t("settings.personalInfo.emailAddress")}</label>
+                  <input
+                    id="s-email"
+                    ref={emailRef}
+                    type="email"
+                    autoComplete="email"
+                    value={emailDraft}
+                    onChange={(e) => {
+                      setEmailDraft(e.target.value);
+                      setEmailError("");
+                    }}
+                  />
+                  <p className="panel-sub" style={{ marginTop: 4 }}>
+                    {t("settings.personalInfo.emailHint", {
+                      domain: emailDomain(employee.email || "") || "—",
+                    })}
+                  </p>
+                  {emailError ? (
+                    <p role="alert" className="muted" style={{ margin: "4px 0 0" }}>{emailError}</p>
+                  ) : null}
+                </div>
+              ) : (
+                <p className="panel-sub" style={{ marginTop: 2 }}>{employee.email}</p>
+              )}
               <div className="chip-row" style={{ marginTop: 12 }}>
-                <button type="button" className="btn-outline" onClick={() => firstRef.current?.focus()}>
-                  <Icon name="user" size={14} /> {t("settings.personalInfo.editProfile")}
-                </button>
+                {emailOpen ? (
+                  <>
+                    <LoadingButton type="button" className="btn-primary" loading={op === "email"}
+                      loadingLabel={t("common.saving")} disabled={op !== null}
+                      onClick={() => void saveEmail()}>
+                      {t("settings.personalInfo.saveEmail")}
+                    </LoadingButton>
+                    <button type="button" className="btn-outline" disabled={op !== null}
+                      onClick={() => { setEmailOpen(false); setEmailError(""); }}>
+                      {t("common.cancel")}
+                    </button>
+                  </>
+                ) : (
+                  <button type="button" className="btn-outline" onClick={openEmailEditor}>
+                    <Icon name="mail" size={14} /> {t("settings.personalInfo.editEmail")}
+                  </button>
+                )}
                 <LoadingButton type="button" className="btn-primary" loading={op === "avatar"}
                   loadingLabel={t("common.sending")} disabled={op !== null}
                   title={t("settings.personalInfo.uploadHint")}

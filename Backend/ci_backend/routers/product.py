@@ -3013,13 +3013,23 @@ def serve_asset(name: str):
     ext = os.path.splitext(name)[1].lower()
     if ext in _ALLOWED_DIST_EXTS:
         path = os.path.join(legacy.REACT_ASSETS_DIR, name)
-        if not os.path.isfile(path):
-            raise HTTPException(status_code=404,
-                                detail={"error": "not found"})
-        ctype, _ = mimetypes.guess_type(path)
-        return FileResponse(
-            path, media_type=ctype or "application/octet-stream",
-            headers={"Cache-Control": "public, max-age=31536000, immutable"})
+        if os.path.isfile(path):
+            ctype, _ = mimetypes.guess_type(path)
+            return FileResponse(
+                path, media_type=ctype or "application/octet-stream",
+                headers={"Cache-Control":
+                         "public, max-age=31536000, immutable"})
+        # A hashed build asset wins when it exists. The same name in
+        # Web/assets is the brand file the shell also serves at the
+        # dedicated path (/favicon.png, /foap-logo.png).
+        if ext in _ALLOWED_ASSET_EXTS:
+            brand = os.path.join(legacy.ASSETS_DIR, name)
+            if os.path.isfile(brand):
+                ctype, _ = mimetypes.guess_type(brand)
+                return FileResponse(
+                    brand, media_type=ctype or "application/octet-stream",
+                    headers={"Cache-Control": "public, max-age=86400"})
+        raise HTTPException(status_code=404, detail={"error": "not found"})
     if ext not in _ALLOWED_ASSET_EXTS:
         raise HTTPException(status_code=404, detail={"error": "not found"})
     path = os.path.join(legacy.ASSETS_DIR, name)

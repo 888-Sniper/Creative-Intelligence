@@ -433,13 +433,22 @@ describe("AdminEmployeesPage", () => {
 
   it("shows the four KPI cards with honest sub-lines", async () => {
     setupFetch();
-    render(<AdminEmployeesPage />);
+    const { container } = render(<AdminEmployeesPage />);
     await waitFor(() => {
       expect(screen.getByText("Total Employees")).toBeDefined();
     });
     expect(screen.getByText("Active Users")).toBeDefined();
     expect(screen.getByText("Pending Approvals")).toBeDefined();
-    expect(screen.getByText("Admins")).toBeDefined();
+    expect(screen.getByText("Total Admins")).toBeDefined();
+    const labels = Array.from(
+      container.querySelectorAll(".kpi-grid .kpi-card .kpi-body"),
+    ).map((card) => card.querySelector(".kpi-label")?.textContent);
+    expect(labels).toEqual([
+      "Active Users",
+      "Total Admins",
+      "Total Employees",
+      "Pending Approvals",
+    ]);
   });
 
   it("orders Admins, Teams and Employees rows with real counts", async () => {

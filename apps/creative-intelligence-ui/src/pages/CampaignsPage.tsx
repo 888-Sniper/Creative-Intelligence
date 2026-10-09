@@ -107,6 +107,11 @@ export function CampaignsPage() {
    * search so the hit is visible immediately. */
   const [search, setSearch] = useState(
     () => new URLSearchParams(location.search).get("find") ?? "");
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (!params.has("find")) return;
+    setSearch(params.get("find") ?? "");
+  }, [location.search]);
 
   const { data: compare, error: compareError } = useCompareState(applied);
   const [focus, setFocus] = useState<CompareLike | null>(null);

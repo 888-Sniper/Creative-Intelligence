@@ -69,8 +69,11 @@ function num(v: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function secondsOf(c: CreativeRowDatum): number {
-  return num(c.annotation?.duration_s ?? c.duration_s);
+function secondsOf(c: CreativeRowDatum): number | null {
+  const raw = c.annotation?.duration_s ?? c.duration_s;
+  if (raw == null || raw === "") return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
 }
 
 function shortHook(t: TFn, hook: string | null | undefined): string {
@@ -117,7 +120,7 @@ function CreativeDetail({ datum }: { datum: CreativeRowDatum }) {
   const a = datum.annotation ?? {};
   const facts: Array<[string, string]> = [
     [t("filters.hook"), shortHook(t, a.hook_type)],
-    [t("creatives.detail.duration"), secondsOf(datum) ? `${secondsOf(datum)}s` : "—"],
+    [t("creatives.detail.duration"), secondsOf(datum) == null ? "—" : `${secondsOf(datum)}s`],
     [t("filters.creator"), codeVia(t, "filters.creators", a.creator_vs_branded)],
     [t("filters.format"), datum.format ?? "—"],
     [t("filters.platform"), platformLabel(datum.platform)],
@@ -216,7 +219,7 @@ export function CreativesPage() {
   // describe the same filtered group as the table.
   const lengthRows = useMemo(() => (creatives.data ?? []).filter((c) => {
     const s = secondsOf(c);
-    if (length === "short" && !(s > 0 && s < 15)) return false;
+    if (length === "short" && !(s != null && s < 15)) return false;
     if (length === "sweet" && !(s >= 15 && s <= 30)) return false;
     if (length === "long" && !(s > 30)) return false;
     return true;
@@ -389,7 +392,8 @@ export function CreativesPage() {
   const allChecked = rows.length > 0 && rows.every((r) => selected.has(r.creative_key));
 
   const onExport = async () => {
-    const keys = rows.map((r) => r.creative_key);
+    const picked = rows.filter((r) => selected.has(r.creative_key));
+    const keys = (picked.length ? picked : rows).map((r) => r.creative_key);
     if (!keys.length) {
       setBanner(t("creatives.banner.nothingToExport"));
       return;
@@ -619,7 +623,7 @@ export function CreativesPage() {
                               </td>
                               <td>
                                 <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                                  <CreativeThumb seed={c.creative_key} duration={s || null} label={c.name || c.creative_key} />
+                                  <CreativeThumb seed={c.creative_key} duration={s} label={c.name || c.creative_key} />
                                   <button
                                     type="button"
                                     className="link-teal cell-main"
@@ -633,7 +637,7 @@ export function CreativesPage() {
                               <td>{(c.campaigns ?? [])[0] ?? "—"}</td>
                               <td>{c.format ?? "—"}</td>
                               <td>{shortHook(t, c.annotation?.hook_type)}</td>
-                              <td>{s ? `${s}s` : "—"}</td>
+                              <td>{s == null ? "—" : `${s}s`}</td>
                               <td>{platformLabel(c.platform)}</td>
                               <td className="num">{fmtCompact(num(c.metrics.impressions), locale)}</td>
                               <td className="num">{fmtCell(c.metrics.ctr, (n) => fmtPct(n * 100, 1, locale), unavailable)}</td>
@@ -651,10 +655,22 @@ export function CreativesPage() {
                     {rows.map((c) => {
                       const s = secondsOf(c);
                       return (
-                        <div className="creative-card" key={c.creative_key}>
+                        <div
+                          className="creative-card"
+                          key={c.creative_key}
+                          role="button"
+                          tabIndex={0}
+                          aria-expanded={expandedKey === c.creative_key}
+                          onClick={() => setExpandedKey((cur) => (cur === c.creative_key ? null : c.creative_key))}
+                          onKeyDown={(e) => {
+                            if (e.key !== "Enter" && e.key !== " ") return;
+                            e.preventDefault();
+                            setExpandedKey((cur) => (cur === c.creative_key ? null : c.creative_key));
+                          }}
+                        >
                           <div className="creative-thumb-lg">
                             <CreativeThumb seed={c.creative_key} label={c.name || c.creative_key} />
-                            {s ? <span className="thumb-dur">{formatDuration(s)}</span> : null}
+                            {s == null ? null : <span className="thumb-dur">{formatDuration(s)}</span>}
                             <span className="creative-scrim">{c.name || c.creative_key}</span>
                           </div>
                           <p className="creative-name">{[(c.campaigns ?? [])[0], c.format].filter(Boolean).join(" • ") || "—"}</p>

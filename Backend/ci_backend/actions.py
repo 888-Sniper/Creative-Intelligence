@@ -1403,7 +1403,14 @@ def expert2_report_route(conn, payload, owner=None, admin=False):
             export_gate.check_reviews(conn)
         except export_gate.ExportBlocked as e:
             raise ValueError(str(e))
-    campaigns = payload.get("campaigns") or None
+    # Omitted or null keeps every campaign still in scope. An explicit
+    # empty list is a cleared selection, not that default.
+    if "campaigns" not in payload or payload.get("campaigns") is None:
+        campaigns = None
+    else:
+        campaigns = payload.get("campaigns")
+        if isinstance(campaigns, list) and len(campaigns) == 0:
+            raise ValueError("Select at least one campaign.")
     kpis = payload.get("kpis") or ["cpa", "ctr"]
     benchmark_sel = payload.get("benchmark")
     fmt = payload.get("format", "one-pager")

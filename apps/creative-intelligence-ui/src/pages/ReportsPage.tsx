@@ -439,12 +439,14 @@ export function ReportsPage() {
   const toggle = (list: string[], value: string): string[] =>
     list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
 
-  /** Legacy report_body(): unchecked-everything campaigns send null,
-   *  unchecked-everything KPIs fall back to cpa + ctr. The visible
-   *  Date Range always lands in filters (report-scoped From/To win
-   *  over the global scope; empty follows the global scope). */
+  /** Unchecked-everything campaigns are an empty list, never null.
+   *  Null still means every campaign in scope on the server, which
+   *  is the wrong result for a cleared checklist. Unchecked KPIs
+   *  fall back to cpa + ctr. The visible Date Range always lands in
+   *  filters (report-scoped From/To win over the global scope; empty
+   *  follows the global scope). */
   const reportBody = (): Record<string, unknown> => ({
-    campaigns: checkedCampaigns.length ? checkedCampaigns : null,
+    campaigns: checkedCampaigns,
     kpis: kpis.length ? kpis : ["cpa", "ctr"],
     benchmark: benchmark === "industry" ? "hook_type" : benchmark,
     benchmark_scope: "filters",
@@ -532,6 +534,10 @@ export function ReportsPage() {
   };
 
   const generate = () => {
+    if (checkedCampaigns.length === 0) {
+      setStatus(t("reports.needCampaign"));
+      return;
+    }
     const n = checkedCampaigns.length;
     const title = n === 1
       ? t("reports.titleOne", { name: checkedCampaigns[0] })
@@ -617,7 +623,7 @@ export function ReportsPage() {
               <MultiCheck
                 id="rep-camp"
                 label={t("reports.campaignsLabel")}
-                empty={t("reports.allCampaigns")}
+                empty={t("reports.noneSelected")}
                 selectedKey="reports.campSelected"
                 options={(campaigns ?? []).map((c) => ({ value: c, label: c }))}
                 checked={checkedCampaigns}
@@ -664,7 +670,7 @@ export function ReportsPage() {
                 );
               })}
               <div className="fmt-go">
-                <LoadingButton type="button" className="btn-primary" loading={busy} loadingLabel={t("reports.generating")} disabled={busy || campaigns === null} onClick={generate}>
+                <LoadingButton type="button" className="btn-primary" loading={busy} loadingLabel={t("reports.generating")} disabled={busy || campaigns === null || checkedCampaigns.length === 0} onClick={generate}>
                   <Icon name="spark" size={16} /> {t("reports.generate")}
                 </LoadingButton>
                 <p className="panel-sub">{t("reports.estTime")}</p>

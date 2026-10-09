@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { MemoryRouter } from "react-router-dom";
 import { AuthProvider } from "@/auth/AuthProvider";
 import { FilterProvider } from "@/state/FilterContext";
+import { useTheme } from "@/app/useTheme";
 import { SettingsPage } from "@/pages/SettingsPage";
 import type { MeResponse } from "@/types/auth";
 
@@ -46,7 +47,7 @@ const adminMe: MeResponse = {
 
 let failGoogleStatus = false;
 
-function mockFetch(opts?: { googleConnected?: boolean; me?: MeResponse; sessions?: number; cohorts?: typeof cohortsData; deleteFails?: number; rejectEmail?: boolean }) {
+function mockFetch(opts?: { googleConnected?: boolean; me?: MeResponse; sessions?: number; cohorts?: typeof cohortsData; deleteFails?: number; rejectEmail?: boolean; rejectProfile?: boolean }) {
   const calls: Array<[string, RequestInit | undefined]> = [];
   const googleConnected = opts?.googleConnected ?? false;
   // Stateful cohort list: DELETE removes the row so a re-fetched
@@ -63,6 +64,9 @@ function mockFetch(opts?: { googleConnected?: boolean; me?: MeResponse; sessions
           { detail: { error: "That email is already registered." } },
           { status: 409 },
         );
+      }
+      if (opts?.rejectProfile) {
+        return Response.json({ error: "Could not save profile." }, { status: 500 });
       }
       return Response.json({ employee: { ...(opts?.me ?? authed).employee, ...body } });
     }
@@ -107,11 +111,21 @@ function mockFetch(opts?: { googleConnected?: boolean; me?: MeResponse; sessions
   return calls;
 }
 
-function renderSettings() {
+function HeaderThemeToggle() {
+  const { toggle } = useTheme();
+  return (
+    <button type="button" aria-label="Toggle Light And Dark Mode" onClick={toggle}>
+      Light/Dark
+    </button>
+  );
+}
+
+function renderSettings(withToggle = false) {
   return render(
     <MemoryRouter>
       <AuthProvider>
         <FilterProvider>
+          {withToggle ? <HeaderThemeToggle /> : null}
           <SettingsPage />
         </FilterProvider>
       </AuthProvider>
@@ -324,6 +338,46 @@ describe("SettingsPage", () => {
     expect(window.localStorage.getItem("ci-settings-prefs:e1")).toContain("Blue");
   });
 
+  it("shows the painted dark theme and returns to light in one step", async () => {
+    window.localStorage.setItem("ci-theme", "dark");
+    window.localStorage.setItem(
+      "ci-settings-prefs:e1",
+      JSON.stringify({ theme: "light" }),
+    );
+    mockFetch();
+    renderSettings();
+    await waitFor(() => {
+      expect((screen.getByLabelText("Theme") as HTMLSelectElement).value).toBe("dark");
+    });
+    expect(document.documentElement.dataset["theme"]).toBe("dark");
+    fireEvent.change(screen.getByLabelText("Theme"), { target: { value: "light" } });
+    await waitFor(() => {
+      expect(document.documentElement.dataset["theme"] ?? "").toBe("");
+    });
+    expect((screen.getByLabelText("Theme") as HTMLSelectElement).value).toBe("light");
+    expect(window.localStorage.getItem("ci-theme")).toBe("light");
+    expect(window.localStorage.getItem("ci-settings-prefs:e1")).toContain('"theme":"light"');
+  });
+
+  it("follows a header toggle and still accepts Light", async () => {
+    mockFetch();
+    renderSettings(true);
+    await waitFor(() => {
+      expect((screen.getByLabelText("Theme") as HTMLSelectElement).value).toBe("light");
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Toggle Light And Dark Mode" }));
+    await waitFor(() => {
+      expect((screen.getByLabelText("Theme") as HTMLSelectElement).value).toBe("dark");
+    });
+    expect(document.documentElement.dataset["theme"]).toBe("dark");
+    fireEvent.change(screen.getByLabelText("Theme"), { target: { value: "light" } });
+    await waitFor(() => {
+      expect(document.documentElement.dataset["theme"] ?? "").toBe("");
+    });
+    expect((screen.getByLabelText("Theme") as HTMLSelectElement).value).toBe("light");
+    expect(window.localStorage.getItem("ci-theme")).toBe("light");
+  });
+
   it("sends a password reset email from Security", async () => {
     const calls = mockFetch();
     renderSettings();
@@ -376,6 +430,42 @@ describe("SettingsPage", () => {
       expect(calls.some(([url, init]) => url === "/api/auth/logout" && init?.method === "POST")).toBe(true);
     });
     expect(calls.some(([url]) => url === "/api/auth/sessions/revoke-all")).toBe(false);
+  });
+
+  it("keeps a failed profile save visible after the button stops", async () => {
+    mockFetch({ rejectProfile: true });
+    renderSettings();
+    await screen.findByRole("button", { name: "Save Profile" });
+    fireEvent.click(screen.getByRole("button", { name: "Save Profile" }));
+    await waitFor(() => {
+      expect(screen.getByText("Could not save profile.")).toBeDefined();
+    });
+    expect((screen.getByRole("button", { name: "Save Profile" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("does not paint a failed Google check as Connected", async () => {
+    failGoogleStatus = true;
+    mockFetch({ googleConnected: false });
+    renderSettings();
+    await screen.findByRole("heading", { name: "Google SSO" });
+    const row = screen.getByRole("heading", { name: "Google SSO" }).closest(".insight") as HTMLElement;
+    await waitFor(() => {
+      expect(within(row).getByText("Could not check status.")).toBeDefined();
+    });
+    expect(within(row).queryByText("Connected")).toBeNull();
+    expect(within(row).queryByText("Not Connected")).toBeNull();
+  });
+
+  it("paints Google SSO Not Connected when Drive is disconnected", async () => {
+    mockFetch({ googleConnected: false });
+    renderSettings();
+    await screen.findByRole("heading", { name: "Google SSO" });
+    const row = screen.getByRole("heading", { name: "Google SSO" }).closest(".insight") as HTMLElement;
+    await waitFor(() => {
+      expect(within(row).getByText("Not Connected")).toBeDefined();
+    });
+    expect(within(row).getByText("Not Connected").className).toContain("pill-bad");
+    expect(within(row).queryByText("Connected")).toBeNull();
   });
 
   it("shows Google Drive as not connected by default", async () => {

@@ -155,6 +155,34 @@ describe("ReportsPage", () => {
     expect(screen.getByRole("link", { name: "Download 2-Campaign Performance" })).toBeDefined();
   });
 
+  it("does not generate when every campaign is unchecked", async () => {
+    const fetchMock = vi.fn(async (url: unknown, init?: unknown) => {
+      const target = String(url);
+      const method = (init as { method?: string } | undefined)?.method;
+      if (method === "POST") return jsonResponse({});
+      if (target.includes("/api/campaigns")) return jsonResponse(campaignsBody);
+      return jsonResponse({});
+    });
+    window.fetch = fetchMock as unknown as typeof fetch;
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("2 Campaigns Selected")).toBeDefined();
+    });
+    fireEvent.click(screen.getByRole("button", { name: /2 Campaigns Selected/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Camp A" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Camp B" }));
+    await waitFor(() => {
+      expect(screen.getByText("No Campaigns Selected")).toBeDefined();
+    });
+    const generate = screen.getByRole("button", { name: /Generate Report/ });
+    expect((generate as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(generate);
+    expect(fetchMock.mock.calls.some((call) => {
+      const init = call[1] as { method?: string } | undefined;
+      return String(call[0]) === "/api/report" && init?.method === "POST";
+    })).toBe(false);
+  });
+
   it("falls back to cpa + ctr when every KPI is deselected", async () => {
     let reportBody: Record<string, unknown> = {};
     mockFetch((url, init) => {

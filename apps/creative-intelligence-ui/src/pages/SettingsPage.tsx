@@ -83,25 +83,12 @@ function emailDomain(value: string): string {
   return domain;
 }
 
-/** Load prefs, honoring an explicit legacy `ci-theme` choice until the
- *  stored prefs carry their own theme (useTheme owns that key and stays
- *  the live source of truth; every autosave commit re-syncs both). */
+/** Load prefs. The painted mode (`ci-theme`) wins when it disagrees
+ *  with a saved theme string. That string used to stay "light" while
+ *  the page was dark, so choosing Light (Default) did not fire. */
 function adoptPrefs(employeeId: string, liveTheme: Prefs["theme"]): Prefs {
   const loaded = loadPrefs(employeeId);
-  try {
-    const keys = employeeId
-      ? [`ci-settings-prefs:${employeeId}`, "ci-settings-prefs"]
-      : ["ci-settings-prefs"];
-    for (const k of keys) {
-      const raw = window.localStorage.getItem(k);
-      if (!raw) continue;
-      const parsed = JSON.parse(raw) as Partial<Prefs>;
-      if (typeof parsed.theme === "string") return loaded;
-      return { ...loaded, theme: liveTheme };
-    }
-  } catch {
-    /* unreadable storage: fall through to the live theme */
-  }
+  if (loaded.theme === liveTheme) return loaded;
   return { ...loaded, theme: liveTheme };
 }
 
@@ -272,6 +259,14 @@ export function SettingsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [employee?.id, t, applyLive]);
 
+  // A header toggle (or a stored ci-theme) can move the painted mode
+  // without a Settings change. Catch up so the menu matches the page
+  // and a later autosave does not snap the theme back.
+  useEffect(() => {
+    if (prefsRef.current.theme === liveThemeMode) return;
+    commit({ ...prefsRef.current, theme: liveThemeMode });
+  }, [liveThemeMode, commit]);
+
   const retrySave = useCallback(() => {
     commit(prefsRef.current);
   }, [commit]);
@@ -357,6 +352,7 @@ export function SettingsPage() {
 
   const saveProfile = async () => {
     setOp("profile");
+    setStatus("");
     try {
       // PATCH is the backend's update route; only send avatar_url when it
       // changed so a plain name save can never clear the avatar.
@@ -427,6 +423,7 @@ export function SettingsPage() {
   const removeAvatar = async () => {
     // No DELETE route exists; an empty avatar_url in PATCH clears the avatar.
     setOp("avatar");
+    setStatus("");
     try {
       const r = await api<{ employee: PublicEmployee }>("PATCH", "/api/auth/me", {
         avatar_url: "",
@@ -712,7 +709,7 @@ export function SettingsPage() {
                 {t("settings.personalInfo.removeAvatar")}
               </LoadingButton>
             ) : null}
-            {status && op !== null ? (
+            {status ? (
               <span className="panel-sub" role="status" style={{ margin: 0 }}>{status}</span>
             ) : null}
           </div>
@@ -787,10 +784,19 @@ export function SettingsPage() {
                 <h4 style={{ textTransform: "capitalize" }}>{providerName} SSO</h4>
                 <p>{ssoBody}</p>
               </div>
-              {google.loading && googleConnected === null ? (
+              {employee.provider === "google" && google.loading && googleConnected === null && !google.error ? (
                 <span className="panel-sub">{t("drive.checking")}</span>
-              ) : googleConnected === false && employee.provider === "google" ? (
-                <span className="pill pill-ok">{t("settings.connections.notConnected")}</span>
+              ) : employee.provider === "google" && google.error ? (
+                <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span className="panel-sub">{t("drive.couldNotCheck")}</span>
+                  <button type="button" className="btn-outline" onClick={() => google.reload()}>
+                    {t("common.retry")}
+                  </button>
+                </span>
+              ) : employee.provider === "google" && googleConnected === true ? (
+                <span className="pill pill-ok">{t("settings.connections.connected")}</span>
+              ) : employee.provider === "google" ? (
+                <span className="pill pill-bad">{t("settings.connections.notConnected")}</span>
               ) : (
                 <span className="pill pill-ok">{t("settings.connections.connected")}</span>
               )}
@@ -976,7 +982,7 @@ export function SettingsPage() {
               <label htmlFor="s-theme">{t("settings.appearance.theme")}</label>
               <select
                 id="s-theme"
-                value={prefs.theme}
+                value={liveThemeMode}
                 onChange={(e) => update("theme", e.target.value as Prefs["theme"])}
               >
                 <option value="light">{t("settings.appearance.themeLight")}</option>
@@ -1017,7 +1023,7 @@ export function SettingsPage() {
           <AppearancePreview
             accent={prefs.accent}
             density={prefs.density}
-            mode={resolvePreviewTheme(prefs.theme, liveTheme)}
+            mode={resolvePreviewTheme(liveThemeMode, liveTheme)}
           />
         </Panel>
 

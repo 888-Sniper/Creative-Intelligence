@@ -44,6 +44,13 @@ services:
       # cleaner). Oracle keeps its systemd worker unit unchanged.
       - key: CREATIVE_INTEL_RUN_WORKER
         value: "true"
+      # Public callback URLs for this service. Not secrets. WorkOS and
+      # Google Cloud must allow the same URLs; this file cannot edit
+      # those consoles. A blueprint sync updates the service variables.
+      - key: CREATIVE_INTEL_WORKOS_REDIRECT_URI
+        value: https://creative-intelligence-0t0c.onrender.com/api/auth/callback
+      - key: CREATIVE_INTEL_GOOGLE_REDIRECT_URI
+        value: https://creative-intelligence-0t0c.onrender.com/api/auth/google/callback
       # Secrets below are placeholders: fill them in the Render
       # dashboard AFTER creating the service (never commit values).
       # The service stays unhealthy until the required ones are set.
@@ -53,13 +60,9 @@ services:
         sync: false
       - key: CREATIVE_INTEL_KEY_WORKOS
         sync: false
-      - key: CREATIVE_INTEL_WORKOS_REDIRECT_URI
-        sync: false
       - key: CREATIVE_INTEL_MASTER_KEY
         sync: false
       - key: CREATIVE_INTEL_GOOGLE_CLIENT_ID
         sync: false
       - key: CREATIVE_INTEL_GOOGLE_CLIENT_SECRET
-        sync: false
-      - key: CREATIVE_INTEL_GOOGLE_REDIRECT_URI
         sync: false

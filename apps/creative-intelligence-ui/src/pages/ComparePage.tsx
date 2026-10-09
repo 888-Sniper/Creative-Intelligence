@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api, scopedPath } from "@/api/client";
 import { useFilters } from "@/state/FilterContext";
 import { Icon } from "@/components/icons";
@@ -408,6 +408,23 @@ export function ComparePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [booted, campaignOptions.data, creativeOptions.data]);
 
+  // A later shared-scope change must redraw the open comparison.
+  // The first boot already ran against the scope it saw.
+  const scopeKey = scope.toString();
+  const bootedScope = useRef<string | null>(null);
+  useEffect(() => {
+    if (!booted) return;
+    if (bootedScope.current === null) {
+      bootedScope.current = scopeKey;
+      return;
+    }
+    if (bootedScope.current === scopeKey) return;
+    bootedScope.current = scopeKey;
+    if (mode === "campaigns" && picked.length >= 2) void runCampaigns(picked, campaignRank);
+    if (mode === "creatives" && picked.length >= 2) void runCreatives(picked, creativeRank);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [booted, scopeKey]);
+
   // Per-campaign daily series for Performance Over Time.
   useEffect(() => {
     if (mode !== "campaigns" || !campaignData) return;
@@ -431,7 +448,7 @@ export function ComparePage() {
     })();
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, campaignData]);
+  }, [mode, campaignData, scopeKey]);
 
   // Retention curves for creative mode.
   useEffect(() => {
@@ -507,28 +524,39 @@ export function ComparePage() {
     });
   }, [mode, campaignData, creativeData, creativeKeys, firstCreativeByCampaign, metaByKey, dailyMap]);
 
+  const trendDates = useMemo(() => {
+    if (mode !== "campaigns") return [];
+    const names = (campaignData?.ranking ?? []).slice(0, 4);
+    return [...new Set(names.flatMap((name) => (dailyMap[name] ?? []).map((p) => p.date)))].sort();
+  }, [mode, campaignData, dailyMap]);
+
   const trendSeries = useMemo(() => {
     if (mode !== "campaigns") return [];
     const names = (campaignData?.ranking ?? []).slice(0, 4);
-    return names.map((name, i) => ({
-      label: name.length > 18 ? `${name.slice(0, 17)}…` : name,
-      color: COLORS[i % COLORS.length],
-      soft: "#E4EAF7",
-      points: (dailyMap[name] ?? []).map((p) => {
-        if (perfMetric === "roas") return p.spend ? p.revenue / p.spend : 0;
-        if (perfMetric === "ctr") return p.impressions ? (p.clicks / p.impressions) * 100 : 0;
-        if (perfMetric === "cpa") return p.conversions ? p.spend / p.conversions : 0;
-        if (perfMetric === "cpm") return p.impressions ? (p.spend / p.impressions) * 1000 : 0;
-        return num((p as unknown as Record<string, number>)[perfMetric]);
-      }),
-    }));
-  }, [mode, campaignData, dailyMap, perfMetric]);
+    return names.map((name, i) => {
+      const byDate = new Map((dailyMap[name] ?? []).map((p) => [p.date, p]));
+      return {
+        label: name.length > 18 ? `${name.slice(0, 17)}…` : name,
+        color: COLORS[i % COLORS.length],
+        soft: "#E4EAF7",
+        points: trendDates.map((date) => {
+          const p = byDate.get(date);
+          if (!p) return null;
+          if (perfMetric === "roas") return p.spend ? p.revenue / p.spend : null;
+          if (perfMetric === "ctr") return p.impressions ? (p.clicks / p.impressions) * 100 : null;
+          if (perfMetric === "cpa") return p.conversions ? p.spend / p.conversions : null;
+          if (perfMetric === "cpm") return p.impressions ? (p.spend / p.impressions) * 1000 : null;
+          const raw = num((p as unknown as Record<string, number>)[perfMetric]);
+          return Number.isFinite(raw) ? raw : null;
+        }),
+      };
+    });
+  }, [mode, campaignData, dailyMap, perfMetric, trendDates]);
 
-  const trendLabels = useMemo(() => {
-    const names = (campaignData?.ranking ?? []).slice(0, 4);
-    const first = names.map((n) => dailyMap[n] ?? []).find((d) => d.length);
-    return (first ?? []).map((p) => p.date.slice(5));
-  }, [campaignData, dailyMap]);
+  const trendLabels = useMemo(
+    () => trendDates.map((date) => date.slice(5)),
+    [trendDates],
+  );
 
   const diffs = useMemo(() => {
     const base = items.find((i) => i.key === baseName) ?? items[0];

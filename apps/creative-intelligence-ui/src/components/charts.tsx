@@ -29,7 +29,7 @@ export function fmtAxis(n: number, locale = "en"): string {
 }
 
 export interface TrendSeries {
-  label: string; color: string; soft: string; points: number[]; axis?: "left" | "right";
+  label: string; color: string; soft: string; points: ReadonlyArray<number | null>; axis?: "left" | "right";
 }
 export function TrendChart({ series, labels, height = 240, ticks = 5 }: {
   series: TrendSeries[]; labels: string[]; height?: number; ticks?: number;
@@ -40,8 +40,10 @@ export function TrendChart({ series, labels, height = 240, ticks = 5 }: {
   // float just inside the plot area; the right gutter exists only when
   // a right-axis series is actually drawn.
   const W = 640, H = 240, PL = 4, PB = 24, PT = 14;
-  const leftMax = Math.max(1, ...series.filter((s) => (s.axis ?? "left") === "left").flatMap((s) => s.points));
-  const rightValues = series.filter((s) => s.axis === "right").flatMap((s) => s.points);
+  const finite = (pts: ReadonlyArray<number | null>) =>
+    pts.filter((v): v is number => v != null && Number.isFinite(v));
+  const leftMax = Math.max(1, ...series.filter((s) => (s.axis ?? "left") === "left").flatMap((s) => finite(s.points)));
+  const rightValues = series.filter((s) => s.axis === "right").flatMap((s) => finite(s.points));
   const PR = rightValues.length ? 40 : 4;
   const rightMax = rightValues.length ? Math.max(1, ...rightValues) : 1;
   const top = niceMax(leftMax);
@@ -54,10 +56,31 @@ export function TrendChart({ series, labels, height = 240, ticks = 5 }: {
     const ceiling = axis === "right" ? rightTop : top;
     return PT + (H - PT - PB) * (1 - v / ceiling);
   };
-  const path = (pts: number[], axis: "left" | "right" = "left") =>
-    pts.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v, axis).toFixed(1)}`).join(" ");
-  const area = (pts: number[], axis: "left" | "right" = "left") =>
-    `${path(pts, axis)}L${x(pts.length - 1).toFixed(1)},${y(0, axis).toFixed(1)}L${x(0).toFixed(1)},${y(0, axis).toFixed(1)}Z`;
+  const runs = (pts: ReadonlyArray<number | null>) => {
+    const out: Array<Array<[number, number]>> = [];
+    let cur: Array<[number, number]> = [];
+    pts.forEach((v, i) => {
+      if (v == null || !Number.isFinite(v)) {
+        if (cur.length) out.push(cur);
+        cur = [];
+        return;
+      }
+      cur.push([i, v]);
+    });
+    if (cur.length) out.push(cur);
+    return out;
+  };
+  const stroke = (pts: ReadonlyArray<number | null>, axis: "left" | "right" = "left") =>
+    runs(pts).map((run) => run.map(([i, v], n) =>
+      `${n ? "L" : "M"}${x(i).toFixed(1)},${y(v, axis).toFixed(1)}`).join(" "));
+  const fill = (pts: ReadonlyArray<number | null>, axis: "left" | "right" = "left") =>
+    runs(pts).filter((run) => run.length > 1).map((run) => {
+      const line = run.map(([i, v], n) =>
+        `${n ? "L" : "M"}${x(i).toFixed(1)},${y(v, axis).toFixed(1)}`).join("");
+      const last = run[run.length - 1][0];
+      const first = run[0][0];
+      return `${line}L${x(last).toFixed(1)},${y(0, axis).toFixed(1)}L${x(first).toFixed(1)},${y(0, axis).toFixed(1)}Z`;
+    });
   const labelEvery = Math.max(1, Math.ceil(n / 7));
   return (
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height, display: "block" }}
@@ -77,18 +100,19 @@ export function TrendChart({ series, labels, height = 240, ticks = 5 }: {
       ))}
       {series.map((s) => (
         <g key={s.label}>
-          <path d={area(s.points, s.axis ?? "left")} fill={s.soft} opacity={0.55} />
-          <path d={path(s.points, s.axis ?? "left")} fill="none" stroke={s.color}
-            strokeWidth={2.2} strokeLinejoin="round" strokeLinecap="round" />
+          {fill(s.points, s.axis ?? "left").map((d, i) => (
+            <path key={`a-${i}`} d={d} fill={s.soft} opacity={0.55} />
+          ))}
+          {stroke(s.points, s.axis ?? "left").map((d, i) => (
+            <path key={`s-${i}`} d={d} fill="none" stroke={s.color}
+              strokeWidth={2.2} strokeLinejoin="round" strokeLinecap="round" />
+          ))}
         </g>
       ))}
-      {labels.filter((_, i) => i % labelEvery === 0).map((lb) => {
-        const i = labels.indexOf(lb);
-        return (
-          <text key={`${lb}-${i}`} x={x(i)} y={H - 7} textAnchor="middle"
-            fontSize={10.5} fill="#8CA0B5">{lb}</text>
-        );
-      })}
+      {labels.map((lb, i) => i % labelEvery !== 0 ? null : (
+        <text key={`${i}-${lb}`} x={x(i)} y={H - 7} textAnchor="middle"
+          fontSize={10.5} fill="#8CA0B5">{lb}</text>
+      ))}
     </svg>
   );
 }

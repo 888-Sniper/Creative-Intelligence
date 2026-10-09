@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { FilterProvider } from "@/state/FilterContext";
+import { FilterProvider, useFilters } from "@/state/FilterContext";
 import { ComparePage } from "@/pages/ComparePage";
+
+function SetPlatform() {
+  const { setFilter } = useFilters();
+  return <button type="button" onClick={() => setFilter("platform", "meta")}>Set Platform</button>;
+}
 
 afterEach(() => {
   cleanup();
@@ -11,6 +16,7 @@ afterEach(() => {
 function renderPage() {
   return render(
     <FilterProvider>
+      <SetPlatform />
       <ComparePage />
     </FilterProvider>,
   );
@@ -91,6 +97,47 @@ describe("ComparePage", () => {
     expect(screen.getByText("Key Takeaways")).toBeDefined();
     expect(screen.getByText("Next Tests")).toBeDefined();
     expect(screen.getByText("Camp A leads Camp B on ROAS (2 vs 1)")).toBeDefined();
+  });
+
+  it("redraws the open comparison when the shared scope changes", async () => {
+    mockFetchAll();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("Camp A leads Camp B on ROAS (2 vs 1)")).toBeDefined();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Set Platform" }));
+    await waitFor(() => {
+      const called = (window.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls
+        .map((c) => String(c[0]));
+      expect(called.some((u) => u.includes("/api/compare/campaigns") && u.includes("platform=meta"))).toBe(true);
+    });
+  });
+
+  it("places trend days on a shared date axis", async () => {
+    window.fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.startsWith("/api/kpis/daily") && url.includes("Camp+A")) {
+        return Response.json({ days: [
+          { date: "2026-01-01", impressions: 10, clicks: 1, spend: 5, conversions: 1, revenue: 10 },
+          { date: "2026-01-03", impressions: 10, clicks: 1, spend: 5, conversions: 1, revenue: 10 },
+        ] });
+      }
+      if (url.startsWith("/api/kpis/daily") && url.includes("Camp+B")) {
+        return Response.json({ days: [
+          { date: "2026-01-02", impressions: 8, clicks: 1, spend: 4, conversions: 1, revenue: 4 },
+        ] });
+      }
+      if (url.startsWith("/api/compare/campaigns")) return Response.json(campaignPayload);
+      if (url.startsWith("/api/creatives")) return Response.json(creativeOptions);
+      if (url.startsWith("/api/campaigns")) return Response.json(campaignOptions);
+      return Response.json({ days: [], points: [] });
+    }) as unknown as typeof fetch;
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("01-02")).toBeDefined();
+    });
+    expect(screen.getByText("01-01")).toBeDefined();
+    expect(screen.getByText("01-03")).toBeDefined();
   });
 
   it("compares creatives with chips and backend ranking", async () => {

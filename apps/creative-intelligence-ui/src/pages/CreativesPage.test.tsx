@@ -201,4 +201,46 @@ describe("CreativesPage", () => {
     expect((screen.getByLabelText("Video Length") as HTMLSelectElement).value).toBe("all");
     expect(screen.getByText("Branded Hooks Perform Best")).toBeDefined();
   });
+
+  it("exports checked creatives and opens a grid card", async () => {
+    mockLibrary();
+    window.URL.createObjectURL = vi.fn(() => "blob:creatives") as unknown as (obj: Blob | MediaSource) => string;
+    window.URL.revokeObjectURL = vi.fn();
+    renderPage();
+    await screen.findByRole("checkbox", { name: "Select Alpha" });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Alpha" }));
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+    await waitFor(() => {
+      const call = (window.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.find(
+        (c) => String(c[0]) === "/api/exports/creatives",
+      );
+      expect(call).toBeTruthy();
+      const body = JSON.parse(String((call?.[1] as { body?: string } | undefined)?.body));
+      expect(body.creative_keys).toEqual(["ck-alpha"]);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Grid View" }));
+    const card = screen.getByRole("button", { name: /Alpha/ });
+    fireEvent.click(card);
+    expect(document.getElementById("creative-detail")).not.toBeNull();
+  });
+
+  it("shows a measured duration of zero", async () => {
+    window.fetch = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      if (url.startsWith("/api/creatives")) {
+        return Response.json([{
+          ...rows[0],
+          duration_s: 0,
+          annotation: { ...rows[0].annotation, duration_s: 0 },
+        }]);
+      }
+      if (url.startsWith("/api/kpis/compare")) return Response.json(comparePayload);
+      if (url.startsWith("/api/benchmarks")) return Response.json({});
+      if (url.startsWith("/api/retention/curve")) return Response.json({ points: [] });
+      return Response.json({});
+    }) as unknown as typeof fetch;
+    renderPage();
+    await screen.findByText("0s");
+    expect(screen.queryByText("—", { selector: "td" })).toBeNull();
+  });
 });

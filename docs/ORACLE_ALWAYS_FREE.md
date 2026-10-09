@@ -1,6 +1,10 @@
-# Oracle Cloud VM deployment — free Foap demo (DuckDNS + HTTPS)
+# Oracle Cloud VM deployment — separate server (DuckDNS + HTTPS)
 
-Target: a public **$0/month** demo at
+The live site is https://creative-intelligence-0t0c.onrender.com.
+This document is only the separate Oracle VM. Its hostname stays
+DuckDNS.
+
+Target: that VM at
 
 ```text
 https://creative-intelligence.duckdns.org

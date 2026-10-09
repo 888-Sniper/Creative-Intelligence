@@ -391,16 +391,16 @@ export function AdminEmployeesPage() {
     const admins = rows.filter((e) => e.role === "admin").length;
     const staff = rows.filter((e) => e.role !== "admin").length;
     return [
-      { label: t("admin.stats.total"), value: String(total), icon: "users", trend: total ? tp("admin.stats.staffMix", staff, { employees: staff, admins }) : t("admin.stats.noEmployees") },
       { label: t("admin.stats.active"), value: String(active), icon: "check", trend: pct(active) },
+      { label: t("admin.stats.totalAdmins"), value: String(admins), icon: "lock", trend: pct(admins) },
+      { label: t("admin.stats.total"), value: String(total), icon: "users", trend: total ? tp("admin.stats.staffMix", staff, { employees: staff, admins }) : t("admin.stats.noEmployees") },
       /* "Pending Approvals", not "Pending Invites": no invitation
        *  email exists — pending rows await an approval decision. */
       { label: t("admin.stats.pending"), value: String(pending), icon: "clock", trend: pending ? t("admin.stats.awaitingApproval") : t("admin.stats.inboxZero") },
-      { label: t("admin.stats.admins"), value: String(admins), icon: "lock", trend: pct(admins) },
     ];
   }, [employees, t, tp]);
 
-  const adminCount = stats[3].value;
+  const adminCount = String((employees ?? []).filter((e) => e.role === "admin").length);
   const relDay = {
     today: t("admin.dates.today"),
     yesterday: t("admin.dates.yesterday"),

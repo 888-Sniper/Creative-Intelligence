@@ -1,9 +1,11 @@
 # Render Free Demo Deployment
 
+The live site is https://creative-intelligence-0t0c.onrender.com.
+
 Public demo of Foap Creative Intelligence on a Render Free Web Service.
-Additive only: the Oracle Always Free deployment (`deploy/oracle/`,
-`docs/ORACLE_ALWAYS_FREE.md`) is unchanged, SQLite stays the database,
-and no paid Render resources are used.
+The Oracle VM files under `deploy/oracle/` keep their DuckDNS
+settings. SQLite stays the database, and no paid Render resources
+are used.
 
 ## How It Deploys
 
@@ -30,8 +32,13 @@ and no paid Render resources are used.
 2. Fill the `sync: false` secret placeholders in the dashboard
    (see Environment below). The service reports unhealthy until the
    required ones are set — that is the fail-closed behavior, not a bug.
-3. After Render assigns `https://<service>.onrender.com`, register the
-   callback URLs (see below), set the matching env vars, and redeploy.
+3. The service URL is
+   `https://creative-intelligence-0t0c.onrender.com`. Register that
+   host's callback URLs in the WorkOS and Google Cloud consoles
+   (see below), then redeploy. `render.yaml` carries the matching
+   environment variables. Saving this file does not edit those
+   consoles, and an existing Render service keeps its current
+   variables until the blueprint is synced.
 
 ## Environment Variables
 
@@ -47,11 +54,11 @@ Non-secret values ship in `render.yaml`. Secrets are dashboard-only.
 | `CREATIVE_INTEL_ADMIN_EMAIL` | dashboard secret (first admin + approvals) |
 | `CREATIVE_INTEL_WORKOS_CLIENT_ID` | dashboard secret |
 | `CREATIVE_INTEL_KEY_WORKOS` | dashboard secret (WorkOS API key) |
-| `CREATIVE_INTEL_WORKOS_REDIRECT_URI` | dashboard secret (see Callback URLs) |
+| `CREATIVE_INTEL_WORKOS_REDIRECT_URI` | `https://creative-intelligence-0t0c.onrender.com/api/auth/callback` |
 | `CREATIVE_INTEL_MASTER_KEY` | dashboard secret, Fernet key (see below) |
 | `CREATIVE_INTEL_GOOGLE_CLIENT_ID` | dashboard secret (optional; Drive/Sheets) |
 | `CREATIVE_INTEL_GOOGLE_CLIENT_SECRET` | dashboard secret (optional) |
-| `CREATIVE_INTEL_GOOGLE_REDIRECT_URI` | dashboard secret (see Callback URLs) |
+| `CREATIVE_INTEL_GOOGLE_REDIRECT_URI` | `https://creative-intelligence-0t0c.onrender.com/api/auth/google/callback` |
 | `CREATIVE_INTEL_KEY_<SERVICE>` | dashboard secrets, only for AI providers the demo uses, e.g. `CREATIVE_INTEL_KEY_GEMINI`, `CREATIVE_INTEL_KEY_OPENAI`, `CREATIVE_INTEL_KEY_ANTHROPIC` (pattern: `CREATIVE_INTEL_KEY_` + uppercase service name, `-` -> `_`; availability is reported by `/api/providers/status`) |
 
 Generate the master key locally (never commit it):
@@ -65,16 +72,20 @@ will be rejected at startup with a clear error.
 
 ## Callback URLs
 
-After Render assigns the service URL:
+Sign-in uses this host. The app reads the environment variables.
+WorkOS and Google Cloud must allow the same URLs. Those two consoles
+are outside this repository.
 
 - WorkOS dashboard -> redirect URI:
-  `https://<service>.onrender.com/api/auth/callback`,
-  then set `CREATIVE_INTEL_WORKOS_REDIRECT_URI` to the same value.
+  `https://creative-intelligence-0t0c.onrender.com/api/auth/callback`
+  (`CREATIVE_INTEL_WORKOS_REDIRECT_URI`)
 - Google Cloud console -> authorized redirect URI:
-  `https://<service>.onrender.com/api/auth/google/callback`,
-  then set `CREATIVE_INTEL_GOOGLE_REDIRECT_URI` to the same value.
+  `https://creative-intelligence-0t0c.onrender.com/api/auth/google/callback`
+  (`CREATIVE_INTEL_GOOGLE_REDIRECT_URI`)
 
-Redeploy after saving so the new values take effect.
+Redeploy after the consoles and the Render service agree. A blueprint
+sync applies the variables from `render.yaml`. It does not register
+the URLs in WorkOS or Google Cloud.
 
 ## Demo Database Bootstrap And Persistence
 

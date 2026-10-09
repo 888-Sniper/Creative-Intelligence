@@ -58,41 +58,46 @@ export function GoogleDriveCard() {
     }
   };
 
+  /* The description sits under the title, across the card, so a short
+   * line stays one sentence instead of stacking beside Connect. */
+  const actions = (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+      {connected === true ? <span className="pill pill-ok">{t("drive.connected")}</span> : null}
+      {statusError ? (
+        <>
+          <span className="panel-sub">{t("drive.couldNotCheck")}</span>
+          <button type="button" className="btn-outline" onClick={() => status.reload()}>
+            {t("common.retry")}
+          </button>
+        </>
+      ) : connected === true ? (
+        <LoadingButton type="button" className="btn-outline" loading={busy} loadingLabel={t("drive.working")} spinnerClass="spinner dark" disabled={busy} onClick={() => void disconnect()}>
+          {t("drive.disconnect")}
+        </LoadingButton>
+      ) : connected === false ? (
+        <LoadingButton type="button" className="btn-outline" loading={busy} loadingLabel={t("drive.connecting")} spinnerClass="spinner dark" disabled={busy} onClick={() => void connect()}>
+          {t("drive.connect")}
+        </LoadingButton>
+      ) : (
+        <button type="button" className="btn-outline" disabled aria-busy="true">
+          {t("drive.checking")}
+        </button>
+      )}
+    </div>
+  );
+
   return (
     <div className="insight" id="integration-google">
       <span className="insight-ico svc-tile" aria-hidden="true">
         <img className="svc-logo" src={driveLogo} alt="" />
       </span>
-      <div style={{ flex: 1 }}>
-        <h4>{t("drive.title")}</h4>
-        <p>{t("drive.body")}</p>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+          <h4 style={{ margin: 0 }}>{t("drive.title")}</h4>
+          {actions}
+        </div>
+        <p style={{ marginTop: 4 }}>{t("drive.body")}</p>
         {notice ? <p role="status" style={{ margin: "4px 0 0" }}>{notice}</p> : null}
-      </div>
-      {/* Single right-side state/action area (§10): no duplicate status
-        line beside it. Google sign-in alone never marks this connected —
-        only the Drive authorisation status does. */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-        {connected === true ? <span className="pill pill-ok">{t("drive.connected")}</span> : null}
-        {statusError ? (
-          <>
-            <span className="panel-sub">{t("drive.couldNotCheck")}</span>
-            <button type="button" className="btn-outline" onClick={() => status.reload()}>
-              {t("common.retry")}
-            </button>
-          </>
-        ) : connected === true ? (
-          <LoadingButton type="button" className="btn-outline" loading={busy} loadingLabel={t("drive.working")} spinnerClass="spinner dark" disabled={busy} onClick={() => void disconnect()}>
-            {t("drive.disconnect")}
-          </LoadingButton>
-        ) : connected === false ? (
-          <LoadingButton type="button" className="btn-outline" loading={busy} loadingLabel={t("drive.connecting")} spinnerClass="spinner dark" disabled={busy} onClick={() => void connect()}>
-            {t("drive.connect")}
-          </LoadingButton>
-        ) : (
-          <button type="button" className="btn-outline" disabled aria-busy="true">
-            {t("drive.checking")}
-          </button>
-        )}
       </div>
     </div>
   );

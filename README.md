@@ -10,6 +10,8 @@
 
 Creative Intelligence is a local-first tool that turns advertising performance data into creative decisions. Built for Foap, it unifies Meta, TikTok, and spreadsheet exports into one canonical dataset, benchmarks every creative against spend-weighted performance, and runs each asset through a gated AI pipeline — transcribe, frame-sample, vision-annotate, LLM-structure — where confidence is scored and nothing exports until a human verifies it.
 
+The live site is [https://creative-intelligence-0t0c.onrender.com](https://creative-intelligence-0t0c.onrender.com).
+
 ## Features
 
 - Upload Meta / TikTok / spreadsheet exports into one canonical dataset
@@ -35,7 +37,7 @@ Every call flows through one provider layer (`Backend/creative_intel/providers.p
 - Python, FastAPI, SQLAlchemy, Alembic
 - React + Vite frontend (same-origin, served by the backend in production)
 - SQLite canonical store
-- Docker and systemd (Oracle demo deploy)
+- Docker on Render, and systemd for a separate Oracle VM
 - Provider integrations: OpenAI, Gemini, Anthropic, NVIDIA, DeepSeek, and more (bring your own keys)
 
 ## Quick Start
@@ -67,8 +69,12 @@ curl -X POST http://127.0.0.1:4321/api/replay/run
 
 ## Run On A Server
 
-Free Oracle demo deploy: `docs/ORACLE_ALWAYS_FREE.md` (one command:
-`sudo DOMAIN=… EMAIL=… bash deploy/oracle/setup-demo.sh`).
+The live site runs on Render. Setup, environment variables, and the
+WorkOS and Google callback URLs are in `docs/RENDER.md`.
+
+A separate Oracle VM is documented in `docs/ORACLE_ALWAYS_FREE.md`
+(one command: `sudo DOMAIN=… EMAIL=… bash deploy/oracle/setup-demo.sh`).
+That server keeps its DuckDNS hostname. It is not the live site.
 
 Provider keys resolve environment-first
 (`CREATIVE_INTEL_KEY_<PROVIDER>`, see `docs/PROVIDERS.md`), falling
@@ -82,7 +88,8 @@ closed to mock/fixture data when no key is present.
 - `docs/PROVIDERS.md` — <small>Provider Setup and Keys</small>
 - `docs/FRONTEND.md` — <small>UI Guide</small>
 - `docs/BACKUP.md` — <small>Backup and Restore</small>
-- `docs/ORACLE_ALWAYS_FREE.md` — <small>Demo Deploy</small>
+- `docs/RENDER.md` — <small>Live Site On Render</small>
+- `docs/ORACLE_ALWAYS_FREE.md` — <small>Separate Oracle VM</small>
 - `docs/Visual Review.md` — <small>Visual Review Flow</small>
 - `Schema/Canonical Schema V0.json` — <small>Canonical Dataset Definition</small>
 

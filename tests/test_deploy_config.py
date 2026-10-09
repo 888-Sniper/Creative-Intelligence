@@ -99,6 +99,30 @@ def test_backup_service_runs_unprivileged_with_offhost():
     assert "/var/backups/creative-intelligence" in backup
 
 
+def test_live_site_is_render_and_oracle_keeps_duckdns():
+    live = "https://creative-intelligence-0t0c.onrender.com"
+    readme = _read("README.md")
+    render_doc = _read("docs/RENDER.md")
+    blueprint = _read("render.yaml")
+    assert live in readme
+    assert "It is not the live site." in readme
+    assert live in render_doc
+    assert live + "/api/auth/callback" in render_doc
+    assert live + "/api/auth/google/callback" in render_doc
+    assert "value: " + live + "/api/auth/callback" in blueprint
+    assert "value: " + live + "/api/auth/google/callback" in blueprint
+    oracle = _read("deploy/oracle/demo.env.example")
+    assert ("CREATIVE_INTEL_WORKOS_REDIRECT_URI="
+            "https://creative-intelligence.duckdns.org/api/auth/callback"
+            in oracle)
+    assert ("CREATIVE_INTEL_GOOGLE_REDIRECT_URI="
+            "https://creative-intelligence.duckdns.org"
+            "/api/auth/google/callback" in oracle)
+    assert "creative-intelligence.duckdns.org" in _read(
+        "docs/ORACLE_ALWAYS_FREE.md")
+    assert live in _read("docs/ORACLE_ALWAYS_FREE.md")
+
+
 def test_worker_service_bounded_and_enabled():
     service = _read("deploy/oracle/creative-intelligence-worker.service")
     assert re.search(r"^User=creative-intel\s*$", service, re.M)

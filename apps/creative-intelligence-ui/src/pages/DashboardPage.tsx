@@ -318,15 +318,22 @@ export function DashboardPage() {
       { key: "Over 30s", test: (s: number) => s > 30 },
     ].map((b) => ({ ...b, clicks: 0, impr: 0 }));
     for (const c of creatives.data ?? []) {
-      const seconds = num(c.annotation?.duration_s ?? c.duration_s);
-      if (!seconds) continue;
+      const raw = c.annotation?.duration_s ?? c.duration_s;
+      if (raw == null || raw === "") continue;
+      const seconds = Number(raw);
+      if (!Number.isFinite(seconds) || seconds < 0) continue;
       const bucket = buckets.find((b) => b.test(seconds));
       if (bucket) {
         bucket.clicks += num(c.metrics?.clicks);
         bucket.impr += num(c.metrics?.impressions);
       }
     }
-    return buckets.map((b) => ({ key: b.key, ctr: b.impr ? (b.clicks / b.impr) * 100 : null }));
+    return buckets.map((b) => ({
+      key: b.key,
+      clicks: b.clicks,
+      impr: b.impr,
+      ctr: b.impr ? (b.clicks / b.impr) * 100 : null,
+    }));
   }, [creatives.data]);
 
   const hookBaseline = useMemo(
@@ -342,10 +349,16 @@ export function DashboardPage() {
     () => hookRows.slice(0, 5).map((r) => ({ label: hookName(r.key), yours: r.ctr ?? 0, bench: hookBaseline ?? 0 })),
     [hookRows, hookBaseline, t],
   );
-  const lengthCompare = useMemo(
-    () => durationRows.filter((r) => r.ctr != null).map((r) => ({ label: bucketName(r.key), yours: r.ctr ?? 0, bench: r.ctr ?? 0 })),
-    [durationRows, t],
-  );
+  const lengthCompare = useMemo(() => {
+    const clicks = durationRows.reduce((t, r) => t + r.clicks, 0);
+    const impr = durationRows.reduce((t, r) => t + r.impr, 0);
+    const bench = impr ? (clicks / impr) * 100 : 0;
+    return durationRows.filter((r) => r.ctr != null).map((r) => ({
+      label: bucketName(r.key),
+      yours: r.ctr ?? 0,
+      bench,
+    }));
+  }, [durationRows, t]);
   const formatCompare = useMemo(() => {
     const agg = new Map<string, { clicks: number; impr: number }>();
     for (const c of creatives.data ?? []) {
@@ -704,7 +717,7 @@ export function DashboardPage() {
                             <td className="num">{cvr == null ? "—" : fmtPct(cvr, 1, locale)}</td>
                             <td className="num">{roas == null ? "—" : fmtMult(roas, locale)}</td>
                             <td>
-                              <Link className="icon-btn" to="/creatives" aria-label={t("dashboard.topCreatives.openIn", { name: c.name || c.creative_key })}>
+                              <Link className="icon-btn" to={`/creatives?find=${encodeURIComponent(c.creative_key)}`} aria-label={t("dashboard.topCreatives.openIn", { name: c.name || c.creative_key })}>
                                 <Icon name="dots" size={18} />
                               </Link>
                             </td>

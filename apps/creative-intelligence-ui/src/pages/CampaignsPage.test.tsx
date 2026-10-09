@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useNavigate } from "react-router-dom";
 import { CampaignsPage } from "@/pages/CampaignsPage";
 import { FilterProvider } from "@/state/FilterContext";
 
@@ -157,5 +157,29 @@ describe("CampaignsPage", () => {
       expect(screen.getByText("Top Creatives")).toBeDefined();
     });
     expect(screen.getByText("Scale Alpha while CPA holds.")).toBeDefined();
+  });
+
+  it("fills the search box when a later find query arrives", async () => {
+    function GoFind() {
+      const navigate = useNavigate();
+      return <button type="button" onClick={() => navigate("/campaigns?find=Beta")}>Go Find</button>;
+    }
+    window.fetch = fetchFor({ campaigns, comparePayload, detail }).fetch;
+    render(
+      <MemoryRouter initialEntries={["/campaigns"]}>
+        <GoFind />
+        <FilterProvider>
+          <CampaignsPage />
+        </FilterProvider>
+      </MemoryRouter>,
+    );
+    await waitFor(() => {
+      expect(screen.getByLabelText("Search Campaigns")).toBeDefined();
+    });
+    expect((screen.getByLabelText("Search Campaigns") as HTMLInputElement).value).toBe("");
+    fireEvent.click(screen.getByRole("button", { name: "Go Find" }));
+    await waitFor(() => {
+      expect((screen.getByLabelText("Search Campaigns") as HTMLInputElement).value).toBe("Beta");
+    });
   });
 });

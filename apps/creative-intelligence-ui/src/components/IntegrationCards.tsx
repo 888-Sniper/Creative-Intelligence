@@ -9,9 +9,9 @@ import ga4Logo from "@/assets/ga4.svg";
 
 type Provider = "meta" | "tiktok" | "ga4";
 
-const ROWS: Array<{ id: Provider; name: string; bodyKey: string; logo: string }> = [
+const ROWS: Array<{ id: Provider; name: string; bodyKey: string; logo: string; ink?: boolean }> = [
   { id: "meta", name: "Meta Ads", bodyKey: "settings.integrations.metaBody", logo: metaLogo },
-  { id: "tiktok", name: "TikTok Ads", bodyKey: "settings.integrations.tiktokBody", logo: tiktokLogo },
+  { id: "tiktok", name: "TikTok Ads", bodyKey: "settings.integrations.tiktokBody", logo: tiktokLogo, ink: true },
   { id: "ga4", name: "Google Analytics 4", bodyKey: "settings.integrations.ga4Body", logo: ga4Logo },
 ];
 
@@ -40,8 +40,8 @@ function useIntegrationStatus(provider: Provider) {
 }
 
 function IntegrationRow({
-  id, name, bodyKey, logo, flag,
-}: { id: Provider; name: string; bodyKey: string; logo: string; flag: string }) {
+  id, name, bodyKey, logo, ink, flag,
+}: { id: Provider; name: string; bodyKey: string; logo: string; ink?: boolean; flag: string }) {
   const { t } = useLocale();
   const status = useIntegrationStatus(id);
   const [busy, setBusy] = useState(false);
@@ -85,7 +85,7 @@ function IntegrationRow({
   return (
     <div className="insight" id={`integration-${id}`}>
       <span className="insight-ico svc-tile" aria-hidden="true">
-        <img className="svc-logo" src={logo} alt="" />
+        <img className={ink ? "svc-logo svc-logo-ink" : "svc-logo"} src={logo} alt="" />
       </span>
       <div style={{ flex: 1 }}>
         <h4>{name}</h4>

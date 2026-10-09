@@ -106,6 +106,20 @@ def test_report_validates_format_and_kpis(tmp_path):
                      ).status_code == 409
 
 
+def test_report_empty_campaign_list_is_not_every_campaign(tmp_path):
+    http = make_owner(tmp_path)
+    empty = http.post("/api/report", json={"campaigns": [],
+                                           "format": "one-pager"})
+    assert empty.status_code == 409
+    assert "at least one campaign" in empty.json()["error"].lower()
+    # Omitted campaigns stays the legacy all-in-scope path. An empty
+    # database then fails because nothing matches, not because the
+    # selection was cleared.
+    omitted = http.post("/api/report", json={"format": "one-pager"})
+    assert omitted.status_code == 409
+    assert "at least one campaign" not in omitted.json()["error"].lower()
+
+
 def test_annotate_needs_object(tmp_path):
     http = make_owner(tmp_path)
     assert http.post("/api/creatives/k1/annotate",

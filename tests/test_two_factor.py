@@ -134,6 +134,114 @@ def test_recovery_code_opens_one_session_when_two_checks_overlap(
         engine.dispose()
 
 
+def _armed_challenge(tmp_path):
+    import datetime
+    import json
+
+    from ci_backend import token_crypto
+    from ci_backend.db import EmployeeTotp, TotpChallenge, init_db
+
+    db_path = tmp_path / "attempts.db"
+    settings = Settings(master_key=TEST_MASTER_KEY, admin_email="ada@foap.test")
+    engine = make_engine(db_path)
+    init_db(engine)
+    factory = make_session_factory(engine)
+    code = "ABCD-EFGH"
+    token = "attempt-token"
+    with factory() as sess:
+        admin = emp_store.admin_create(
+            sess, "root", "ada@foap.test", role="admin")
+        now = totp_mod._now()
+        sess.add(EmployeeTotp(
+            employee_id=admin.id,
+            secret_enc=token_crypto.encrypt_secret(
+                "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", settings),
+            enabled=1,
+            recovery_hashes=json.dumps([totp_mod._recovery_hash(code)]),
+            last_step=10 ** 12,
+            updated_at=now.isoformat(timespec="seconds")))
+        sess.add(TotpChallenge(
+            token_hash=totp_mod._hash(token),
+            employee_id=admin.id,
+            attempts=0,
+            created_at=now.isoformat(timespec="seconds"),
+            expires_at=(now + datetime.timedelta(seconds=300)
+                        ).isoformat(timespec="seconds")))
+        sess.commit()
+        employee_id = admin.id
+    return engine, factory, settings, token, code, employee_id
+
+
+def test_five_wrong_codes_in_a_row_drop_the_challenge(tmp_path):
+    from ci_backend.db import TotpChallenge
+
+    engine, factory, settings, token, code, employee_id = _armed_challenge(
+        tmp_path)
+    try:
+        for _ in range(4):
+            with factory() as sess:
+                with pytest.raises(emp_store.StoreError, match="not valid"):
+                    totp_mod.take_challenge(sess, token, "000000", settings)
+        with factory() as sess:
+            assert sess.get(TotpChallenge, totp_mod._hash(token)) is not None
+        with factory() as sess:
+            with pytest.raises(emp_store.StoreError, match="not valid"):
+                totp_mod.take_challenge(sess, token, "000000", settings)
+        with factory() as sess:
+            assert sess.get(TotpChallenge, totp_mod._hash(token)) is None
+            with pytest.raises(emp_store.StoreError, match="expired"):
+                totp_mod.take_challenge(sess, token, code, settings)
+            assert emp_store.count_live_sessions(sess, employee_id) == 0
+    finally:
+        engine.dispose()
+
+
+def test_five_overlapping_wrong_codes_drop_the_challenge(
+        tmp_path, monkeypatch):
+    import threading
+
+    from ci_backend.db import TotpChallenge
+
+    engine, factory, settings, token, code, employee_id = _armed_challenge(
+        tmp_path)
+    try:
+        gate = threading.Barrier(5)
+        real_spend = totp_mod._spend_attempt
+
+        def wait_then_spend(db, token_hash):
+            gate.wait(timeout=5)
+            return real_spend(db, token_hash)
+
+        monkeypatch.setattr(totp_mod, "_spend_attempt", wait_then_spend)
+        results = []
+
+        def once():
+            with factory() as sess:
+                try:
+                    totp_mod.take_challenge(sess, token, "000000", settings)
+                    results.append("ok")
+                except emp_store.StoreError:
+                    results.append("denied")
+                except Exception as exc:  # noqa: BLE001 - the assertion prints it
+                    results.append("%s: %s" % (type(exc).__name__, exc))
+
+        threads = [threading.Thread(target=once) for _ in range(5)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(10)
+        assert results.count("denied") == 5, results
+        with factory() as sess:
+            assert sess.get(TotpChallenge, totp_mod._hash(token)) is None
+            with pytest.raises(emp_store.StoreError, match="expired"):
+                employee = totp_mod.take_challenge(sess, token, code, settings)
+                emp_store.create_session(
+                    sess, employee.id, employee.workos_user_id or "")
+            assert emp_store.count_live_sessions(sess, employee_id) == 0
+    finally:
+        engine.dispose()
+
+
 def test_rfc_vector():
     # RFC 6238 appendix B, SHA1, the well-known 20-byte secret.
     secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"

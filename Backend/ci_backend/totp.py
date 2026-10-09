@@ -329,6 +329,27 @@ def _challenge_expired(row: TotpChallenge) -> bool:
     return _now() > born
 
 
+def _spend_attempt(db: Session, token_hash: str) -> None:
+    """Count one wrong code, and drop the challenge on the fifth.
+
+    The count is one UPDATE. Overlapping failures each add one, so
+    they cannot all store the same attempt and leave the challenge
+    open for a later valid code.
+    """
+    kept = db.execute(
+        update(TotpChallenge)
+        .where(TotpChallenge.token_hash == token_hash)
+        .where(TotpChallenge.attempts < MAX_ATTEMPTS - 1)
+        .values(attempts=TotpChallenge.attempts + 1))
+    if _changed_one(kept):
+        db.commit()
+        return
+    db.execute(delete(TotpChallenge).where(
+        TotpChallenge.token_hash == token_hash,
+        TotpChallenge.attempts >= MAX_ATTEMPTS - 1))
+    db.commit()
+
+
 def take_challenge(db: Session, token: str, code: str,
                    settings=None) -> emp.Employee:
     """Burn a valid challenge into the employee it belongs to.
@@ -353,12 +374,8 @@ def take_challenge(db: Session, token: str, code: str,
     if not (code or "").strip() or not _consume_for_login(
             db, totp, code, settings):
         db.rollback()
-        fresh = db.get(TotpChallenge, token_hash)
-        if fresh is not None:
-            fresh.attempts = int(fresh.attempts or 0) + 1
-            if fresh.attempts >= MAX_ATTEMPTS:
-                db.delete(fresh)
-            db.commit()
+        db.expunge_all()
+        _spend_attempt(db, token_hash)
         raise emp.StoreError("That code is not valid.")
     gone = db.execute(delete(TotpChallenge).where(
         TotpChallenge.token_hash == token_hash))

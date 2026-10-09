@@ -1143,7 +1143,7 @@ export function VideoUploadPanel({ open, employeeId, onClose, onNotify }: PanelP
         ...specRef.current, client: v, clientConfirmed: false, match: undefined,
       };
       setSpec(next);
-      setStatus(vu("clearsMatchNote"));
+      setStatus("");
     }
   };
 
@@ -1154,7 +1154,7 @@ export function VideoUploadPanel({ open, employeeId, onClose, onNotify }: PanelP
         ...specRef.current, campaign: v, clientConfirmed: false, match: undefined,
       };
       setSpec(next);
-      setStatus(vu("clearsMatchNote"));
+      setStatus("");
     }
   };
 
@@ -1321,7 +1321,7 @@ export function VideoUploadPanel({ open, employeeId, onClose, onNotify }: PanelP
   const canAnalyze = videoValid && grantConfirmed && matchConfirmed
     && draft?.status !== "queued" && draft?.status !== "analyzing";
   const analyzeReason = !videoValid
-    ? vu("blockedNoVideo")
+    ? ""
     : !grantConfirmed
       ? vu("blockedNoClient")
       : !matchConfirmed
@@ -1571,7 +1571,6 @@ export function VideoUploadPanel({ open, employeeId, onClose, onNotify }: PanelP
                 </span>
               ) : null}
             </div>
-            <p className="panel-sub">{vu("clearsMatchNote")}</p>
             {!customClient ? (
               <p className="panel-sub">
                 <button type="button" className="link-teal" onClick={() => setCustomClient(true)}>
@@ -1679,9 +1678,7 @@ export function VideoUploadPanel({ open, employeeId, onClose, onNotify }: PanelP
                   <p className="panel-sub">{vu("sheetLabel")}: {spec.dataset.sheet}</p>
                 ) : null}
               </div>
-            ) : (
-              <p className="panel-sub">{vu("noDatasetNote")}</p>
-            )}
+            ) : null}
           </section>
         ) : null}
 

@@ -434,17 +434,21 @@ describe("VideoUpload guided panel", () => {
     expect(screen.getByText("348.3 KB")).toBeDefined();
   });
 
-  it("keeps Analyze disabled without a video or a match, with reason text", async () => {
+  it("keeps Analyze disabled without a video and hides the standing notes", async () => {
     openPanel();
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Upload Your Video" })).toBeDefined();
     });
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(screen.getByRole("heading", { name: "Client And Campaign" })).toBeDefined();
+    expect(screen.queryByText("Changing The Client Or Campaign Clears The Confirmed Match.")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(screen.getByRole("heading", { name: "Performance Dataset" })).toBeDefined();
+    expect(screen.queryByText("No Dataset Yet.")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     const analyze = screen.getByRole("button", { name: "Analyze" });
     expect(analyze.hasAttribute("disabled")).toBe(true);
-    expect(screen.getByText("Add And Validate A Video To Enable Analysis.")).toBeDefined();
+    expect(screen.queryByText("Add And Validate A Video To Enable Analysis.")).toBeNull();
   });
 
   it("keeps Analyze disabled with a valid video but no confirmed match", async () => {

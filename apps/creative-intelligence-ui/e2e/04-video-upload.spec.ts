@@ -170,17 +170,22 @@ test("review step chips return to earlier steps", async ({ page, context }) => {
 
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(page.getByRole("heading", { name: "Client And Campaign" })).toBeVisible();
+  await expect(page.getByText("Changing The Client Or Campaign Clears The Confirmed Match.")).toHaveCount(0);
+  await page.screenshot({ path: "/tmp/ci-wizard-notes/client.png" });
   await page.getByRole("button", { name: "1. Video" }).click();
   await expect(page.getByRole("heading", { name: "Upload Your Video" })).toBeVisible();
 
   await page.getByRole("button", { name: "Continue" }).click();
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(page.getByRole("heading", { name: "Performance Dataset" })).toBeVisible();
+  await expect(page.getByText("No Dataset Yet.")).toHaveCount(0);
+  await page.screenshot({ path: "/tmp/ci-wizard-notes/dataset.png" });
   await expect(page.getByRole("button", { name: "4. Review" })).toHaveCount(0);
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(page.getByRole("heading", { name: "Review And Analyze" })).toBeVisible();
   await expect(page.getByRole("button", { name: "4. Review" })).toHaveCount(0);
-  await page.screenshot({ path: "/tmp/ci-step-chips/review-desktop.png" });
+  await expect(page.getByText("Add And Validate A Video To Enable Analysis.")).toHaveCount(0);
+  await page.screenshot({ path: "/tmp/ci-wizard-notes/review.png" });
 
   await page.getByRole("button", { name: "3. Dataset" }).click();
   await expect(page.getByRole("heading", { name: "Performance Dataset" })).toBeVisible();
@@ -201,7 +206,7 @@ test("review step chips return to earlier steps", async ({ page, context }) => {
     return dialog.scrollWidth - dialog.clientWidth;
   });
   expect(dialogOverflow).toBeLessThanOrEqual(1);
-  await page.screenshot({ path: "/tmp/ci-step-chips/review-mobile.png" });
+  await page.screenshot({ path: "/tmp/ci-wizard-notes/review-mobile.png" });
   await page.getByRole("button", { name: "1. Video" }).click();
   await expect(page.getByRole("heading", { name: "Upload Your Video" })).toBeVisible();
   await page.getByRole("button", { name: "Continue" }).click();

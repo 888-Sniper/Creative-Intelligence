@@ -277,6 +277,35 @@ describe("VideoUpload dashboard card", () => {
     expect(screen.getByText(/3 Records|No Match Confirmed Yet/)).toBeDefined();
   });
 
+  it("returns to an earlier step when that step chip is clicked", async () => {
+    window.localStorage.setItem("ci-video-draft:e7", "d1");
+    panelBackend([
+      (m, u) => (u === "/api/drafts" && m === "GET" ? { drafts: [readyDraft] } : undefined),
+    ]);
+    render(
+      <MemoryRouter>
+        <VideoUploadCard />
+      </MemoryRouter>,
+    );
+    await waitFor(() => {
+      expect(screen.getByText(/Unfinished Upload/)).toBeDefined();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Review And Analyze" })).toBeDefined();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "3. Dataset" }));
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Performance Dataset" })).toBeDefined();
+    });
+    expect(screen.queryByRole("button", { name: "4. Review" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "1. Video" }));
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Upload Your Video" })).toBeDefined();
+    });
+    expect(screen.queryByRole("button", { name: "2. Client & Campaign" })).toBeNull();
+  });
+
   it("renders failed and cancelled drafts with text status", async () => {
     dashboardBackend([
       baseDraft({ id: "d-f", status: "failed" }),

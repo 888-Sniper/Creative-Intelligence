@@ -1,21 +1,21 @@
-# Creative Intelligence audit for 2026-10-08
+# Creative Intelligence audit for 2026-10-09
 
 Review `origin/main` after `git fetch`. Confirm that `origin/main` and GitHub `main` name the same SHA. A behind local checkout or a missing local `main` branch is not a reason to stop. Use `git show origin/main:PATH`. Stop only if the remote identities differ or the worktree is dirty.
 
-This is the product repo https://github.com/888-Sniper/Creative-Intelligence. The parent of this push is `2a0b9575c9f41df12f6465642c24a5e4df09798a` (`Keep campaign drawer metrics, names, and creative exports inside the requested scope`). This push makes a string filter on the creative CSV mean the same thing as a one-item list. It also replaces `Audit.md`. The parent already keeps drawer metrics, campaign names, and an empty campaign export inside the requested scope. Do not call the product perfect. Do not edit, commit, push, build, install, start the server, or activate a provider. Do not treat an unrun live model, live browser, Playwright run, Render click-through, or the five Notino clips as a source defect. Report only defects still present at the reviewed SHA, with severity, observed behavior, file and line, and the evidence that reproduces them.
+This is the product repo https://github.com/888-Sniper/Creative-Intelligence. The parent of this push is `a765cfc143a163fcafa679dfe327aad23c078fc1` (`Treat string creative export filters as one value`). This push makes an earlier Analyze Video step chip a button that opens that step. It also replaces `Audit.md`. The parent already treats a string creative-CSV filter as one value, and it already keeps drawer metrics, campaign names, and an empty campaign export inside the requested scope. Do not call the product perfect. Do not edit, commit, push, build, install, start the server, or activate a provider. Do not treat an unrun live model, live browser, Playwright run, Render click-through, or the five Notino clips as a source defect. Report only defects still present at the reviewed SHA, with severity, observed behavior, file and line, and the evidence that reproduces them.
 
 Confirm the push with both ends named:
 
 ```
-git diff --stat 2a0b9575c9f41df12f6465642c24a5e4df09798a origin/main
+git diff --stat a765cfc143a163fcafa679dfe327aad23c078fc1 origin/main
 ```
 
 What this push makes true:
 
-- `POST /api/exports/creatives` treats a string filter as one value. `"platform": "meta"` returns the Meta creative with 100 impressions, the same row as `["meta"]`. `"date_from": "2026-09-01"` returns 200 and drops the August rows, the same file as `["2026-09-01"]`. `_list_filters` (`actions.py` lines 750–758) wraps each string before `build_creatives_list` (line 771).
-- `{"campaign": []}` is still a header with no creative rows (`actions.py` lines 773–774). An empty filter object is still unrestricted. A blank `campaign` query on `GET /api/creatives` is still unrestricted.
+- On Analyze Video, a step chip earlier than the open step is a button. Its click calls `goStage` (`VideoUploadPanel.tsx` lines 1406–1415 and 1001–1008). From Review, `1. Video`, `2. Client & Campaign`, and `3. Dataset` open those steps. The current step and every later step stay text (lines 1418–1429). The current step keeps `aria-current="step"`. Continue still moves one step forward (lines 1925–1927). Back still moves one step back (lines 1914–1917). Hover and keyboard focus on those buttons are in `theme.css` lines 1031–1033.
+- `POST /api/exports/creatives` still treats a string filter as one value, from the parent. `"platform": "meta"` returns the Meta creative with 100 impressions, the same row as `["meta"]`. `"date_from": "2026-09-01"` returns 200 and drops the August rows. `_list_filters` (`actions.py` lines 750–758) wraps each string before `build_creatives_list` (line 771). `{"campaign": []}` is still a header with no creative rows (lines 773–774).
 
-How to confirm that from source: `test_creative_csv_accepts_string_filters` in `tests/test_table_exports.py`. This push ran `uv run --extra dev pytest tests/test_table_exports.py` (8 passed) and `ruff check --select E,F,I` on `tests/test_table_exports.py` and `Backend/ci_backend/actions.py`. No UI file changed, so the UI tests and `tsc` were not re-run. The full backend suite was not re-run.
+How to confirm the step chips from source: `returns to an earlier step when that step chip is clicked` in `src/components/VideoUpload.test.tsx`, and `review step chips return to earlier steps` in `e2e/04-video-upload.spec.ts`. This push ran `pnpm exec vitest run src/components/VideoUpload.test.tsx` (29 passed) and `pnpm exec playwright test e2e/04-video-upload.spec.ts -g "review step chips"` (1 passed, desktop and a 390px-wide dialog). `pnpm build` ran `tsc --noEmit` and the Vite build. The full UI suite and the full backend suite were not re-run. Render was not clicked. The string-filter check stays `test_creative_csv_accepts_string_filters` in `tests/test_table_exports.py`. That file was not re-run on this push.
 
 Re-read the cited files at `origin/main`. Line numbers below were opened on this push. If a later commit moves a line, follow the symbol, not the stale number.
 
@@ -34,7 +34,7 @@ On open, `VideoUploadPanel.tsx` lines 778–781 choose the step in this order:
 3. `spec.wizardStage` (`storedStage` at `VideoUploadPanel.tsx` lines 71–72, field at `videoUploadApi.ts` line 196).
 4. `stageForSpec` (`VideoUploadPanel.tsx` lines 61–66). Missing or invalid video returns `video`. Otherwise an unconfirmed client returns `client`. Otherwise no dataset returns `dataset`. Otherwise `review`. This is only the fallback.
 
-Continue does not require those gates. The Continue button (`VideoUploadPanel.tsx` lines 1912–1914) is not disabled on them. Continue and Back call `goStage` (lines 1001–1007), which writes the stage map and then `persistLeaveFields`. Closing the dialog, the overlay, or Escape calls `leaveAndClose` (lines 1010–1019, overlay at 1387, close button at 1400, Escape at 851–852 through `closeRef` at 1021). Analyze calls `forgetDraftStage` and then `onClose` (lines 1365–1370). It does not use `leaveAndClose`.
+Continue does not require those gates. The Continue button (`VideoUploadPanel.tsx` lines 1925–1927) is not disabled on them. Continue and Back call `goStage` (lines 1001–1007), which writes the stage map and then `persistLeaveFields`. Closing the dialog, the overlay, or Escape calls `leaveAndClose` (lines 1010–1019, overlay at 1387, close button at 1400, Escape at 851–852 through `closeRef` at 1021). Analyze calls `forgetDraftStage` and then `onClose` (lines 1365–1370). It does not use `leaveAndClose`.
 
 The chosen stage is written in the same synchronous block as `setDraft` (lines 775–795), before `await loadRows` (line 812). A render cannot record the default `video` step over a stored later step.
 
@@ -337,7 +337,7 @@ The managed model and frame analysis are separate. `Providers.__init__` (lines 1
 
 `eligible_vision_roster` (`video_analysis.py` lines 37–57) constructs `LiveBundle()` and keeps `VISION_ROSTER` entries that are both `_configured` and `frame_eligible`. The worker overwrites `prov.vision` with `LiveVision` of that filtered list (lines 514–525). `LiveVision._annotate_batch` calls `make_chat(provider, model)` with no admin secret (`providers.py` lines 870–872). If `LiveBundle()` raises because no STT adapter is configured (lines 1031–1040), the roster returns `[]` even when a frame-eligible vision key exists. `run` then aborts at lines 519–522, after ffmpeg prepare and before the pipeline, so a silent clip never reaches the STT skip. The 409 reason is the STT bundle error.
 
-Frame-eligible entries from `VIDEO_MODEL_SUPPORT` (`provider_inventory.py` lines 628–669) that also sit on `VISION_ROSTER` (`providers.py` lines 1003–1013) are `gemini` / `gemini-3.5-flash-lite`, `gemini` / `gemini-3.7-flash`, and `anthropic` / `claude-haiku-4-5`. These roster ids are absent, so `frame_eligible` is false: `nvidia` / `meta/muse-glimmer-30b`, `openai` / `gpt-5.6-luna`, `openai` / `gpt-5.6-sol`, `anthropic` / `claude-opus-5`, `zai` / `glm-5v-turbo`, `zai` / `glm-5.2`. `providers_status` still lists a provider with a key as vision configured (`product.py` lines 127–134). The wizard repeats that (`VideoUploadPanel.tsx` lines 1717–1722). If the bundle constructs and the frame filter then empties the roster, `readiness` keeps the reason `provider mode is 'live': switch on a live provider` (`video_analysis.py` lines 63–70).
+Frame-eligible entries from `VIDEO_MODEL_SUPPORT` (`provider_inventory.py` lines 628–669) that also sit on `VISION_ROSTER` (`providers.py` lines 1003–1013) are `gemini` / `gemini-3.5-flash-lite`, `gemini` / `gemini-3.7-flash`, and `anthropic` / `claude-haiku-4-5`. These roster ids are absent, so `frame_eligible` is false: `nvidia` / `meta/muse-glimmer-30b`, `openai` / `gpt-5.6-luna`, `openai` / `gpt-5.6-sol`, `anthropic` / `claude-opus-5`, `zai` / `glm-5v-turbo`, `zai` / `glm-5.2`. `providers_status` still lists a provider with a key as vision configured (`product.py` lines 127–134). The wizard repeats that (`VideoUploadPanel.tsx` lines 1730–1735). If the bundle constructs and the frame filter then empties the roster, `readiness` keeps the reason `provider mode is 'live': switch on a live provider` (`video_analysis.py` lines 63–70).
 
 The catalog cache TTL is 24 hours (`provider_inventory.py` line 48). Activate requires an exact offered cache row fresher than 24 hours (`admin_providers.py` lines 214–230). Deactivate clears the singleton. A revision mismatch returns 409 and does not write (lines 195–199 and 265–268). Adopt copies a legacy secret once and does not activate.
 
@@ -371,19 +371,19 @@ Besides resume, these controls are wired:
 
 - Card Upload opens a new panel (`VideoUploadCard.tsx` line 279). A dropped mp4 or mov opens the panel with that file (lines 166–173 and 265–269).
 - Resume, Discard, Continue, View, Retry, Cancel Analysis, and Delete behave as in the Resume section. Cancel Analysis is shown only with `live_job_id` (lines 355–361) and posts cancel, then patches the draft. Delete asks, then deletes and forgets the stage.
-- Choose file, Upload, Replace, and Remove (`VideoUploadPanel.tsx` lines 1440–1504). Upload calls media upload, validate, and a spec PATCH. Remove deletes draft videos first (lines 1105–1123).
-- Creative key (lines 1431–1434). The placeholder `video-upload-sample` (line 1434) is hardcoded English.
-- Client and campaign, catalogue or custom (lines 1515–1573), and confirm selection (lines 1547–1551).
-- Platform (lines 1584–1587).
-- Dataset file, CSV text, sheet picker, and Import (lines 1590–1628). Import posts the dataset and stamps `wizardStage`.
-- Dataset version switch patches `dataset_version` (lines 1634–1638). The current option uses `datasetCurrent` (line 1646). Duration uses `durationValue` (line 1485). English is `{duration} Seconds` and `{name} (Current)`. Spanish is `{duration} s` and `{name} (actual)`. Polish is `{duration} s` and `{name} (bieżący)`.
-- Match method, Propose, Confirm, and row checkboxes (lines 1777–1798 and 1865–1887). Changing the selection or the creative key drops a confirmed match locally.
-- Back and Continue call `goStage` (lines 1902 and 1913). Save Draft calls `persistSpec` and re-confirms a held match (lines 1906–1910 and 930–952).
+- Choose file, Upload, Replace, and Remove (`VideoUploadPanel.tsx` lines 1453–1517). Upload calls media upload, validate, and a spec PATCH. Remove deletes draft videos first (lines 1105–1123).
+- Creative key (lines 1443–1448). The placeholder `video-upload-sample` (line 1447) is hardcoded English.
+- Client and campaign, catalogue or custom (lines 1524–1586), and confirm selection (lines 1560–1566).
+- Platform (lines 1596–1600).
+- Dataset file, CSV text, sheet picker, and Import (lines 1602–1642). Import posts the dataset and stamps `wizardStage`.
+- Dataset version switch patches `dataset_version` (lines 1647–1651). The current option uses `datasetCurrent` (line 1659). Duration uses `durationValue` (line 1498). English is `{duration} Seconds` and `{name} (Current)`. Spanish is `{duration} s` and `{name} (actual)`. Polish is `{duration} s` and `{name} (bieżący)`.
+- Match method, Propose, Confirm, and row checkboxes (lines 1790–1811 and 1878–1900). Changing the selection or the creative key drops a confirmed match locally.
+- Back and Continue call `goStage` (lines 1915 and 1926). Save Draft calls `persistSpec` and re-confirms a held match (lines 1919–1923 and 930–952).
 - Analyze posts `/api/drafts/{id}/analyze` (lines 1349–1370). `canAnalyze` (lines 1321–1322) requires a valid video, a confirmed client and campaign, a confirmed match, and a draft that is not `queued` or `analyzing`. It does not read `providerStatus`. The comment at lines 1317–1320 says the readiness block is display-only and the server 409 is the gate. The client comment in `videoUploadApi.ts` lines 290–294 says the submit stays disabled until vision is configured. The button does not do that.
-- Findings seek, correct, accept, reject, and Mark reviewed call the correction and review endpoints (lines 1813–1858).
-- The provider line (lines 1711–1729) is display-only, from `GET /api/providers/status`.
+- Findings seek, correct, accept, reject, and Mark reviewed call the correction and review endpoints (lines 1826–1871).
+- The provider line (lines 1724–1737) is display-only, from `GET /api/providers/status`.
 
-The step chips (lines 1404–1417) are text, not buttons.
+A step chip earlier than the open step is a button (lines 1406–1415) and calls `goStage`. The current step and later steps are text (lines 1418–1429). From the first step, none of the later chips are buttons.
 
 `METHOD_LABELS` is fixed English (lines 98–104): Platform ID, Exact Filename, Explicit Tag, Fuzzy Filename, Manual. Moment flags are fixed English (lines 201–205): Brand, Product, Logo, CTA, End.
 
@@ -395,7 +395,7 @@ The step chips (lines 1404–1417) are text, not buttons.
 
 The item below was a defect at the parent. It is the behavior named at the top of this file. Do not report it again unless the cited lines no longer do what this file says.
 
-- A string filter on the creative CSV is one value (`actions.py` lines 750–758 and 771). `"platform": "meta"` and `"date_from": "2026-09-01"` match the one-item list form. An empty campaign list is still a header only (lines 773–774).
+- Earlier Analyze Video step chips are buttons that call `goStage` (`VideoUploadPanel.tsx` lines 1406–1415). The current step and later steps stay text (lines 1418–1429). A string creative-CSV filter is still one value, from the parent (`actions.py` lines 750–758 and 771).
 
 These were already true at the parent and stay true:
 
@@ -437,10 +437,10 @@ P2. `GET /assets/favicon.png` and `GET /assets/foap-logo.png` 404 through the di
 
 P3. Analyze is offered when the status line says vision is missing (`VideoUploadPanel.tsx` lines 1321–1322). The server 409 is the real gate. A paused managed LLM is discovered at structuring, after vision has been called.
 
-P3. Wizard method labels (`VideoUploadPanel.tsx` lines 98–104) and moment flags (lines 201–205) stay English. The creative-key placeholder `video-upload-sample` (line 1434) stays English. Duration and the current-dataset label are localized.
+P3. Wizard method labels (`VideoUploadPanel.tsx` lines 98–104) and moment flags (lines 201–205) stay English. The creative-key placeholder `video-upload-sample` (line 1447) stays English. Duration and the current-dataset label are localized.
 
 P3. Provider cards show “Activating…” for every in-flight action. Workbook and spreadsheet downloads, and avatar upload, bypass the API client’s 401 gate. Add Employee’s loading label, several Settings option lists, and the Analyst language options are hardcoded English. A workspace name left within 450 ms is dropped. Cohort Create has no in-flight lock. Create Team does not appear in the employee table. Unavailable pills share the Connected color. The Insights empty titles share one string. Reports’ Save as Template is never read. Benchmark Select All exceeds the three-row chart cap without a status.
 
 ## Checks not performed
 
-No server, browser, Playwright, Render click-through, live provider, ffmpeg run, or the five Notino clips. The full UI suite and the full backend suite were not re-run. This push ran `tests/test_table_exports.py` (8 passed) and ruff on `tests/test_table_exports.py` and `Backend/ci_backend/actions.py`. No UI file changed, so the UI tests and `tsc` were not re-run. The four backend failures from the last full run, before the parent changed Python, were `tests/test_ci_app.py::test_security_headers_health_readiness` (`ModuleNotFoundError: No module named 'tests'`), `tests/test_ci_app.py::test_no_licensing_concepts` (the walker does not skip `.venv`), and `tests/test_web_shell.py` `test_favicon_asset_serves` plus `test_logo_and_mark_assets_serve` (404 on `/assets/favicon.png` and `/assets/foap-logo.png`). Those four were not re-run. `client.ts` lines 32–33 still turn a non-OK body with no `error` field into `Request failed (${status})`. This drawer route puts `error` on the 404, so that fallback is not the drawer copy. Spanish and Polish catalogs were checked for missing keys on the Ask, Analyst, Settings, Admin, and Providers slice only, on an earlier push. They were not opened line by line for Compare. Pre-existing ruff findings in `product.py` were left as they were. `benchmarks.py` was not edited.
+No Render click-through, live provider, ffmpeg run, or the five Notino clips. The full UI suite and the full backend suite were not re-run. This push ran the Video Upload unit file (29 passed), the step-chip Playwright test (1 passed), and `tsc --noEmit` through `pnpm build`. `tests/test_table_exports.py` was not re-run. The four backend failures from the last full run, before the parent changed Python, were `tests/test_ci_app.py::test_security_headers_health_readiness` (`ModuleNotFoundError: No module named 'tests'`), `tests/test_ci_app.py::test_no_licensing_concepts` (the walker does not skip `.venv`), and `tests/test_web_shell.py` `test_favicon_asset_serves` plus `test_logo_and_mark_assets_serve` (404 on `/assets/favicon.png` and `/assets/foap-logo.png`). Those four were not re-run. `client.ts` lines 32–33 still turn a non-OK body with no `error` field into `Request failed (${status})`. This drawer route puts `error` on the 404, so that fallback is not the drawer copy. Spanish and Polish catalogs were checked for missing keys on the Ask, Analyst, Settings, Admin, and Providers slice only, on an earlier push. They were not opened line by line for Compare. Pre-existing ruff findings in `product.py` were left as they were. `benchmarks.py` was not edited.

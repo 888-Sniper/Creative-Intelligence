@@ -1403,19 +1403,32 @@ export function VideoUploadPanel({ open, employeeId, onClose, onNotify }: PanelP
         </div>
         <ol className="chip-row vu-steps" aria-label={vu("stepsLabel")}
           style={{ listStyle: "none", margin: "0 0 14px", padding: 0 }}>
-          {STAGES.map((s, i) => (
-            <li key={s}>
-              <span
-                className="chip-static"
-                aria-current={s === stage ? "step" : undefined}
-                style={s === stage
-                  ? { background: "var(--shell-teal)", color: "#fff", borderColor: "var(--shell-teal)" }
-                  : undefined}
-              >
-                {`${i + 1}. ${stepName(s)}`}
-              </span>
-            </li>
-          ))}
+          {STAGES.map((s, i) => {
+            const label = `${i + 1}. ${stepName(s)}`;
+            const current = s === stage;
+            if (i < stageIndex) {
+              return (
+                <li key={s}>
+                  <button type="button" className="chip-static" onClick={() => goStage(s)}>
+                    {label}
+                  </button>
+                </li>
+              );
+            }
+            return (
+              <li key={s}>
+                <span
+                  className="chip-static"
+                  aria-current={current ? "step" : undefined}
+                  style={current
+                    ? { background: "var(--shell-teal)", color: "#fff", borderColor: "var(--shell-teal)" }
+                    : undefined}
+                >
+                  {label}
+                </span>
+              </li>
+            );
+          })}
         </ol>
         <div role="status" aria-live="polite" className="panel-sub" style={{ minHeight: status ? undefined : 0 }}>
           {status || ""}

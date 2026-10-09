@@ -158,3 +158,55 @@ test("video upload card stacks on a narrow viewport", async ({
   expect(dialogOverflow).toBeLessThanOrEqual(1);
   await page.screenshot({ path: "test-results/screens/vu-mobile.png" });
 });
+
+test("review step chips return to earlier steps", async ({ page, context }) => {
+  const seeds = readSeeds();
+  await loginAs(context, page, seeds.employee, "/");
+  await page.getByRole("button", { name: /Upload Video/ }).click();
+  await expect(page.getByRole("heading", { name: "Upload Your Video" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "2. Client & Campaign" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "3. Dataset" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "4. Review" })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page.getByRole("heading", { name: "Client And Campaign" })).toBeVisible();
+  await page.getByRole("button", { name: "1. Video" }).click();
+  await expect(page.getByRole("heading", { name: "Upload Your Video" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page.getByRole("heading", { name: "Performance Dataset" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "4. Review" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page.getByRole("heading", { name: "Review And Analyze" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "4. Review" })).toHaveCount(0);
+  await page.screenshot({ path: "/tmp/ci-step-chips/review-desktop.png" });
+
+  await page.getByRole("button", { name: "3. Dataset" }).click();
+  await expect(page.getByRole("heading", { name: "Performance Dataset" })).toBeVisible();
+  await page.getByRole("button", { name: "2. Client & Campaign" }).click();
+  await expect(page.getByRole("heading", { name: "Client And Campaign" })).toBeVisible();
+  await page.getByRole("button", { name: "1. Video" }).click();
+  await expect(page.getByRole("heading", { name: "Upload Your Video" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "2. Client & Campaign" })).toHaveCount(0);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page.getByRole("heading", { name: "Review And Analyze" })).toBeVisible();
+  const dialogOverflow = await page.evaluate(() => {
+    const dialog = document.querySelector(".modal-card");
+    if (!(dialog instanceof HTMLElement)) return 999;
+    return dialog.scrollWidth - dialog.clientWidth;
+  });
+  expect(dialogOverflow).toBeLessThanOrEqual(1);
+  await page.screenshot({ path: "/tmp/ci-step-chips/review-mobile.png" });
+  await page.getByRole("button", { name: "1. Video" }).click();
+  await expect(page.getByRole("heading", { name: "Upload Your Video" })).toBeVisible();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByRole("button", { name: "2. Client & Campaign" }).click();
+  await expect(page.getByRole("heading", { name: "Client And Campaign" })).toBeVisible();
+});

@@ -43,6 +43,20 @@ class Settings(BaseSettings):
     """Exact redirect registered in Google Cloud console, e.g.
     http://127.0.0.1:4321/api/auth/google/callback."""
 
+    meta_client_id: str = ""
+    meta_redirect_uri: str = ""
+    """Meta Ads OAuth. The client secret is CREATIVE_INTEL_META_CLIENT_SECRET,
+    not the Marketing API token CREATIVE_INTEL_KEY_META."""
+
+    tiktok_client_id: str = ""
+    tiktok_redirect_uri: str = ""
+    """TikTok Ads OAuth app id. The secret is
+    CREATIVE_INTEL_TIKTOK_CLIENT_SECRET, not CREATIVE_INTEL_KEY_TIKTOK."""
+
+    ga4_redirect_uri: str = ""
+    """GA4 reuses the Google client id and secret with this redirect and
+    the read-only Analytics scope."""
+
     admin_email: str = ""
 
     master_key: str = ""

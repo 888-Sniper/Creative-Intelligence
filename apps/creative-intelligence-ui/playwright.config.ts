@@ -20,6 +20,7 @@ export default defineConfig({
       command:
         `rm -f "${E2E_DB}" "${E2E_SEEDS}" && ` +
         `python3 apps/creative-intelligence-ui/e2e/seed.py "${E2E_DB}" "${E2E_SEEDS}" "${E2E_CONTAINER}" && ` +
+        `CREATIVE_INTEL_MASTER_KEY="$(python3 -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')" ` +
         `python3 Backend/ci_backend/main.py --db "${E2E_DB}" --port ${E2E_PORT}`,
       url: `http://127.0.0.1:${E2E_PORT}/api/health`,
       reuseExistingServer: false,

@@ -21,6 +21,28 @@ def google_client_secret(settings=None) -> str:
     return keyring_get(GOOGLE_ACCOUNT)
 
 
+def _client_secret(settings, attr: str, env_name: str) -> str:
+    """OAuth client secret from an explicit test setting, else the env.
+
+    These are app secrets, not the Marketing API user tokens in
+    CREATIVE_INTEL_KEY_META / CREATIVE_INTEL_KEY_TIKTOK. They are never
+    logged or returned to the browser.
+    """
+    if settings is not None and getattr(settings, attr, ""):
+        return getattr(settings, attr)
+    return env_value(env_name)
+
+
+def meta_client_secret(settings=None) -> str:
+    return _client_secret(settings, "key_meta_oauth",
+                          "CREATIVE_INTEL_META_CLIENT_SECRET")
+
+
+def tiktok_client_secret(settings=None) -> str:
+    return _client_secret(settings, "key_tiktok_oauth",
+                          "CREATIVE_INTEL_TIKTOK_CLIENT_SECRET")
+
+
 def env_value(name: str, default: str = "") -> str:
     return os.environ.get(name, default)
 

@@ -885,6 +885,16 @@ def sync_job_run(job_id: str, request: Request,
         except (emp.StoreError, goog.GoogleError) as exc:
             raise _conflict(exc)
         bearer = headers["Authorization"].split(" ", 1)[1]
+    if job["source"] in ("meta", "tiktok"):
+        from ci_backend import integrations_oauth as integ
+        try:
+            with request.app.state.ci_sessions() as session:
+                if integ.status(session, job["source"], who.id)["connected"]:
+                    bearer = integ.access_token_for(
+                        session, job["source"], who.id,
+                        request.app.state.ci_settings)
+        except emp.StoreError as exc:
+            raise _conflict(exc)
     if bearer:
         def _fetch():
             return sync.fetch_job(job["source"], job["params"],
@@ -2736,6 +2746,33 @@ def _resolve_google_bearer(payload: dict, actor: str,
     payload["_google_bearer"] = headers["Authorization"].split(" ", 1)[1]
 
 
+def _attach_ads_token(payload: dict, actor: str, request, provider: str,
+                      account_field: str) -> None:
+    """Use the employee's connected ads token when they have one.
+
+    No connection leaves the workspace token path alone. A connected
+    account whose token cannot be read fails the import instead of
+    silently using a different credential. The token is stripped
+    before anything is saved.
+    """
+    if not isinstance(payload, dict):
+        return
+    from ci_backend import integrations_oauth as integ
+    try:
+        with request.app.state.ci_sessions() as session:
+            if not integ.status(session, provider, actor)["connected"]:
+                return
+            payload["_ads_bearer"] = integ.access_token_for(
+                session, provider, actor, request.app.state.ci_settings)
+            if account_field and not str(
+                    payload.get(account_field) or "").strip():
+                ref = integ.account_ref(session, provider, actor)
+                if ref:
+                    payload[account_field] = ref
+    except emp.StoreError as exc:
+        raise _conflict(exc)
+
+
 # Product writes worth an audit row: uploads, annotation checks,
 # sync starts and connector changes. Targets stay metadata (keys,
 # action names); payloads (annotations, tokens, file bytes) never do.
@@ -2783,6 +2820,13 @@ async def _run_action(conn, prov, action: str, payload: dict, actor: str = "",
     """
     if action in ("connect-sheets", "connect-drive") and request is not None:
         _resolve_google_bearer(payload, actor, request)
+    if request is not None and action == "connect-meta":
+        _attach_ads_token(payload, actor, request, "meta", "ad_account_id")
+    if request is not None and action == "connect-tiktok":
+        _attach_ads_token(payload, actor, request, "tiktok", "advertiser_id")
+    if request is not None and action == "sync-now" and isinstance(
+            payload, dict) and payload.get("source") in ("meta", "tiktok"):
+        _attach_ads_token(payload, actor, request, payload["source"], "")
     if not limits_checked:
         _route_limits(request, action, actor)
     audit_name = _AUDITED_ACTIONS.get(action)
@@ -2810,6 +2854,7 @@ async def _run_action(conn, prov, action: str, payload: dict, actor: str = "",
     finally:
         if isinstance(payload, dict):
             payload.pop("_google_bearer", None)
+            payload.pop("_ads_bearer", None)
     if action != "media-upload":
         replay.log(conn, action, payload)
     if audit_name is not None and request is not None:

@@ -73,6 +73,16 @@ function mockFetch(opts?: { googleConnected?: boolean; me?: MeResponse; sessions
       });
     }
     if (url === "/api/auth/sessions") return Response.json({ count: opts?.sessions ?? 2 });
+    if (url === "/api/auth/2fa/status") return Response.json({ enabled: false });
+    if (url === "/api/auth/2fa/setup" && method === "POST") {
+      return Response.json({ secret: "TESTSECRETKEY", otpauth_uri: "otpauth://totp/x" });
+    }
+    if (url === "/api/auth/integrations/meta/start" && method === "POST") {
+      return Response.json({ error: "Meta Ads is not configured." }, { status: 409 });
+    }
+    if (/\/api\/auth\/integrations\/(meta|tiktok|ga4)\/status$/.test(url)) {
+      return Response.json({ connected: false });
+    }
     if (url === "/api/auth/google/status") {
       if (failGoogleStatus) throw new TypeError("Failed to fetch");
       return Response.json({ connected: googleConnected });
@@ -584,6 +594,23 @@ describe("SettingsPage", () => {
       expect(idx.every((i) => i >= 0)).toBe(true);
       expect([...idx].sort((a, b) => a - b)).toEqual(idx);
     }
+  });
+
+  it("offers two-factor setup and integration connect", async () => {
+    mockFetch();
+    renderSettings();
+    const securityHeading = await screen.findByRole("heading", { name: "Security" });
+    const security = securityHeading.closest("section") as HTMLElement;
+    expect(await within(security).findByRole("button", { name: "Set Up" })).toBeDefined();
+    expect(within(security).queryByText("Unavailable")).toBeNull();
+    fireEvent.click(within(security).getByRole("button", { name: "Set Up" }));
+    expect((await screen.findByTestId("totp-secret")).textContent).toBe("TESTSECRETKEY");
+    const integrations = (await screen.findByRole("heading", { name: "Integrations" })).closest("section") as HTMLElement;
+    expect(within(integrations).queryByText("Unavailable")).toBeNull();
+    fireEvent.click(within(integrations).getByRole("button", { name: "Connect Meta Ads" }));
+    expect(await within(integrations).findByText("Meta Ads is not configured.")).toBeDefined();
+    expect(within(integrations).getByRole("button", { name: "Connect TikTok Ads" })).toBeDefined();
+    expect(within(integrations).getByRole("button", { name: "Connect Google Analytics 4" })).toBeDefined();
   });
 
   it("creates a cohort copying every active filter plus include/exclude lists", async () => {

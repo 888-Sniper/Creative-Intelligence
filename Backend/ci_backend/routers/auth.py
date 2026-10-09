@@ -208,6 +208,32 @@ def _clear_state_cookie(response) -> None:
     response.delete_cookie(OAUTH_STATE_COOKIE, path="/")
 
 
+def _mfa_cookie(response, token: str, secure: bool) -> None:
+    from ci_backend import totp as totp_mod
+    response.set_cookie(totp_mod.CHALLENGE_COOKIE, token, max_age=300,
+                        path="/", httponly=True, samesite="lax",
+                        secure=secure)
+
+
+def _clear_mfa_cookie(response) -> None:
+    from ci_backend import totp as totp_mod
+    response.delete_cookie(totp_mod.CHALLENGE_COOKIE, path="/")
+
+
+def _after_identity(db, identity, settings, container_id=""):
+    """Open a session, or a two-factor challenge when that is enabled."""
+    kind, token, employee = oauth_mod.open_login(
+        db, identity, settings, container_id)
+    if kind == "session":
+        security_log.event(
+            "login_success", target=employee.id,
+            detail="gate=%s" % (
+                "app" if employee.status == "active" else employee.status))
+    else:
+        security_log.event("login_mfa_required", target=employee.id)
+    return kind, token, employee
+
+
 @router.get("/callback")
 def callback(request: Request, db=Depends(get_db),
              settings: Settings = Depends(get_settings)):
@@ -216,12 +242,7 @@ def callback(request: Request, db=Depends(get_db),
     try:
         _check_state_binding(request, state)
         identity = oauth_mod.finish_oauth(db, code, state, settings)
-        token, _employee, _created = emp.login_identity(
-            db, identity, settings)
-        security_log.event("login_success", target=_employee.id,
-                           detail="oauth callback gate=%s" % (
-                               "app" if _employee.status == "active"
-                               else _employee.status))
+        kind, token, _employee = _after_identity(db, identity, settings)
     except (emp.StoreError, emp.Denied, HTTPException) as exc:
         from urllib.parse import quote
         detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
@@ -229,9 +250,15 @@ def callback(request: Request, db=Depends(get_db),
             detail = detail.get("error", "Sign-in failed.")
         return RedirectResponse("/?auth_error=" + quote(str(detail)[:200]),
                                 status_code=302)
+    if kind == "mfa":
+        response = RedirectResponse("/?mfa=1", status_code=302)
+        _mfa_cookie(response, token, settings.cookie_secure)
+        _clear_state_cookie(response)
+        return response
     response = RedirectResponse("/", status_code=302)
     _apply_cookie(response, emp.session_cookie(token),
                   settings.cookie_secure)
+    _clear_mfa_cookie(response)
     _clear_state_cookie(response)
     return response
 
@@ -261,19 +288,27 @@ async def oauth_finish(request: Request, db=Depends(get_db),
     try:
         identity = oauth_mod.finish_oauth(
             db, body.get("code", ""), body.get("state", ""), settings)
-        token, employee, _created = emp.login_identity(
+        kind, token, employee = _after_identity(
             db, identity, settings,
             emp.valid_container_id(body.get("container_id", "")))
-        security_log.event("login_success", target=employee.id,
-                           detail="oauth finish")
     except (emp.StoreError, emp.Denied,
             workos_mod.WorkOSError) as exc:
         security_log.event("login_failure", detail="oauth finish")
         raise HTTPException(status_code=409, detail={"error": str(exc)})
+    if kind == "mfa":
+        response = JSONResponse({
+            "ok": True, "authenticated": False, "gate": "mfa",
+            "employee": None, "is_admin": False, "message": "",
+            "workos_configured": workos_mod.workos_configured(settings),
+        })
+        _mfa_cookie(response, token, settings.cookie_secure)
+        _clear_state_cookie(response)
+        return response
     gate = "app" if employee.status == "active" else employee.status
     response = _issue({"ok": True, "gate": gate,
                        "employee": emp.public_employee(employee).model_dump()},
                       token, secure=settings.cookie_secure)
+    _clear_mfa_cookie(response)
     _clear_state_cookie(response)
     return response
 
@@ -288,14 +323,25 @@ async def email_signin(request: Request, db=Depends(get_db),
             body.get("email", ""), body.get("password", ""),
             settings=settings)
         identity = workos_mod.public_identity(raw, provider="email")
-        token, employee, gate = oauth_mod.login_verified(
+        kind, token, employee = _after_identity(
             db, identity, settings,
             emp.valid_container_id(body.get("container_id", "")))
     except (emp.StoreError, workos_mod.WorkOSError) as exc:
         raise HTTPException(status_code=409, detail={"error": str(exc)})
-    return _issue({"ok": True, "gate": gate,
-                   "employee": emp.public_employee(employee).model_dump()},
-                  token, secure=settings.cookie_secure)
+    if kind == "mfa":
+        response = JSONResponse({
+            "ok": True, "authenticated": False, "gate": "mfa",
+            "employee": None, "is_admin": False, "message": "",
+            "workos_configured": workos_mod.workos_configured(settings),
+        })
+        _mfa_cookie(response, token, settings.cookie_secure)
+        return response
+    gate = "app" if employee.status == "active" else employee.status
+    response = _issue({"ok": True, "gate": gate,
+                       "employee": emp.public_employee(employee).model_dump()},
+                      token, secure=settings.cookie_secure)
+    _clear_mfa_cookie(response)
+    return response
 
 
 @router.post("/email/code")
@@ -318,14 +364,25 @@ async def email_code_signin(request: Request, db=Depends(get_db),
         raw = workos_mod.authenticate_magic_code(
             body.get("email", ""), body.get("code", ""), settings=settings)
         identity = workos_mod.public_identity(raw, provider="email")
-        token, employee, gate = oauth_mod.login_verified(
+        kind, token, employee = _after_identity(
             db, identity, settings,
             emp.valid_container_id(body.get("container_id", "")))
     except (emp.StoreError, workos_mod.WorkOSError) as exc:
         raise HTTPException(status_code=409, detail={"error": str(exc)})
-    return _issue({"ok": True, "gate": gate,
-                   "employee": emp.public_employee(employee).model_dump()},
-                  token, secure=settings.cookie_secure)
+    if kind == "mfa":
+        response = JSONResponse({
+            "ok": True, "authenticated": False, "gate": "mfa",
+            "employee": None, "is_admin": False, "message": "",
+            "workos_configured": workos_mod.workos_configured(settings),
+        })
+        _mfa_cookie(response, token, settings.cookie_secure)
+        return response
+    gate = "app" if employee.status == "active" else employee.status
+    response = _issue({"ok": True, "gate": gate,
+                       "employee": emp.public_employee(employee).model_dump()},
+                      token, secure=settings.cookie_secure)
+    _clear_mfa_cookie(response)
+    return response
 
 
 @router.post("/email/reset")

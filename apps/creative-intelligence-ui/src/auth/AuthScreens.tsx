@@ -1,4 +1,6 @@
+import { useEffect, useState } from "react";
 import { useAuth } from "@/auth/AuthProvider";
+import { ApiError } from "@/api/client";
 import { EmployeeOAuthButtons } from "@/auth/OAuthButton";
 import { EmailSignIn } from "@/auth/EmailSignIn";
 import { Icon } from "@/components/icons";
@@ -73,11 +75,58 @@ function GateScreen({ gate }: { gate: "pending" | "suspended" | "revoked" }) {
   );
 }
 
+function TwoFactorPrompt({ verify, busy }: {
+  verify: (code: string) => Promise<void>;
+  busy: boolean;
+}) {
+  const { t } = useLocale();
+  const [code, setCode] = useState("");
+  const [alert, setAlert] = useState("");
+  const submit = async () => {
+    setAlert("");
+    try {
+      await verify(code);
+    } catch (err) {
+      setAlert(err instanceof ApiError ? err.message : t("auth.login.failedGeneric"));
+    }
+  };
+  return (
+    <AuthShell dense>
+      <div className="auth-card login-card" style={{ maxWidth: 520, padding: "36px 40px 28px" }}>
+        <h1>{t("auth.login.mfaTitle")}</h1>
+        <p className="muted login-sub">{t("auth.login.mfaBody")}</p>
+        <div className="field">
+          <label htmlFor="mfa-code">{t("auth.login.mfaCode")}</label>
+          <input id="mfa-code" inputMode="text" autoComplete="one-time-code"
+            maxLength={32} value={code} onChange={(e) => setCode(e.target.value)} />
+        </div>
+        <p className="muted">{t("auth.login.mfaRecovery")}</p>
+        {alert ? <p role="alert" className="muted">{alert}</p> : null}
+        <button type="button" className="auth-btn" disabled={busy} onClick={() => void submit()}>
+          {busy ? t("auth.login.verifying") : t("auth.login.mfaVerify")}
+        </button>
+      </div>
+    </AuthShell>
+  );
+}
+
 export function LoginPage() {
   const { t } = useLocale();
+  const { mfaRequired, verifyMfa, authenticating } = useAuth();
   const params = new URLSearchParams(window.location.search);
   const authError = params.get("auth_error") ?? "";
+  const [queryMfa] = useState(() => params.get("mfa") === "1");
   if (authError) window.history.replaceState(null, "", window.location.pathname);
+  useEffect(() => {
+    if (!queryMfa) return;
+    const next = new URLSearchParams(window.location.search);
+    next.delete("mfa");
+    const query = next.toString();
+    window.history.replaceState(null, "", window.location.pathname + (query ? `?${query}` : ""));
+  }, [queryMfa]);
+  if (queryMfa || mfaRequired) {
+    return <TwoFactorPrompt verify={verifyMfa} busy={authenticating} />;
+  }
   return (
     <AuthShell dense>
       <div className="auth-card login-card" style={{ maxWidth: 520, padding: "36px 40px 28px" }}>

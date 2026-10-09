@@ -253,9 +253,9 @@ META_PURCHASE_TYPES = ("purchase", "offsite_conversion",
                        "onsite_conversion.purchase")
 
 
-def meta_insights_csv(ad_account_id, since, until):
+def meta_insights_csv(ad_account_id, since, until, token=None):
     """Meta Marketing API -> canonical CSV text. ad_account_id without act_."""
-    token = token_for("meta")
+    token = token or token_for("meta")
     if not ad_account_id or not str(ad_account_id).strip():
         raise ConnectorUnavailable("meta needs an ad account id")
     base = api_base("meta", "https://graph.facebook.com").rstrip("/")
@@ -349,9 +349,9 @@ TIKTOK_FIELDS = ("campaign_id", "adgroup_id", "ad_id", "spend",
 TIKTOK_VALUE_METRICS = ("roas",)
 
 
-def tiktok_report_csv(advertiser_id, start_date, end_date):
+def tiktok_report_csv(advertiser_id, start_date, end_date, token=None):
     """TikTok Business API integrated report -> canonical CSV text."""
-    token = token_for("tiktok")
+    token = token or token_for("tiktok")
     if not advertiser_id or not str(advertiser_id).strip():
         raise ConnectorUnavailable("tiktok needs an advertiser id")
     base = api_base("tiktok", "https://business-api.tiktok.com").rstrip("/")

@@ -195,6 +195,32 @@ test.describe("employee journey", () => {
     await expect(page.getByRole("heading", { name: "Welcome Back" })).toBeVisible();
   });
 
+  test("settings can start two-factor and the ad connections", async ({ page, context }) => {
+    const seeds = readSeeds();
+    await loginAs(context, page, seeds.employee, "/settings");
+    await expect(page.getByRole("heading", { name: "Profile Settings", exact: true })).toBeVisible();
+    const security = page.getByRole("heading", { name: "Security", exact: true }).locator("xpath=ancestor::section[1]");
+    await expect(security.getByRole("button", { name: "Set Up" })).toBeVisible();
+    await expect(security.getByText("Unavailable")).toHaveCount(0);
+    await security.getByRole("button", { name: "Set Up" }).click();
+    const secret = security.getByTestId("totp-secret");
+    await expect(secret).toBeVisible();
+    const key = (await secret.textContent()) ?? "";
+    expect(key.length).toBeGreaterThan(10);
+    await security.getByLabel("Authenticator Code").fill("000000");
+    await security.getByRole("button", { name: "Confirm" }).click();
+    await expect(security.getByRole("alert")).toContainText("not valid");
+    const integrations = page.getByRole("heading", { name: "Integrations", exact: true }).locator("xpath=ancestor::section[1]");
+    await expect(integrations.getByText("Unavailable")).toHaveCount(0);
+    await integrations.getByRole("button", { name: "Connect Meta Ads" }).click();
+    await expect(integrations.getByRole("status")).toContainText("Meta Ads is not configured.");
+    await expect(integrations.getByRole("button", { name: "Connect TikTok Ads" })).toBeVisible();
+    await expect(integrations.getByRole("button", { name: "Connect Google Analytics 4" })).toBeVisible();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(integrations.getByRole("button", { name: "Connect TikTok Ads" })).toBeVisible();
+    await expect(security.getByTestId("totp-secret")).toBeVisible();
+  });
+
   test("edit email keeps the current domain", async ({ page, context }) => {
     const seeds = readSeeds();
     // The admin token is revoked by the logout-all step above. This

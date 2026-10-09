@@ -460,16 +460,20 @@ def apply_action(conn, action, payload, prov, media_dir=None, actor="",
         params = {"ad_account_id": payload.get("ad_account_id", ""),
                   "since": payload.get("since", ""),
                   "until": payload.get("until", "")}
+        token = payload.get("_ads_bearer") or None
         out = sync.import_once(
-            conn, "meta", lambda: sync.fetch_job("meta", params))
+            conn, "meta",
+            lambda: sync.fetch_job("meta", params, bearer=token))
         sync.save_job(conn, "meta", params, owner=actor)
         return out
     if action == "connect-tiktok":
         params = {"advertiser_id": payload.get("advertiser_id", ""),
                   "start_date": payload.get("start_date", ""),
                   "end_date": payload.get("end_date", "")}
+        token = payload.get("_ads_bearer") or None
         out = sync.import_once(
-            conn, "tiktok", lambda: sync.fetch_job("tiktok", params))
+            conn, "tiktok",
+            lambda: sync.fetch_job("tiktok", params, bearer=token))
         sync.save_job(conn, "tiktok", params, owner=actor)
         return out
     if action == "sync-now":
@@ -479,9 +483,10 @@ def apply_action(conn, action, payload, prov, media_dir=None, actor="",
             raise ValueError(
                 "no saved sync job for %r: run a manual import first"
                 % (source,))
+        token = payload.get("_ads_bearer") or None
         return sync.import_once(
             conn, source,
-            lambda: sync.fetch_job(source, stored[source]))
+            lambda: sync.fetch_job(source, stored[source], bearer=token))
     if action == "retention":
         # Manual uploads are stamped source='manual' so the quartile
         # synthesizer never overwrites them (it only rebuilds its own

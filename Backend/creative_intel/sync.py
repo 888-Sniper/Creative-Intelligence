@@ -69,20 +69,21 @@ def fetch_job(source, params, bearer=None):
 
     Raises ValueError with a human-readable reason (missing token,
     unconnected Google OAuth, bad payload) — fail closed, never stub
-    rows. Pass bearer="..." (a Google access token) for private
-    Sheets/Drive files.
+    rows. Pass bearer="..." for a private Sheets/Drive file, or for
+    the employee's Meta or TikTok access token. Saved job params
+    never include that token.
     """
     from creative_intel import connectors, ingest
     params = params or {}
     if source == "meta":
         text = connectors.meta_insights_csv(
             params.get("ad_account_id", ""), params.get("since", ""),
-            params.get("until", ""))
+            params.get("until", ""), token=bearer)
         return ingest.parse_csv_report(text, "meta", "meta-api")
     if source == "tiktok":
         text = connectors.tiktok_report_csv(
             params.get("advertiser_id", ""), params.get("start_date", ""),
-            params.get("end_date", ""))
+            params.get("end_date", ""), token=bearer)
         return ingest.parse_csv_report(text, "tiktok", "tiktok-api")
     if source == "sheets":
         if not params.get("platform"):

@@ -65,6 +65,25 @@ def finish_oauth(db: Session, code: str, state: str,
     return identity
 
 
+def open_login(db: Session, identity: dict[str, Any], settings=None,
+               container_id: str = "") -> tuple[str, str, Any]:
+    """Finish a verified identity as a session, or as a 2FA challenge.
+
+    Returns (kind, token, employee). kind is "session" or "mfa".
+    The mfa token is a challenge cookie value, not a session: the
+    employee is not signed in until the authenticator code is accepted.
+    """
+    from ci_backend import totp as totp_mod
+    employee, _created = emp.ensure_identity(db, identity, settings)
+    if totp_mod.is_enabled(db, employee.id):
+        challenge = totp_mod.issue_challenge(db, employee.id)
+        return "mfa", challenge, employee
+    totp_mod.clear_challenges(db, employee.id)
+    token, employee, _created = emp.login_identity(
+        db, identity, settings, emp.valid_container_id(container_id))
+    return "session", token, employee
+
+
 def login_verified(db: Session, identity: dict[str, Any],
                    settings=None,
                    container_id: str = "") -> tuple[str, Any, str]:

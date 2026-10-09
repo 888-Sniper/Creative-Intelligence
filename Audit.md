@@ -2,23 +2,23 @@
 
 Review `origin/main` after `git fetch`. Confirm that `origin/main` and GitHub `main` name the same SHA. A behind local checkout or a missing local `main` branch is not a reason to stop. Use `git show origin/main:PATH`. Stop only if the remote identities differ or the worktree is dirty.
 
-This is the product repo https://github.com/888-Sniper/Creative-Intelligence. The parent of this push is `95e2e8309beed63eab04c0439ec6886c44c649c8` (`Let an employee change email on the same domain`). This push changes the AI Analyst suggestion label to “Try Asking:”. It also replaces `Audit.md`. The parent already lets an employee change the part of an email before `@` and keep the domain. It already names the page headings Admin Settings and Profile Settings. It already draws the video file-limit line at 12px, hides the three standing notes, makes an earlier step chip a button, treats a string creative-CSV filter as one value, and keeps drawer metrics, campaign names, and an empty campaign export inside the requested scope. Do not call the product perfect. Do not edit, commit, push, build, install, start the server, or activate a provider. Do not treat an unrun live model, live browser, Playwright run, Render click-through, or the five Notino clips as a source defect. Report only defects still present at the reviewed SHA, with severity, observed behavior, file and line, and the evidence that reproduces them.
+This is the product repo https://github.com/888-Sniper/Creative-Intelligence. The parent of this push is `cb2fcb691d8e154260809e40421bbb7ef0cd52d1` (`Capitalize the analyst suggestion label`). This push makes Profile Settings Integrations and Two-Factor Authentication real. It also replaces `Audit.md`. The parent already shows the AI Analyst label “Try Asking:”. It already lets an employee change the part of an email before `@` and keep the domain. It already names the page headings Admin Settings and Profile Settings. It already draws the video file-limit line at 12px, hides the three standing notes, makes an earlier step chip a button, treats a string creative-CSV filter as one value, and keeps drawer metrics, campaign names, and an empty campaign export inside the requested scope. Do not call the product perfect. Do not edit, commit, push, build, install, start the server, or activate a provider. Do not treat an unrun live model, live browser, Playwright run, Render click-through, or the five Notino clips as a source defect. Report only defects still present at the reviewed SHA, with severity, observed behavior, file and line, and the evidence that reproduces them.
 
 Confirm the push with both ends named:
 
 ```
-git diff --stat 95e2e8309beed63eab04c0439ec6886c44c649c8 origin/main
+git diff --stat cb2fcb691d8e154260809e40421bbb7ef0cd52d1 origin/main
 ```
 
 What this push makes true:
 
-- The AI Analyst suggestion label is “Try Asking:” (`en.ts` `analyst.tryLabel`, line 357). The accessible name is already “Try Asking” (`tryAria`, line 356). Spanish stays “Prueba a preguntar:” (`es.ts` line 357). Polish stays “Spróbuj zapytać:” (`pl.ts` line 363). The chips still send `analyst.tryAsking.t0` through `t3`.
-- Profile Settings still uses Edit Email (`en.ts` line 1673). A `gmail.com` address can become another `gmail.com` address, and a `foap.com` address can become another `foap.com` address. `employees.py` lines 686–690 refuse a different domain.
-- The `/admin` page heading stays “Admin Settings” (`en.ts` `admin.title`, line 631). Spanish stays “Ajustes de administración” (`es.ts` line 631). Polish stays “Ustawienia administracji” (`pl.ts` line 645). The sidebar link stays “Admin” (`nav.admin`, `en.ts` line 619).
-- The `/settings` page heading, including the `/profile` redirect, stays “Profile Settings” (`en.ts` `settings.title`, line 1655). Spanish stays “Ajustes del perfil” (`es.ts` line 1655). Polish stays “Ustawienia profilu” (`pl.ts` line 1669). The sidebar link stays “Settings” (`nav.settings`, `en.ts` line 620). Personal Info still edits the name.
-- The video file-limit line stays 12px, from an earlier parent (`VideoUploadPanel.tsx` line 1469, `theme.css` line 1037).
+- Two-Factor Authentication on Profile Settings is an authenticator-app step (`TwoFactorCard.tsx`). Set Up stores a pending secret and shows it once (`totp.py` `begin_setup`). Confirm with a current 6-digit code turns it on and returns eight recovery codes once (`confirm_setup`). Cancel deletes only a pending row. Turn Off requires a current code or a recovery code. A wrong code returns 409 `That code is not valid.` The secret is encrypted. Recovery codes are stored as sha256 hashes. The same time step cannot be reused (`last_step`).
+- Sign-in paths that issue a session go through `open_login` (`oauth.py` lines 68–84). When two-factor is on, they set cookie `ci_2fa` for 300 seconds and do not set `ci_session`. The Google callback redirects to `/?mfa=1` (`auth.py` lines 253–257). JSON email and OAuth finish return `{ok:true, authenticated:false, gate:"mfa"}`. `POST /api/auth/2fa/verify` with that cookie and a valid code creates the session and sets `last_login_at` (`two_factor.py` lines 91–120). Five wrong attempts, an expired cookie, or a disabled authenticator drops the challenge. `login_identity` itself still creates a session. The login screen shows Authenticator Code and Verify only when `?mfa=1` was in the address or the email sign-in returned that gate (`AuthScreens.tsx` `TwoFactorPrompt`, `LoginPage`). The default Welcome Back screen does not show Verification Code until Use A Sign-In Code Instead.
+- Integrations are Meta Ads, TikTok Ads, and Google Analytics 4 (`IntegrationCards.tsx`). Each row has Connect or Disconnect. The accessible name is “Connect Meta Ads”, “Connect TikTok Ads”, or “Connect Google Analytics 4”. The visible word stays Connect. Connect posts `POST /api/auth/integrations/{provider}/start` and navigates to the returned URL. A missing client id, redirect, or client secret returns 409 `{Name} is not configured.` and does not mark the row connected. Status is `GET /api/auth/integrations/{provider}/status`. Disconnected is exactly `{"connected": false}`. Connected may add `account` and `scope`. The linked account is a separate line only when `account` is non-empty. Disconnect posts `.../disconnect`. The callback lands on `/settings?integration={provider}&result=connected|failed|expired`.
+- Meta uses the Facebook dialog and `ads_read` (`integrations_oauth.py`). TikTok uses the business portal and `auth_code` or `code`. GA4 reuses the Google client id and secret, PKCE, and scope `https://www.googleapis.com/auth/analytics.readonly`. Tokens stay encrypted in `oauth_tokens` for that employee. `account_ref` is the discovered ad account or GA4 property, never the token. GA4 has no import route. Connecting GA4 does not import rows. A connected Meta or TikTok token is attached to the existing `connect-meta`, `connect-tiktok`, and `sync-now` jobs as `_ads_bearer` and removed before the job is saved (`product.py` `_attach_ads_token`, lines 2749–2773, stripped at line 2857). No connection leaves the workspace `CREATIVE_INTEL_KEY_META` / `CREATIVE_INTEL_KEY_TIKTOK` path alone. A connected account whose token cannot be read fails the import. Those key names are not the OAuth client secrets. The OAuth secrets are `CREATIVE_INTEL_META_CLIENT_SECRET` and `CREATIVE_INTEL_TIKTOK_CLIENT_SECRET`. Client ids and redirect URIs are `CREATIVE_INTEL_META_CLIENT_ID`, `CREATIVE_INTEL_META_REDIRECT_URI`, `CREATIVE_INTEL_TIKTOK_CLIENT_ID`, `CREATIVE_INTEL_TIKTOK_REDIRECT_URI`, and `CREATIVE_INTEL_GA4_REDIRECT_URI` (`config.py` lines 46–58). GA4 also needs `CREATIVE_INTEL_GOOGLE_CLIENT_ID` and the Google client secret.
+- Alembic revision `0013` adds `oauth_tokens.account_ref` and the tables `employee_totp` and `totp_challenges`. It does not add columns to `employees`.
 
-How to confirm from source: `e2e/analyst.spec.ts` expects the exact text “Try Asking:”. `AnalystPage.test.tsx` expects the same text. This push ran `pnpm exec vitest run src/pages/AnalystPage.test.tsx` (17 passed) and `pnpm exec playwright test e2e/analyst.spec.ts` (1 passed). The desktop page showed “Try Asking:” beside “Which hook types drive the highest CTR?”. A 390px-wide capture still showed the suggestion chips. `pnpm build` ran `tsc --noEmit` and the Vite build. The full UI suite and the full backend suite were not re-run. Render was not clicked. The email tests from the parent were not re-run.
+How to confirm from source: `tests/test_two_factor.py` and `tests/test_integrations_oauth.py` cover the RFC 6238 vector, setup, the sign-in challenge, recovery codes, and the three OAuth connects with a fake HTTP client. This push ran those two files (9 passed) and `tests/test_ci_app.py` OAuth cases plus `tests/test_google_oauth.py` and `tests/test_ci_auth.py` (44 passed). `pnpm exec vitest run src/pages/SettingsPage.test.tsx src/i18n/parity.test.ts src/auth` passed 64, including Set Up and Connect Meta Ads. `pnpm exec playwright test e2e/auth.spec.ts -g "settings can start two-factor"` passed 1: Set Up showed the key, `000000` showed “not valid”, and Connect Meta Ads showed “Meta Ads is not configured.” A desktop capture showed the key, Copy Key, Confirm, and the three Connect buttons. A 390px-wide capture still showed those Connect buttons. The existing off-canvas sidebar can cover the middle of Settings after a resize. `pnpm build` ran `tsc --noEmit` and the Vite build. Ruff passed on the new Python modules. The full UI suite and the full backend suite were not re-run. Render was not clicked. Do not say Render already shows this change.
 
 Re-read the cited files at `origin/main`. Line numbers below were opened on this push. If a later commit moves a line, follow the symbol, not the stale number.
 
@@ -41,7 +41,7 @@ Continue does not require those gates. The Continue button (`VideoUploadPanel.ts
 
 The chosen stage is written in the same synchronous block as `setDraft` (lines 775–795), before `await loadRows` (line 812). A render cannot record the default `video` step over a stored later step.
 
-A step-only leave does not PATCH. `persistLeaveFields` (lines 960–998) patches only when the client, campaign, creative key, or platform differs from the last saved spec. A confirmed match returns first unless the client, campaign, or creative key changed (lines 975–976), because any spec PATCH clears matches ((`product.py` lines 2008–2012). `fieldSnap` treats a missing platform as `meta` on both sides (lines 75–86), so the default does not count as a change. Closing an unchanged wizard sends no PATCH and leaves a confirmed match in place.
+A step-only leave does not PATCH. `persistLeaveFields` (lines 960–998) patches only when the client, campaign, creative key, or platform differs from the last saved spec. A confirmed match returns first unless the client, campaign, or creative key changed (lines 975–976), because any spec PATCH clears matches (`product.py` lines 2018–2022). `fieldSnap` treats a missing platform as `meta` on both sides (lines 75–86), so the default does not count as a change. Closing an unchanged wizard sends no PATCH and leaves a confirmed match in place.
 
 Typed client, campaign, creative key, and platform are included when they differ, so Resume can show them again. `wizardStage` is stamped on `persistSpec` (line 907), upload (line 1082), import (line 1218), and the leave body (line 985). A video file that was chosen and never uploaded is not restored. CSV or XLSX text that was never imported is not restored. Boot clears that staged file and text (lines 728–740). An uploaded video and an imported dataset come back from the draft.
 
@@ -59,11 +59,12 @@ Signed-in employees get `AppShell`. Nav labels come from `en.ts` `nav.*`: Dashbo
 
 Sign-in is email password, email code, or Google.
 
-- Refresh Access (`AuthScreens.tsx` line 65) calls `GET /api/auth/me`.
-- Log Out (`AuthScreens.tsx` line 68 and `AccountMenu.tsx` line 141) calls `POST /api/auth/logout`.
+- Refresh Access (`AuthScreens.tsx` line 67) calls `GET /api/auth/me`.
+- Log Out (`AuthScreens.tsx` line 70 and `AccountMenu.tsx` line 141) calls `POST /api/auth/logout`.
 - Work Email, password, Remember Me, and Show/Hide Password are local. Remember Me writes `ci-remember-email`. The password-mode label “Work Email” is a literal at `EmailSignIn.tsx` line 146, not `auth.login.workEmail`.
-- Sign In posts `/api/auth/email/signin`. Forgot Password posts `/api/auth/email/reset`. The success sentence is the English string at `AuthProvider.tsx` line 205.
-- Use A Sign-In Code Instead is local. Send Sign-In Code posts `/api/auth/email/code`. Success copy is hardcoded at `AuthProvider.tsx` line 181. Verify & Sign In posts `/api/auth/email/code/signin`.
+- Sign In posts `/api/auth/email/signin`. Forgot Password posts `/api/auth/email/reset`. The success sentence is the English string at `AuthProvider.tsx` line 214.
+- Use A Sign-In Code Instead is local. Send Sign-In Code posts `/api/auth/email/code`. Success copy is hardcoded at `AuthProvider.tsx` line 187. Verify & Sign In posts `/api/auth/email/code/signin`.
+- When the password or code sign-in body has `gate` `"mfa"`, `AuthProvider.tsx` lines 170–172 and 199–201 set `mfaRequired` and do not call `afterLogin`. Verify posts `/api/auth/2fa/verify` (`verifyMfa`, lines 217–228). The Google callback with two-factor on goes to `/?mfa=1` without `ci_session`. With two-factor off, that callback still goes to `/` and sets `ci_session`.
 - Continue With Google posts `/api/auth/oauth/start` and then assigns `location`. Microsoft, Apple, and GitHub exist on `OAuthButtons`, but the login screen renders `EmployeeOAuthButtons`, which is Google only.
 - The account menu loads `GET /api/auth/accounts`. Settings navigates to `/settings`. Switch To posts `/api/auth/switch` and then `/api/auth/me`. A failed account load leaves “Loading Accounts…” up (`AccountMenu.tsx` lines 116–117) and also shows the error (line 140).
 
@@ -104,11 +105,11 @@ Top Creatives, the benchmark chart, and the recommendation rail stay on `Skeleto
 
 Campaigns loads the campaign list, benchmarks, meta, compare, and daily endpoints. Status and spend bands are real scope axes. The backend resolves them into a campaign allowlist. The name search is local.
 
-`GET /api/campaigns/{name:path}` (`product.py` lines 205–220) is the drawer. `_campaign_path_name` (lines 189–202) takes the name from one decode of the raw request target, so a slash stays a slash and a literal `%20` stays `%20`. `campaign_detail_payload` (`actions.py` lines 648–700) strips the name, resolves the query as a scope, and reads `benchmark(..., "campaign")`. A name that is not in that grouping returns `None`. The route then answers 404 with `error` set to `No campaign matches the current filters.` `app.py` lines 39–42 unwrap a dict `detail`, so the JSON body is that `error` field. The same query is then copied and its campaign axis is set to that one name (`actions.py` lines 668–671). `build_creatives_list` sums only the ads in that campaign. A confirmed match still replaces key equality, the same way the Creatives page does. Each row has `creative_key`, `campaigns`, `platform`, `format`, `metrics`, `brand_seconds`, and `product_seconds`. They sort by impressions descending and stop at 25. Recommendations are the CPA bullet texts from `campaign_recommendations`, flattened to strings. An empty name is 409.
+`GET /api/campaigns/{name:path}` (`product.py` lines 205–220) is the drawer. `_campaign_path_name` (lines 189–202) takes the name from one decode of the raw request target, so a slash stays a slash and a literal `%20` stays `%20`. `campaign_detail_payload` (`actions.py` lines 653–705) strips the name, resolves the query as a scope, and reads `benchmark(..., "campaign")`. A name that is not in that grouping returns `None`. The route then answers 404 with `error` set to `No campaign matches the current filters.` `app.py` lines 39–42 unwrap a dict `detail`, so the JSON body is that `error` field. The same query is then copied and its campaign axis is set to that one name (`actions.py` lines 673–676). `build_creatives_list` sums only the ads in that campaign. A confirmed match still replaces key equality, the same way the Creatives page does. Each row has `creative_key`, `campaigns`, `platform`, `format`, `metrics`, `brand_seconds`, and `product_seconds`. They sort by impressions descending and stop at 25. Recommendations are the CPA bullet texts from `campaign_recommendations`, flattened to strings. An empty name is 409.
 
 `/api/campaigns/meta` (line 157) and `/api/campaigns/recommendations` (line 171) are registered before `{name:path}`. A campaign whose name is exactly `meta` or `recommendations` still hits those static routes. `scopedPath` (`client.ts` lines 104–143) appends the shared filter scope to a campaign drawer. The path is compared without its query (lines 108–111). The exact bases `/api/campaigns/meta` and `/api/campaigns/recommendations` are not drawers. A name that only begins with `meta` or `recommendations` is a drawer and keeps the filters. The recommendations route still receives them, because line 121 matches that prefix on its own.
 
-The three table exports are registered before the catch-all `POST /api/{action:path}` (`product.py` lines 2611–2618). They are not entries in `_ACTION_ROUTES` (lines 954–965). `POST /api/export` (line 1526) is still the one-pager and still requires 1–50 creative keys.
+The three table exports are registered before the catch-all `POST /api/{action:path}` (`product.py` lines 2621–2628). They are not entries in `_ACTION_ROUTES` (lines 964–975). `POST /api/export` (line 1536) is still the one-pager and still requires 1–50 creative keys.
 
 Controls:
 
@@ -119,7 +120,7 @@ Controls:
 - Platform Metric (line 585): Spend, Impressions, or Clicks. Local.
 - Search Campaigns (line 606). `?find=` is copied only into the initial state (lines 108–109). A later navigation to the same route does not update the box. Global search uses that query (`GlobalSearch.tsx` lines 130–132).
 - Compare Selected (line 614) goes to `/compare` with the selected names. One campaign is enough. An empty selection only sets a status line. The compare page asks for two to four.
-- Export (line 616) posts `/api/exports/campaigns` (lines 336–340) with `{ names, filters: scopeBody(scope) }` and downloads `campaigns.csv`. The route (`product.py` lines 1481–1493) requires a non-empty name list. An empty list is 409. Names absent from the scoped campaign group are omitted. A header-only file is still 200. The response is `text/csv; charset=utf-8` with `Content-Disposition: attachment; filename="campaigns.csv"`. A string cell that starts with `=`, `+`, `-`, or `@` is prefixed with a quote (`actions.py` lines 703–713). Numbers stay numbers. At most 500 names.
+- Export (line 616) posts `/api/exports/campaigns` (lines 336–340) with `{ names, filters: scopeBody(scope) }` and downloads `campaigns.csv`. The route (`product.py` lines 1492–1504) requires a non-empty name list. An empty list is 409. Names absent from the scoped campaign group are omitted. A header-only file is still 200. The response is `text/csv; charset=utf-8` with `Content-Disposition: attachment; filename="campaigns.csv"`. A string cell that starts with `=`, `+`, `-`, or `@` is prefixed with a quote (`actions.py` lines 708–718). Numbers stay numbers. At most 500 names.
 - Select All and the row checkbox are the compare selection.
 - Details (line 669) opens the drawer. The effect (lines 358–381) clears that name’s payload, then calls `GET` `scopedPath(/api/campaigns/${encodeURIComponent(name)}, scope)`. It runs again when the open name or the scope changes. Success stores the detail and clears that name’s error. Failure stores `ApiError.message` (lines 375–378). `EmptyState` prints it (lines 734–735). A 404 from this route carries `error`, so the drawer shows `No campaign matches the current filters.` The client’s `Request failed (${status})` (`client.ts` lines 32–33) is only for a non-OK body that has no `error` field.
 - Delete Sample, Confirm Delete, and Cancel (`SampleDelete.tsx` lines 105–123) are admin-only and sample-campaign-only. They call the demo-pack impact and campaign-delete routes.
@@ -142,7 +143,7 @@ Controls:
 - See All on Top Creatives (line 527) navigates to `/creatives`, the current page.
 - List View and Grid View (lines 564 and 569). Grid cards are not buttons and do not open the detail (lines 650–669).
 - Sort By (line 575): Top Performing, Highest CTR, Highest ROAS, Most Impressions. Local.
-- Export (line 579) posts `/api/exports/creatives` (line 404) with `{ creative_keys: keys, filters: scopeBody(scope) }` for every visible key. The checkboxes are ignored. The route (`product.py` lines 1496–1510) requires a non-empty key list, keeps request order, skips a key that is not in the scoped list, and downloads `creatives.csv`. An empty list is 409. A header-only file is still 200. At most 500 keys. An explicit empty campaign list matches nothing, so the file is header-only (`actions.py` lines 773–774). A string value is one filter. `_list_filters` (lines 750–758) wraps it into a one-item list before the lookup at line 771. An empty filter object is still unrestricted.
+- Export (line 579) posts `/api/exports/creatives` (line 404) with `{ creative_keys: keys, filters: scopeBody(scope) }` for every visible key. The checkboxes are ignored. The route (`product.py` lines 1507–1521) requires a non-empty key list, keeps request order, skips a key that is not in the scoped list, and downloads `creatives.csv`. An empty list is 409. A header-only file is still 200. At most 500 keys. An explicit empty campaign list matches nothing, so the file is header-only (`actions.py` lines 778–779). A string value is one filter. `_list_filters` (lines 755–763) wraps it into a one-item list before the lookup at line 778. An empty filter object is still unrestricted.
 - Select All and the row checkbox write `selected` (lines 188 and 618). `selected` is only read to paint the checkbox (line 389). `creatives.compareSelected` exists in `en.ts` and is not rendered.
 - The creative name (line 623) toggles the detail panel and loads `GET /api/retention/curve`.
 - See All on Top Learnings and on Next Tests (lines 685 and 706) go to `/insights`. Next Tests are three fixed sentences (lines 376–380) whenever any creative is in scope.
@@ -180,7 +181,7 @@ Controls:
 - View All (line 329) goes to `/insights`.
 - Open Benchmark (line 341) and Delete (line 344).
 - Group By (lines 375–378). The select offers `platform`, `hook_type`, `format`, and `creator_vs_branded` (`AXES` at lines 31–33). `GROUPABLE` is `platform`, `campaign`, `hook_type`, `creator_vs_branded`, `edit_style`, `format`, and `vertical` (`benchmarks.py` lines 10–11). `format` and `vertical` are `ads` columns, so both groupings return rows. `benchmark()` still raises `ValueError` for a name outside that tuple (lines 236–237), and the panel then renders `benchmarks.error` (line 428). The vertical count uses `group_by=vertical` (line 112) and fills lines 474–476 from that response.
-- Export, desktop (line 380) and overflow (line 371), posts `{ group_by: axis, filters: scopeBody(scope) }` to `/api/exports/benchmarks` (line 244). The route (`product.py` lines 1513–1523) returns `benchmarks.csv`. `group_by` must be in `GROUPABLE` (`TableExportBody`, lines 475–481). Anything else is 409. An empty filter object is unrestricted.
+- Export, desktop (line 380) and overflow (line 371), posts `{ group_by: axis, filters: scopeBody(scope) }` to `/api/exports/benchmarks` (line 244). The route (`product.py` lines 1524–1534) returns `benchmarks.csv`. `group_by` must be in `GROUPABLE` (`TableExportBody`, lines 475–481). Anything else is 409. An empty filter object is unrestricted.
 - Select All (lines 393–395) checks every row. The three-benchmark cap and `benchmarks.maxCompare` exist only in `toggle` (lines 159–165). Charts still use `compared.slice(0, 3)` (lines 134–137), so extra checked rows are omitted with no status. Clear All (line 434) clears the local selection.
 - Open AI Analyst (line 498) and Open Reports (line 499).
 
@@ -188,7 +189,7 @@ Coverage and Platform cells are canned `filters.allVerticals` or `filters.allPla
 
 ## Insights
 
-Insights loads reach-objective cards from scoped `GET /api/analyst/creatives?objective=reach`. The backend treats that `objective` as the analysis objective and does not use it as a campaign filter (`product.py` lines 1111–1118). Page search, client, platform, market, type, and date are local state. Save Insight posts the global `scopeBody(scope)` plus `filters.kpi` and `view: "main"` (`InsightsPage.tsx` lines 213–215). It ignores the page’s own client, platform, and market. Conversations and views load once (lines 94–103, deps `[]`).
+Insights loads reach-objective cards from scoped `GET /api/analyst/creatives?objective=reach`. The backend treats that `objective` as the analysis objective and does not use it as a campaign filter (`product.py` lines 1121–1128). Page search, client, platform, market, type, and date are local state. Save Insight posts the global `scopeBody(scope)` plus `filters.kpi` and `view: "main"` (`InsightsPage.tsx` lines 213–215). It ignores the page’s own client, platform, and market. Conversations and views load once (lines 94–103, deps `[]`).
 
 Controls:
 
@@ -223,7 +224,7 @@ History is local storage plus sample files and, in a demo workspace, synthetic r
 
 ## Workbook
 
-The nav label is Blank Workbook. Preview uses scoped creatives and `/api/kpis/compare` through `useCompare`, which refetches on the whole filters object, including `kpi`. Create downloads `GET /api/analyst/workbook` with name, description, modules, and KPIs only. The handler builds a cover plus seven blank sheets (`product.py` lines 1177–1203). The about copy says that on purpose (`en.ts` lines 1550 and 1576). Module cards other than summary and breakdown do not change the file.
+The nav label is Blank Workbook. Preview uses scoped creatives and `/api/kpis/compare` through `useCompare`, which refetches on the whole filters object, including `kpi`. Create downloads `GET /api/analyst/workbook` with name, description, modules, and KPIs only. The handler builds a cover plus seven blank sheets (`product.py` lines 1187–1206). The about copy says that on purpose (`en.ts` lines 1555 and 1581). Module cards other than summary and breakdown do not change the file.
 
 Controls:
 
@@ -237,13 +238,13 @@ Controls:
 - Cancel (line 435) resets, including that English name.
 - Create Workbook (line 436) is disabled while busy.
 
-There is no error branch. `previewFailedTitle` exists in `en.ts` (line 1563) and is unused. If compare or `/api/creatives` fails, the preview stays a `Skeleton` (lines 400–403 and 458–461).
+There is no error branch. `previewFailedTitle` exists in `en.ts` (line 1569) and is unused. If compare or `/api/creatives` fails, the preview stays a `Skeleton` (lines 400–403 and 458–461).
 
 ## Ask
 
 Ask submits `POST /api/ask` with the filter scope captured at send time (`scopeRef` in `AskPage.tsx` lines 101–102 and 130–133). Prompt chips, suggested questions, and follow-ups call the same `ask()`. Production does not auto-send. A demo workspace, `useCampaignMeta().data?.demo === true`, sends the current composer text once (lines 110–153).
 
-When the managed LLM is paused, the ask job fails with `AI is not configured. Contact your administrator.` (`provider_inventory.py` lines 43–44, `providers.py` lines 1105–1106, `qa.py` lines 490–500). `product.py` lines 986–993 return that string as `detail.error` through `_conflict`, because the paused text has no `[provider=` marker. Ask shows `ApiError.message` (lines 135–136 and 244–245). A chosen-model transport failure marked `[provider=` becomes 502 through `_provider_failure` (`product.py` lines 74–88).
+When the managed LLM is paused, the ask job fails with `AI is not configured. Contact your administrator.` (`provider_inventory.py` lines 43–44, `providers.py` lines 1105–1106, `qa.py` lines 490–500). `product.py` lines 996–1003 return that string as `detail.error` through `_conflict`, because the paused text has no `[provider=` marker. Ask shows `ApiError.message` (lines 135–136 and 244–245). A chosen-model transport failure marked `[provider=` becomes 502 through `_provider_failure` (`product.py` lines 74–88).
 
 Controls: the composer and Ask button (lines 220–227); prompt chips `ask.prompts.p0`–`p3` (lines 231–239); suggested questions `s0`–`s5` (lines 332–344); follow-ups `f0`–`f2` after an answer (lines 304–313); recent chats (lines 346–363) from `GET /api/analyst/conversations`, linking to `/analyst?conversation=`. The destination does not load the transcript. See Analyst. KPI, trend, and source blocks render the answer plus scoped compare, daily, and benchmark calls (lines 249–302). Ask money uses the USD formatter in `product.tsx`.
 
@@ -262,12 +263,12 @@ Controls:
 - Campaign, platform, client, and project (lines 1004–1069) write the shared filters.
 - Date range (lines 1022–1036) is local state, initial `"all"` (line 347). Charts use `FilterContext` through `useScopedApi`. A range chosen on another page stays in effect while this select says All Time, until the user changes it.
 - Objective (lines 1038–1047) is page-local and is sent on the ask body. It is not written back to the shared filters.
-- Language (lines 1050–1054). `auto` omits language. The options are the hardcoded strings Auto, Polski, and English. The backend rejects anything else (`product.py` lines 1323–1330). Spanish is not offered.
+- Language (lines 1050–1054). `auto` omits language. The options are the hardcoded strings Auto, Polski, and English. The backend rejects anything else (`product.py` lines 1333–1340). Spanish is not offered.
 - New Conversation (lines 1072–1075) posts `/api/analyst/conversations`.
 - Report (lines 1077–1080) posts `/api/analyst/report` through the API client.
 - Report XLSX (lines 1082–1085) fetches the same route with a raw `fetch` (lines 150–161). A 401 does not run the API client’s login gate.
-- Blank Workbook (lines 1087–1090) is `GET /api/analyst/workbook` through a raw `fetch` (lines 513–541). The comment at lines 514–516 claims session re-gating that this fetch does not do. The server builds a blank workbook (`product.py` lines 1177–1203).
-- Previous analyses (lines 1093–1110) set `activeId` and `setMessages([])` (lines 1101–1104). The Ask deep link only calls `setActiveId` (lines 375–378). Nothing calls `GET /api/analyst/conversations/{id}` (`product.py` lines 1079–1093 returns messages). The next ask still sends `conversation_id`, so the server thread continues while the screen stays empty.
+- Blank Workbook (lines 1087–1090) is `GET /api/analyst/workbook` through a raw `fetch` (lines 513–541). The comment at lines 514–516 claims session re-gating that this fetch does not do. The server builds a blank workbook (`product.py` lines 1187–1206).
+- Previous analyses (lines 1093–1110) set `activeId` and `setMessages([])` (lines 1101–1104). The Ask deep link only calls `setActiveId` (lines 375–378). Nothing calls `GET /api/analyst/conversations/{id}` (`product.py` lines 1089–1103 returns messages). The next ask still sends `conversation_id`, so the server thread continues while the screen stays empty.
 - Save To Next-Flight Plan and Dismiss (lines 903–913) post accepted or rejected while the finding is proposed.
 - Follow-up chips (lines 1179–1186) send the returned follow-up text.
 
@@ -275,7 +276,7 @@ Charts on this page use `/api/benchmarks`, `/api/campaigns`, and `/api/creatives
 
 ## Settings
 
-The page heading is “Profile Settings” (`en.ts` line 1655). The sidebar link stays “Settings” (`en.ts` line 620).
+The page heading is “Profile Settings” (`en.ts` line 1660). The sidebar link stays “Settings” (`en.ts` line 620).
 
 `applyLive` (`SettingsPage.tsx` lines 246–251) applies theme, accent, density, language, and timezone on each autosave commit. Language and timezone are also restored for the signed-in employee by `LocalePrefsSync` (`i18n/index.tsx` lines 160–162). Accent and density CSS variables are rewritten when Settings is mounted (line 329) and then left on `documentElement`.
 
@@ -283,7 +284,7 @@ The prefs key is `ci-settings-prefs:<employeeId>` (`prefs.ts` lines 106–147), 
 
 Live on commit: theme, accent, density, language, timezone.
 
-Saved on this page and not read by Dashboard, the router, or Ask: workspace name, Default View, Default Currency, Default Date Range, Default Campaign View, Email Reports, Campaign Updates, AI Insights, Product Updates, Data Usage, Share Analytics, and the retention select. Workspace name autosaves after 450 ms, trims, caps at 80, and rejects a blank (lines 284–302). No other page reads `prefs.workspace`. Unmount clears the debounce without flushing (lines 305–307), so a name typed and left within 450 ms is dropped. Default View, currency, date-range, and campaign-view option labels are English arrays (lines 66–69 and 937–973). The retention hint says the browser preference is not workspace retention (`en.ts` line 1790).
+Saved on this page and not read by Dashboard, the router, or Ask: workspace name, Default View, Default Currency, Default Date Range, Default Campaign View, Email Reports, Campaign Updates, AI Insights, Product Updates, Data Usage, Share Analytics, and the retention select. Workspace name autosaves after 450 ms, trims, caps at 80, and rejects a blank (lines 284–302). No other page reads `prefs.workspace`. Unmount clears the debounce without flushing (lines 305–307), so a name typed and left within 450 ms is dropped. Default View, currency, date-range, and campaign-view option labels are English arrays (lines 66–69 and 937–973). The retention hint says the browser preference is not workspace retention (`en.ts` line 1825).
 
 Theme is saved per employee, but the painted mode is the global `ci-theme` key (`useTheme.ts` lines 6–18 and 45–51). The live tree mounts `useTheme` only from Settings. Account switch applies language and timezone and does not call `setThemeMode` for the new employee. Accent and density update only when Settings mounts.
 
@@ -291,21 +292,21 @@ Backend actions, not prefs:
 
 - Retry (lines 575–577) re-saves the prefs already on screen, and only after a local save failed.
 - Reset Defaults (lines 579–581) writes `DEFAULTS` and applies them. No confirm.
-- Edit Email (lines 641–643) opens the address field (lines 601–623). Save Email (lines 394–425) patches `{ email }` to `/api/auth/me`. The domain after `@` must match the stored address (`employees.py` lines 682–695, route at `auth.py` line 81). A different domain shows `Use another {domain} address.` and does not send the patch (lines 403–405). That sentence stays in a `role="alert"` (lines 620–622). Cancel closes the field. The same address closes it without a patch (lines 407–410). An invalid address is refused. A duplicate returns `That email is already registered.` The WorkOS id is left unchanged. Personal Info still edits the first and last name.
+- Edit Email (lines 641–643) opens the address field (lines 601–623). Save Email (lines 394–425) patches `{ email }` to `/api/auth/me`. The domain after `@` must match the stored address (`employees.py` lines 682–695, route at `auth.py` line 81). A different domain shows `Use another {domain} address.` and does not send the patch (lines 402–404). That sentence stays in a `role="alert"` (lines 620–622). Cancel closes the field. The same address closes it without a patch (lines 407–410). An invalid address is refused. A duplicate returns `That email is already registered.` The WorkOS id is left unchanged. Personal Info still edits the first and last name.
 - Upload Photo posts `/api/auth/me/avatar` with a raw `fetch` (lines 445–472).
 - Save Profile patches `/api/auth/me` (lines 359–382). The avatar URL is included only if it changed.
 - Remove Avatar patches `avatar_url: ""` (lines 428–442). The fallback error is the English sentence “Could not remove avatar.” (line 439).
 - Change Password posts `/api/auth/email/reset` (lines 475–487). It sends a reset email. The form does not set a new password.
-- Log Out (lines 839–843) posts `/api/auth/logout` and is shown only when the session count is under 2.
-- Log Out Everywhere (lines 833–837) confirms, then posts `/api/auth/sessions/revoke-all`. The handler destroys every session and clears the cookie (`auth.py` lines 378–391). It is shown only when the count is at least 2, in place of Log Out.
-- Export Data posts `/api/auth/export` (lines 520–531).
+- Log Out (lines 838–842) posts `/api/auth/logout` and is shown only when the session count is under 2.
+- Log Out Everywhere (lines 832–836) confirms, then posts `/api/auth/sessions/revoke-all`. The handler destroys every session and clears the cookie (`auth.py`). It is shown only when the count is at least 2, in place of Log Out.
+- Two-Factor Authentication is `TwoFactorCard` (`SettingsPage.tsx` line 846). The body is “Use an authenticator app for a second sign-in step.” (`en.ts` line 1724). Set Up, Confirm, Turn Off, Copy Key, and I Saved These Codes are real controls. On is the pill only after confirm. The secret is `data-testid="totp-secret"`.
+- Export Data posts `/api/auth/export` (lines 519–530). That route is still absent. The button remains.
 - Google Drive Connect and Disconnect live on `GoogleDriveCard.tsx` lines 35–89.
+- Meta Ads, TikTok Ads, and Google Analytics 4 are `IntegrationCards` (`SettingsPage.tsx` line 1025). They are not Unavailable pills.
 
-The only `status` output requires `op !== null` (line 716). Save Profile, avatar upload and remove, Change Password, Log Out Everywhere, and Export Data set `status` in `catch` and clear `op` or `sessionOp` in `finally` (lines 377–381, 438–442, 468–472, 483–487, 513–517, 527–531). Those updates land in one paint, so the error never shows. A rejected photo sets `status` without setting `op` (lines 447–449). Success still uses the toast. Edit Email does not use that `status` line. Its error stays on the alert above.
+The only `status` output requires `op !== null` (line 715). Save Profile, avatar upload and remove, Change Password, Log Out Everywhere, and Export Data set `status` in `catch` and clear `op` or `sessionOp` in `finally`. Those updates land in one paint, so the error never shows. A rejected photo sets `status` without setting `op` (lines 447–449). Success still uses the toast. Edit Email does not use that `status` line. Its error stays on the alert at lines 620–622. Two-factor and integration errors use their own `role="alert"` or `role="status"` and do show.
 
-The Google SSO row shows Connected unless the check is still loading or `connected === false` (lines 791–797). `useGoogleStatus` sets `connected` to null and `error` to true on failure (`useGoogleStatus.ts` lines 54–57). The Drive card shows a retry for that state (`GoogleDriveCard.tsx` lines 76–81). The SSO row does not.
-
-Unavailable, with no connect button: two-factor (lines 847–856), Meta Ads, TikTok Ads, and Google Analytics 4 (lines 1040–1063). Not-connected and those integration pills use `pill-ok` (lines 780, 794, 796, 1043, 1053, 1063). Two-factor uses `pill-info` (line 851). `theme.css` line 916 paints both classes as the brand teal. The words still differ.
+The Google SSO row shows Connected unless the check is still loading or `connected === false` (lines 790–796). `useGoogleStatus` sets `connected` to null and `error` to true on failure (`useGoogleStatus.ts` lines 54–57). The Drive card shows a retry for that state (`GoogleDriveCard.tsx` lines 76–81). The SSO row does not. Not Connected and Connected on that row both use `pill-ok` (lines 779, 793, and 795). `theme.css` line 916 paints `pill-ok` and `pill-info` as the brand teal.
 
 Data tools on this page: retention patterns call `GET /api/retention/patterns`. Create Cohort posts `/api/cohorts` with the current filter scope (`DataTools.tsx` lines 272–346) and has no in-flight lock. Build calls `GET /api/cohorts/build`. Delete confirms and is rendered only for admins.
 
@@ -362,13 +363,13 @@ Provider screen controls (`ProvidersPage.tsx`):
 
 Any in-flight provider action shows “Activating…” on every card. The shared `busy` flag is rendered inside each card, and only the exact string `"deactivate"` selects the other label (lines 665–668).
 
-`POST /api/drafts/{id}/analyze` (`product.py` lines 2496–2547) calls `bind_snapshot`, then `readiness()`, and returns 409 when not ready. The job payload stores that snapshot. The draft becomes `queued`.
+`POST /api/drafts/{id}/analyze` (`product.py` lines 2506–2557) calls `bind_snapshot`, then `readiness()`, and returns 409 when not ready. The job payload stores that snapshot. The draft becomes `queued`.
 
 One Analyse press binds the snapshot in `bind_snapshot` (`video_analysis.py` lines 88–135). The worker re-checks in `check_snapshot` (lines 145–158) at the start of `run` (line 485), after the pipeline (line 546), and again inside the publish transaction (line 585). A changed input raises and does not publish. Metrics come from `measured_from_records` (line 553, function at 245–378) using the confirmed match records, not the LLM. A total with no known contributor becomes `None` (lines 367–371). A zero impression pool leaves CTR null and adds `missing is not zero` (lines 354–359). Silent clips set `audio` to `None` in `prepare_media` (lines 189–200). `run_pipeline` then skips STT (`creative.py` lines 1106–1113) and still calls `llm.structure` (line 1130). That skip is reached only if the vision-roster gate has already passed. Draft success status is `ready_for_review` (`video_analysis.py` lines 627–628). `jobs.complete` sets the job row to `completed` (`jobs.py` lines 203–217), and the worker applies that after the handler returns (`worker.py` lines 110–119). The worker sets `analyzing` at start and `failed` or `cancelled` on the way out (`worker_handlers.py` lines 233–270). The provider receives JPEG bytes and WAV bytes, not the file path (`video_analysis.py` lines 526–539). Frames require a JPEG magic header (`video.py` lines 256–268). Audio is 16 kHz mono PCM (`video.py` lines 19 and 200–218). `readiness` labels the send as `sampled JPEG frames + 16kHz mono WAV` (lines 73–74).
 
 Annotate runs before `llm.structure` (`creative.py` line 1086, then 1130). With no managed selection, the LLM slot is already the not-configured error. Publish does not happen. The draft is marked `failed` (`worker_handlers.py` lines 261–270). The vision call still ran.
 
-`POST /api/ask` is the model call on the ask surface (`product.py` lines 968–997). `run_ask` passes `prov.llm` only in live mode (`worker_handlers.py` lines 125–138). Analyst ask, analyst creatives, and the analyst report do not call the model.
+`POST /api/ask` is the model call on the ask surface (`product.py` lines 978–1007). `run_ask` passes `prov.llm` only in live mode (`worker_handlers.py` lines 125–138). Analyst ask, analyst creatives, and the analyst report do not call the model.
 
 ## Analyze Video wizard
 
@@ -395,28 +396,29 @@ A step chip earlier than the open step is a button (lines 1406–1415) and calls
 
 ## Assets
 
-`GET /assets/{name}` (`product.py` lines 2964–2986) serves `.png` from `REACT_ASSETS_DIR` first, because `.png` is in `_ALLOWED_DIST_EXTS` (line 2911). A missing dist file raises 404 (lines 2971–2973) and does not fall through to `ASSETS_DIR`. Brand files live in `Web/assets` and are served by `/foap-logo.png`, `/foap-mark.png`, and `/favicon.png` (lines 2995–3007). The React shell uses those dedicated paths. `GET /assets/favicon.png` and `GET /assets/foap-logo.png` 404 unless a hashed build has copied those exact names into the dist assets directory.
+`GET /assets/{name}` (`product.py` lines 3009–3030) serves `.png` from `REACT_ASSETS_DIR` first, because `.png` is in `_ALLOWED_DIST_EXTS` (line 2956). A missing dist file raises 404 (lines 3016–3018) and does not fall through to `ASSETS_DIR`. Brand files live in `Web/assets` and are served by `/foap-logo.png`, `/foap-mark.png`, and `/favicon.png` (lines 3040–3052). The React shell uses those dedicated paths. `GET /assets/favicon.png` and `GET /assets/foap-logo.png` 404 unless a hashed build has copied those exact names into the dist assets directory.
 
 ## Fixed on this push
 
-The item below was a defect at the parent. It is the behavior named at the top of this file. Do not report it again unless the cited lines no longer do what this file says.
+The items below were placeholders at the parent. They are the behavior named at the top of this file. Do not report the old Unavailable pills unless the cited lines no longer do what this file says.
 
-- The AI Analyst suggestion label is “Try Asking:” (`en.ts` line 357).
+- Two-Factor Authentication sets up, confirms, and can turn off with an authenticator code (`TwoFactorCard.tsx`, `totp.py`, `routers/two_factor.py`). Sign-in does not issue `ci_session` until that code or a recovery code is accepted (`oauth.py` `open_login`).
+- Meta Ads, TikTok Ads, and Google Analytics 4 have Connect, status, and Disconnect (`IntegrationCards.tsx`, `integrations_oauth.py`, `routers/integrations.py`). An unconfigured app returns 409 and stays disconnected. GA4 does not import rows.
 
 These were already true at the parent and stay true:
 
-- Edit Email changes only the part before `@`. `update_profile` (`employees.py` lines 682–695) stores another address when the domain matches and refuses a different domain, a duplicate, and an invalid address. The page shows the same domain sentence before the request (`SettingsPage.tsx` lines 403–405 and 620–622).
-
-- The Admin page heading is “Admin Settings” and the Settings page heading is “Profile Settings” (`en.ts` lines 631 and 1655). The sidebar labels stay “Admin” and “Settings”. The video file-limit line stays 12px, from an earlier parent.
-- Drawer creative metrics stay inside the open campaign (`actions.py` lines 668–671). Totals still come from `benchmark(..., "campaign")` (lines 661–663).
+- The AI Analyst suggestion label is “Try Asking:” (`en.ts` line 357). Spanish stays “Prueba a preguntar:” (`es.ts` line 357). Polish stays “Spróbuj zapytać:” (`pl.ts` line 363).
+- Edit Email changes only the part before `@`. `update_profile` (`employees.py` lines 682–695) stores another address when the domain matches and refuses a different domain, a duplicate, and an invalid address. The page shows the same domain sentence before the request (`SettingsPage.tsx` lines 402–404 and 620–622). The button label is `en.ts` line 1678.
+- The Admin page heading is “Admin Settings” and the Settings page heading is “Profile Settings” (`en.ts` lines 631 and 1660). Spanish Settings title is `es.ts` line 1660. Polish is `pl.ts` line 1674. The sidebar labels stay “Admin” and “Settings”. The video file-limit line stays 12px, from an earlier parent.
+- Drawer creative metrics stay inside the open campaign (`actions.py` lines 673–676). Totals still come from `benchmark(..., "campaign")` (lines 667–668).
 - `scopedPath` treats only the exact `/api/campaigns/meta` and `/api/campaigns/recommendations` bases as static (`client.ts` lines 105–111). A name such as `meta-launch` keeps the shared filters.
 - A campaign name that contains `/` or a literal `%20` opens through `GET /api/campaigns/{name:path}` (`product.py` lines 189–220). The handler decodes the raw target once.
-- An explicit empty campaign list exports no creative rows (`actions.py` lines 773–774). The campaign CSV already omitted every requested name for that filter.
+- An explicit empty campaign list exports no creative rows (`actions.py` lines 778–779). The campaign CSV already omitted every requested name for that filter.
 
 These four were already true before that parent and stay true:
 
 - The drawer route exists (`product.py` lines 205–220, `CampaignsPage.tsx` lines 358–381). An unknown name is 404 with `error` set to `No campaign matches the current filters.`
-- Table CSV: `POST /api/exports/campaigns`, `/api/exports/creatives`, and `/api/exports/benchmarks` (`product.py` lines 1481–1523). `POST /api/export` (line 1526) is still the one-pager.
+- Table CSV: `POST /api/exports/campaigns`, `/api/exports/creatives`, and `/api/exports/benchmarks` (`product.py` lines 1492–1533). `POST /api/export` (line 1536) is still the one-pager.
 - `format` and `vertical` are in `GROUPABLE` (`benchmarks.py` lines 10–11). `BenchmarksPage.tsx` lines 31–33 and 112 call those names.
 - A provider validation 409 stays on the card (`ProvidersPage.tsx` lines 500, 522, 548, and 596). It does not call `runDeactivate`.
 
@@ -426,7 +428,7 @@ P2. Compare does not redraw results when the shared scope changes while the page
 
 P2. Compare copy listed in that section stays English in Spanish and Polish.
 
-P2. Reports with every campaign unchecked send `campaigns: null` (`ReportsPage.tsx` line 447), and the report then includes every campaign still in scope (`actions.py` line 1401, `benchmarks.py` lines 839–841).
+P2. Reports with every campaign unchecked send `campaigns: null` (`ReportsPage.tsx` line 447), and the report then includes every campaign still in scope (`actions.py` line 1406, `benchmarks.py` lines 839–841).
 
 P2. Creative checkboxes do not change Export or open a compare. Grid view cannot open a creative. Dashboard “Open in Creatives” drops the creative key. Campaign “vs. Benchmark” is one shared number, or Unavailable. Campaign search ignores a later `?find=` while the page stays mounted.
 
@@ -436,7 +438,7 @@ P2. Several failures render as a skeleton or as an empty state: dashboard charts
 
 P2. The Analyst date select can read All Time while the shared date filter is still applied. Reset does not clear Objective or Language. Clear does not clear shared filters.
 
-P2. Settings action failures other than Edit Email are stored and then not rendered (`SettingsPage.tsx` line 716). Edit Email errors use the alert at lines 620–622 and do show. A failed Google status check paints the SSO row as Connected. Theme follows the global `ci-theme` key, not the employee whose prefs stored it. Workspace name, default view, currency, date range, campaign view, notification toggles, and privacy toggles stay on Settings.
+P2. Settings action failures other than Edit Email, two-factor, and the ad connections are stored and then not rendered (`SettingsPage.tsx` line 715). Edit Email errors use the alert at lines 620–622 and do show. A failed Google status check paints the SSO row as Connected. Not Connected uses the same teal pill as Connected (lines 793 and 795). Theme follows the global `ci-theme` key, not the employee whose prefs stored it. Workspace name, default view, currency, date range, campaign view, notification toggles, and privacy toggles stay on Settings. Export Data still posts `/api/auth/export`, and that route is still absent. Notification toggles do not send email.
 
 P2. The paused-provider banner says AI Analyst is paused. Analyst does not check the provider. Ask does fail closed with the administrator sentence.
 
@@ -448,8 +450,8 @@ P3. Analyze is offered when the status line says vision is missing (`VideoUpload
 
 P3. Wizard method labels (`VideoUploadPanel.tsx` lines 98–104) and moment flags (lines 201–205) stay English. The creative-key placeholder `video-upload-sample` (line 1447) stays English. Duration and the current-dataset label are localized.
 
-P3. Provider cards show “Activating…” for every in-flight action. Workbook and spreadsheet downloads, and avatar upload, bypass the API client’s 401 gate. Add Employee’s loading label, several Settings option lists, and the Analyst language options are hardcoded English. A workspace name left within 450 ms is dropped. Cohort Create has no in-flight lock. Create Team does not appear in the employee table. Unavailable pills share the Connected color. The Insights empty titles share one string. Reports’ Save as Template is never read. Benchmark Select All exceeds the three-row chart cap without a status.
+P3. Provider cards show “Activating…” for every in-flight action. Workbook and spreadsheet downloads, and avatar upload, bypass the API client’s 401 gate. Add Employee’s loading label, several Settings option lists, and the Analyst language options are hardcoded English. A workspace name left within 450 ms is dropped. Cohort Create has no in-flight lock. Create Team does not appear in the employee table. The Insights empty titles share one string. Reports’ Save as Template is never read. Benchmark Select All exceeds the three-row chart cap without a status.
 
 ## Checks not performed
 
-No Render click-through, live provider, ffmpeg run, or the five Notino clips. The full UI suite and the full backend suite were not re-run. This push ran the Analyst page unit tests (17 passed), the Analyst Playwright journey (1 passed), and `tsc --noEmit` through `pnpm build`. The email tests from the parent were not re-run. `tests/test_table_exports.py` was not re-run. The four backend failures from the last full run, before an earlier parent changed Python, were `tests/test_ci_app.py::test_security_headers_health_readiness` (`ModuleNotFoundError: No module named 'tests'`), `tests/test_ci_app.py::test_no_licensing_concepts` (the walker does not skip `.venv`), and `tests/test_web_shell.py` `test_favicon_asset_serves` plus `test_logo_and_mark_assets_serve` (404 on `/assets/favicon.png` and `/assets/foap-logo.png`). Those four were not re-run. `client.ts` lines 32–33 still turn a non-OK body with no `error` field into `Request failed (${status})`. This drawer route puts `error` on the 404, so that fallback is not the drawer copy. Spanish and Polish catalogs were checked for missing keys by `parity.test.ts` on this push. They were not opened line by line for Compare. Pre-existing ruff findings in `product.py` were left as they were. `benchmarks.py` was not edited.
+No Render click-through, live provider, ffmpeg run, or the five Notino clips. The full UI suite and the full backend suite were not re-run. This push ran `tests/test_two_factor.py` and `tests/test_integrations_oauth.py` (9 passed), the OAuth cases in `tests/test_ci_app.py` plus `tests/test_google_oauth.py` and `tests/test_ci_auth.py` (44 passed), Settings plus locale parity plus auth vitest (64 passed), and the new Settings Playwright journey (1 passed). `pnpm build` ran `tsc --noEmit`. Ruff passed on the new Python modules. Pre-existing ruff findings in `product.py` were left as they were. The Analyst tests from the parent were not re-run. `tests/test_table_exports.py` was not re-run. The four backend failures from the last full run, before an earlier parent changed Python, were `tests/test_ci_app.py::test_security_headers_health_readiness` (`ModuleNotFoundError: No module named 'tests'`), `tests/test_ci_app.py::test_no_licensing_concepts` (the walker does not skip `.venv`), and `tests/test_web_shell.py` `test_favicon_asset_serves` plus `test_logo_and_mark_assets_serve` (404 on `/assets/favicon.png` and `/assets/foap-logo.png`). Those four were not re-run. `client.ts` lines 32–33 still turn a non-OK body with no `error` field into `Request failed (${status})`. This drawer route puts `error` on the 404, so that fallback is not the drawer copy. Spanish and Polish catalogs were checked for missing keys by `parity.test.ts` on this push. They were not opened line by line for Compare. `benchmarks.py` was not edited.

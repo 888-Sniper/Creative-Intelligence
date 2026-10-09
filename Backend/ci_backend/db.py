@@ -109,6 +109,47 @@ class OAuthToken(Base):
     scope: Mapped[str] = mapped_column(String, default="")
     updated_at: Mapped[str] = mapped_column(String, default="")
     refresh_token_enc: Mapped[str] = mapped_column(String, default="")
+    # External account id (Meta ad account, TikTok advertiser, GA4
+    # property). Empty when the provider did not return one. Never a
+    # token.
+    account_ref: Mapped[str] = mapped_column(String, default="")
+
+
+class EmployeeTotp(Base):
+    """Authenticator secret for one employee.
+
+    The secret is a Fernet token. enabled is 0 while setup is still
+    waiting for a confirming code. recovery_hashes is a JSON list of
+    sha256 digests; the codes themselves are shown once and never
+    stored. last_step blocks reuse of an already accepted TOTP step.
+    """
+
+    __tablename__ = "employee_totp"
+
+    employee_id: Mapped[str] = mapped_column(
+        String, ForeignKey("employees.id"), primary_key=True)
+    secret_enc: Mapped[str] = mapped_column(String, default="")
+    enabled: Mapped[int] = mapped_column(default=0)
+    recovery_hashes: Mapped[str] = mapped_column(Text, default="")
+    last_step: Mapped[int] = mapped_column(default=0)
+    updated_at: Mapped[str] = mapped_column(String, default="")
+
+
+class TotpChallenge(Base):
+    """Short-lived sign-in challenge issued when two-factor is on.
+
+    Only the hash of the cookie token is stored. The row is single-use
+    on success and dies after a few wrong codes or five minutes.
+    """
+
+    __tablename__ = "totp_challenges"
+
+    token_hash: Mapped[str] = mapped_column(String, primary_key=True)
+    employee_id: Mapped[str] = mapped_column(
+        String, ForeignKey("employees.id"), default="")
+    attempts: Mapped[int] = mapped_column(default=0)
+    expires_at: Mapped[str] = mapped_column(String, default="")
+    created_at: Mapped[str] = mapped_column(String, default="")
 
 
 class ProviderConfig(Base):

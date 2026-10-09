@@ -21,6 +21,8 @@ interface AuthContextValue {
   emailCodeSignIn: (email: string, code: string) => Promise<void>;
   emailReset: (email: string) => Promise<string>;
   logout: () => Promise<void>;
+  mfaRequired: boolean;
+  verifyMfa: (code: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -35,6 +37,7 @@ async function fetchMe(): Promise<MeResponse> {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [me, setMe] = useState<MeResponse | null>(null);
   const [authenticating, setAuthenticating] = useState(false);
+  const [mfaRequired, setMfaRequired] = useState(false);
   const [switching, setSwitching] = useState(false);
   // Monotonic refresh generation: only the latest /me resolution may
   // apply, so a slow pre-switch response can never clobber the
@@ -159,13 +162,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (email: string, password: string) => {
       setAuthenticating(true);
       try {
-        await afterLogin(
-          await api<MeResponse>("POST", "/api/auth/email/signin", {
-            email,
-            password,
-            container_id: installationContainer(),
-          }),
-        );
+        const res = await api<MeResponse>("POST", "/api/auth/email/signin", {
+          email,
+          password,
+          container_id: installationContainer(),
+        });
+        if (String(res.gate) === "mfa") {
+          setMfaRequired(true);
+          return;
+        }
+        await afterLogin(res);
       } finally {
         // Runs after afterLogin resolved (setMe + refresh): React batches
         // this clear with the gate flip, so the spinner bridges the whole
@@ -185,13 +191,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (email: string, code: string) => {
       setAuthenticating(true);
       try {
-        await afterLogin(
-          await api<MeResponse>("POST", "/api/auth/email/code/signin", {
-            email,
-            code,
-            container_id: installationContainer(),
-          }),
-        );
+        const res = await api<MeResponse>("POST", "/api/auth/email/code/signin", {
+          email,
+          code,
+          container_id: installationContainer(),
+        });
+        if (String(res.gate) === "mfa") {
+          setMfaRequired(true);
+          return;
+        }
+        await afterLogin(res);
       } finally {
         // Same batching as password sign-in: spinner bridges the gate flip.
         setAuthenticating(false);
@@ -205,6 +214,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return "If That Email Exists, A Reset Is On Its Way.";
   }, []);
 
+  const verifyMfa = useCallback(async (code: string) => {
+    setAuthenticating(true);
+    try {
+      const res = await api<MeResponse>("POST", "/api/auth/2fa/verify", {
+        code,
+        container_id: installationContainer(),
+      });
+      setMfaRequired(false);
+      await afterLogin(res);
+    } finally {
+      setAuthenticating(false);
+    }
+  }, [afterLogin]);
+
   const logout = useCallback(async () => {
     try {
       await api("POST", "/api/auth/logout", {});
@@ -215,8 +238,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   const value = useMemo(
-    () => ({ status, me, switching, authenticating, refresh, switchAccount, oauthStart, emailSignIn, emailCodeSend, emailCodeSignIn, emailReset, logout }),
-    [status, me, switching, authenticating, refresh, switchAccount, oauthStart, emailSignIn, emailCodeSend, emailCodeSignIn, emailReset, logout],
+    () => ({ status, me, switching, authenticating, refresh, switchAccount, oauthStart, emailSignIn, emailCodeSend, emailCodeSignIn, emailReset, logout, mfaRequired, verifyMfa }),
+    [status, me, switching, authenticating, refresh, switchAccount, oauthStart, emailSignIn, emailCodeSend, emailCodeSignIn, emailReset, logout, mfaRequired, verifyMfa],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

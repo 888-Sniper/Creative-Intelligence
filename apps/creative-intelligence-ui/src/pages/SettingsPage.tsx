@@ -5,6 +5,8 @@ import { useAuth } from "@/auth/AuthProvider";
 import { Icon } from "@/components/icons";
 import { LoadingButton } from "@/components/LoadingButton";
 import { GoogleDriveCard } from "@/components/GoogleDriveCard";
+import { IntegrationCards } from "@/components/IntegrationCards";
+import { TwoFactorCard } from "@/components/TwoFactorCard";
 import { CohortBuilder, RetentionPatterns } from "@/components/DataTools";
 import { EmployeeAvatar } from "@/components/product";
 import {
@@ -28,9 +30,6 @@ import {
   type Prefs,
 } from "@/state/prefs";
 import type { PublicEmployee } from "@/types/auth";
-import metaLogo from "@/assets/meta.svg";
-import tiktokLogo from "@/assets/tiktok.svg";
-import ga4Logo from "@/assets/ga4.svg";
 
 const ACCENTS: Record<string, { teal: string; dark: string; ink: string }> = {
   "Teal (Default)": { teal: "#00C7B2", dark: "#08786E", ink: "#182536" },
@@ -844,16 +843,7 @@ export function SettingsPage() {
               )
             )}
           />
-          <SecRow
-            title={t("settings.security.twoFactor")}
-            body={t("settings.security.twoFactorBody")}
-            action={(
-              <span className="pill pill-info" title={t("settings.security.twoFactorBody")}>
-                {t("settings.connections.unavailable")}
-              </span>
-            )}
-            last
-          />
+          <TwoFactorCard last />
         </Panel>
 
         <Panel title={t("settings.notifications.title")}>
@@ -1032,36 +1022,7 @@ export function SettingsPage() {
         </Panel>
 
         <Panel title={t("settings.integrations.title")} icon="grid">
-          <div className="insight">
-            <span className="insight-ico svc-tile" aria-hidden="true">
-              <img className="svc-logo" src={metaLogo} alt="" />
-            </span>
-            <div style={{ flex: 1 }}>
-              <h4>Meta Ads</h4>
-              <p>{t("settings.integrations.metaBody")}</p>
-            </div>
-            <span className="pill pill-ok">{t("settings.connections.unavailable")}</span>
-          </div>
-          <div className="insight">
-            <span className="insight-ico svc-tile" aria-hidden="true">
-              <img className="svc-logo" src={tiktokLogo} alt="" />
-            </span>
-            <div style={{ flex: 1 }}>
-              <h4>TikTok Ads</h4>
-              <p>{t("settings.integrations.tiktokBody")}</p>
-            </div>
-            <span className="pill pill-ok">{t("settings.connections.unavailable")}</span>
-          </div>
-          <div className="insight">
-            <span className="insight-ico svc-tile" aria-hidden="true">
-              <img className="svc-logo" src={ga4Logo} alt="" />
-            </span>
-            <div style={{ flex: 1 }}>
-              <h4>Google Analytics 4</h4>
-              <p>{t("settings.integrations.ga4Body")}</p>
-            </div>
-            <span className="pill pill-ok">{t("settings.connections.unavailable")}</span>
-          </div>
+          <IntegrationCards />
         </Panel>
 
         <Panel title={t("settings.privacy.title")} icon="shield">

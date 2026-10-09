@@ -19,7 +19,9 @@ from ci_backend.routers import (  # noqa: E402
     admin_providers,
     auth,
     google,
+    integrations,
     product,
+    two_factor,
 )
 
 
@@ -204,6 +206,8 @@ def create_app(db_path: str = "", settings: Settings | None = None,
     app.include_router(admin.router)
     app.include_router(admin_providers.router)
     app.include_router(google.router)
+    app.include_router(integrations.router)
+    app.include_router(two_factor.router)
     app.include_router(product.router)
 
     return app

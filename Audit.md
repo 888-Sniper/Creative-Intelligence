@@ -2,22 +2,20 @@
 
 Review `origin/main` after `git fetch`. Confirm that `origin/main` and GitHub `main` name the same SHA. A behind local checkout or a missing local `main` branch is not a reason to stop. Use `git show origin/main:PATH`. Stop only if the remote identities differ or the worktree is dirty.
 
-This is the product repo https://github.com/888-Sniper/Creative-Intelligence. The parent of this push is `0be9464e99ca9e4c23185240f900390e7af89adc` (`Let earlier analyze video steps open from the step chips`). This push hides three standing Analyze Video notes. It also replaces `Audit.md`. The parent already makes an earlier step chip a button that opens that step. It already treats a string creative-CSV filter as one value, and it already keeps drawer metrics, campaign names, and an empty campaign export inside the requested scope. Do not call the product perfect. Do not edit, commit, push, build, install, start the server, or activate a provider. Do not treat an unrun live model, live browser, Playwright run, Render click-through, or the five Notino clips as a source defect. Report only defects still present at the reviewed SHA, with severity, observed behavior, file and line, and the evidence that reproduces them.
+This is the product repo https://github.com/888-Sniper/Creative-Intelligence. The parent of this push is `fb2b75beeb5d88c2685c170528b1e9b6ad1e60d6` (`Hide the standing analyze video notes`). This push draws the video file-limit line one step smaller. It also replaces `Audit.md`. The parent already hides the three standing notes. It already makes an earlier step chip a button that opens that step. It already treats a string creative-CSV filter as one value, and it already keeps drawer metrics, campaign names, and an empty campaign export inside the requested scope. Do not call the product perfect. Do not edit, commit, push, build, install, start the server, or activate a provider. Do not treat an unrun live model, live browser, Playwright run, Render click-through, or the five Notino clips as a source defect. Report only defects still present at the reviewed SHA, with severity, observed behavior, file and line, and the evidence that reproduces them.
 
 Confirm the push with both ends named:
 
 ```
-git diff --stat 0be9464e99ca9e4c23185240f900390e7af89adc origin/main
+git diff --stat fb2b75beeb5d88c2685c170528b1e9b6ad1e60d6 origin/main
 ```
 
 What this push makes true:
 
-- Client And Campaign does not show “Changing The Client Or Campaign Clears The Confirmed Match.” The standing paragraph is gone. Changing a confirmed client or campaign still clears that confirmation and the match (`pickClient` and `pickCampaign` in `VideoUploadPanel.tsx`), and it clears the status line instead of printing that sentence.
-- Performance Dataset does not show “No Dataset Yet.” With no imported dataset, that step renders the file controls only (the empty branch at the dataset section is `null`).
-- Review does not show “Add And Validate A Video To Enable Analysis.” `analyzeReason` is empty when the video is not valid (lines 1323–1324), so the footer note (lines 1907–1908) stays off. Analyze stays disabled until a valid video, a confirmed client and campaign, and a confirmed match are all present (`canAnalyze`, lines 1321–1322). A valid video with a missing client or match still shows its own footer reason.
-- An earlier step chip is still a button that calls `goStage` (lines 1406–1415 and 1001–1008), from the parent. Continue still moves one step forward (lines 1922–1924). Back still moves one step back (lines 1912–1914).
+- The line under Choose File, “MP4 / MOV, Up To 100 MB, Up To 600 Seconds”, is 12px. The element is `p.panel-sub.vu-limits` (`VideoUploadPanel.tsx` line 1469). `.vu-limits` sets `font-size: 12px` (`theme.css` line 1037). Other `.panel-sub` text stays 13px (`theme.css` line 341).
+- The three standing notes stay hidden, from the parent. An earlier step chip is still a button that calls `goStage` (lines 1406–1415 and 1001–1008).
 
-How to confirm from source: `keeps Analyze disabled without a video and hides the standing notes` in `src/components/VideoUpload.test.tsx`. The same three strings are absent in `review step chips return to earlier steps` in `e2e/04-video-upload.spec.ts`. This push ran `pnpm exec vitest run src/components/VideoUpload.test.tsx` (29 passed) and `pnpm exec playwright test e2e/04-video-upload.spec.ts -g "review step chips"` (1 passed, desktop and a 390px-wide dialog). `pnpm build` ran `tsc --noEmit` and the Vite build. The full UI suite and the full backend suite were not re-run. Render was not clicked.
+How to confirm from source: `review step chips return to earlier steps` in `e2e/04-video-upload.spec.ts` expects that limits line to have `font-size` `12px` on the desktop dialog and again at 390px wide. This push ran that Playwright test (1 passed) and `pnpm build` (`tsc --noEmit` and the Vite build). The Video Upload unit file was not re-run. The full UI suite and the full backend suite were not re-run. Render was not clicked.
 
 Re-read the cited files at `origin/main`. Line numbers below were opened on this push. If a later commit moves a line, follow the symbol, not the stale number.
 
@@ -373,7 +371,7 @@ Besides resume, these controls are wired:
 
 - Card Upload opens a new panel (`VideoUploadCard.tsx` line 279). A dropped mp4 or mov opens the panel with that file (lines 166–173 and 265–269).
 - Resume, Discard, Continue, View, Retry, Cancel Analysis, and Delete behave as in the Resume section. Cancel Analysis is shown only with `live_job_id` (lines 355–361) and posts cancel, then patches the draft. Delete asks, then deletes and forgets the stage.
-- Choose file, Upload, Replace, and Remove (`VideoUploadPanel.tsx` lines 1453–1517). Upload calls media upload, validate, and a spec PATCH. Remove deletes draft videos first (lines 1105–1123).
+- Choose file, Upload, Replace, and Remove (`VideoUploadPanel.tsx` lines 1453–1517). The limit line under Choose File is 12px (line 1469, `theme.css` line 1037). Upload calls media upload, validate, and a spec PATCH. Remove deletes draft videos first (lines 1105–1123).
 - Creative key (lines 1443–1448). The placeholder `video-upload-sample` (line 1447) is hardcoded English.
 - Client and campaign, catalogue or custom (lines 1524–1585), and confirm selection (lines 1560–1566). The standing match-clear sentence is not rendered.
 - Platform (lines 1595–1599).
@@ -398,7 +396,7 @@ A step chip earlier than the open step is a button (lines 1406–1415) and calls
 
 The item below was a defect at the parent. It is the behavior named at the top of this file. Do not report it again unless the cited lines no longer do what this file says.
 
-- Three standing Analyze Video notes are not rendered (`VideoUploadPanel.tsx`): the client match-clear sentence, “No Dataset Yet.” (line 1681 is `null`), and “Add And Validate A Video To Enable Analysis.” (`analyzeReason` lines 1323–1324). Analyze stays disabled without a valid video (lines 1321–1322). Earlier step chips stay buttons, from the parent (lines 1406–1415).
+- The video file-limit line is 12px (`VideoUploadPanel.tsx` line 1469, `theme.css` line 1037). The three standing notes stay hidden, from the parent. Earlier step chips stay buttons, from the parent (lines 1406–1415).
 
 These were already true at the parent and stay true:
 
@@ -446,4 +444,4 @@ P3. Provider cards show “Activating…” for every in-flight action. Workbook
 
 ## Checks not performed
 
-No Render click-through, live provider, ffmpeg run, or the five Notino clips. The full UI suite and the full backend suite were not re-run. This push ran the Video Upload unit file (29 passed), the step-chip Playwright test (1 passed, and it also asserts the three notes are absent), and `tsc --noEmit` through `pnpm build`. `tests/test_table_exports.py` was not re-run. The four backend failures from the last full run, before the parent changed Python, were `tests/test_ci_app.py::test_security_headers_health_readiness` (`ModuleNotFoundError: No module named 'tests'`), `tests/test_ci_app.py::test_no_licensing_concepts` (the walker does not skip `.venv`), and `tests/test_web_shell.py` `test_favicon_asset_serves` plus `test_logo_and_mark_assets_serve` (404 on `/assets/favicon.png` and `/assets/foap-logo.png`). Those four were not re-run. `client.ts` lines 32–33 still turn a non-OK body with no `error` field into `Request failed (${status})`. This drawer route puts `error` on the 404, so that fallback is not the drawer copy. Spanish and Polish catalogs were checked for missing keys on the Ask, Analyst, Settings, Admin, and Providers slice only, on an earlier push. They were not opened line by line for Compare. Pre-existing ruff findings in `product.py` were left as they were. `benchmarks.py` was not edited.
+No Render click-through, live provider, ffmpeg run, or the five Notino clips. The full UI suite, the Video Upload unit file, and the full backend suite were not re-run. This push ran the step-chip Playwright test (1 passed; it checks the limit line is 12px at desktop and at 390px) and `tsc --noEmit` through `pnpm build`. `tests/test_table_exports.py` was not re-run. The four backend failures from the last full run, before the parent changed Python, were `tests/test_ci_app.py::test_security_headers_health_readiness` (`ModuleNotFoundError: No module named 'tests'`), `tests/test_ci_app.py::test_no_licensing_concepts` (the walker does not skip `.venv`), and `tests/test_web_shell.py` `test_favicon_asset_serves` plus `test_logo_and_mark_assets_serve` (404 on `/assets/favicon.png` and `/assets/foap-logo.png`). Those four were not re-run. `client.ts` lines 32–33 still turn a non-OK body with no `error` field into `Request failed (${status})`. This drawer route puts `error` on the 404, so that fallback is not the drawer copy. Spanish and Polish catalogs were checked for missing keys on the Ask, Analyst, Settings, Admin, and Providers slice only, on an earlier push. They were not opened line by line for Compare. Pre-existing ruff findings in `product.py` were left as they were. `benchmarks.py` was not edited.

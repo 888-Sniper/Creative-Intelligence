@@ -164,6 +164,10 @@ test("review step chips return to earlier steps", async ({ page, context }) => {
   await loginAs(context, page, seeds.employee, "/");
   await page.getByRole("button", { name: /Upload Video/ }).click();
   await expect(page.getByRole("heading", { name: "Upload Your Video" })).toBeVisible();
+  const limits = page.getByText(/MP4 \/ MOV, Up To .+ Seconds/);
+  await expect(limits).toBeVisible();
+  await expect(limits).toHaveCSS("font-size", "12px");
+  await page.screenshot({ path: "/tmp/ci-limits/video.png" });
   await expect(page.getByRole("button", { name: "2. Client & Campaign" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "3. Dataset" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "4. Review" })).toHaveCount(0);
@@ -209,6 +213,8 @@ test("review step chips return to earlier steps", async ({ page, context }) => {
   await page.screenshot({ path: "/tmp/ci-wizard-notes/review-mobile.png" });
   await page.getByRole("button", { name: "1. Video" }).click();
   await expect(page.getByRole("heading", { name: "Upload Your Video" })).toBeVisible();
+  await expect(page.getByText(/MP4 \/ MOV, Up To .+ Seconds/)).toHaveCSS("font-size", "12px");
+  await page.screenshot({ path: "/tmp/ci-limits/video-mobile.png" });
   await page.getByRole("button", { name: "Continue" }).click();
   await page.getByRole("button", { name: "Continue" }).click();
   await page.getByRole("button", { name: "Continue" }).click();

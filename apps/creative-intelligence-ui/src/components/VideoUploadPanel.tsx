@@ -1466,7 +1466,7 @@ export function VideoUploadPanel({ open, employeeId, onClose, onNotify }: PanelP
                   e.target.value = "";
                 }}
               />
-              <p className="panel-sub">{limitsText}</p>
+              <p className="panel-sub vu-limits">{limitsText}</p>
             </div>
             {stagedName ? (
               <div className="chip-row" style={{ marginTop: 8 }}>

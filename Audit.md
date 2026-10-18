@@ -17,11 +17,14 @@ it were your own finding.
   (`Complete the video-to-report, Analyst, templates, export and settings gaps`).
   Commits after it on this branch touch only this `Audit.md`;
   review the code at `d6a8ae7` regardless of branch head.
-- This branch is local only. It has NOT been pushed to `main` and
-  NOT deployed; Render still serves `5dcb3a0`. GitHub `main` will
-  NOT show this Audit.md or the change. Check out the local branch.
-  If you cannot check out `d6a8ae7`, stop and say so — reviewing
-  `main` instead reviews the wrong code.
+- This push lands the branch on `main` by fast-forward. After
+  `git fetch`, the commit under review is `origin/main`; the code
+  commit is `d6a8ae7` (commits after it touch only this file).
+  Render auto-deploys from `main` (`render.yaml autoDeploy: true`),
+  but deployment was not verified by the implementer — do not
+  claim the live site shows this push without checking it, and do
+  not treat Render state as a source defect. If your checkout has
+  only `5dcb3a0` (no `d6a8ae7`), stop and say so — fetch first.
 
 Confirm the change with both ends named (never a one-revision diff;
 a behind checkout invents changes that are not in this commit):
@@ -387,8 +390,10 @@ the missing test, not just "needs more tests".
   pass; real delivery unverified. Do not send test mail.
 - **Meta/TikTok/GA4 live OAuth/imports: BLOCKED** on the console
   credentials in `docs/RENDER.md`. No live provider was contacted.
-- **Production:** nothing merged, pushed, or deployed. Any claim
-  that Render changed would itself be a defect in this file.
+- **Production:** this push fast-forwards `main`; Render
+  auto-deploys from `main`, but no deploy verification was done.
+  Any claim that the live site already shows this push, without
+  checking Render, would itself be a defect.
 
 ## Known still-open items (already admitted — only re-report if worse)
 

@@ -64,6 +64,7 @@ from ci_backend.deps import (  # noqa: E402
     check_user_limit,
     get_current_admin,
     get_current_employee,
+    get_db,
     get_product_conn,
     get_providers,
     json_payload,
@@ -119,27 +120,49 @@ def health(request: Request, prov=Depends(get_providers)):
 
 @router.get("/api/providers/status")
 def providers_status(request: Request,
+                     conn=Depends(get_product_conn),
                      _emp=Depends(get_current_employee)):
     """Safe AI readiness for the demo (item 30): per-capability
     configured/missing plus adapter names. Never carries key values,
     bearer tokens, or provider secrets."""
-    caps = {}
-    for cap, roster in (
-            ("stt", providers_mod.LiveBundle.STT_ROSTER),
-            ("vision", providers_mod.LiveBundle.VISION_ROSTER),
-            ("llm", providers_mod.LiveBundle.LLM_ROSTER)):
-        names = sorted({p for p, _model, _tier in roster
-                        if providers_mod._configured(p)})
-        caps[cap] = {"status": "configured" if names else "missing",
-                     "adapters": names}
+    # Vision reflects the worker's truth (frame-eligible roster);
+    # speech-to-text counts a Gemini key (multimodal transcription).
+    from creative_intel import video_analysis as _va
+    _eligible = _va.eligible_vision_roster()
+    _stt = sorted({p for p, _m, _t
+                   in providers_mod.LiveBundle.STT_ROSTER
+                   if providers_mod._configured(p)})
+    if providers_mod._configured("gemini"):
+        _stt = sorted(set(_stt) | {"gemini"})
+    _vision = sorted({p for p, _m, _t in _eligible})
+    _llm = sorted({p for p, _m, _t
+                   in providers_mod.LiveBundle.LLM_ROSTER
+                   if providers_mod._configured(p)})
+    caps = {
+        "stt": {"status": "configured" if _stt else "missing",
+                "adapters": _stt},
+        "vision": {"status": "configured" if _vision else "missing",
+                   "adapters": _vision,
+                   "models": sorted({m for _p, m, _t in _eligible})},
+        "llm": {"status": "configured" if _llm else "missing",
+                "adapters": _llm},
+    }
     # What video analysis would send and where derived media lives:
     # informational copy only (no key values, Bearer tokens, or
     # provider secrets) so the upload review stage can display it
     # before Analyze is submitted.
-    from creative_intel import video_analysis as _va
-    _ready = _va.readiness()
+    try:
+        _ready = _va.readiness(conn)
+    except TypeError:  # test doubles may keep the old no-arg shape
+        _ready = _va.readiness()
     return {"mode": providers_mod.mode(), "capabilities": caps,
-            "analysis": {"sends": _ready["sends"],
+            "analysis": {"ready": _ready["ready"],
+                         "reason": _ready["reason"],
+                         "provider": _ready["provider"],
+                         "model": _ready["model"],
+                         "level": _ready["level"],
+                         "llm_ready": _ready.get("llm_ready"),
+                         "sends": _ready["sends"],
                          "storage": _ready["storage"]}}
 
 
@@ -686,6 +709,10 @@ class MatchBody(BaseModel):
 class AnalyzeBody(BaseModel):
     brand_terms: list[str] = Field(default_factory=list, max_length=20)
     speech_language: str = Field(default="", max_length=16)
+    # Video-only creative analysis: no matched performance dataset.
+    # The report is labelled video-only and performance stays
+    # unavailable; combined analysis still needs a confirmed match.
+    video_only: bool = False
 
     @field_validator("speech_language", mode="before")
     @classmethod
@@ -2525,11 +2552,15 @@ async def draft_analyze(draft_id: str, request: Request,
             "error": "analysis already running for this draft",
             "job_id": live})
     try:
-        snapshot = video_analysis.bind_snapshot(conn, did)
+        snapshot = video_analysis.bind_snapshot(
+            conn, did, video_only=bool(body.video_only))
     except video_analysis.AnalysisUnavailable as exc:
         raise HTTPException(status_code=409,
                             detail={"error": str(exc)})
-    ready = video_analysis.readiness()
+    try:
+        ready = video_analysis.readiness(conn)
+    except TypeError:  # test doubles may keep the old no-arg shape
+        ready = video_analysis.readiness()
     if not ready["ready"]:
         paudit.audit_request(request, conn, employee_id=who.id,
                              action="draft_analyzed", target=did,
@@ -2589,6 +2620,204 @@ def draft_analysis(draft_id: str, request: Request,
     return {"draft_id": draft["id"], "status": draft["status"],
             "creative_key": key, "annotation": annotation,
             "transcript": transcript}
+
+
+@router.get("/api/drafts/{draft_id}/report")
+def draft_report(draft_id: str, request: Request,
+                 conn=Depends(get_product_conn),
+                 who=Depends(get_current_employee)):
+    """Download the saved creative report for one draft.
+
+    Renders the persisted analysis only (same findings the review
+    screen shows); 409 when nothing has been analysed yet. Owner or
+    admin, like every other draft read.
+    """
+    from urllib.parse import unquote
+    from creative_intel import creative as creative_mod
+    from creative_intel import drafts as drafts_mod
+    from creative_intel import video_analysis as va_mod
+    _ = request
+    draft = _draft_owner_or_403(conn, unquote(draft_id), who)
+    video = drafts_mod.active_video(conn, draft["id"])
+    if video is None:
+        raise HTTPException(status_code=409, detail={
+            "error": "no analysed video on this draft yet"})
+    key = video["creative_key"]
+    annotation = creative_mod.scoped_annotation(conn, key, video["id"])
+    if not isinstance(annotation, dict) \
+            or not isinstance(annotation.get("analysis"), dict):
+        raise HTTPException(status_code=409, detail={
+            "error": "no saved analysis for this draft yet"})
+    text = va_mod.build_creative_report(
+        annotation, transcript=video.get("transcript") or "",
+        creative_key=key, duration_s=video.get("duration_s"))
+    safe = "".join(c if c.isalnum() or c in "-_" else "-"
+                   for c in (key or "video"))[:80]
+    return Response(
+        content=text, media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition":
+                 'attachment; filename="creative-report-%s.md"' % safe})
+
+
+class ReportTemplateBody(BaseModel):
+    name: str = Field(default="", max_length=80)
+    config: dict = Field(default_factory=dict)
+
+
+@router.get("/api/report-templates")
+def report_templates_list(conn=Depends(get_product_conn),
+                          who=Depends(get_current_employee)):
+    from creative_intel import report_templates as rt_mod
+    return {"templates": rt_mod.list_mine(conn, who.id)}
+
+
+@router.post("/api/report-templates")
+async def report_templates_save(request: Request,
+                                conn=Depends(get_product_conn),
+                                who=Depends(get_current_employee)):
+    from creative_intel import report_templates as rt_mod
+    body = _validated(ReportTemplateBody, await json_payload(request),
+                      "report template")
+    try:
+        return rt_mod.save(conn, who.id, body.name, body.config)
+    except ValueError as exc:
+        raise _conflict(exc)
+
+
+@router.put("/api/report-templates/{template_id}")
+async def report_templates_update(template_id: str, request: Request,
+                                  conn=Depends(get_product_conn),
+                                  who=Depends(get_current_employee)):
+    from creative_intel import report_templates as rt_mod
+    body = _validated(ReportTemplateBody, await json_payload(request),
+                      "report template")
+    try:
+        return rt_mod.save(conn, who.id, body.name, body.config,
+                           template_id=template_id)
+    except ValueError as exc:
+        raise _conflict(exc)
+
+
+@router.delete("/api/report-templates/{template_id}")
+def report_templates_delete(template_id: str,
+                            conn=Depends(get_product_conn),
+                            who=Depends(get_current_employee)):
+    from creative_intel import report_templates as rt_mod
+    if not rt_mod.delete(conn, who.id, template_id):
+        raise HTTPException(status_code=404,
+                            detail={"error": "template not found"})
+    return {"ok": True}
+
+
+@router.get("/api/preferences")
+def preferences_get(conn=Depends(get_product_conn),
+                    who=Depends(get_current_employee)):
+    from creative_intel import notifications as notify_mod
+    return {"prefs": notify_mod.get_prefs(conn, who.id)}
+
+
+@router.put("/api/preferences")
+async def preferences_put(request: Request,
+                          conn=Depends(get_product_conn),
+                          who=Depends(get_current_employee)):
+    from creative_intel import notifications as notify_mod
+    raw = await json_payload(request)
+    try:
+        prefs = notify_mod.save_prefs(
+            conn, who.id, raw.get("prefs") if isinstance(raw, dict)
+            else {})
+    except ValueError as exc:
+        raise _conflict(exc)
+    return {"prefs": prefs}
+
+
+@router.get("/api/notifications")
+def notifications_list(conn=Depends(get_product_conn),
+                       who=Depends(get_current_employee)):
+    from creative_intel import notifications as notify_mod
+    return {"notifications": notify_mod.list_outbox(conn, who.id),
+            "smtp_blocker": notify_mod.smtp_blocker()}
+
+
+@router.post("/api/notifications/test")
+def notifications_test(conn=Depends(get_product_conn),
+                       who=Depends(get_current_employee)):
+    """Send one test notification to the requester's own address."""
+    from creative_intel import notifications as notify_mod
+    result = notify_mod.enqueue(
+        conn, who.id, "analysis_ready",
+        "Creative Intelligence test notification",
+        "This is a test notification from Creative Intelligence.",
+        recipient=who.email)
+    return result
+
+
+@router.get("/api/integrations/ga4/properties")
+def ga4_properties(db=Depends(get_db),
+                   who=Depends(get_current_employee)):
+    from ci_backend import integrations_oauth
+    from creative_intel import ga4 as ga4_mod
+    try:
+        token = integrations_oauth.access_token_for(db, "ga4", who.id)
+    except Exception:
+        token = None
+    if not token:
+        raise HTTPException(status_code=409, detail={
+            "error": "Google Analytics 4 is not connected."})
+    try:
+        return {"properties": ga4_mod.list_properties(token)}
+    except ga4_mod.Ga4Unavailable as exc:
+        raise _conflict(exc)
+
+
+class Ga4ImportBody(BaseModel):
+    property_id: str = Field(default="", max_length=64)
+    start_date: str = Field(default="", max_length=10)
+    end_date: str = Field(default="", max_length=10)
+
+
+@router.post("/api/integrations/ga4/import")
+async def ga4_import(request: Request, conn=Depends(get_product_conn),
+                     db=Depends(get_db),
+                     who=Depends(get_current_employee)):
+    from ci_backend import integrations_oauth
+    from creative_intel import ga4 as ga4_mod
+    body = _validated(Ga4ImportBody, await json_payload(request),
+                      "ga4 import")
+    try:
+        token = integrations_oauth.access_token_for(db, "ga4", who.id)
+    except Exception:
+        token = None
+    if not token:
+        raise HTTPException(status_code=409, detail={
+            "error": "Google Analytics 4 is not connected."})
+    try:
+        return ga4_mod.import_rows(
+            conn, token, body.property_id, body.start_date,
+            body.end_date, imported_by=who.id)
+    except ga4_mod.Ga4Unavailable as exc:
+        raise _conflict(exc)
+
+
+@router.get("/api/integrations/ga4/rows")
+def ga4_rows(request: Request, conn=Depends(get_product_conn),
+             who=Depends(get_current_employee)):
+    _ = who
+    query = query_multidict(request)
+    pid = str((query.get("property_id") or [""])[0])
+    sql = ("SELECT property_id, date, session_source, session_medium,"
+           " session_campaign, sessions, total_users, conversions,"
+           " timezone FROM ga4_rows")
+    params = ()
+    if pid:
+        sql += " WHERE property_id=?"
+        params = (pid.replace("properties/", ""),)
+    sql += " ORDER BY date DESC LIMIT 500"
+    cur = conn.execute(sql, params)
+    cols = [d[0] for d in cur.description]
+    return {"rows": [dict(zip(cols, r)) for r in cur.fetchall()],
+            "note": "GA4 website analytics — not ad-level creative "
+                    "metrics."}
 
 
 @router.get("/api/drafts/{draft_id}/candidates")

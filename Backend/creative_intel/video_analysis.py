@@ -37,39 +37,49 @@ def utcnow() -> str:
 def eligible_vision_roster():
     """Configured live vision entries that may consume frames.
 
-    Intersects the live bundle roster with the verified support
-    table: native-video and image levels qualify; text-only, audio,
-    and unverified ids do not. Empty (or mock mode) means analysis
-    is unavailable — never a mock substitution.
+    Intersects the vision roster with the verified support table:
+    native-video and image levels qualify; text-only, audio, and
+    unverified ids do not. This deliberately does NOT construct
+    LiveBundle: the bundle requires every capability at once, so a
+    Gemini-only install (no separate speech-to-text key) used to
+    report vision unavailable even with a working Gemini key.
+    Empty (or mock mode) means analysis is unavailable — never a
+    mock substitution.
     """
     from creative_intel import provider_inventory as inv
     from creative_intel import providers as prov_mod
     if prov_mod.mode() != "live":
         return []
-    try:
-        bundle = prov_mod.LiveBundle()
-    except prov_mod.ProviderUnavailable:
-        return []
     # Frame-eligible and actually configured. An unverified roster
     # id stays out, and so does a verified id whose key is missing:
     # otherwise readiness names a model the worker cannot call.
-    return [(p, m, t) for p, m, t in bundle.VISION_ROSTER
+    return [(p, m, t) for p, m, t in prov_mod.LiveBundle.VISION_ROSTER
             if inv.frame_eligible(p, m) and prov_mod._configured(p)]
 
 
-def readiness():
-    """What Stage D shows: selected provider, content sent, storage."""
+def readiness(conn=None):
+    """What Stage D shows: selected provider, content sent, storage.
+
+    `llm_ready` is reported separately so the wizard can say, before
+    any paid call, whether structuring will fail on a paused/absent
+    managed model. With no conn the managed selection cannot be
+    read and llm_ready stays None (unknown), never a false yes.
+    """
     roster = eligible_vision_roster()
+    llm_ready = None
+    if conn is not None:
+        llm_ready = _managed_llm_ready(conn)
     if not roster:
         from creative_intel import providers as prov_mod
-        reason = ("provider mode is %r: switch on a live provider"
-                  % prov_mod.mode())
-        try:
-            prov_mod.LiveBundle()
-        except prov_mod.ProviderUnavailable as exc:
-            reason = str(exc)
+        if prov_mod.mode() != "live":
+            reason = ("provider mode is %r: switch on a live provider"
+                      % prov_mod.mode())
+        else:
+            reason = ("no video-eligible model is configured: add a "
+                      "Gemini key (CREATIVE_INTEL_KEY_GEMINI) or another "
+                      "frame-eligible provider key")
         return {"ready": False, "reason": reason, "model": "",
-                "provider": "", "level": "",
+                "provider": "", "level": "", "llm_ready": llm_ready,
                 "sends": "sampled JPEG frames + 16kHz mono WAV "
                          "(never the raw video file)",
                 "storage": "private media store; derived frames kept "
@@ -78,14 +88,36 @@ def readiness():
     from creative_intel import provider_inventory as inv
     level, _doc = inv.frame_support(provider, model)
     return {"ready": True, "reason": "", "model": model,
-            "provider": provider, "level": level,
+            "provider": provider, "level": level, "llm_ready": llm_ready,
             "sends": "sampled JPEG frames + 16kHz mono WAV "
                      "(never the raw video file)",
             "storage": "private media store; derived frames kept "
                        "with the draft, deleted with it"}
 
 
-def bind_snapshot(conn, draft_id):
+def _managed_llm_ready(conn):
+    """True when structuring can run: a managed selection exists, or
+    (pre-managed databases) the legacy LLM roster has a key. False
+    when the managed provider is paused/absent — checked BEFORE any
+    paid vision call so a paused model never burns frame spend."""
+    try:
+        from creative_intel import dispatcher as dispatcher_mod
+        db_path = _identity_db(conn)
+        if db_path and dispatcher_mod.has_selection(db_path):
+            return True
+        if db_path:
+            return False
+    except Exception:
+        pass
+    try:
+        from creative_intel import providers as prov_mod
+        return any(prov_mod._configured(p)
+                   for p, _m, _t in prov_mod.LiveBundle.LLM_ROSTER)
+    except Exception:
+        return False
+
+
+def bind_snapshot(conn, draft_id, video_only=False):
     """Verify preconditions and freeze the analysis snapshot.
 
     An incomplete draft may be saved at any time, but combined
@@ -95,6 +127,11 @@ def bind_snapshot(conn, draft_id):
     draft mutation). Reports without a client column inherit the
     confirmed destination explicitly in the snapshot — the
     association is never left ambiguous.
+
+    video_only=True binds a clearly-labelled creative-only analysis:
+    no dataset or match is required, records stay empty, and every
+    downstream surface must mark performance metrics unavailable.
+    It never invents a destination or metrics.
     """
     from creative_intel import drafts as drafts_mod
     draft = drafts_mod.get_draft(conn, draft_id)
@@ -111,6 +148,19 @@ def bind_snapshot(conn, draft_id):
         spec = {}
     client = str(spec.get("client") or "").strip()
     campaign = str(spec.get("campaign") or "").strip()
+    base = {"draft_id": draft_id, "video_id": video["id"],
+            "creative_key": video["creative_key"],
+            "video_sha256": video.get("sha256") or "",
+            "duration_s": float(video.get("duration_s") or 0.0),
+            "media_id": int(video.get("media_id") or 0),
+            "analysis_version": ANALYSIS_VERSION,
+            "video_only": bool(video_only)}
+    if video_only:
+        base.update({"dataset_version": "",
+                     "match_confirmed_at": "", "match_method": "",
+                     "client": client, "campaign": campaign,
+                     "records": []})
+        return base
     if not spec.get("clientConfirmed") or not client or not campaign:
         raise AnalysisUnavailable(
             "confirm the client and campaign before analysing: "
@@ -122,17 +172,12 @@ def bind_snapshot(conn, draft_id):
     if not matches:
         raise AnalysisUnavailable("confirm the video-to-data match first")
     match = matches[0]
-    return {"draft_id": draft_id, "video_id": video["id"],
-            "creative_key": video["creative_key"],
-            "video_sha256": video.get("sha256") or "",
-            "duration_s": float(video.get("duration_s") or 0.0),
-            "media_id": int(video.get("media_id") or 0),
-            "dataset_version": version,
-            "match_confirmed_at": match.get("confirmed_at") or "",
-            "match_method": match.get("method") or "",
-            "client": client, "campaign": campaign,
-            "records": json.loads(match.get("record_json") or "[]"),
-            "analysis_version": ANALYSIS_VERSION}
+    base.update({"dataset_version": version,
+                 "match_confirmed_at": match.get("confirmed_at") or "",
+                 "match_method": match.get("method") or "",
+                 "client": client, "campaign": campaign,
+                 "records": json.loads(match.get("record_json") or "[]")})
+    return base
 
 
 def _all_matches(conn, draft_id):
@@ -144,7 +189,9 @@ def _all_matches(conn, draft_id):
 
 def check_snapshot(conn, snapshot):
     """Re-resolve at job time: inputs must equal the bound snapshot."""
-    fresh = bind_snapshot(conn, snapshot["draft_id"])
+    video_only = bool(snapshot.get("video_only"))
+    fresh = bind_snapshot(conn, snapshot["draft_id"],
+                          video_only=video_only)
     for key in ("video_id", "media_id", "creative_key", "video_sha256",
                 "dataset_version", "match_confirmed_at",
                 "client", "campaign"):
@@ -152,7 +199,7 @@ def check_snapshot(conn, snapshot):
             raise AnalysisUnavailable(
                 "inputs changed since Analyse was pressed (%s): "
                 "re-confirm the match and analyse again" % key)
-    if not fresh["match_confirmed_at"]:
+    if not video_only and not fresh["match_confirmed_at"]:
         raise AnalysisUnavailable("match confirmation was cleared: "
                                   "re-confirm before analysing")
     return fresh
@@ -519,10 +566,18 @@ def run(conn, snapshot, owner="", media_dir="", providers=None,
         roster = eligible_vision_roster()
         if not roster:
             raise AnalysisUnavailable(
-                readiness()["reason"] or "no video-eligible provider")
+                readiness(conn)["reason"] or "no video-eligible provider")
+        # Paused/absent managed model stops the job BEFORE the paid
+        # vision call, not after it at structuring time.
+        if isinstance(prov.llm, prov_mod._Unavailable):
+            raise AnalysisUnavailable(
+                "AI is not configured. Contact your administrator.")
         import copy
         prov = copy.copy(prov)
         prov.vision = prov_mod.LiveVision(roster)
+        if isinstance(prov.stt, prov_mod._Unavailable) \
+                and prov_mod._configured("gemini"):
+            prov.stt = prov_mod.GeminiStt()
     media = {"audio": ((prep["audio"], prep["audio_mime"])
                        if prep["audio"] else (None, None)),
              "images": prep["images"], "image_times": prep["image_times"],
@@ -550,7 +605,14 @@ def run(conn, snapshot, owner="", media_dir="", providers=None,
             "another analysis finished or the findings were corrected"
             " while this one was running: discarding this result")
     checkpoint(90, "measured")
-    measured = measured_from_records(fresh["records"])
+    if fresh.get("video_only"):
+        measured = {"available": False, "video_only": True,
+                    "note": "Performance metrics unavailable: no "
+                            "confirmed performance dataset was matched "
+                            "to this video. Creative findings only."}
+    else:
+        measured = measured_from_records(fresh["records"])
+        measured["available"] = True
     ann = report["annotation"]
     transcript = report.get("transcript") or ""
     ann["frame_labels"] = saved_frame_labels(report.get("frame_labels"))
@@ -565,7 +627,8 @@ def run(conn, snapshot, owner="", media_dir="", providers=None,
         "snapshot": {k: fresh[k] for k in
                      ("video_id", "media_id", "video_sha256",
                       "dataset_version", "match_confirmed_at",
-                      "match_method", "client", "campaign")},
+                      "match_method", "client", "campaign",
+                      "video_only")},
         "measured": measured,
         "suggested_tests": suggest_tests(ann, measured, transcript)}
     # Publish the complete result in one all-or-nothing transaction.
@@ -910,6 +973,132 @@ def apply_corrections(conn, creative_key, corrections, by="",
     if not isinstance(persisted, dict):
         raise ValueError("correction did not persist")
     return persisted
+
+
+def build_creative_report(annotation, transcript="", creative_key="",
+                          duration_s=None):
+    """Downloadable creative report (Markdown) from a SAVED analysis.
+
+    Renders only stored findings — the same content the review screen
+    shows — so a download can never drift from the persisted result.
+    Performance numbers appear only when the stored measured block
+    came from confirmed records; video-only analyses say so plainly.
+    Nothing is inferred from the video alone.
+    """
+    ann = annotation if isinstance(annotation, dict) else {}
+    block = ann.get("analysis") if isinstance(ann.get("analysis"), dict) \
+        else {}
+    measured = block.get("measured") if isinstance(
+        block.get("measured"), dict) else {}
+    snap = block.get("snapshot") if isinstance(
+        block.get("snapshot"), dict) else {}
+    lines = ["# Creative report — %s" % (creative_key or "uploaded video"),
+             ""]
+    if snap.get("video_only") or measured.get("available") is False:
+        lines += ["> Video-only creative report. Performance metrics "
+                  "are unavailable: no confirmed performance dataset "
+                  "was matched to this video.", ""]
+    lines += ["- Video: %s" % (creative_key or "—"),
+              "- Duration: %s" % (
+                  ("%gs" % duration_s) if duration_s else "—"),
+              "- Model: %s" % (block.get("model") or "—"),
+              "- Analysed: %s" % (block.get("at") or "—"),
+              "- Analysis version: %s" % (block.get("version") or "—"),
+              ""]
+    execution = ann.get("execution") if isinstance(
+        ann.get("execution"), dict) else {}
+    lines += ["## Creative summary", "",
+              "- Hook: %s (modality %s, confidence %s)" % (
+                  ann.get("hook_type") or "unknown",
+                  ann.get("hook_modality") or "unknown",
+                  ann.get("hook_confidence", "—")),
+              "- Narrative: %s" % (ann.get("narrative") or "unknown"),
+              "- Message class: %s" % (
+                  ann.get("message_class") or "unknown"),
+              "- Format: %s · %s" % (
+                  ann.get("format_kind") or "unknown",
+                  ann.get("creator_vs_branded") or "unknown"),
+              "- First product appearance: %s" % (
+                  ("%ss" % execution.get("product_first_s"))
+                  if execution.get("product_first_s") is not None
+                  else "not identified in sampled frames"),
+              ""]
+    labels = ann.get("frame_labels") if isinstance(
+        ann.get("frame_labels"), list) else []
+    ctas = [lab for lab in labels if isinstance(lab, dict)
+            and (lab.get("cta_visible") or lab.get("text_overlay"))]
+    lines += ["## Call to action and on-screen copy", ""]
+    if ctas:
+        for label in ctas:
+            lines.append("- %ss: %s%s" % (
+                label.get("t_sec", "?"),
+                label.get("text_overlay") or label.get("label") or "",
+                " [CTA]" if label.get("cta_visible") else ""))
+    else:
+        lines.append("- No call to action was identified in sampled frames.")
+    lines += ["", "## Transcript", ""]
+    if (transcript or "").strip():
+        lines.append(transcript.strip())
+    else:
+        lines.append("No transcript: no speech was transcribed from this "
+                     "clip (silent media or no audio track). This is "
+                     "reported as observed, not as a transcription "
+                     "failure, unless the job error says otherwise.")
+    lines += ["", "## Timestamped observations", ""]
+    if labels:
+        for label in labels:
+            if not isinstance(label, dict):
+                continue
+            flags = [name for name, key in (
+                ("brand", "brand_visible"), ("product", "product_visible"),
+                ("logo", "logo_visible"), ("CTA", "cta_visible"),
+                ("end frame", "end_frame")) if label.get(key)]
+            lines.append("- %ss — %s%s" % (
+                label.get("t_sec", "?"), label.get("label") or "frame",
+                (" (" + ", ".join(flags) + ")") if flags else ""))
+    else:
+        lines.append("- No frame observations were stored.")
+    tests = block.get("suggested_tests") if isinstance(
+        block.get("suggested_tests"), list) else []
+    lines += ["", "## Recommendations (hypotheses to test)", ""]
+    if tests:
+        for item in tests:
+            if isinstance(item, dict):
+                lines.append("- %s — %s" % (
+                    item.get("hypothesis") or "", item.get("why") or ""))
+    else:
+        lines.append("- No test hypotheses were generated.")
+    lines += ["", "## Performance", ""]
+    if measured.get("available"):
+        totals = measured.get("totals") or {}
+        lines.append("Measured from %s confirmed record(s): "
+                     "impressions %s, link clicks %s, spend %s, "
+                     "conversions %s, pooled link CTR %s." % (
+                         totals.get("records", "—"),
+                         totals.get("impressions", "—"),
+                         totals.get("link_clicks", "—"),
+                         totals.get("spend", "—"),
+                         totals.get("conversions", "—"),
+                         measured.get("pooled_link_ctr_pct", "—")))
+        for warning in measured.get("warnings") or []:
+            lines.append("- Coverage note: %s" % warning)
+    else:
+        lines.append(measured.get("note") or
+                     "Performance metrics unavailable for this analysis.")
+    coverage = block.get("coverage") if isinstance(
+        block.get("coverage"), dict) else {}
+    lines += ["", "## Uncertainty and coverage", "",
+              "- Frames sampled: %s of a %ss clip. Moments between "
+              "sampled frames were not observed." % (
+                  coverage.get("frames", len(labels)),
+                  coverage.get("clip_s", duration_s or "—")),
+              "- Hook confidence: %s. Low-confidence classifications "
+              "need human review before use." % ann.get(
+                  "hook_confidence", "—"),
+              "- Findings describe this video only. Spend, CTR, "
+              "conversions, ROAS and business outcomes are never "
+              "inferred from video content.", ""]
+    return "\n".join(lines)
 
 
 def _vision_model(prov):

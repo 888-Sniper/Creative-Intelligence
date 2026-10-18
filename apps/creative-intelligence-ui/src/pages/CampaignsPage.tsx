@@ -114,7 +114,7 @@ export function CampaignsPage() {
   }, [location.search]);
 
   const { data: compare, error: compareError } = useCompareState(applied);
-  const [focus, setFocus] = useState<CompareLike | null>(null);
+  const [, setFocus] = useState<CompareLike | null>(null);
   const daily = useDaily(90, applied);
   const campaigns = useScopedApi<Record<string, CampaignRow>>("/api/campaigns", applied);
   const benchPlatform = useScopedApi<Record<string, BenchSummary>>("/api/benchmarks?group_by=platform", applied);
@@ -386,10 +386,34 @@ export function CampaignsPage() {
   }, [expanded, scope, scopeKey]);
 
   const kpiKey = !filters.kpi || filters.kpi === "all" ? "roas" : filters.kpi;
-  const benchName = initial.name ?? [...selected][0] ?? rows[0]?.name ?? null;
-  const benchVal = focus && benchName
-    ? focus.metrics[kpiKey]?.current ?? null
-    : null;
+  // "vs. Benchmark" is per campaign: this row's KPI against the
+  // pooled scope benchmark (totals first, then divide — never an
+  // average of row rates, and never one shared focus value).
+  const pooledBench = useMemo((): number | null => {
+    const spend = rows.reduce((s, r) => s + num(r.spend), 0);
+    const impr = rows.reduce((s, r) => s + num(r.impressions), 0);
+    const clicks = rows.reduce((s, r) => s + num(r.clicks), 0);
+    const conv = rows.reduce((s, r) => s + num(r.conversions), 0);
+    const revenue = rows.reduce((s, r) => s + num(r.revenue), 0);
+    switch (kpiKey) {
+      case "roas": return spend ? revenue / spend : null;
+      case "ctr": return impr ? clicks / impr : null;
+      case "cpa": return conv ? spend / conv : null;
+      case "cpc": return clicks ? spend / clicks : null;
+      case "spend": return rows.length ? spend / rows.length : null;
+      case "impressions": return rows.length ? impr / rows.length : null;
+      case "clicks": return rows.length ? clicks / rows.length : null;
+      case "conversions": return rows.length ? conv / rows.length : null;
+      default: return null;
+    }
+  }, [rows, kpiKey]);
+  const benchFor = (r: CampaignRow): number | null => {
+    if (pooledBench == null) return null;
+    const value = (r as unknown as Record<string, number | null>)[kpiKey];
+    return typeof value === "number" && Number.isFinite(value)
+      ? rate(value, pooledBench)
+      : null;
+  };
 
   /* Shared FilterPanel stores "no constraint" as ""; the legacy "all"
    *  sentinel normalises to "" here so every controlled select always
@@ -398,13 +422,10 @@ export function CampaignsPage() {
     value: filters[key] === "all" ? "" : filters[key],
     onChange: (e: React.ChangeEvent<HTMLSelectElement>) => setFilter(key, e.target.value),
   });
-  const fmtBench = (v: number | null) => fmtCell(v, (n) => {
-    const k = kpiKey;
-    if (k === "roas") return fmtMult(n, locale);
-    if (k === "spend" || k === "cpa" || k === "cpc") return fmtMoney(n, locale);
-    if (k === "ctr") return fmtPct(n * 100, 1, locale);
-    return fmtCompact(n, locale);
-  }, unavailable);
+  // benchFor returns a signed percent delta vs the pooled scope
+  // benchmark, so the cell reads "+12.3%" / "-4.0%" per campaign.
+  const fmtBench = (v: number | null) => fmtCell(
+    v, (n) => `${n > 0 ? "+" : ""}${fmtPct(n, 1, locale)}`, unavailable);
 
   return (
     <div className="campaigns">
@@ -668,7 +689,7 @@ export function CampaignsPage() {
                           <td className="num">{fmtCell(r.ctr, (n) => fmtPct(n * 100, 1, locale))}</td>
                           <td className="num">{fmtMoney(num(r.spend), locale)}</td>
                           <td className="num">{fmtCell(r.roas, (n) => fmtMult(n, locale))}</td>
-                          <td className="num">{fmtBench(benchVal)}</td>
+                          <td className="num">{fmtBench(benchFor(r))}</td>
                           <td>
                             <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
                               <button type="button" className="icon-btn" aria-expanded={expanded === r.name}

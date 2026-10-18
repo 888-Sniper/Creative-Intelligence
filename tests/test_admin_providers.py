@@ -781,11 +781,14 @@ class DiscoverySchemeTest(ApiBase):
         finally:
             stop_server(chat, chat_thread)
 
-    def test_gemini_chat_uses_key_param(self):
+    def test_gemini_chat_keeps_key_out_of_url(self):
+        # Credentials never travel in URLs (logs/proxies/errors):
+        # Gemini auth rides the x-goog-api-key header instead.
         client = providers_mod.make_chat("gemini", "gemini-3.5-flash-lite",
                                          secret="g-secret",
                                          base_url="http://127.0.0.1:9")
-        self.assertIn("?key=", client.url)
+        self.assertNotIn("key=", client.url)
+        self.assertNotIn("g-secret", client.url)
         self.assertIn("gemini-3.5-flash-lite", client.url)
 
 

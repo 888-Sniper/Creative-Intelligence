@@ -83,6 +83,35 @@ are outside this repository.
   `https://creative-intelligence-0t0c.onrender.com/api/auth/google/callback`
   (`CREATIVE_INTEL_GOOGLE_REDIRECT_URI`)
 
+## Ad And Analytics Integrations
+
+Settings → Integrations connects Meta Ads, TikTok Ads and Google
+Analytics 4 per employee (encrypted tokens, owner-bound callbacks).
+Register these redirect URIs in each provider console and set the
+matching dashboard secrets; without them Connect answers
+"{Name} is not configured." and nothing is marked connected.
+
+| Provider | Console setup | Env vars | Redirect URI |
+| --- | --- | --- | --- |
+| Meta Ads | Meta app with `ads_read` permission | `CREATIVE_INTEL_META_CLIENT_ID`, `CREATIVE_INTEL_META_CLIENT_SECRET`, `CREATIVE_INTEL_META_REDIRECT_URI` | `https://creative-intelligence-0t0c.onrender.com/api/auth/integrations/meta/callback` |
+| TikTok Ads | TikTok business app (advertiser read) | `CREATIVE_INTEL_TIKTOK_CLIENT_ID`, `CREATIVE_INTEL_TIKTOK_CLIENT_SECRET`, `CREATIVE_INTEL_TIKTOK_REDIRECT_URI` | `https://creative-intelligence-0t0c.onrender.com/api/auth/integrations/tiktok/callback` |
+| Google Analytics 4 | Same Google Cloud OAuth client; enable Analytics Admin + Data APIs; scope `analytics.readonly` | `CREATIVE_INTEL_GOOGLE_CLIENT_ID`, Google client secret, `CREATIVE_INTEL_GA4_REDIRECT_URI` | `https://creative-intelligence-0t0c.onrender.com/api/auth/integrations/ga4/callback` |
+
+GA4 imports (`POST /api/integrations/ga4/import`) store website
+sessions separately from ad facts; they are never presented as
+ad-level creative metrics.
+
+## Notification Email (Optional)
+
+Settings notification toggles persist server-side. Delivery needs
+SMTP: `CREATIVE_INTEL_SMTP_HOST`, `CREATIVE_INTEL_SMTP_PORT`
+(default 587), `CREATIVE_INTEL_SMTP_USER`,
+`CREATIVE_INTEL_SMTP_PASSWORD`, `CREATIVE_INTEL_SMTP_FROM`.
+Without them every notification is recorded in the outbox as
+`blocked` naming the missing variable — the UI never claims an
+email was sent when it was not. Check the exact callback paths in
+`Backend/ci_backend/routers/integrations.py` before registering.
+
 Redeploy after the consoles and the Render service agree. A blueprint
 sync applies the variables from `render.yaml`. It does not register
 the URLs in WorkOS or Google Cloud.

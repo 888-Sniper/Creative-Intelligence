@@ -12,6 +12,12 @@ interface SampleFileRow {
   bytes: number; created_at: string; url: string;
 }
 
+interface ReportTemplate {
+  id: string;
+  name: string;
+  config: { campaigns?: string[]; kpis?: string[]; benchmark?: string; format?: string };
+}
+
 const KPI_OPTIONS = [
   "spend",
   "impressions",
@@ -549,10 +555,55 @@ export function ReportsPage() {
     ]);
   };
 
-  const saveTemplate = () => {
+  const [templates, setTemplates] = useState<ReportTemplate[]>([]);
+  const [templateName, setTemplateName] = useState("");
+
+  const loadTemplates = useCallback(async () => {
     try {
-      window.localStorage.setItem("ci-report-template", JSON.stringify({ campaigns: checkedCampaigns, kpis, benchmark, format }));
+      const data = await api<{ templates: ReportTemplate[] }>("GET", "/api/report-templates");
+      setTemplates(data.templates ?? []);
+    } catch {
+      /* templates are optional; generation still works */
+    }
+  }, []);
+  useEffect(() => { void loadTemplates(); }, [loadTemplates]);
+
+  const saveTemplate = async () => {
+    const name = templateName.trim() || t("reports.templateDefaultName");
+    try {
+      await api("POST", "/api/report-templates", {
+        name,
+        config: { campaigns: checkedCampaigns, kpis, benchmark, format },
+      });
+      setTemplateName("");
       setStatus(t("reports.templateSaved"));
+      await loadTemplates();
+    } catch {
+      setStatus(t("reports.templateFailed"));
+    }
+  };
+
+  const applyTemplate = (tpl: ReportTemplate) => {
+    const available = new Set(campaigns ?? []);
+    const wanted = tpl.config.campaigns ?? [];
+    const kept = wanted.filter((c) => available.has(c));
+    const dropped = wanted.length - kept.length;
+    setCheckedCampaigns(kept);
+    if (tpl.config.kpis?.length) setKpis(tpl.config.kpis.filter((k) => KPI_OPTIONS.includes(k)));
+    if (tpl.config.benchmark) setBenchmark(tpl.config.benchmark);
+    if (tpl.config.format === "pptx" || tpl.config.format === "xlsx" || tpl.config.format === "one-pager") {
+      setFormat(tpl.config.format);
+    }
+    setStatus(dropped > 0
+      ? t("reports.templateAppliedDropped", { name: tpl.name, count: dropped })
+      : t("reports.templateApplied", { name: tpl.name }));
+  };
+
+  const deleteTemplate = async (tpl: ReportTemplate) => {
+    try {
+      await api("DELETE", `/api/report-templates/${encodeURIComponent(tpl.id)}`);
+      setStatus(t("reports.templateDeleted", { name: tpl.name }));
+      await loadTemplates();
     } catch {
       setStatus(t("reports.templateFailed"));
     }
@@ -613,12 +664,35 @@ export function ReportsPage() {
             title={t("reports.newTitle")}
             sub={t("reports.newSub")}
             action={(
-              <button type="button" className="btn-outline" onClick={saveTemplate}>
-                <Icon name="bookmark" size={15} /> {t("reports.saveTemplate")}
-              </button>
+              <span style={{ display: "inline-flex", gap: 8, flexWrap: "wrap" }}>
+                <input
+                  aria-label={t("reports.templateNameLabel")}
+                  placeholder={t("reports.templateNamePlaceholder")}
+                  value={templateName}
+                  onChange={(e) => setTemplateName(e.target.value)}
+                />
+                <button type="button" className="btn-outline" onClick={() => void saveTemplate()}>
+                  <Icon name="bookmark" size={15} /> {t("reports.saveTemplate")}
+                </button>
+              </span>
             )}
           >
             {catalogError ? <EmptyState text={catalogError} /> : null}
+            {templates.length > 0 ? (
+              <div className="chip-row" aria-label={t("reports.templatesLabel")} style={{ marginBottom: 12 }}>
+                {templates.map((tpl) => (
+                  <span key={tpl.id} style={{ display: "inline-flex", gap: 4 }}>
+                    <button type="button" className="chip" onClick={() => applyTemplate(tpl)}>
+                      {tpl.name}
+                    </button>
+                    <button type="button" className="chip" aria-label={t("reports.templateDeleteLabel", { name: tpl.name })}
+                      onClick={() => void deleteTemplate(tpl)}>
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+            ) : null}
             <div className="filter-grid fg-4">
               <MultiCheck
                 id="rep-camp"

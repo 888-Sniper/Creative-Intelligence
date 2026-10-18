@@ -664,7 +664,13 @@ function ProviderCard({ entry, active, activeName, revision, busy, setBusy, onRe
     >
       {busy !== null ? (
         <p className="panel-sub" role="status" style={{ fontSize: 12, margin: "0 0 12px" }}>
-          {busy === "deactivate" ? t("providers.deactivating") : t("providers.activating")}
+          {busy === "deactivate" ? t("providers.deactivating")
+            : busy.startsWith("save:") ? t("providers.savingKey")
+            : busy.startsWith("remove:") ? t("providers.removingKey")
+            : busy.startsWith("save-base:") ? t("providers.savingBase")
+            : busy.startsWith("refresh:") ? t("providers.refreshing")
+            : busy.startsWith("test:") ? t("providers.testing")
+            : t("providers.activating")}
         </p>
       ) : null}
 

@@ -397,6 +397,11 @@ def build_blank_workbook(prefill=None, cover=None):
     "modules", "kpis"} mapping prepended as a "Workbook" cover sheet;
     omitted callers get the exact historical seven-sheet file.
     """
+    # The seven analysis sheets are the workbook contract; the
+    # selected modules/KPIs are recorded on the cover (below) and
+    # drive the on-screen preview. Dropping sheets here would break
+    # cross-sheet formulas (Metrics reads Input), so the file stays
+    # whole and the cover states the configuration honestly.
     sheets = [_input_sheet(prefill), _metrics_sheet(),
               _benchmarks_sheet(), _hypotheses_sheet(),
               _summary_sheet(), _test_plan_sheet(),

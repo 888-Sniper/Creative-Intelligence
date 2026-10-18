@@ -144,17 +144,74 @@ def run_ask(conn, payload, owner, ctx, job_id=None, run_token=None):
     return result
 
 
+_LANG_NAMES = {"en": "English", "pl": "Polish", "es": "Spanish"}
+
+
+def _analyst_narrative(conn, ctx, out, question):
+    """Grounded narrative from the ACTIVE managed provider.
+
+    Numbers and tables stay deterministic (answer_turn). The managed
+    model only interprets the already-computed facts. Returns
+    (narrative, source, detail): source is "managed_provider" only
+    when the selected model actually answered — template text is
+    never relabelled as a provider response. Paused/absent provider
+    in live mode yields source "deterministic" with the honest
+    not-configured detail, matching AI Providers pause behaviour.
+    """
+    prov = _providers(ctx, conn)
+    if getattr(prov, "mode", "mock") != "live":
+        return "", "deterministic", "mock mode: no live provider call"
+    if isinstance(prov.llm, providers_mod._Unavailable):
+        return "", "deterministic", (
+            "AI is not configured. Contact your administrator.")
+    lang = _LANG_NAMES.get(out.get("language") or "en", "English")
+    facts = {
+        "scope": out.get("scope"),
+        "task": out.get("task"),
+        "objective": out.get("objective"),
+        "deterministic_answer": (out.get("text") or "")[:3000],
+        "payload": out.get("payload") or {},
+    }
+    ask = ("Interpret these computed advertising results for the "
+           "user in %s. Use ONLY the facts given; do not invent "
+           "numbers. Original question: %s" % (lang, question or ""))
+    try:
+        raw = prov.llm.ask_facts(ask, facts)
+        data = providers_mod._extract_json(raw)
+        narrative = str(data.get("answer") or "").strip()
+    except providers_mod.ProviderUnavailable as exc:
+        return "", "deterministic", str(exc)
+    except Exception as exc:
+        return "", "deterministic", "provider narrative failed: %s" % exc
+    if not narrative:
+        return "", "deterministic", "provider returned no narrative"
+    selection = {}
+    try:
+        from creative_intel import dispatcher as dispatcher_mod
+        db_path = _db_path(ctx, conn)
+        if db_path:
+            with dispatcher_mod._connect(db_path) as sel_conn:
+                selection = dispatcher_mod.load_selection(sel_conn) or {}
+    except Exception:
+        selection = {}
+    detail = "%s/%s" % (selection.get("provider_id") or "managed",
+                        selection.get("model_id") or "selected model")
+    return narrative, "managed_provider", detail
+
+
 def run_analyst(conn, payload, owner, ctx, job_id=None, run_token=None):
     """One persistent Foap Analyst turn, off the event loop.
 
-    Deterministic: numbers come from the shared calculation engine,
-    never the LLM. Progress checkpoints bracket routing, analysis
-    and persistence so cancellation lands between stages.
+    Numbers come from the shared calculation engine, never the LLM.
+    Narrative interpretation comes from the active managed provider
+    when one is live (see _analyst_narrative); pause/deactivation
+    behaves exactly like AI Providers says it does. Progress
+    checkpoints bracket routing, analysis and persistence so
+    cancellation lands between stages.
     run_token is intentionally unused: analyst turns persist only
     owner-scoped conversation rows, never published findings.
     """
     _ = run_token
-    _ = ctx
     payload = dict(payload or {})
     progress, cancelled = (None, None)
     if job_id:
@@ -175,6 +232,19 @@ def run_analyst(conn, payload, owner, ctx, job_id=None, run_token=None):
         progress(90, "answered")
     if not isinstance(out, dict):
         return {"result": out}
+    narrative, source, detail = _analyst_narrative(
+        conn, ctx, out, payload.get("question", ""))
+    out["narrative"] = narrative
+    out["narrative_source"] = source
+    out["narrative_detail"] = detail
+    if narrative and out.get("conversation_id"):
+        try:
+            analyst_chat.append_message(
+                conn, out["conversation_id"], "assistant", "narrative",
+                narrative,
+                {"narrative_source": source, "model": detail})
+        except Exception:
+            pass
     return out
 
 

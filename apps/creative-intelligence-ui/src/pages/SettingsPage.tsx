@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { api, ApiError } from "@/api/client";
+import { api, apiBlob, ApiError } from "@/api/client";
 import { useAuth } from "@/auth/AuthProvider";
 import { Icon } from "@/components/icons";
 import { LoadingButton } from "@/components/LoadingButton";
@@ -90,6 +90,34 @@ function adoptPrefs(employeeId: string, liveTheme: Prefs["theme"]): Prefs {
   const loaded = loadPrefs(employeeId);
   if (loaded.theme === liveTheme) return loaded;
   return { ...loaded, theme: liveTheme };
+}
+
+/** Server preference keys (snake_case) <-> local Prefs (camelCase). */
+const SERVER_PREF_MAP: Array<[keyof Prefs, string]> = [
+  ["workspace", "workspace"], ["defaultView", "default_view"],
+  ["currency", "default_currency"], ["dateRange", "default_date_range"],
+  ["campaignView", "default_campaign_view"], ["theme", "theme"],
+  ["accent", "accent"], ["density", "density"], ["language", "language"],
+  ["timezone", "timezone"], ["emailReports", "email_reports"],
+  ["campaignUpdates", "campaign_updates"], ["aiInsights", "ai_insights"],
+  ["productUpdates", "product_updates"], ["dataUsage", "data_usage"],
+  ["shareAnalytics", "share_analytics"], ["retention", "retention"],
+];
+
+function toServerPrefs(prefs: Prefs): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [local, server] of SERVER_PREF_MAP) out[server] = prefs[local];
+  return out;
+}
+
+function mergeServerPrefs(local: Prefs, server: Record<string, unknown>): Prefs {
+  const next = { ...local };
+  for (const [localKey, serverKey] of SERVER_PREF_MAP) {
+    if (serverKey in server) {
+      (next as Record<string, unknown>)[localKey] = server[serverKey];
+    }
+  }
+  return next;
 }
 
 const AVATAR_MIME = ["image/jpeg", "image/png", "image/webp"];
@@ -254,6 +282,14 @@ export function SettingsPage() {
       setSaveError(t("settings.footer.couldNotSave"));
       return false;
     }
+    // Server copy: defaults + notification opt-ins must follow the
+    // account (and drive email), not just this browser.
+    void api("PUT", "/api/preferences", { prefs: toServerPrefs(next) })
+      .then(() => setSaveState("saved"))
+      .catch(() => {
+        setSaveState("error");
+        setSaveError(t("settings.footer.couldNotSave"));
+      });
     setSaveState("saved");
     return true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -296,8 +332,18 @@ export function SettingsPage() {
     }, 450);
   }, [commit, t]);
 
+  // Flush a pending debounced workspace-name autosave on unmount:
+  // navigating away inside the 450ms window must not drop the edit.
   useEffect(() => () => {
     if (nameTimer.current !== null) window.clearTimeout(nameTimer.current);
+    const pending = nameDraftRef.current.trim();
+    if (pending && pending !== prefsRef.current.workspace) {
+      const id = employee?.id ?? me?.employee?.id ?? "";
+      const next = { ...prefsRef.current, workspace: pending.slice(0, 80) };
+      savePrefs(id, next);
+      void api("PUT", "/api/preferences", { prefs: toServerPrefs(next) }).catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Adopt the signed-in employee's own preference key once identity
@@ -314,6 +360,18 @@ export function SettingsPage() {
         const loaded = adoptPrefs(id, liveThemeMode);
         setPrefs(loaded);
         setNameDraft(loaded.workspace);
+        // Server preferences win over this browser's copy so theme,
+        // accent, density and defaults follow the account switch.
+        void api<{ prefs: Record<string, unknown> }>("GET", "/api/preferences")
+          .then((r) => {
+            if (!r.prefs || !Object.keys(r.prefs).length) return;
+            const merged = mergeServerPrefs(adoptPrefs(id, liveThemeMode), r.prefs);
+            setPrefs(merged);
+            setNameDraft(merged.workspace);
+            savePrefs(id, merged);
+            applyLive(merged);
+          })
+          .catch(() => { /* local copy stays authoritative offline */ });
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -517,9 +575,17 @@ export function SettingsPage() {
     setOp("export");
     setStatus("");
     try {
-      const r = await api<{ exported?: boolean }>("POST", "/api/auth/export", {});
-      if (r && r.exported === false) setStatus(t("settings.privacy.exportUnavailable"));
-      else notifyOk(t("settings.privacy.exported"));
+      // Success only when a real archive came back: apiBlob throws
+      // on any non-2xx (including an expired session) instead of
+      // saving error JSON as the export file.
+      const blob = await apiBlob("POST", "/api/auth/export", {});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "creative-intelligence-export.zip";
+      a.click();
+      URL.revokeObjectURL(url);
+      notifyOk(t("settings.privacy.exported"));
     } catch (err) {
       setStatus(err instanceof ApiError ? err.message : t("settings.privacy.exportUnavailable"));
     } finally {

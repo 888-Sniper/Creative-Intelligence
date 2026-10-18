@@ -32,8 +32,13 @@ PL_STEMS = ("kreacj", "przetest", "wniosk", "rekomend", "ogranicz",
 
 
 def detect_language(text, explicit=None):
-    """Analyst's language: explicit choice wins, else Polish signals."""
-    if explicit in ("pl", "en"):
+    """Analyst's language: explicit choice wins, else Polish signals.
+
+    Spanish is a first-class explicit choice (the app ships en/es/pl):
+    deterministic tables keep their en/pl rendering, and the managed
+    provider narrative answers in Spanish when one is active.
+    """
+    if explicit in ("pl", "en", "es"):
         return explicit
     low = (text or "").lower()
     if any(ch in PL_DIACRITICS for ch in low):

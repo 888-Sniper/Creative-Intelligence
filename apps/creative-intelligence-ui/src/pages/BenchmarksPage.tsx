@@ -391,8 +391,16 @@ export function BenchmarksPage() {
                     <thead>
                       <tr>
                         <th scope="col"><input type="checkbox" aria-label={t("benchmarks.selectAll")}
-                          checked={rows.length > 0 && rows.every((r) => selected.has(r.key))}
-                          onChange={() => setSelected(rows.every((r) => selected.has(r.key)) ? new Set() : new Set(rows.map((r) => r.key)))} /></th>
+                          checked={rows.length > 0 && rows.slice(0, 3).every((r) => selected.has(r.key))}
+                          onChange={() => {
+                            const top = rows.slice(0, 3);
+                            if (top.every((r) => selected.has(r.key))) {
+                              setSelected(new Set());
+                            } else {
+                              setSelected(new Set(top.map((r) => r.key)));
+                              if (rows.length > 3) setStatus(t("benchmarks.maxCompare"));
+                            }
+                          }} /></th>
                         <th scope="col">{t("benchmarks.headers.name")}</th>
                         <th scope="col">{t("benchmarks.headers.coverage")}</th>
                         <th scope="col">{t("benchmarks.headers.platform")}</th>

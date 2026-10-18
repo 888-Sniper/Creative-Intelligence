@@ -154,3 +154,30 @@ export function clearPrefs(employeeId: string): void {
     /* private mode: nothing persisted */
   }
 }
+
+/** Route for the saved Default View ("Dashboard" stays "/"). */
+export function defaultViewPath(prefs: Prefs): string {
+  const paths: Record<string, string> = {
+    Dashboard: "/",
+    Campaigns: "/campaigns",
+    Creatives: "/creatives",
+    Compare: "/compare",
+    "Ask The Data": "/ask",
+    Reports: "/reports",
+  };
+  return paths[prefs.defaultView] ?? "/";
+}
+
+/** ISO code of the saved Default Currency label ("EUR – Euro"). */
+export function currencyCode(prefs: Prefs): string {
+  const code = (prefs.currency || "").slice(0, 3).toUpperCase();
+  return /^[A-Z]{3}$/.test(code) ? code : "USD";
+}
+
+/** Days for the saved Default Date Range; null means All Time. */
+export function rangeDays(prefs: Prefs): number | null {
+  if (prefs.dateRange === "Last 7 Days") return 7;
+  if (prefs.dateRange === "Last 30 Days") return 30;
+  if (prefs.dateRange === "Last 90 Days") return 90;
+  return null;
+}

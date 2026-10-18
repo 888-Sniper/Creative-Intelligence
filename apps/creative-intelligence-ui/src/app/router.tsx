@@ -17,6 +17,7 @@ import { AdminEmployeesPage } from "@/admin/AdminEmployeesPage";
 import { ProvidersPage } from "@/admin/ProvidersPage";
 import { useAuth } from "@/auth/AuthProvider";
 import { useLocale } from "@/i18n";
+import { defaultViewPath, loadPrefs } from "@/state/prefs";
 import type { ReactNode } from "react";
 
 /** Admin routes render only for admins (presentation layer). The backend
@@ -39,6 +40,25 @@ function AnalystRoute() {
 /** A07: the protected tree remounts whenever the signed-in employee
  *  changes, so no account-specific component state (Analyst
  *  conversations, filters, drafts) can survive an account switch. */
+/** Settings → Default View: the first landing per browser session
+ *  goes to the saved view. Explicit later navigation to "/" (the
+ *  Dashboard nav item, the brand mark) always wins. */
+function DefaultLanding() {
+  const { me } = useAuth();
+  const id = me?.employee?.id ?? "";
+  const target = defaultViewPath(loadPrefs(id));
+  const guardKey = `ci-landing:${id}`;
+  let landed = false;
+  try {
+    landed = window.sessionStorage.getItem(guardKey) === "1";
+    if (target !== "/" && !landed) window.sessionStorage.setItem(guardKey, "1");
+  } catch {
+    landed = true;
+  }
+  if (target !== "/" && !landed) return <Navigate to={target} replace />;
+  return <DashboardPage />;
+}
+
 function KeyedLayout() {
   const { me } = useAuth();
   return (
@@ -56,7 +76,7 @@ export const router = createBrowserRouter([
       </AuthGate>
     ),
     children: [
-      { index: true, element: <DashboardPage /> },
+      { index: true, element: <DefaultLanding /> },
       { path: "dashboard", element: <Navigate to="/" replace /> },
       { path: "campaigns", element: <CampaignsPage /> },
       { path: "creatives", element: <CreativesPage /> },

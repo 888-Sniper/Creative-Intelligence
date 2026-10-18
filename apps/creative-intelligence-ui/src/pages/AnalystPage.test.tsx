@@ -434,6 +434,37 @@ describe("AnalystPage", () => {
     expect((screen.getByRole("button", { name: "3 Points" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
+  it("restores stored messages from a ?conversation= deep link", async () => {
+    window.history.pushState({}, "", "/analyst?conversation=conv-9");
+    window.fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/analyst/conversations/conv-9") {
+        return Response.json({
+          id: "conv-9", objective: "reach", language: "en",
+          scope: {}, dataset_version: "d9",
+          messages: [
+            { role: "user", kind: "question", text: "Earlier question" },
+            { role: "assistant", kind: "full_analysis", text: "Earlier answer" },
+            { role: "assistant", kind: "narrative", text: "Provider interpretation" },
+          ],
+        });
+      }
+      if (url.startsWith("/api/analyst/conversations") && (!init || init.method === "GET")) {
+        return Response.json({ conversations: [{ id: "conv-9", title: "Saved" }] });
+      }
+      return Response.json({ error: "not found" }, { status: 404 });
+    }) as unknown as typeof fetch;
+    try {
+      renderPage();
+      await waitFor(() => {
+        expect(screen.getByText(/Earlier answer/)).toBeDefined();
+      });
+      expect(screen.getByText(/Provider interpretation/)).toBeDefined();
+    } finally {
+      window.history.pushState({}, "", "/analyst");
+    }
+  });
+
   it("clears chat state when the account key changes", async () => {
     mockFetch();
     const { rerender } = render(

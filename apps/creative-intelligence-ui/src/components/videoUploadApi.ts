@@ -294,8 +294,17 @@ export interface AnalyzeResp {
  *  endpoint itself re-checks and refuses honestly on 409. */
 export interface ProvidersStatus {
   mode: string;
-  capabilities: Record<string, { status: string; adapters: string[] }>;
-  analysis?: { sends: string; storage: string };
+  capabilities: Record<string, { status: string; adapters: string[]; models?: string[] }>;
+  analysis?: {
+    ready?: boolean;
+    reason?: string;
+    provider?: string;
+    model?: string;
+    level?: string;
+    llm_ready?: boolean | null;
+    sends: string;
+    storage: string;
+  };
 }
 
 export function getProvidersStatus(): Promise<ProvidersStatus> {
@@ -305,11 +314,26 @@ export function getProvidersStatus(): Promise<ProvidersStatus> {
 /** Binds the immutable snapshot and enqueues the analysis job.
  *  Throws ApiError with the server's honest reason (preconditions,
  *  provider readiness, duplicate submit) on 409. */
-export function analyzeDraft(draftId: string, brandTerms: string[] = []): Promise<AnalyzeResp> {
+export function analyzeDraft(draftId: string, brandTerms: string[] = [], videoOnly = false): Promise<AnalyzeResp> {
   return api<AnalyzeResp>(
     "POST", `/api/drafts/${encodeURIComponent(draftId)}/analyze`,
-    { brand_terms: brandTerms },
+    { brand_terms: brandTerms, video_only: videoOnly },
   );
+}
+
+/** Download the saved creative report (Markdown) for one draft.
+ *  Goes through apiBlob so an expired session re-gates instead of
+ *  saving error JSON as the report file. */
+export async function downloadDraftReport(draftId: string): Promise<void> {
+  const { apiBlob } = await import("@/api/client");
+  const blob = await apiBlob(
+    "GET", `/api/drafts/${encodeURIComponent(draftId)}/report`);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "creative-report.md";
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 export function cancelAnalysisJob(jobId: string): Promise<void> {

@@ -6,6 +6,7 @@ import { MediaPreview } from "@/components/MediaPreview";
 import { MetaSelect, Toast, useCampaignMeta } from "@/components/product";
 import {
   analyzeDraft,
+  downloadDraftReport,
   confirmMatch,
   correctDraft,
   createDraft,
@@ -1318,17 +1319,28 @@ export function VideoUploadPanel({ open, employeeId, onClose, onNotify }: PanelP
   // readiness block above is display-only: the Analyze endpoint
   // re-checks provider readiness server-side and refuses honestly,
   // so the screen never overrules it in either direction.
-  const canAnalyze = videoValid && grantConfirmed && matchConfirmed
+  // Video-only mode: a clearly labelled creative-only analysis when
+  // no performance dataset is matched. Performance stays unavailable
+  // in that report; combined analysis still needs the full chain.
+  const [videoOnly, setVideoOnly] = useState(false);
+  const providerReady = providerStatus?.analysis?.ready !== false
+    && providerStatus?.analysis?.llm_ready !== false;
+  const canAnalyze = videoValid && providerReady
+    && (videoOnly || (grantConfirmed && matchConfirmed))
     && draft?.status !== "queued" && draft?.status !== "analyzing";
   const analyzeReason = !videoValid
     ? ""
-    : !grantConfirmed
-      ? vu("blockedNoClient")
-      : !matchConfirmed
-        ? vu("blockedNoMatch")
-        : draft?.status === "queued" || draft?.status === "analyzing"
-          ? vu("queuedMsg")
-          : "";
+    : !providerReady
+      ? (providerStatus?.analysis?.reason || vu("blockedNoProvider"))
+      : videoOnly
+        ? ""
+        : !grantConfirmed
+          ? vu("blockedNoClient")
+          : !matchConfirmed
+            ? vu("blockedNoMatch")
+            : draft?.status === "queued" || draft?.status === "analyzing"
+              ? vu("queuedMsg")
+              : "";
   const limitsText = limits
     ? vu("limitsNote", {
       containers: limits.containers
@@ -1355,7 +1367,7 @@ export function VideoUploadPanel({ open, employeeId, onClose, onNotify }: PanelP
       // The real Analyze contract: bind the immutable snapshot and
       // enqueue the worker job. 409 carries the honest reason
       // (preconditions, provider readiness, duplicate submit).
-      const res = await analyzeDraft(current.id);
+      const res = await analyzeDraft(current.id, [], videoOnly);
       setDraft({ ...current, status: res.status || "analyzing", live_job_id: res.job_id });
       try {
         window.localStorage.removeItem(draftKey(employeeId));
@@ -1857,6 +1869,13 @@ export function VideoUploadPanel({ open, employeeId, onClose, onNotify }: PanelP
                       />
                     </div>
                     <div className="chip-row" style={{ marginTop: 8 }}>
+                      <button
+                        type="button" className="btn-outline"
+                        onClick={() => void downloadDraftReport(draft.id).catch((e) =>
+                          setStatus(vu("errorGeneric", { error: e instanceof Error ? e.message : String(e) })))}
+                      >
+                        {vu("downloadReportBtn")}
+                      </button>
                       <LoadingButton
                         type="button" className="btn-primary" loading={reviewBusy}
                         loadingLabel={vu("reviewingLabel")}
@@ -1904,6 +1923,13 @@ export function VideoUploadPanel({ open, employeeId, onClose, onNotify }: PanelP
 
         {draft ? (
           <div className="vu-footer">
+            {stageIndex === STAGES.length - 1 ? (
+              <label className="panel-sub" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <input type="checkbox" checked={videoOnly}
+                  onChange={(e) => setVideoOnly(e.target.checked)} />
+                {vu("videoOnlyLabel")}
+              </label>
+            ) : null}
             {stageIndex === STAGES.length - 1 && !canAnalyze && analyzeReason ? (
               <p className="panel-sub vu-footer-note" role="note">{analyzeReason}</p>
             ) : null}

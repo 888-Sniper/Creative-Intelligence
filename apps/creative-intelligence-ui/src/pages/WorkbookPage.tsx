@@ -12,7 +12,7 @@ import {
   fmtMult,
   fmtPct,
   kpiDisplay,
-  useCompare,
+  useCompareState,
   useScopedApi,
 } from "@/components/product";
 
@@ -176,8 +176,9 @@ export function WorkbookPage() {
   const [helpHover, setHelpHover] = useState(false);
   const [fullScreen, setFullScreen] = useState(false);
 
-  const compare = useCompare();
-  const creatives = useScopedApi<CreativeRow[]>("/api/creatives");
+  const [previewTick, setPreviewTick] = useState(0);
+  const { data: compare, error: compareError } = useCompareState(previewTick);
+  const creatives = useScopedApi<CreativeRow[]>("/api/creatives", previewTick);
 
   useEffect(() => {
     if (!fullScreen && !learnOpen) return;
@@ -400,6 +401,13 @@ export function WorkbookPage() {
           {compare && creatives.data ? (
             <PreviewDoc name={name} today={today} modules={modules}
               previewKpis={previewKpis} top={top} />
+          ) : (compareError || creatives.error) ? (
+            <EmptyState title={t("workbook.previewFailedTitle")} text={compareError || creatives.error}
+              action={(
+                <button type="button" className="btn-outline" onClick={() => setPreviewTick((n) => n + 1)}>
+                  {t("workbook.retry")}
+                </button>
+              )} />
           ) : <Skeleton height={280} />}
         </Panel>
         <Panel title={t("workbook.templatesTitle")} sub={t("workbook.templatesSub")}>

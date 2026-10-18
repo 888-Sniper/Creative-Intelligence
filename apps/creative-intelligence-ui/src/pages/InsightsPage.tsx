@@ -78,7 +78,8 @@ export function InsightsPage() {
   const [views, setViews] = useState<SavedView[] | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState("");
-  const cards = useScopedApi<{ creatives: AnalystCard[] }>("/api/analyst/creatives?objective=reach");
+  const [cardsTick, setCardsTick] = useState(0);
+  const cards = useScopedApi<{ creatives: AnalystCard[] }>("/api/analyst/creatives?objective=reach", cardsTick);
   const meta = useCampaignMeta();
   const metaRows = meta.data?.campaigns ?? [];
   const metaClients = [...new Set(metaRows.map((r) => r.client.trim()).filter(Boolean))].sort();
@@ -91,16 +92,20 @@ export function InsightsPage() {
     return m;
   }, [metaRows]);
 
+  const [loadError, setLoadError] = useState("");
+  const [reloadTick, setReloadTick] = useState(0);
   useEffect(() => {
     let live = true;
+    setLoadError("");
     api<{ conversations: Conversation[] }>("GET", "/api/analyst/conversations")
       .then((r) => live && setConversations(r.conversations ?? []))
-      .catch(() => live && setConversations([]));
+      .catch((e) => { if (live) { setConversations([]); setLoadError(e instanceof Error ? e.message : t("pageInsights.loadFailed")); } });
     api<SavedView[]>("GET", "/api/views")
       .then((r) => live && setViews(Array.isArray(r) ? r : []))
-      .catch(() => live && setViews([]));
+      .catch((e) => { if (live) { setViews([]); setLoadError(e instanceof Error ? e.message : t("pageInsights.loadFailed")); } });
     return () => { live = false; };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reloadTick]);
 
   const findings = useMemo(() => {
     const rows = cards.data?.creatives ?? [];
@@ -173,7 +178,7 @@ export function InsightsPage() {
           title,
           body: c.objective ? t("pageInsights.objectiveBody", { objective: c.objective }) : t("pageInsights.analystConvBody"),
           meta: c.updated_at ? t("pageInsights.updatedLabel", { date: dayLabel(fmtDate, c.updated_at) }) : "",
-          to: "/analyst",
+          to: `/analyst?conversation=${encodeURIComponent(c.id)}`,
         });
       }
     }
@@ -238,6 +243,14 @@ export function InsightsPage() {
         )}
       />
       {saveStatus ? <p className="panel-sub" role="status" style={{ margin: "0 0 12px" }}>{saveStatus}</p> : null}
+      {loadError || cards.error ? (
+        <p className="panel-sub" role="alert" style={{ margin: "0 0 12px" }}>
+          {loadError || cards.error}{" "}
+          <button type="button" className="link-teal" onClick={() => { setReloadTick((n) => n + 1); setCardsTick((n) => n + 1); }}>
+            {t("pageInsights.retry")}
+          </button>
+        </p>
+      ) : null}
       <section className="panel" aria-label={t("pageInsights.filtersLabel")}>
         <div className="filter-grid fg-6">
           <div className="field">

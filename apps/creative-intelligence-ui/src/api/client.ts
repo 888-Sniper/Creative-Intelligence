@@ -99,6 +99,30 @@ export async function api<T>(method: string, path: string, body?: unknown, opts?
   }
 }
 
+/** Download a file through the same session/gate handling as api().
+ *  Raw fetch() downloads used to save 401 error JSON as the file and
+ *  never re-gated an expired session; this parses errors first and
+ *  only returns a Blob for a real 2xx attachment. */
+export async function apiBlob(method: string, path: string, body?: unknown): Promise<Blob> {
+  const res = await fetch(path, {
+    method,
+    headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const parsed = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    const detail = parsed["detail"];
+    const err = typeof detail === "object" && detail !== null ? (detail as Record<string, unknown>) : parsed;
+    const gate = typeof err["gate"] === "string" ? (err["gate"] as Gate) : "";
+    if (gate === "login" || gate === "pending" || gate === "suspended" || gate === "revoked") {
+      gateHandler?.(gate);
+    }
+    if (res.status === 401 && !gate) gateHandler?.("login");
+    throw new ApiError(typeof err["error"] === "string" ? err["error"] : `Request failed (${res.status})`, res.status, gate);
+  }
+  return res.blob();
+}
+
 /** Append the shared top-filter-bar scope to scoped analytics endpoints,
  *  mirroring the legacy filtered_path() behaviour. */
 export function scopedPath(path: string, scope: URLSearchParams): string {

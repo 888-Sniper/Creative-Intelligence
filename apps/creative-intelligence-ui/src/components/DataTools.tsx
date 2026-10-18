@@ -165,6 +165,7 @@ export function CohortBuilder() {
   const [cohortsLoading, setCohortsLoading] = useState(true);
   const [cohortsError, setCohortsError] = useState("");
   const [buildingId, setBuildingId] = useState<number | null>(null);
+  const [creating, setCreating] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [build, setBuild] = useState<CohortBuild | null>(null);
   const [builtId, setBuiltId] = useState<number | null>(null);
@@ -270,6 +271,8 @@ export function CohortBuilder() {
   }
 
   async function createCohort(): Promise<void> {
+    if (creating) return;
+    setCreating(true);
     setBuildError("");
     try {
       const name = cohortName.trim() || t("dataTools.defaultName", {
@@ -283,6 +286,8 @@ export function CohortBuilder() {
       await refreshCohorts(saved.id);
     } catch (e) {
       setBuildError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCreating(false);
     }
   }
 
@@ -341,8 +346,8 @@ export function CohortBuilder() {
         </div>
       </div>
       <div className="filter-actions">
-        <button type="button" className="btn-primary" onClick={() => void createCohort()}>
-          {t("dataTools.create")}
+        <button type="button" className="btn-primary" disabled={creating} onClick={() => void createCohort()}>
+          {creating ? t("dataTools.creating") : t("dataTools.create")}
         </button>
       </div>
       <div style={{ marginTop: 8 }}>

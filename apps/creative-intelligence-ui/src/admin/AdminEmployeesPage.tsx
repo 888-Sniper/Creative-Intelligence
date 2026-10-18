@@ -847,7 +847,7 @@ export function AdminEmployeesPage() {
                 <option value="admin">{t("admin.addDialog.roleAdmin")}</option>
               </select>
               <LoadingButton type="button" className="btn-primary"
-                loading={busyKey === "add"} loadingLabel="Adding…"
+                loading={busyKey === "add"} loadingLabel={t("admin.addDialog.adding")}
                 disabled={busyKey !== null} onClick={() => void addEmployee()}>
                 <Icon name="plus" size={14} /> {t("admin.addDialog.add")}
               </LoadingButton>

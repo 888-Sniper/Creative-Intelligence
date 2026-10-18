@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api } from "@/api/client";
+import { api, apiBlob } from "@/api/client";
 import { useFilters } from "@/state/FilterContext";
 import { useLocale } from "@/i18n";
 import { Icon } from "@/components/icons";
@@ -55,6 +55,19 @@ interface AskResponse {
   answer: AnalystAnswer;
   scope_snapshot?: Record<string, unknown>;
   dataset_version?: string | null;
+  narrative?: string;
+  narrative_source?: string;
+  narrative_detail?: string;
+}
+
+interface StoredConversation {
+  id: string;
+  title?: string | null;
+  objective?: string | null;
+  language?: string | null;
+  scope?: Record<string, unknown>;
+  dataset_version?: string | null;
+  messages?: Array<{ role: string; kind?: string; text: string; created_at?: string }>;
 }
 
 interface ConversationSummary {
@@ -69,6 +82,8 @@ interface ChatMessage {
   role: "user" | "assistant";
   text: string;
   answer?: AnalystAnswer | null;
+  narrative?: string;
+  narrativeSource?: string;
 }
 
 interface BenchGroup {
@@ -122,6 +137,9 @@ const DATE_RANGES = [
   { value: "7", key: "d7" },
   { value: "30", key: "d30" },
   { value: "90", key: "d90" },
+  // Shown when a window was set on another page: the label must
+  // match the applied shared filter, never read "All Time".
+  { value: "custom", key: "custom" },
 ] as const;
 
 type TFn = (key: string, vars?: Record<string, string | number>) => string;
@@ -147,18 +165,7 @@ export function scopeBody(scope: URLSearchParams): Record<string, string[]> {
 }
 
 async function downloadReportBlob(body: unknown): Promise<Blob> {
-  const res = await fetch("/api/analyst/report", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const detail = (await res.json().catch(() => null)) as {
-      detail?: { error?: string };
-    } | null;
-    throw new Error(detail?.detail?.error ?? `Report export failed (${res.status})`);
-  }
-  return res.blob();
+  return apiBlob("POST", "/api/analyst/report", body);
 }
 
 function fmtScope(scope?: Record<string, unknown>): string {
@@ -346,6 +353,59 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
   const [datasetVersion, setDatasetVersion] = useState<string | null>(null);
   const [range, setRange] = useState("all");
   const [stamp] = useState(() => stampNow(fmtDate));
+  const [convLoading, setConvLoading] = useState(false);
+  const [convError, setConvError] = useState<string | null>(null);
+  // Generation guard: a slower conversation fetch must never
+  // overwrite a newer selection (or another account's screen).
+  const convGenRef = useRef(0);
+
+  // Keep the range label honest: a date window chosen on another
+  // page shows as that window here, never as "All Time".
+  useEffect(() => {
+    const hasDates = Boolean(filters.date || filters.date_from || filters.date_to);
+    setRange((cur) => (hasDates ? (cur === "all" ? "custom" : cur) : "all"));
+  }, [filters.date, filters.date_from, filters.date_to]);
+
+  const openConversation = useCallback(async (id: string) => {
+    const gen = ++convGenRef.current;
+    const key = accountRef.current;
+    setActiveId(id);
+    setConvLoading(true);
+    setConvError(null);
+    try {
+      const data = await api<StoredConversation>(
+        "GET",
+        `/api/analyst/conversations/${encodeURIComponent(id)}`,
+      );
+      if (gen !== convGenRef.current || key !== accountRef.current) return;
+      // Stored narrative rows attach to the preceding assistant
+      // answer instead of rendering as a duplicate message.
+      const restored: ChatMessage[] = [];
+      for (const m of data.messages ?? []) {
+        if (m.role !== "user" && m.role !== "assistant") continue;
+        if (m.kind === "narrative") {
+          const prev = restored[restored.length - 1];
+          if (prev?.role === "assistant") {
+            prev.narrative = m.text;
+            prev.narrativeSource = "managed_provider";
+            continue;
+          }
+        }
+        restored.push({ role: m.role, text: m.text });
+      }
+      setMessages(restored);
+      if (data.objective) setObjective(data.objective);
+      if (data.language) setLocale(data.language);
+      setDatasetVersion(data.dataset_version ?? null);
+      setLastScope(fmtScope(data.scope));
+    } catch (e) {
+      if (gen !== convGenRef.current || key !== accountRef.current) return;
+      setMessages([]);
+      setConvError(e instanceof Error ? e.message : t("analyst.conversationFailed"));
+    } finally {
+      if (gen === convGenRef.current && key === accountRef.current) setConvLoading(false);
+    }
+  }, [t]);
 
   const hooks = useScopedApi<Record<string, BenchGroup>>("/api/benchmarks?group_by=hook_type");
   const plats = useScopedApi<Record<string, BenchGroup>>("/api/benchmarks?group_by=platform");
@@ -371,23 +431,38 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
   }, [loadConversations]);
 
   // Deep links (?conversation=<id>, e.g. from Ask recent chats) open
-  // the chosen conversation once the list arrives.
+  // the chosen conversation and load its stored messages. The id is
+  // tried directly: the list may not have arrived yet, and an
+  // unknown/foreign id answers 404 -> the error state below.
+  const deepLinkedRef = useRef<string | null>(null);
   useEffect(() => {
-    if (activeId || !conversations.length) return;
     const id = new URLSearchParams(window.location.search).get("conversation");
-    if (id && conversations.some((c) => c.id === id)) setActiveId(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conversations]);
+    if (!id || deepLinkedRef.current === id || activeId === id) return;
+    deepLinkedRef.current = id;
+    void openConversation(id);
+  }, [activeId, openConversation]);
 
   // A07: even if a remount is skipped, changing identity clears all
   // account-specific chat state before reloading. busy resets too:
   // the in-flight request's finally-block stands down because its
   // key no longer matches.
+  const prevAccountRef = useRef<string | null>(null);
   useEffect(() => {
+    // First mount is not an account switch: clearing here would
+    // cancel a deep-link restore that is already in flight.
+    if (prevAccountRef.current === null) {
+      prevAccountRef.current = accountKey;
+      return;
+    }
+    prevAccountRef.current = accountKey;
+    convGenRef.current += 1;
+    deepLinkedRef.current = null;
     setConversations([]);
     setActiveId(null);
     setMessages([]);
     setError(null);
+    setConvError(null);
+    setConvLoading(false);
     setLastScope("");
     setDatasetVersion(null);
     setBusy(false);
@@ -442,7 +517,9 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
       setDatasetVersion(data.dataset_version ?? null);
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", text: data.answer.text, answer: data.answer },
+        { role: "assistant", text: data.answer.text, answer: data.answer,
+          narrative: data.narrative || undefined,
+          narrativeSource: data.narrative_source },
       ]);
       await loadConversations();
     } catch (e) {
@@ -457,11 +534,16 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
   }
 
   function clearAll() {
+    convGenRef.current += 1;
     setMessages([]);
     setInput("");
     setError(null);
+    setConvError(null);
+    setConvLoading(false);
     setLastScope("");
     setActiveId(null);
+    clearFilters();
+    setRange("all");
   }
 
   async function downloadReport(fmt: "one-pager" | "xlsx") {
@@ -519,15 +601,9 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
     setError(null);
     const key = accountRef.current;
     try {
-      const res = await fetch("/api/analyst/workbook");
+      const blob = await apiBlob("GET", "/api/analyst/workbook");
       if (key !== accountRef.current) return;
-      if (!res.ok) {
-        const detail = (await res.json().catch(() => null)) as {
-          detail?: { error?: string };
-        } | null;
-        throw new Error(detail?.detail?.error ?? `Workbook download failed (${res.status})`);
-      }
-      const url = URL.createObjectURL(await res.blob());
+      const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
       a.download = "foap-analyst-workbook.xlsx";
@@ -995,7 +1071,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
         title={t("analyst.controlsTitle")}
         sub={t("analyst.controlsSub")}
         action={(
-          <button type="button" className="link-teal" onClick={() => { clearFilters(); setRange("all"); }}>
+          <button type="button" className="link-teal" onClick={() => { clearFilters(); setRange("all"); setObjective("reach"); setLocale("auto"); }}>
             {t("analyst.reset")}
           </button>
         )}
@@ -1052,6 +1128,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
               <option value="auto">Auto</option>
               <option value="pl">Polski</option>
               <option value="en">English</option>
+              <option value="es">Español</option>
             </select>
           </div>
         </div>
@@ -1098,10 +1175,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
                   type="button"
                   className="chip"
                   aria-pressed={c.id === activeId}
-                  onClick={() => {
-                    setActiveId(c.id);
-                    setMessages([]);
-                  }}
+                  onClick={() => void openConversation(c.id)}
                   title={c.objective ? t("pageInsights.objectiveBody", { objective: c.objective }) : undefined}
                 >
                   {c.title || t("pageInsights.untitledConv")}
@@ -1154,6 +1228,26 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
         )}
       </Panel>
 
+      {(convLoading || convError) && (
+        <>
+          <div className="section-gap" />
+          <Panel title={t("analyst.convoTitle")}>
+            {convLoading ? (
+              <p role="status">{t("analyst.loadingConversation")}</p>
+            ) : (
+              <EmptyState
+                title={t("analyst.conversationFailed")}
+                text={convError ?? ""}
+                action={activeId ? (
+                  <button type="button" className="btn-outline" onClick={() => void openConversation(activeId)}>
+                    {t("analyst.retry")}
+                  </button>
+                ) : undefined}
+              />
+            )}
+          </Panel>
+        </>
+      )}
       {messages.length > 0 && (
         <>
           <div className="section-gap" />
@@ -1168,6 +1262,12 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
                   }}>
                     {m.role === "user" ? `${t("analyst.qPrefix")}${m.text}` : m.text}
                   </p>
+                  {m.role === "assistant" && m.narrative ? (
+                    <p className="panel-sub" style={{ marginTop: 8 }}>
+                      <strong>{t("analyst.narrativeLabel")}:</strong> {m.narrative}
+                      {m.narrativeSource === "managed_provider" ? ` (${t("analyst.narrativeProvider")})` : ""}
+                    </p>
+                  ) : null}
                   {m.role === "assistant" && m.answer ? (
                     <>
                       {(m.answer.tables ?? []).map((t, k) => renderTable(t, k))}

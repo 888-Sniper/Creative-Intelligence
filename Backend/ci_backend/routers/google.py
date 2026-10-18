@@ -40,7 +40,7 @@ def google_start(request: Request, db: Session = Depends(get_db),
                  settings: Settings = Depends(get_settings)):
     employee = _actor(request, db)
     try:
-        flow = goog.start_google(db, settings)
+        flow = goog.start_google(db, settings, employee_id=employee.id)
     except emp.StoreError as exc:
         raise HTTPException(status_code=409,
                             detail={"error": str(exc)})

@@ -414,6 +414,64 @@ CREATE TABLE IF NOT EXISTS matches (
     video_id TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (draft_id, creative_key)
 );
+-- Reusable report templates, scoped to their owner. config_json holds
+-- {campaigns, kpis, benchmark, format}; applying one is a UI action,
+-- generation still goes through the normal report route.
+CREATE TABLE IF NOT EXISTS report_templates (
+    id TEXT PRIMARY KEY,
+    owner_employee_id TEXT NOT NULL DEFAULT '',
+    name TEXT NOT NULL DEFAULT '',
+    config_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS report_templates_owner
+    ON report_templates (owner_employee_id, name);
+-- Server-persisted per-employee preferences (workspace, defaults,
+-- notification opt-ins). Browser storage alone leaked across
+-- accounts and could not drive server behaviour such as email.
+CREATE TABLE IF NOT EXISTS employee_prefs (
+    employee_id TEXT PRIMARY KEY,
+    prefs_json TEXT NOT NULL DEFAULT '{}',
+    updated_at TEXT NOT NULL DEFAULT ''
+);
+-- Notification outbox: every would-be email is recorded with a
+-- truthful status (queued/sent/blocked/failed) so the UI never
+-- claims delivery that did not happen. dedup_key prevents repeats.
+CREATE TABLE IF NOT EXISTS notification_outbox (
+    id TEXT PRIMARY KEY,
+    employee_id TEXT NOT NULL DEFAULT '',
+    kind TEXT NOT NULL DEFAULT '',
+    subject TEXT NOT NULL DEFAULT '',
+    body TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'queued',
+    detail TEXT NOT NULL DEFAULT '',
+    dedup_key TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT '',
+    sent_at TEXT NOT NULL DEFAULT ''
+);
+CREATE UNIQUE INDEX IF NOT EXISTS notification_outbox_dedup
+    ON notification_outbox (dedup_key) WHERE dedup_key != '';
+-- GA4 read-only imports stay separate from ad facts: website
+-- analytics are never silently presented as ad-level metrics.
+CREATE TABLE IF NOT EXISTS ga4_rows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    property_id TEXT NOT NULL DEFAULT '',
+    date TEXT NOT NULL DEFAULT '',
+    session_source TEXT NOT NULL DEFAULT '',
+    session_medium TEXT NOT NULL DEFAULT '',
+    session_campaign TEXT NOT NULL DEFAULT '',
+    sessions INTEGER NOT NULL DEFAULT 0,
+    total_users INTEGER NOT NULL DEFAULT 0,
+    conversions REAL NOT NULL DEFAULT 0,
+    timezone TEXT NOT NULL DEFAULT '',
+    imported_by TEXT NOT NULL DEFAULT '',
+    imported_at TEXT NOT NULL DEFAULT '',
+    UNIQUE (property_id, date, session_source, session_medium,
+            session_campaign)
+);
+CREATE INDEX IF NOT EXISTS ga4_rows_property
+    ON ga4_rows (property_id, date);
 """
 
 # Natural dedup key for re-imports: the same fact from the same origin

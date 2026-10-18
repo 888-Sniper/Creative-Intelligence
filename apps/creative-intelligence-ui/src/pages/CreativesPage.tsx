@@ -334,7 +334,7 @@ export function CreativesPage() {
       }
     }
     const buckets = [
-      { key: t("creatives.lengthShort"), test: (s: number) => s > 0 && s < 15 },
+      { key: t("creatives.lengthShort"), test: (s: number) => s >= 0 && s < 15 },
       { key: t("creatives.lengthSweet"), test: (s: number) => s >= 15 && s <= 30 },
       { key: t("creatives.lengthLong"), test: (s: number) => s > 30 },
     ].map((b) => ({ ...b, clicks: 0, impr: 0 }));

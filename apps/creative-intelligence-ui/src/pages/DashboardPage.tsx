@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { api } from "@/api/client";
 import { useAuth } from "@/auth/AuthProvider";
 import { useFilters } from "@/state/FilterContext";
+import { currencyCode, loadPrefs, rangeDays } from "@/state/prefs";
 import { useLocale } from "@/i18n";
 import { AnalyzeVideoSection, RecentUploadsSection, VideoUploadsProvider } from "@/components/VideoUploadCard";
 import { monthName } from "@/components/KpiTrend";
@@ -214,8 +215,9 @@ export function DashboardPage() {
   const hooks = useScopedApi<Record<string, BenchGroup>>("/api/benchmarks?group_by=hook_type", applied);
   const modes = useScopedApi<Record<string, BenchGroup>>("/api/benchmarks?group_by=creator_vs_branded", applied);
 
-  // Default reporting period: the trailing 30 days present in the data.
-  // A blank scope makes the backend compare the whole dataset extent
+  // Default reporting period: Settings → Default Date Range over the
+  // days present in the data (All Time leaves the scope open). A
+  // blank scope makes the backend compare the whole dataset extent
   // against an empty previous window (honest "none", no percentages),
   // so the dashboard opens on a range with a real previous equivalent.
   // User-chosen dates always win; this runs once per mount.
@@ -226,11 +228,17 @@ export function DashboardPage() {
       return;
     }
     if (!daily || daily.length < 2) return;
+    const days = rangeDays(loadPrefs(me?.employee?.id ?? ""));
+    if (days === null) {
+      setRangeBooted(true);
+      return;
+    }
     const dates = daily.map((p) => p.date).sort();
-    setFilter("date_from", dates[0]);
-    setFilter("date_to", dates[dates.length - 1]);
+    const window = dates.slice(-days);
+    setFilter("date_from", window[0]);
+    setFilter("date_to", window[window.length - 1]);
     setRangeBooted(true);
-  }, [daily, filters.date, filters.date_from, filters.date_to, rangeBooted, setFilter]);
+  }, [daily, filters.date, filters.date_from, filters.date_to, rangeBooted, setFilter, me?.employee?.id]);
 
   const hour = new Date().getHours();
   const part = hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening";
@@ -538,6 +546,9 @@ export function DashboardPage() {
     { label: t("dashboard.averageRoas"), metric: "roas", ...kpi("mult", compare?.metrics.roas?.current), icon: "bars", tint: "var(--shell-blue-soft)", color: "var(--glyph-blue)" },
   ];
 
+  const prefsNow = loadPrefs(me?.employee?.id ?? "");
+  const wantedCurrency = currencyCode(prefsNow);
+
   return (
     <div className="dashboard">
       <PageHeader
@@ -559,6 +570,11 @@ export function DashboardPage() {
         A hidden-yet-active scope is never silent: the chip below names
         it and clears it deliberately. */}
       <FilterPanel actions="none" showTeam={false} />
+      {wantedCurrency !== "USD" ? (
+        <p className="panel-sub" role="note" style={{ margin: "10px 0 0" }}>
+          {t("dashboard.currencyNote", { wanted: wantedCurrency })}
+        </p>
+      ) : null}
       {filters.team ? (
         <div className="chip-row" style={{ margin: "10px 0 0" }}>
           <span className="chip-static">{t("dashboard.teamScope", { team: filters.team })}</span>

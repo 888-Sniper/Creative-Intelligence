@@ -21,7 +21,9 @@ from ci_backend.config import Settings
 from ci_backend.deps import (
     auth_rate_limit,
     bearer_token,
+    get_current_employee,
     get_db,
+    get_product_conn,
     get_settings,
     json_payload,
 )
@@ -478,3 +480,33 @@ async def switch(request: Request, db=Depends(get_db),
     return _issue({"ok": True,
                    "employee": emp.public_employee(target).model_dump()},
                   fresh, secure=settings.cookie_secure)
+
+
+@router.post("/export")
+def export_data(request: Request, conn=Depends(get_product_conn),
+                who=Depends(get_current_employee)):
+    """Download a ZIP of the requester's own data (no secrets).
+
+    Returns the archive bytes directly: the UI reports success only
+    when this response is a real attachment. An expired session is
+    the standard 401 login gate from get_current_employee.
+    """
+    from creative_intel import data_export
+    from fastapi.responses import Response
+    employee = {"id": who.id, "email": who.email,
+                "first_name": who.first_name, "last_name": who.last_name,
+                "is_admin": bool(getattr(who, "is_admin", False)
+                                 or who.role == "admin"),
+                "status": who.status, "created_at": who.created_at,
+                "last_login_at": who.last_login_at}
+    try:
+        blob, filename = data_export.build_export(conn, employee)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail={
+            "error": "Export failed: %s" % exc})
+    security_log.event("data_export", actor=who.id, target=who.id,
+                       detail=filename)
+    return Response(
+        content=blob, media_type="application/zip",
+        headers={"Content-Disposition":
+                 'attachment; filename="%s"' % filename})

@@ -49,14 +49,22 @@ def google_configured(settings=None) -> bool:
                 and secrets_mod.google_client_secret(settings))
 
 
-def start_google(db: Session, settings=None) -> dict[str, str]:
-    """Begin Google OAuth: returns {url} for a top-level navigation."""
+def start_google(db: Session, settings=None,
+                 employee_id: str = "") -> dict[str, str]:
+    """Begin Google OAuth: returns {url} for a top-level navigation.
+
+    The starting employee is bound into the pending verifier (same
+    packing as integrations_oauth): a callback completed after an
+    account switch must not attach Drive tokens to the other
+    employee.
+    """
     if not google_configured(settings):
         raise emp.StoreError("Google Drive is not configured.")
     emp.sweep_pending(db)
     verifier, challenge = workos_mod.pkce_pair()
     state = secrets.token_urlsafe(16)
-    emp.pending_put(db, state, "google-drive", verifier)
+    packed = "%s %s" % ((employee_id or "").strip(), verifier)
+    emp.pending_put(db, state, "google-drive", packed)
     query = urllib.parse.urlencode({
         "client_id": settings.google_client_id.strip(),
         "redirect_uri": settings.google_redirect_uri.strip(),
@@ -106,11 +114,18 @@ def finish_google(db: Session, code: str, state: str, employee_id: str,
     if row is None or row.provider != "google-drive" \
             or not emp.pending_valid(row):
         raise emp.StoreError("That Google sign-in expired. Try again.")
+    owner, sep, verifier = (row.verifier or "").partition(" ")
+    if not sep:
+        owner, verifier = "", row.verifier or ""
+    if not owner or owner != employee_id:
+        # Started by someone else (or an unbound legacy flow): never
+        # exchange the code or store tokens for this employee.
+        raise emp.StoreError("That Google sign-in expired. Try again.")
     body = _exchange({
         "grant_type": "authorization_code",
         "code": code,
         "redirect_uri": settings.google_redirect_uri.strip(),
-        "code_verifier": row.verifier,
+        "code_verifier": verifier,
     }, settings)
     granted = body.get("scope") or ""
     if granted and SCOPES[0] not in str(granted).split():

@@ -1,5 +1,7 @@
 import { createContext, useCallback, useContext, useMemo, useState } from "react";
 import type { ReactNode } from "react";
+import { useOptionalAuth } from "@/auth/AuthProvider";
+import { markCampaignStatusTouched } from "@/state/prefs";
 
 export interface FilterValues {
   client: string;
@@ -82,6 +84,7 @@ function isoDate(d: Date): string {
 
 export function FilterProvider({ children }: { children: ReactNode }) {
   const [filters, setFilters] = useState<FilterValues>(EMPTY_FILTERS);
+  const employeeId = useOptionalAuth()?.me?.employee?.id ?? "";
 
   // Exact Date and From/To range are mutually exclusive: entering
   // one clears the other, so the backend never receives an ambiguous
@@ -102,7 +105,16 @@ export function FilterProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const clearFilters = useCallback(() => setFilters(EMPTY_FILTERS), []);
+  // Clearing shared filters IS an explicit All-status choice:
+  // record it here, at the one choke point every Reset/Clear
+  // control funnels through, so Campaigns never resurrects a
+  // remembered status after any page's clear. Programmatic
+  // clears that immediately set their own filters (Analyst
+  // restore, sample scope) re-mark or restore afterwards.
+  const clearFilters = useCallback(() => {
+    markCampaignStatusTouched(employeeId, "");
+    setFilters(EMPTY_FILTERS);
+  }, [employeeId]);
 
   const applyPresetDays = useCallback((days: number) => {
     const to = new Date();

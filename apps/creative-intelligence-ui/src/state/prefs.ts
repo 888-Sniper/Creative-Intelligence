@@ -255,6 +255,19 @@ export function campaignStatusTouched(employeeId: string): boolean {
   return touchedCampaignStatus(employeeId) !== null;
 }
 
+/** Forget an explicit status choice entirely (back to "never
+ *  chosen", so the saved default applies again). Used when a
+ *  temporary scope that cleared filters programmatically ends
+ *  and the pre-scope untouched state must be restored. */
+export function clearCampaignStatusTouched(employeeId: string): void {
+  _statusTouchedMemory.delete(employeeId);
+  try {
+    window.sessionStorage.removeItem(`ci-status-touched:${employeeId}`);
+  } catch {
+    /* memory copy already cleared */
+  }
+}
+
 /** Last SERVER-ISSUED prefs version seen for an account, persisted
  *  in localStorage so it survives reloads and is shared across
  *  tabs (unlike the in-memory edit counter above, which only
@@ -280,6 +293,41 @@ export function noteServerPrefsRevision(employeeId: string,
   } catch {
     /* storage unavailable: next save bootstraps with unknown base */
   }
+}
+
+/** THIS TAB's last confirmed server snapshot per account
+ *  (server-shaped, including `_rev`). The version a save claims
+ *  as its base must describe the snapshot the tab actually
+ *  edited — the localStorage revision above is shared across
+ *  tabs, so pairing it with a stale whole document let one tab
+ *  overwrite another tab's unrelated edits. Saves therefore
+ *  send only the keys that differ from this snapshot. */
+const _serverSnapshots = new Map<string, Record<string, unknown>>();
+
+export function noteServerPrefsSnapshot(employeeId: string,
+                                        prefs: Record<string, unknown>): void {
+  _serverSnapshots.set(employeeId, { ...prefs });
+  noteServerPrefsRevision(employeeId, prefs);
+}
+
+export function serverPrefsSnapshot(employeeId: string): Record<string, unknown> | null {
+  return _serverSnapshots.get(employeeId) ?? null;
+}
+
+/** Server-shaped keys whose value in `next` differs from the
+ *  snapshot this tab last confirmed. Null snapshot (nothing
+ *  confirmed yet) yields the full document — the bootstrap
+ *  save. Only these keys are PUT, so a stale tab can never
+ *  restore values another tab changed after its snapshot. */
+export function serverPrefsDelta(snapshot: Record<string, unknown> | null,
+                                 next: Prefs): Record<string, unknown> {
+  const full = toServerPrefs(next);
+  if (!snapshot) return full;
+  const delta: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(full)) {
+    if (snapshot[key] !== value) delta[key] = value;
+  }
+  return delta;
 }
 
 /** Fired after server preferences are merged into local storage so

@@ -1461,7 +1461,7 @@ def test_positive_journey_analysis_correction_review_export(tmp_path,
     monkeypatch.setattr(prov_mod, "Providers",
                         lambda db_path=None: stubs)
     monkeypatch.setattr(prov_mod, "LiveVision",
-                        lambda roster: StubVision())
+                        lambda roster, secret_for=None: StubVision())
     resp = http.post("/api/drafts/%s/analyze" % did, json={})
     assert resp.status_code == 200, resp.text
     job_id = resp.json()["job_id"]

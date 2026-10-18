@@ -2750,6 +2750,12 @@ async def preferences_put(request: Request,
             else {},
             base_revision=raw.get("base_revision")
             if isinstance(raw, dict) else None)
+    except notify_mod.StalePreferenceRevision as exc:
+        # Explicit conflict WITH the current prefs: the client
+        # re-applies its changed keys on this fresh base and only
+        # then reports the save as done.
+        raise HTTPException(status_code=409, detail={
+            "error": str(exc), "prefs": exc.current})
     except ValueError as exc:
         raise _conflict(exc)
     return {"prefs": prefs}

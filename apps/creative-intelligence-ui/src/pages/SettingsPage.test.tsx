@@ -47,12 +47,16 @@ const adminMe: MeResponse = {
 
 let failGoogleStatus = false;
 
-function mockFetch(opts?: { googleConnected?: boolean; me?: MeResponse; sessions?: number; cohorts?: typeof cohortsData; deleteFails?: number; rejectEmail?: boolean; rejectProfile?: boolean }) {
+function mockFetch(opts?: { googleConnected?: boolean; me?: MeResponse; sessions?: number; cohorts?: typeof cohortsData; deleteFails?: number; rejectEmail?: boolean; rejectProfile?: boolean; serverPrefs?: Record<string, unknown>; conflictPrefs?: Record<string, unknown>; prefsPut?: "conflict-once" | "fail" }) {
   const calls: Array<[string, RequestInit | undefined]> = [];
   const googleConnected = opts?.googleConnected ?? false;
   // Stateful cohort list: DELETE removes the row so a re-fetched
   // list proves the deletion sticks (refresh persistence).
   const deleted = new Set<number>();
+  let prefsPuts = 0;
+  // Stateful server prefs: PUTs merge-apply like the real endpoint
+  // so snapshot/delta behavior across sequential saves is real.
+  let storedPrefs: Record<string, unknown> = { ...(opts?.serverPrefs ?? {}) };
   window.fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     calls.push([url, init]);
@@ -105,6 +109,31 @@ function mockFetch(opts?: { googleConnected?: boolean; me?: MeResponse; sessions
     }
     if (url === "/api/cohorts" && method === "POST") {
       return Response.json({ id: 3, name: "Beauty", filters: {}, created_at: "" });
+    }
+    if (url === "/api/preferences" && method === "GET") {
+      return Response.json({ prefs: storedPrefs });
+    }
+    if (url === "/api/preferences" && method === "PUT") {
+      prefsPuts += 1;
+      if (opts?.prefsPut === "fail") {
+        return Response.json({ error: "down" }, { status: 500 });
+      }
+      if (opts?.prefsPut === "conflict-once" && prefsPuts === 1) {
+        storedPrefs = { ...(opts?.conflictPrefs ?? {}) };
+        return Response.json(
+          { error: "preferences changed since they were loaded",
+            prefs: storedPrefs },
+          { status: 409 });
+      }
+      const sent = (JSON.parse(String(init?.body ?? "{}")) as {
+        prefs?: Record<string, unknown>;
+      }).prefs ?? {};
+      storedPrefs = {
+        ...storedPrefs, ...sent,
+        _rev: (typeof storedPrefs["_rev"] === "number"
+          ? (storedPrefs["_rev"] as number) : 0) + 1,
+      };
+      return Response.json({ prefs: storedPrefs });
     }
     return Response.json({});
   }) as unknown as typeof fetch;
@@ -785,5 +814,82 @@ describe("SettingsPage", () => {
     });
     // Failed delete keeps the row.
     expect(screen.getByText("Beauty")).toBeDefined();
+  });
+
+  const fullServerPrefs = {
+    workspace: "Foap Creative Intelligence", default_view: "Dashboard",
+    default_currency: "USD – US Dollar", default_date_range: "Last 30 Days",
+    default_campaign_view: "All Campaigns", theme: "light",
+    accent: "Teal (Default)", density: "Compact", language: "en",
+    timezone: "Europe/London", email_reports: true, campaign_updates: true,
+    ai_insights: true, product_updates: false, data_usage: true,
+    share_analytics: true, retention: "24 Months", _rev: 3,
+  };
+
+  it("reconciles a cross-tab conflict, retrying only its changed keys", async () => {
+    // Another tab moved density to Comfortable at _rev 9 after
+    // this tab loaded _rev 3 (density Compact).
+    const conflictPrefs = { ...fullServerPrefs, density: "Comfortable", _rev: 9 };
+    const calls = mockFetch({
+      serverPrefs: fullServerPrefs, prefsPut: "conflict-once", conflictPrefs,
+    });
+    renderSettings();
+    await waitFor(() => {
+      expect((screen.getByLabelText("Interface Density") as HTMLSelectElement).value)
+        .toBe("Compact");
+    });
+    fireEvent.change(screen.getByLabelText("Theme"), { target: { value: "dark" } });
+    await waitFor(() => {
+      expect(screen.getByRole("status").textContent).toBe("All Changes Saved.");
+    });
+    const puts = calls
+      .filter(([u, i]) => u === "/api/preferences" && (i?.method ?? "GET") === "PUT")
+      .map(([, i]) => JSON.parse(String(i?.body ?? "{}")) as {
+        prefs: Record<string, unknown>; base_revision: number;
+      });
+    expect(puts).toHaveLength(2);
+    expect(puts[0]!.base_revision).toBe(3);
+    expect(puts[0]!.prefs).toEqual({ theme: "dark" });
+    expect(puts[1]!.base_revision).toBe(9);
+    // Density is never re-sent: the other tab's newer value survives.
+    expect(puts[1]!.prefs).toEqual({ theme: "dark" });
+  });
+
+  it("an edit followed by a revert lands as the reverted value", async () => {
+    const calls = mockFetch({ serverPrefs: fullServerPrefs });
+    renderSettings();
+    await waitFor(() => {
+      expect((screen.getByLabelText("Interface Density") as HTMLSelectElement).value)
+        .toBe("Compact");
+    });
+    fireEvent.change(screen.getByLabelText("Theme"), { target: { value: "dark" } });
+    await waitFor(() => {
+      expect(screen.getByRole("status").textContent).toBe("All Changes Saved.");
+    });
+    fireEvent.change(screen.getByLabelText("Theme"), { target: { value: "light" } });
+    await waitFor(() => {
+      expect(screen.getByRole("status").textContent).toBe("All Changes Saved.");
+    });
+    const puts = calls
+      .filter(([u, i]) => u === "/api/preferences" && (i?.method ?? "GET") === "PUT")
+      .map(([, i]) => JSON.parse(String(i?.body ?? "{}")) as {
+        prefs: Record<string, unknown>;
+      });
+    expect(puts.length).toBeGreaterThanOrEqual(2);
+    // The revert is a real delta against the post-edit snapshot,
+    // not an empty write that would leave "dark" on the server.
+    expect(puts[puts.length - 1]!.prefs).toEqual({ theme: "light" });
+  });
+
+  it("does not claim saved when the server rejects the write", async () => {
+    mockFetch({ prefsPut: "fail" });
+    renderSettings();
+    await waitFor(() => {
+      expect(screen.getByLabelText("Theme")).toBeDefined();
+    });
+    fireEvent.change(screen.getByLabelText("Theme"), { target: { value: "dark" } });
+    expect(await screen.findByText("Could not save settings in this browser."))
+      .toBeDefined();
+    expect(screen.getByRole("status").textContent).not.toBe("All Changes Saved.");
   });
 });

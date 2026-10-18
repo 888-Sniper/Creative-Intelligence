@@ -27,29 +27,70 @@ import {
   TIMEZONES,
   applyAccent,
   loadPrefs,
-  noteServerPrefsRevision,
+  noteServerPrefsSnapshot,
+  serverPrefsDelta,
   serverPrefsRevision,
+  serverPrefsSnapshot,
   mergeServerPrefs,
   savePrefs,
-  toServerPrefs,
   type Prefs,
 } from "@/state/prefs";
 
-/** Serialized, ACCOUNT-BOUND preference PUTs: writes land in edit
- *  order, each stamped with its originating employee (the server
- *  drops mismatches after an account switch) and the last
- *  server-issued version as base (stale bases lose server-side). */
+/** Current prefs carried by a stale-base 409 (the account-mismatch
+ *  409 has no `prefs` and must NOT be retried). */
+function conflictCurrentPrefs(e: unknown): Record<string, unknown> | null {
+  if (!(e instanceof ApiError) || e.status !== 409) return null;
+  const detail = e.body?.["detail"];
+  const prefs = detail && typeof detail === "object"
+    ? (detail as Record<string, unknown>)["prefs"]
+    : e.body?.["prefs"];
+  return prefs && typeof prefs === "object"
+    ? (prefs as Record<string, unknown>) : null;
+}
+
+/** Base version for a save: the version of THIS tab's confirmed
+ *  snapshot (the localStorage note is only a pre-GET fallback). */
+function snapshotBase(employeeId: string): number | null {
+  const rev = serverPrefsSnapshot(employeeId)?.["_rev"];
+  return typeof rev === "number" && Number.isInteger(rev)
+    ? rev : serverPrefsRevision(employeeId);
+}
+
+/** Serialized, ACCOUNT-BOUND, DELTA-ONLY preference PUTs. Each
+ *  write sends only the keys that differ from this tab's
+ *  confirmed snapshot, stamped with its originating employee
+ *  and that snapshot's version as base. A stale base is an
+ *  explicit 409 carrying the current prefs: the same delta is
+ *  re-applied once on the fresh base, so unrelated edits from
+ *  another tab survive and success is reported only after the
+ *  server actually accepts the write. */
 let prefsPutChain: Promise<unknown> = Promise.resolve();
 function putServerPrefs(next: Prefs, employeeId: string): Promise<unknown> {
   prefsPutChain = prefsPutChain.catch(() => {}).then(async () => {
-    const res = await api<{ prefs: Record<string, unknown> }>(
-      "PUT", "/api/preferences", {
-        prefs: toServerPrefs(next),
+    // Delta computed at EXECUTION against the latest confirmed
+    // snapshot: an edit reverted while an earlier write was
+    // still queued must land as the reverted value, not vanish
+    // against a snapshot the earlier write has since moved.
+    // The same fixed delta is reused for the conflict retry.
+    const delta = serverPrefsDelta(serverPrefsSnapshot(employeeId), next);
+    const attempt = (base: number | null) =>
+      api<{ prefs: Record<string, unknown> }>("PUT", "/api/preferences", {
+        prefs: delta,
         employee_id: employeeId,
-        base_revision: serverPrefsRevision(employeeId),
+        base_revision: base,
       });
-    noteServerPrefsRevision(employeeId, res.prefs ?? {});
-    return res;
+    try {
+      const res = await attempt(snapshotBase(employeeId));
+      noteServerPrefsSnapshot(employeeId, res.prefs ?? {});
+      return res;
+    } catch (e) {
+      const current = conflictCurrentPrefs(e);
+      if (!current) throw e;
+      noteServerPrefsSnapshot(employeeId, current);
+      const res = await attempt(snapshotBase(employeeId));
+      noteServerPrefsSnapshot(employeeId, res.prefs ?? {});
+      return res;
+    }
   });
   return prefsPutChain;
 }
@@ -262,6 +303,7 @@ export function SettingsPage() {
   const commit = useCallback((next: Prefs) => {
     const id = employee?.id ?? me?.employee?.id ?? "";
     revRef.current += 1;
+    const commitRev = revRef.current;
     setPrefs(next);
     if (next.workspace !== nameDraftRef.current) setNameDraft(next.workspace);
     applyLive(next);
@@ -275,13 +317,18 @@ export function SettingsPage() {
     }
     // Server copy: defaults + notification opt-ins must follow the
     // account (and drive email), not just this browser.
+    // "saved" only once the server accepts the write (including
+    // after a conflict reconcile-retry) — never optimistically,
+    // and only if no newer commit is still in flight behind it.
     void putServerPrefs(next, id)
-      .then(() => setSaveState("saved"))
+      .then(() => {
+        if (revRef.current === commitRev) setSaveState("saved");
+      })
       .catch(() => {
+        if (revRef.current !== commitRev) return;
         setSaveState("error");
         setSaveError(t("settings.footer.couldNotSave"));
       });
-    setSaveState("saved");
     return true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [employee?.id, t, applyLive]);
@@ -359,7 +406,7 @@ export function SettingsPage() {
           // was in flight: any commit since the fetch started wins.
           if (revRef.current !== revAtFetch) return;
           if (!r.prefs || !Object.keys(r.prefs).length) return;
-          noteServerPrefsRevision(id, r.prefs);
+          noteServerPrefsSnapshot(id, r.prefs);
           const merged = mergeServerPrefs(adoptPrefs(id, liveThemeMode), r.prefs);
           setPrefs(merged);
           setNameDraft(merged.workspace);
@@ -383,7 +430,7 @@ export function SettingsPage() {
           .then((r) => {
             if (revRef.current !== revAtFetch) return;
             if (!r.prefs || !Object.keys(r.prefs).length) return;
-            noteServerPrefsRevision(id, r.prefs);
+            noteServerPrefsSnapshot(id, r.prefs);
           const merged = mergeServerPrefs(adoptPrefs(id, liveThemeMode), r.prefs);
             setPrefs(merged);
             setNameDraft(merged.workspace);

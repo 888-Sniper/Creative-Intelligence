@@ -1,5 +1,11 @@
 import { useEffect, useState } from "react";
 import { EMPTY_FILTERS, useFilters, type FilterValues } from "@/state/FilterContext";
+import { useOptionalAuth } from "@/auth/AuthProvider";
+import {
+  clearCampaignStatusTouched,
+  markCampaignStatusTouched,
+  touchedCampaignStatus,
+} from "@/state/prefs";
 import { useLocale } from "@/i18n";
 
 export const SAMPLE_SCOPE_KEY = "ci-sample-scope";
@@ -8,6 +14,9 @@ interface SampleScope {
   from: string; to: string; batch: string;
   prev?: Partial<FilterValues>;
   applied?: boolean;
+  /** Explicit campaign-status choice before the demo scope
+   *  cleared filters (null = none chosen); restored on return. */
+  prevStatusTouched?: string | null;
 }
 
 function readScope(): SampleScope | null {
@@ -32,6 +41,7 @@ function readScope(): SampleScope | null {
 export function SampleScopeBanner() {
   const { t } = useLocale();
   const { filters, setFilter, clearFilters } = useFilters();
+  const employeeId = useOptionalAuth()?.me?.employee?.id ?? "";
   const [scope, setScope] = useState<SampleScope | null>(null);
 
   useEffect(() => {
@@ -52,7 +62,10 @@ export function SampleScopeBanner() {
           if (filters[k] !== EMPTY_FILTERS[k]) prev[k] = filters[k];
         });
       }
-      const next = { ...s, prev, applied: true };
+      const next = {
+        ...s, prev, applied: true,
+        prevStatusTouched: touchedCampaignStatus(employeeId),
+      };
       try {
         localStorage.setItem(SAMPLE_SCOPE_KEY, JSON.stringify(next));
       } catch { /* ignore */ }
@@ -76,6 +89,15 @@ export function SampleScopeBanner() {
     (Object.keys(EMPTY_FILTERS) as (keyof FilterValues)[]).forEach((k) => {
       setFilter(k, (prev[k] as string | undefined) ?? EMPTY_FILTERS[k]);
     });
+    // Undo the explicit-All mark the demo's programmatic clear
+    // recorded: put back exactly the pre-demo status choice.
+    if (scope.prevStatusTouched === null) {
+      clearCampaignStatusTouched(employeeId);
+    } else if (typeof scope.prevStatusTouched === "string") {
+      markCampaignStatusTouched(employeeId, scope.prevStatusTouched);
+    } else if (prev.status) {
+      markCampaignStatusTouched(employeeId, prev.status);
+    }
     try {
       localStorage.removeItem(SAMPLE_SCOPE_KEY);
     } catch { /* ignore */ }

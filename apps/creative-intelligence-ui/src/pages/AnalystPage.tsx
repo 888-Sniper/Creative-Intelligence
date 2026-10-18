@@ -438,11 +438,6 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
       }
       setRestoredScope(Object.keys(full).length ? full : null);
       restoredFirstsRef.current = firsts;
-      // A restored status is an explicit scope choice: Campaigns'
-      // saved default must not overwrite it afterwards.
-      if (firsts["status"] !== undefined) {
-        markCampaignStatusTouched(accountKey, firsts["status"]);
-      }
       // Snapshot the exact filter object the restore produces
       // (cleared defaults + first values) for drift detection.
       restoredFiltersRef.current = JSON.stringify({
@@ -456,6 +451,13 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
       clearFilters();
       for (const [k, first] of Object.entries(firsts)) {
         setFilter(k as Parameters<typeof setFilter>[0], first);
+      }
+      // A restored status is an explicit scope choice: Campaigns'
+      // saved default must not overwrite it afterwards. Marked
+      // AFTER clearFilters (which records an explicit All) so the
+      // restored value wins; absent status keeps that All.
+      if (firsts["status"] !== undefined) {
+        markCampaignStatusTouched(accountKey, firsts["status"]);
       }
     } catch (e) {
       if (gen !== convGenRef.current || key !== accountRef.current) return;

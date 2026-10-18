@@ -478,12 +478,17 @@ def test_stale_preference_revision_cannot_overwrite(conn):
     second = notifications.save_prefs(
         conn, "emp-1", {"density": "comfortable"}, base_revision=1)
     assert second["_rev"] == 2
-    # A delayed older save (base 1, pre-reset edit) must lose.
-    out = notifications.save_prefs(conn, "emp-1",
-                                   {"density": "compact"},
-                                   base_revision=1)
-    assert out["density"] == "comfortable"
+    # A delayed older save (base 1, pre-reset edit) must lose —
+    # as an EXPLICIT conflict carrying the current prefs, never a
+    # silent drop the caller can mistake for success.
+    with pytest.raises(notifications.StalePreferenceRevision) as hit:
+        notifications.save_prefs(conn, "emp-1",
+                                 {"density": "compact"},
+                                 base_revision=1)
+    assert hit.value.current["density"] == "comfortable"
+    assert hit.value.current["_rev"] == 2
     assert notifications.get_prefs(conn, "emp-1")["_rev"] == 2
+    assert notifications.get_prefs(conn, "emp-1")["density"] == "comfortable"
     # Reload lifecycle: a fresh client that GETs first (base =
     # current server version) saves successfully — no catch-up
     # rejection loop like the old client-counter design.
@@ -492,6 +497,44 @@ def test_stale_preference_revision_cannot_overwrite(conn):
         conn, "emp-1", {"density": "compact"}, base_revision=seen)
     assert third["density"] == "compact"
     assert third["_rev"] == 3
+
+
+def test_preferences_two_tab_conflict_then_reconcile(tmp_path):
+    """The cross-tab contract over HTTP: tab B saves first; tab A's
+    stale-base save is a 409 carrying B's current prefs (not a
+    200 that loses A's edit); A retries its changed keys on the
+    fresh base and BOTH tabs' edits survive."""
+    http = _authed_client(tmp_path)
+    me = http.get("/api/auth/me").json()["employee"]["id"]
+    # Establish a stored version, then both tabs load it as base.
+    http.put("/api/preferences", json={
+        "prefs": {"workspace": "Tabs"}, "employee_id": me})
+    base = http.get("/api/preferences").json()["prefs"]["_rev"]
+    # Tab B changes density and wins.
+    res_b = http.put("/api/preferences", json={
+        "prefs": {"density": "Compact"}, "employee_id": me,
+        "base_revision": base})
+    assert res_b.status_code == 200, res_b.text
+    rev_b = res_b.json()["prefs"]["_rev"]
+    # Tab A (stale base) changes theme: explicit conflict, and the
+    # body carries B's density so A can reconcile without a GET.
+    res_a = http.put("/api/preferences", json={
+        "prefs": {"theme": "dark"}, "employee_id": me,
+        "base_revision": base})
+    assert res_a.status_code == 409, res_a.text
+    current = res_a.json()["prefs"]
+    assert current["density"] == "Compact"
+    assert current["_rev"] == rev_b
+    # Nothing of A's edit was written by the rejected save.
+    assert "theme" not in http.get("/api/preferences").json()["prefs"]
+    # A retries ONLY its changed key on the fresh base.
+    res_retry = http.put("/api/preferences", json={
+        "prefs": {"theme": "dark"}, "employee_id": me,
+        "base_revision": current["_rev"]})
+    assert res_retry.status_code == 200, res_retry.text
+    final = http.get("/api/preferences").json()["prefs"]
+    assert final["density"] == "Compact"   # B's edit preserved
+    assert final["theme"] == "dark"        # A's edit landed
 
 
 def test_preferences_write_for_another_account_is_rejected(tmp_path):

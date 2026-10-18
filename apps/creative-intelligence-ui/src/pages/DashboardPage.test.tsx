@@ -6,6 +6,7 @@ import { FilterProvider } from "@/state/FilterContext";
 
 vi.mock("@/auth/AuthProvider", () => ({
   useAuth: () => ({ me: { employee: { first_name: "Ada" } } }),
+  useOptionalAuth: () => ({ me: { employee: { first_name: "Ada" } } }),
 }));
 
 const comparePayload = {

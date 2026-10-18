@@ -19,6 +19,7 @@ vi.mock("@/auth/AuthProvider", () => ({
       },
     },
   }),
+  useOptionalAuth: () => ({ me: { employee: { id: "e7" } } }),
 }));
 
 const comparePayload = {

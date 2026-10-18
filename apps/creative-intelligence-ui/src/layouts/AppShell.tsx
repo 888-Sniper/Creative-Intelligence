@@ -6,7 +6,7 @@ import { Icon } from "@/components/icons";
 import { GlobalSearch } from "@/components/GlobalSearch";
 import { SampleScopeBanner } from "@/components/SampleScopeBanner";
 import { useLocale } from "@/i18n";
-import { applyAccent, currentPrefsRevision, loadPrefs, mergeServerPrefs, noteServerPrefsRevision, notifyPrefsUpdated, savePrefs } from "@/state/prefs";
+import { applyAccent, currentPrefsRevision, loadPrefs, mergeServerPrefs, noteServerPrefsSnapshot, notifyPrefsUpdated, savePrefs } from "@/state/prefs";
 import { api } from "@/api/client";
 import { useTheme, type ThemeMode } from "@/app/useTheme";
 
@@ -66,7 +66,7 @@ export function AppShell() {
       .then((r) => {
         if (!live || !r.prefs || !Object.keys(r.prefs).length) return;
         if (currentPrefsRevision() !== revAtFetch) return;
-        noteServerPrefsRevision(employeeId, r.prefs);
+        noteServerPrefsSnapshot(employeeId, r.prefs);
         const merged = mergeServerPrefs(loadPrefs(employeeId), r.prefs);
         savePrefs(employeeId, merged);
         apply(merged);

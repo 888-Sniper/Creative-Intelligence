@@ -51,17 +51,31 @@ def get_prefs(conn, employee_id):
     return data if isinstance(data, dict) else {}
 
 
+class StalePreferenceRevision(ValueError):
+    """A save whose base version is older than the stored version.
+
+    Carries the CURRENT stored prefs so the API can return them
+    with the 409 and the client can reconcile (re-apply its own
+    changed keys on the fresh base) instead of silently losing
+    the edit while reporting success."""
+
+    def __init__(self, current):
+        super().__init__("preferences changed since they were loaded")
+        self.current = current
+
+
 def save_prefs(conn, employee_id, prefs, base_revision=None):
     """Merge-save preferences with a SERVER-ISSUED version.
 
     The server owns `_rev`: every accepted save increments it and
-    returns the new value. Clients echo the last version they saw
-    as `base_revision` (persisted locally, so it survives reloads
-    and is shared across tabs). A write whose base is older than
-    the current version is stale (e.g. a pre-reset edit still in
-    flight) and is dropped, returning current prefs unchanged.
-    Unknown base (None) accepts — first contact after a GET is the
-    normal bootstrap path."""
+    returns the new value. Clients echo the version of the
+    snapshot they edited as `base_revision`. A write whose base
+    is older than the current version is stale (another tab or a
+    pre-reset edit landed first): it raises
+    StalePreferenceRevision — an explicit conflict the caller
+    must reconcile, never a silent drop reported as success.
+    Unknown base (None) accepts — first contact after a GET is
+    the normal bootstrap path."""
     if not employee_id:
         raise ValueError("preferences need an employee")
     if not isinstance(prefs, dict):
@@ -76,7 +90,7 @@ def save_prefs(conn, employee_id, prefs, base_revision=None):
         except (TypeError, ValueError):
             raise ValueError("base_revision must be an integer")
         if base_revision < current:
-            return existing
+            raise StalePreferenceRevision(existing)
     clean["_rev"] = current + 1
     merged = {**existing, **clean}
     conn.execute(

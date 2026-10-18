@@ -401,14 +401,9 @@ export function CreativesPage() {
     setExportBusy(true);
     setBanner("");
     try {
-      const res = await fetch("/api/exports/creatives", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ creative_keys: keys, filters: scopeBody(scope) }),
-      });
-      if (!res.ok) throw new Error(t("creatives.banner.exportFailed"));
-      const blob = await res.blob();
+      const { apiBlob } = await import("@/api/client");
+      const blob = await apiBlob("POST", "/api/exports/creatives",
+        { creative_keys: keys, filters: scopeBody(scope) });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;

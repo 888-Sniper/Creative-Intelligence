@@ -100,15 +100,17 @@ def fetch_rows(token, property_id, start_date, end_date):
             total = int(total) if total is not None else None
         except (TypeError, ValueError):
             total = None
+        # Cap check BEFORE any success exit: a 250001-row result
+        # must fail loudly, never import as "complete".
+        if len(raw_rows) > 250000:
+            raise Ga4Unavailable(
+                "GA4 result exceeds the 250000-row import cap; "
+                "narrow the date range.")
         if not batch or len(batch) < page_size:
             break
         if total is not None and len(raw_rows) >= total:
             break
         offset += len(batch)
-        if offset > 250000:  # hard stop: never loop unbounded
-            raise Ga4Unavailable(
-                "GA4 result exceeds the 250000-row import cap; "
-                "narrow the date range.")
     rows = []
     for row in raw_rows:
         dims = [d.get("value", "") for d in row.get("dimensionValues") or []]
@@ -141,12 +143,12 @@ def import_rows(conn, token, property_id, start_date, end_date,
             " conversions, timezone, imported_by, imported_at)"
             " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             " ON CONFLICT (property_id, date, session_source,"
-            " session_medium, session_campaign) DO UPDATE SET"
+            " session_medium, session_campaign, imported_by)"
+            " DO UPDATE SET"
             " sessions=excluded.sessions,"
             " total_users=excluded.total_users,"
             " conversions=excluded.conversions,"
             " timezone=excluded.timezone,"
-            " imported_by=excluded.imported_by,"
             " imported_at=excluded.imported_at",
             (pid, row["date"], row["session_source"],
              row["session_medium"], row["session_campaign"],

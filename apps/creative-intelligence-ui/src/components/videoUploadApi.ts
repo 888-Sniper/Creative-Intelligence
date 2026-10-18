@@ -1,4 +1,4 @@
-import { api } from "@/api/client";
+import { api, apiForm, ApiError } from "@/api/client";
 
 /** Backend errors arrive top-level ({error, ...}) via the app's
  *  HTTPException handler — never under a {"detail"} envelope. Read
@@ -116,22 +116,12 @@ export interface MediaRecord {
   height?: number;
 }
 
-/** Multipart upload: bytes ride outside JSON (the api() helper is
- *  JSON-only), mirroring the Campaigns export fetch style. */
+/** Multipart upload through apiForm (shared session/gate handling). */
 export async function uploadMedia(creativeKey: string, file: File): Promise<MediaRecord> {
   const form = new FormData();
   form.append("creative_key", creativeKey);
   form.append("file", file, file.name);
-  const res = await fetch("/api/media/upload", {
-    method: "POST",
-    credentials: "same-origin",
-    body: form,
-  });
-  const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-  if (!res.ok) {
-    throw new Error(errorMessage(body, `Upload failed (${res.status})`));
-  }
-  return body as unknown as MediaRecord;
+  return apiForm<MediaRecord>("POST", "/api/media/upload", form);
 }
 
 export interface VideoLimits {
@@ -480,21 +470,15 @@ export async function importDataset(body: {
   draft_id: string; platform: string; filename?: string;
   csv?: string; xlsx_b64?: string; sheet?: string | number;
 }): Promise<DatasetImportResp> {
-  const res = await fetch("/api/datasets/import", {
-    method: "POST",
-    credentials: "same-origin",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-  if (!res.ok) {
-    const sheets = errorSheets(data);
-    if (sheets) {
-      throw new SheetConflictError(sheets);
+  try {
+    return await api<DatasetImportResp>("POST", "/api/datasets/import", body);
+  } catch (e) {
+    if (e instanceof ApiError) {
+      const sheets = errorSheets(e.body ?? {});
+      if (sheets) throw new SheetConflictError(sheets);
     }
-    throw new Error(errorMessage(data, `Import failed (${res.status})`));
+    throw e;
   }
-  return data as unknown as DatasetImportResp;
 }
 
 export interface DraftMatch {

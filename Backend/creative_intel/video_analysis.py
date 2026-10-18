@@ -45,25 +45,58 @@ def _roster(conn=None):
 _GEMINI_MODELS_CACHE = {"at": 0.0, "models": None}
 
 
-def _gemini_live_models():
+def _managed_credentials(conn):
+    """Eagerly resolved managed credential: {provider: (secret, base)}.
+
+    Resolved ONCE on the caller's thread. Frame processing runs in
+    a thread pool whose members must never touch the worker's
+    thread-bound SQLite connection — vision/STT receive plain
+    values from this dict instead of a DB callback.
+    """
+    if conn is None:
+        return {}
+    try:
+        from creative_intel import dispatcher as dispatcher_mod
+        db_path = _identity_db(conn)
+        if not db_path:
+            return {}
+        with dispatcher_mod._connect(db_path) as sel_conn:
+            pid, _mid, secret, base = dispatcher_mod._resolve(sel_conn)
+        return {pid: (secret, base)} if pid else {}
+    except Exception:
+        return {}
+
+
+def _gemini_live_models(conn=None):
     """Cached (5 min) live Gemini model list, or None when unknown.
 
     Discovery failure keeps the offline roster (unknown, not
     "unavailable"); a successful list is authoritative, so
     readiness never names a Gemini model the key cannot call.
+    Uses the managed Gemini credential when one is selected, else
+    the legacy env/Keychain key. Cache is keyed by credential
+    identity so one account's list never filters another's.
     """
+    import hashlib
     import time
+    creds = _managed_credentials(conn)
+    secret, base = creds.get("gemini", (None, None))
+    cache_key = hashlib.sha256(
+        ("managed" if secret else "legacy").encode()).hexdigest()[:16]
     now = time.time()
-    if _GEMINI_MODELS_CACHE["models"] is not None \
+    if _GEMINI_MODELS_CACHE.get("key") == cache_key \
+            and _GEMINI_MODELS_CACHE["models"] is not None \
             and now - _GEMINI_MODELS_CACHE["at"] < 300:
         return _GEMINI_MODELS_CACHE["models"]
     try:
         from creative_intel import providers as prov_mod
-        models = prov_mod.gemini_available_models()
+        models = prov_mod.gemini_available_models(
+            secret=secret, base_url=base)
     except Exception:
         return None
     if models:
-        _GEMINI_MODELS_CACHE.update({"at": now, "models": set(models)})
+        _GEMINI_MODELS_CACHE.update(
+            {"at": now, "models": set(models), "key": cache_key})
         return set(models)
     return None
 
@@ -116,7 +149,7 @@ def eligible_vision_roster(conn=None):
     # otherwise readiness names a model the worker cannot call.
     roster = [(p, m, t) for p, m, t in prov_mod.LiveBundle.VISION_ROSTER
               if inv.frame_eligible(p, m) and prov_mod._configured(p)]
-    live_gemini = _gemini_live_models()
+    live_gemini = _gemini_live_models(conn)
     if live_gemini is not None:
         roster = [(p, m, t) for p, m, t in roster
                   if p != "gemini" or m in live_gemini]
@@ -645,24 +678,19 @@ def run(conn, snapshot, owner="", media_dir="", providers=None,
                 "AI is not configured. Contact your administrator.")
         import copy
         prov = copy.copy(prov)
-
-        def _managed_secret(provider, _conn=conn):
-            try:
-                from creative_intel import dispatcher as _disp
-                db_path = _identity_db(_conn)
-                if not db_path:
-                    return None
-                with _disp._connect(db_path) as sel_conn:
-                    _pid, _mid, _secret, _base = _disp._resolve(sel_conn)
-            except Exception:
-                return None
-            return _secret if _pid == provider else None
-
+        # Resolve the managed credential HERE, on the worker thread
+        # that owns the DB connection. Vision races run in a thread
+        # pool; a DB callback there would use a thread-bound
+        # connection from the wrong thread and silently lose the
+        # managed key (previous P1).
+        creds = _managed_credentials(conn)
         prov.vision = prov_mod.LiveVision(
-            roster, secret_for=_managed_secret)
-        if isinstance(prov.stt, prov_mod._Unavailable) \
-                and prov_mod._configured("gemini"):
-            prov.stt = prov_mod.GeminiStt()
+            roster, secret_for=lambda p: creds.get(p))
+        if isinstance(prov.stt, prov_mod._Unavailable) and (
+                prov_mod._configured("gemini") or "gemini" in creds):
+            _gsecret, _gbase = creds.get("gemini", (None, None))
+            prov.stt = prov_mod.GeminiStt(secret=_gsecret,
+                                          base_url=_gbase)
     media = {"audio": ((prep["audio"], prep["audio_mime"])
                        if prep["audio"] else (None, None)),
              "images": prep["images"], "image_times": prep["image_times"],

@@ -27,7 +27,9 @@ import {
   TIMEZONES,
   applyAccent,
   loadPrefs,
+  mergeServerPrefs,
   savePrefs,
+  toServerPrefs,
   type Prefs,
 } from "@/state/prefs";
 import type { PublicEmployee } from "@/types/auth";
@@ -86,33 +88,7 @@ function adoptPrefs(employeeId: string, liveTheme: Prefs["theme"]): Prefs {
   return { ...loaded, theme: liveTheme };
 }
 
-/** Server preference keys (snake_case) <-> local Prefs (camelCase). */
-const SERVER_PREF_MAP: Array<[keyof Prefs, string]> = [
-  ["workspace", "workspace"], ["defaultView", "default_view"],
-  ["currency", "default_currency"], ["dateRange", "default_date_range"],
-  ["campaignView", "default_campaign_view"], ["theme", "theme"],
-  ["accent", "accent"], ["density", "density"], ["language", "language"],
-  ["timezone", "timezone"], ["emailReports", "email_reports"],
-  ["campaignUpdates", "campaign_updates"], ["aiInsights", "ai_insights"],
-  ["productUpdates", "product_updates"], ["dataUsage", "data_usage"],
-  ["shareAnalytics", "share_analytics"], ["retention", "retention"],
-];
-
-function toServerPrefs(prefs: Prefs): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [local, server] of SERVER_PREF_MAP) out[server] = prefs[local];
-  return out;
-}
-
-function mergeServerPrefs(local: Prefs, server: Record<string, unknown>): Prefs {
-  const next = { ...local };
-  for (const [localKey, serverKey] of SERVER_PREF_MAP) {
-    if (serverKey in server) {
-      (next as Record<string, unknown>)[localKey] = server[serverKey];
-    }
-  }
-  return next;
-}
+// Server-pref mapping lives in @/state/prefs (shared with AppShell).
 
 const AVATAR_MIME = ["image/jpeg", "image/png", "image/webp"];
 const AVATAR_MAX = 2 * 1024 * 1024;
@@ -355,8 +331,12 @@ export function SettingsPage() {
       && saveState !== "saving"
       && nameDraftRef.current === prefsRef.current.workspace) {
       serverMergedFor.current = id;
+      const revAtFetch = revRef.current;
       void api<{ prefs: Record<string, unknown> }>("GET", "/api/preferences")
         .then((r) => {
+          // A slow GET must never overwrite an edit made while it
+          // was in flight: any commit since the fetch started wins.
+          if (revRef.current !== revAtFetch) return;
           if (!r.prefs || !Object.keys(r.prefs).length) return;
           const merged = mergeServerPrefs(adoptPrefs(id, liveThemeMode), r.prefs);
           setPrefs(merged);
@@ -376,8 +356,10 @@ export function SettingsPage() {
         setNameDraft(loaded.workspace);
         // Server preferences win over this browser's copy so theme,
         // accent, density and defaults follow the account switch.
+        const revAtFetch = revRef.current;
         void api<{ prefs: Record<string, unknown> }>("GET", "/api/preferences")
           .then((r) => {
+            if (revRef.current !== revAtFetch) return;
             if (!r.prefs || !Object.keys(r.prefs).length) return;
             const merged = mergeServerPrefs(adoptPrefs(id, liveThemeMode), r.prefs);
             setPrefs(merged);

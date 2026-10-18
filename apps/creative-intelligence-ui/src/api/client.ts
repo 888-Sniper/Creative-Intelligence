@@ -3,10 +3,14 @@ import type { Gate } from "@/types/auth";
 export class ApiError extends Error {
   gate: Gate | "";
   status: number;
-  constructor(message: string, status: number, gate: Gate | "" = "") {
+  /** Parsed error envelope (for structured errors like sheet lists). */
+  body?: Record<string, unknown>;
+  constructor(message: string, status: number, gate: Gate | "" = "",
+              body?: Record<string, unknown>) {
     super(message);
     this.status = status;
     this.gate = gate;
+    this.body = body;
   }
 }
 
@@ -36,7 +40,8 @@ async function parse<T>(res: Response): Promise<T> {
     if (gate === "login" || gate === "pending" || gate === "suspended" || gate === "revoked") {
       gateHandler?.(gate);
     }
-    throw new ApiError(message, res.status, gate);
+    if (res.status === 401 && !gate) gateHandler?.("login");
+    throw new ApiError(message, res.status, gate, body);
   }
   return body as T;
 }

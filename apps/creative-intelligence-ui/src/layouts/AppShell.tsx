@@ -6,7 +6,8 @@ import { Icon } from "@/components/icons";
 import { GlobalSearch } from "@/components/GlobalSearch";
 import { SampleScopeBanner } from "@/components/SampleScopeBanner";
 import { useLocale } from "@/i18n";
-import { applyAccent, loadPrefs } from "@/state/prefs";
+import { applyAccent, loadPrefs, mergeServerPrefs, savePrefs } from "@/state/prefs";
+import { api } from "@/api/client";
 import { useTheme, type ThemeMode } from "@/app/useTheme";
 
 const NAV = [
@@ -47,11 +48,25 @@ export function AppShell() {
   const employeeId = me?.employee?.id ?? "";
   useEffect(() => {
     if (!employeeId) return;
-    const prefs = loadPrefs(employeeId);
-    applyAccent(prefs.accent, prefs.density);
-    if (prefs.theme === "light" || prefs.theme === "dark" || prefs.theme === "system") {
-      setThemeMode(prefs.theme as ThemeMode);
-    }
+    let live = true;
+    const apply = (prefs: ReturnType<typeof loadPrefs>) => {
+      applyAccent(prefs.accent, prefs.density);
+      if (prefs.theme === "light" || prefs.theme === "dark" || prefs.theme === "system") {
+        setThemeMode(prefs.theme as ThemeMode);
+      }
+    };
+    apply(loadPrefs(employeeId));
+    // Server copy wins at account init too, so a fresh browser gets
+    // saved appearance/defaults without visiting Settings first.
+    void api<{ prefs: Record<string, unknown> }>("GET", "/api/preferences")
+      .then((r) => {
+        if (!live || !r.prefs || !Object.keys(r.prefs).length) return;
+        const merged = mergeServerPrefs(loadPrefs(employeeId), r.prefs);
+        savePrefs(employeeId, merged);
+        apply(merged);
+      })
+      .catch(() => { /* local copy stays authoritative offline */ });
+    return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [employeeId]);
   // Mobile drawer state (slide-over under 900px) — independent from

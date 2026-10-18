@@ -879,9 +879,14 @@ class LiveVision:
     def _annotate_batch(self, use, t_secs):
         def call(item):
             provider, model, _tier = item
-            secret = self._secret_for(provider) if self._secret_for \
+            resolved = self._secret_for(provider) if self._secret_for \
                 else None
-            client = make_chat(provider, model, secret=secret)
+            if isinstance(resolved, tuple):
+                secret, base_url = (resolved + (None, None))[:2]
+            else:
+                secret, base_url = resolved, None
+            client = make_chat(provider, model, secret=secret,
+                               base_url=base_url)
             content = [{"type": "text",
                         "text": VISION_PROMPT % ", ".join(str(t) for t in t_secs)}]
             content += [_image_part(b) for b in use]
@@ -1011,8 +1016,12 @@ class GeminiStt:
 
     MODELS = ("gemini-2.5-flash", "gemini-2.5-flash-lite")
 
-    def __init__(self, models=None):
+    def __init__(self, models=None, secret=None, base_url=None):
         self.models = tuple(models or self.MODELS)
+        # Managed (AI Providers) credential, resolved eagerly by the
+        # caller on its own thread; None = legacy env/Keychain lookup.
+        self._secret = secret
+        self._base_url = base_url
 
     def transcribe(self, creative_key, audio_bytes=None, mime=None,
                    timings_out=None, language=None):
@@ -1031,7 +1040,8 @@ class GeminiStt:
         last = None
         for model in self.models:
             try:
-                client = GeminiChat(model)
+                client = GeminiChat(model, secret=self._secret,
+                                    base_url=self._base_url)
                 text = client.chat(
                     [{"role": "user", "content": content}],
                     max_tokens=2048)

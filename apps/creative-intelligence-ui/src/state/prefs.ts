@@ -174,6 +174,34 @@ export function applyAccent(accentName: string, density: string): void {
   document.body.dataset.density = density === "Compact" ? "compact" : "";
 }
 
+/** Server preference keys (snake_case) <-> local Prefs (camelCase). */
+export const SERVER_PREF_MAP: Array<[keyof Prefs, string]> = [
+  ["workspace", "workspace"], ["defaultView", "default_view"],
+  ["currency", "default_currency"], ["dateRange", "default_date_range"],
+  ["campaignView", "default_campaign_view"], ["theme", "theme"],
+  ["accent", "accent"], ["density", "density"], ["language", "language"],
+  ["timezone", "timezone"], ["emailReports", "email_reports"],
+  ["campaignUpdates", "campaign_updates"], ["aiInsights", "ai_insights"],
+  ["productUpdates", "product_updates"], ["dataUsage", "data_usage"],
+  ["shareAnalytics", "share_analytics"], ["retention", "retention"],
+];
+
+export function toServerPrefs(prefs: Prefs): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [local, server] of SERVER_PREF_MAP) out[server] = prefs[local];
+  return out;
+}
+
+export function mergeServerPrefs(local: Prefs, server: Record<string, unknown>): Prefs {
+  const next = { ...local };
+  for (const [localKey, serverKey] of SERVER_PREF_MAP) {
+    if (serverKey in server) {
+      (next as Record<string, unknown>)[localKey] = server[serverKey];
+    }
+  }
+  return next;
+}
+
 /** Route for the saved Default View ("Dashboard" stays "/"). */
 export function defaultViewPath(prefs: Prefs): string {
   const paths: Record<string, string> = {

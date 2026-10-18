@@ -338,6 +338,17 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
   // Live mirror of the visible conversation for late-answer guards.
   const activeIdRef = useRef<string | null>(null);
   useEffect(() => { activeIdRef.current = activeId; }, [activeId]);
+  // Full multi-value scope of a restored conversation. Submitted
+  // verbatim until the user changes a restored filter value.
+  const [restoredScope, setRestoredScope] =
+    useState<Record<string, string[]> | null>(null);
+  const restoredFirstsRef = useRef<Record<string, string>>({});
+  useEffect(() => {
+    if (!restoredScope) return;
+    const drifted = Object.entries(restoredFirstsRef.current)
+      .some(([k, v]) => (filters as unknown as Record<string, string>)[k] !== v);
+    if (drifted) setRestoredScope(null);
+  }, [filters, restoredScope]);
   accountRef.current = accountKey;
   const [input, setInput] = useState("");
   const [objective, setObjective] = useState(filters.objective || "reach");
@@ -404,14 +415,27 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
       setLastScope(fmtScope(data.scope));
       // Restore the conversation's filters too: a follow-up must
       // analyse the scope the visible history is about, not
-      // whatever shared filters happen to be active now.
+      // whatever shared filters happen to be active now. Filter
+      // controls hold one value per key, so the FULL multi-value
+      // scope is kept as the submission override until the user
+      // changes a restored filter (see effect below) — displaying
+      // first values must never silently narrow the scope sent.
       const scopeIn = (data.scope ?? {}) as Record<string, unknown>;
-      clearFilters();
+      const full: Record<string, string[]> = {};
+      const firsts: Record<string, string> = {};
       for (const [k, v] of Object.entries(scopeIn)) {
-        const first = Array.isArray(v) ? v[0] : v;
-        if (typeof first === "string") {
-          setFilter(k as Parameters<typeof setFilter>[0], first);
+        const vals = (Array.isArray(v) ? v : [v])
+          .filter((x): x is string => typeof x === "string");
+        if (vals.length) {
+          full[k] = vals;
+          firsts[k] = vals[0];
         }
+      }
+      setRestoredScope(Object.keys(full).length ? full : null);
+      restoredFirstsRef.current = firsts;
+      clearFilters();
+      for (const [k, first] of Object.entries(firsts)) {
+        setFilter(k as Parameters<typeof setFilter>[0], first);
       }
     } catch (e) {
       if (gen !== convGenRef.current || key !== accountRef.current) return;
@@ -522,18 +546,24 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
       const data = await api<AskResponse>("POST", "/api/analyst/ask", {
         conversation_id: activeId,
         question,
-        scope: scopeBody(scope),
+        scope: restoredScope ?? scopeBody(scope),
         objective: objective || undefined,
         language,
         max_points: maxPoints,
       });
       if (key !== accountRef.current) return;
       // The user opened another conversation while this ran: the
-      // answer belongs to the sent-in conversation only. Refresh
-      // the list, never append into the now-visible transcript.
-      if (sentIn !== null && data.conversation_id !== activeIdRef.current) {
+      // answer belongs to its own conversation only — including a
+      // first question sent with no active conversation. Refresh
+      // the list, never append into the now-visible transcript
+      // and never steal its active id.
+      const visibleNow = activeIdRef.current;
+      if (visibleNow !== null && data.conversation_id !== visibleNow) {
         await loadConversations();
         return;
+      }
+      if (sentIn === null && visibleNow === null) {
+        // Still on the new conversation this answer created.
       }
       if (!activeId) setActiveId(data.conversation_id);
       setLastScope(fmtScope(data.scope_snapshot));

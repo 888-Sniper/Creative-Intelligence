@@ -159,6 +159,7 @@ export function IntegrationCards() {
 
 interface Ga4Property { property_id: string; display_name: string }
 interface Ga4Row {
+  property_id?: string;
   date: string; session_source: string; session_medium: string;
   sessions: number; total_users: number; conversions: number;
 }
@@ -225,7 +226,11 @@ function Ga4Tools() {
         <p>{t("settings.integrations.ga4ToolsBody")}</p>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
           <select aria-label={t("settings.integrations.ga4PropertyLabel")}
-            value={propertyId} onChange={(e) => setPropertyId(e.target.value)}>
+            value={propertyId} onChange={(e) => {
+              setPropertyId(e.target.value);
+              setRows([]);
+              void loadRows(e.target.value);
+            }}>
             {properties.map((p) => (
               <option key={p.property_id} value={p.property_id}>
                 {p.display_name} ({p.property_id})
@@ -246,6 +251,7 @@ function Ga4Tools() {
         {rows.length ? (
           <table className="tbl" style={{ marginTop: 8 }}>
             <thead><tr>
+              <th>{t("settings.integrations.ga4PropertyLabel")}</th>
               <th>{t("settings.integrations.ga4Date")}</th>
               <th>{t("settings.integrations.ga4Source")}</th>
               <th>{t("settings.integrations.ga4Sessions")}</th>
@@ -253,7 +259,8 @@ function Ga4Tools() {
             </tr></thead>
             <tbody>
               {rows.slice(0, 10).map((r, i) => (
-                <tr key={`${r.date}-${r.session_source}-${i}`}>
+                <tr key={`${r.property_id ?? ""}-${r.date}-${r.session_source}-${i}`}>
+                  <td>{r.property_id ?? propertyId}</td>
                   <td>{r.date}</td>
                   <td>{r.session_source} / {r.session_medium}</td>
                   <td>{r.sessions}</td>

@@ -305,6 +305,70 @@ def test_spanish_language_accepted_by_analyst_body(tmp_path):
     assert got.json()["language"] == "es"
 
 
+def test_ga4_same_property_two_employees_keep_own_rows(conn, monkeypatch):
+    import creative_intel.ga4 as ga4_mod
+    fake = [{"date": "2026-01-01", "session_source": "google",
+             "session_medium": "cpc", "session_campaign": "x",
+             "sessions": 5, "total_users": 4, "conversions": 1.0,
+             "timezone": "UTC"}]
+    monkeypatch.setattr(ga4_mod, "fetch_rows",
+                        lambda *a, **k: list(fake))
+    ga4_mod.import_rows(conn, "tok", "123", "2026-01-01", "2026-01-01",
+                        imported_by="emp-A")
+    ga4_mod.import_rows(conn, "tok", "123", "2026-01-01", "2026-01-01",
+                        imported_by="emp-B")
+    owners = {r[0] for r in conn.execute(
+        "SELECT imported_by FROM ga4_rows WHERE property_id='123'")}
+    assert owners == {"emp-A", "emp-B"}
+
+
+def test_notification_concurrent_dedup_sends_once(tmp_path):
+    import threading
+    db = str(tmp_path / "race.db")
+    c0 = sqlite3.connect(db)
+    schema_mod.init_db(c0)
+    c0.close()
+    sent = []
+    barrier = threading.Barrier(2)
+
+    def worker():
+        c = sqlite3.connect(db, timeout=30)
+        barrier.wait(timeout=10)
+        notifications.enqueue(
+            c, "emp-1", "analysis_ready", "s", "b", dedup_key="race-1",
+            recipient="a@b.c",
+            sender=lambda to, s, b: sent.append(to))
+        c.close()
+
+    threads = [threading.Thread(target=worker) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=30)
+    assert sent == ["a@b.c"]
+
+
+def test_gemini_stt_uses_managed_secret(monkeypatch):
+    captured = {}
+
+    def fake_init(self, model, secret=None, base_url=None):
+        captured["secret"] = secret
+        captured["base_url"] = base_url
+        self.model = model
+
+    monkeypatch.setattr(prov_mod.GeminiChat, "__init__", fake_init)
+    monkeypatch.setattr(
+        prov_mod.GeminiChat, "chat",
+        lambda self, messages, max_tokens=2048:
+            json.dumps({"transcript": "ok", "confidence": 0.5}))
+    text, _conf = prov_mod.GeminiStt(
+        secret="managed-key", base_url="http://127.0.0.1:9").transcribe(
+            "ck", audio_bytes=b"RIFFx", mime="audio/wav")
+    assert text == "ok"
+    assert captured["secret"] == "managed-key"
+    assert captured["base_url"] == "http://127.0.0.1:9"
+
+
 def test_analyst_narrative_mock_mode_is_labelled(conn, monkeypatch):
     monkeypatch.delenv("CREATIVE_INTEL_PROVIDER_MODE", raising=False)
     from ci_backend import worker_handlers

@@ -468,7 +468,7 @@ CREATE TABLE IF NOT EXISTS ga4_rows (
     imported_by TEXT NOT NULL DEFAULT '',
     imported_at TEXT NOT NULL DEFAULT '',
     UNIQUE (property_id, date, session_source, session_medium,
-            session_campaign)
+            session_campaign, imported_by)
 );
 CREATE INDEX IF NOT EXISTS ga4_rows_property
     ON ga4_rows (property_id, date);
@@ -863,7 +863,56 @@ def migrate(conn):
     return added
 
 
+def _migrate_ga4_owner_unique(conn):
+    """Rebuild pre-fix ga4_rows whose UNIQUE key omitted the owner.
+
+    Without imported_by in the key, employee B importing the same
+    property overwrote imported_by and stole A's rows from A's
+    owner-filtered reads. Detected from the stored DDL; a no-op
+    once the owner-aware key exists.
+    """
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table'"
+        " AND name='ga4_rows'").fetchone()
+    if not row or not row[0]:
+        return
+    sql = row[0]
+    if "session_campaign, imported_by" in sql \
+            or "session_campaign,imported_by" in sql.replace(" ", ""):
+        return
+    conn.executescript("""
+        CREATE TABLE ga4_rows_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            property_id TEXT NOT NULL DEFAULT '',
+            date TEXT NOT NULL DEFAULT '',
+            session_source TEXT NOT NULL DEFAULT '',
+            session_medium TEXT NOT NULL DEFAULT '',
+            session_campaign TEXT NOT NULL DEFAULT '',
+            sessions INTEGER NOT NULL DEFAULT 0,
+            total_users INTEGER NOT NULL DEFAULT 0,
+            conversions REAL NOT NULL DEFAULT 0,
+            timezone TEXT NOT NULL DEFAULT '',
+            imported_by TEXT NOT NULL DEFAULT '',
+            imported_at TEXT NOT NULL DEFAULT '',
+            UNIQUE (property_id, date, session_source, session_medium,
+                    session_campaign, imported_by)
+        );
+        INSERT OR IGNORE INTO ga4_rows_new
+            (property_id, date, session_source, session_medium,
+             session_campaign, sessions, total_users, conversions,
+             timezone, imported_by, imported_at)
+            SELECT property_id, date, session_source, session_medium,
+                   session_campaign, sessions, total_users, conversions,
+                   timezone, imported_by, imported_at FROM ga4_rows;
+        DROP TABLE ga4_rows;
+        ALTER TABLE ga4_rows_new RENAME TO ga4_rows;
+        CREATE INDEX IF NOT EXISTS ga4_rows_property
+            ON ga4_rows (property_id, date);
+    """)
+
+
 def init_db(conn):
     conn.executescript(DDL)
+    _migrate_ga4_owner_unique(conn)
     migrate(conn)
     conn.commit()

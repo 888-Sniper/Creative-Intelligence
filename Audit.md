@@ -1,4 +1,4 @@
-# Creative Intelligence — audit of the seventh-round fix push
+# Creative Intelligence — audit of the eighth-round fix push
 
 You are the second, independent reviewer. Your job is to find what is
 still missing, wrong, or unsafe in the change below. Be adversarial:
@@ -11,14 +11,14 @@ it were your own finding.
 
 - Repository: https://github.com/888-Sniper/Creative-Intelligence
 - Parent on `main` (previous push):
-  `55b4c9671f5a5d2ecdb3865410d95ea8e1940868`
-  (code `b33cc7a` + Audit.md-only commit; see git history)
+  `018a937782330cbd6e5eda98af0f530dd9823d52`
+  (code `06a8fa7` + Audit.md-only commit; see git history)
 - Under review in THIS push: code commit
-  `06a8fa71196a244e36e8ca124e9877255e70785f`
-  (`Fix the seventh-round audit defects (account-bound preference writes)`)
+  `63020ee718c0b4836c773628ed4753e9a00ec4b1`
+  (`Fix the eighth-round audit defects (preference conflicts, filter clears)`)
 - After `git fetch`, the commit under review is `origin/main`.
-  Commits after `06a8fa7` on this push touch only this `Audit.md`;
-  review the code at `06a8fa7` regardless of branch head. Render
+  Commits after `63020ee` on this push touch only this `Audit.md`;
+  review the code at `63020ee` regardless of branch head. Render
   auto-deploys from `main` (`render.yaml autoDeploy: true`), but
   deployment was not verified by the implementer — do not claim
   the live site shows this push without checking it, and do not
@@ -28,22 +28,22 @@ Confirm the change with both ends named (never a one-revision diff;
 a behind checkout invents changes that are not in this push):
 
 ```
-git diff --stat 55b4c9671f5a5d2ecdb3865410d95ea8e1940868 06a8fa71196a244e36e8ca124e9877255e70785f
-git diff 55b4c9671f5a5d2ecdb3865410d95ea8e1940868 06a8fa71196a244e36e8ca124e9877255e70785f
-git rev-parse 06a8fa71196a244e36e8ca124e9877255e70785f    # must resolve
-git diff --stat 06a8fa71196a244e36e8ca124e9877255e70785f HEAD  # must touch Audit.md only
+git diff --stat 018a937782330cbd6e5eda98af0f530dd9823d52 63020ee718c0b4836c773628ed4753e9a00ec4b1
+git diff 018a937782330cbd6e5eda98af0f530dd9823d52 63020ee718c0b4836c773628ed4753e9a00ec4b1
+git rev-parse 63020ee718c0b4836c773628ed4753e9a00ec4b1    # must resolve
+git diff --stat 63020ee718c0b4836c773628ed4753e9a00ec4b1 HEAD  # must touch Audit.md only
 git rev-parse origin/main     # the commit under review, after fetch
 git status                    # stop only if the worktree is dirty
 ```
 
-Expected shape for the code diff: 8 files, 117 insertions, 37
+Expected shape for the code diff: 15 files, 410 insertions, 41
 deletions. If yours disagrees, stop and say so. A behind local
 checkout, or no local `main` branch, is not a reason to stop.
-Read files at the reviewed commit (`git show 06a8fa7:PATH` if
+Read files at the reviewed commit (`git show 63020ee:PATH` if
 needed); if a later edit moves a line, follow the symbol, not the
 stale number. Earlier audits live in git history (most recently
-`git show 55b4c96:Audit.md`, parent `422f8db`, code `b33cc7a`).
-This push answers the seventh review of `b33cc7a` (defects 1–4);
+`git show 018a937:Audit.md`, parent `55b4c96`, code `06a8fa7`).
+This push answers the eighth review of `06a8fa7` (defects 1–3);
 re-verify those first, then hunt wider. Earlier rounds' fixed
 items should be regression-checked, not re-reported unless broken.
 
@@ -51,22 +51,22 @@ items should be regression-checked, not re-reported unless broken.
 
 - Do NOT edit, commit, push, build, install, start the server, or
   activate a provider. Read-only inspection only.
-- Report ONLY defects still true at `06a8fa7`, each with: severity
-  (P1/P2/P3), observed behavior, exact file and line at `06a8fa7`,
+- Report ONLY defects still true at `63020ee`, each with: severity
+  (P1/P2/P3), observed behavior, exact file and line at `63020ee`,
   and the evidence. No evidence, no defect — use "Unverified".
 - Do NOT treat any of these as a source defect: an unrun live
   Gemini call, an unrun live browser/Render click-through, a
   previously stored analysis, missing SMTP/Meta/TikTok/GA4 console
-  credentials, or the five pre-existing test failures named at the
-  end.
-- For each of the seventh review's 4 defects, state explicitly:
+  credentials, or the five pre-existing test failures named at
+  the end.
+- For each of the eighth review's 3 defects, state explicitly:
   fixed / partly fixed / still open, with line evidence.
 - Check the tests as skeptically as the code.
 - Secrets: never print a credential value (file/line only, redacted).
 
 ## Required output format
 
-1. `Seventh-review 4 defects` — one verdict line each with evidence.
+1. `Eighth-review 3 defects` — one verdict line each with evidence.
 2. `Defects still true` — numbered, severity-ordered.
 3. `Requirements missing or only partly done`.
 4. `Areas checked, no defect found` — one line per section below.
@@ -75,78 +75,107 @@ items should be regression-checked, not re-reported unless broken.
 
 ## What the implementer claims — falsify each one
 
-### 1. Queued preference writes cannot land on the wrong account (was P1)
+### 1. Stale preference saves are explicit conflicts, reconciled before "saved"
 
-Claim. `putServerPrefs(next, employeeId)` stamps the originating
-employee at enqueue time; `PUT /api/preferences` rejects (409) any
-body whose `employee_id` differs from the authenticated employee
-(`product.py`, `preferences_put`). The serialized queue therefore
-drops cross-account writes instead of re-attributing them. Try:
-writes with no `employee_id` (older clients/other callers — still
-accepted for the signed-in account; is that safe?); the unmount
-flush path's owner id; account switch implemented as session swap
-vs full reload (does the queue survive either?); 409 surfacing as
-a Settings save error on the NEW account's screen.
+Claim. `save_prefs` raises `StalePreferenceRevision` (carrying the
+current prefs) instead of returning success
+(`Backend/creative_intel/notifications.py`); `PUT /api/preferences`
+answers 409 with `{error, prefs}` (flat body — the app strips
+FastAPI's `detail` envelope, `Backend/ci_backend/app.py`).
+Settings retries once on the fresh base and shows "saved" only
+after acceptance; the optimistic immediate "saved" and the
+earlier-commit-completion flash are gone (`SettingsPage.tsx`,
+`commitRev` guard). Try: a second consecutive 409 (three tabs);
+409 without `prefs` (account mismatch) proving no retry loop;
+retry succeeding but the OTHER keys in the conflict body being
+adopted as snapshot without the UI showing them (local UI now
+diverges from snapshot — what does the next delta do?); a failed
+LOCAL save followed by Retry (`retrySave` re-commits identical
+prefs — delta vs snapshot must still contain the unsaved keys).
 
-### 2. Server-issued preference version survives reloads and tabs
+### 2. One tab cannot overwrite another tab's unrelated edits
 
-Claim. `save_prefs(..., base_revision=…)` (`notifications.py`):
-server owns `_rev`, increments on every accepted save, drops
-writes whose base is older. Clients persist the last seen server
-version per account in localStorage (`serverPrefsRevision` /
-`noteServerPrefsRevision`, updated on every GET merge and PUT
-response) and echo it as base. Unknown base (`None`) accepts.
-Try: two tabs interleaving (tab2's stale base rejected — does its
-UI recover or loop?); first-ever save before any GET (base null
-accepts — can that resurrect stale data?); `_rev` leaking into
-client merges or exports; AppShell merge-save bumping local state
-without noting the new server rev from its GET (order of
-note-vs-merge); Settings' separate in-memory `revRef` guards vs
-the server version disagreeing.
+Claim. Each tab keeps its own confirmed server snapshot
+(`noteServerPrefsSnapshot`/`serverPrefsSnapshot`, `prefs.ts`);
+saves send ONLY `serverPrefsDelta(snapshot, next)` with the
+snapshot's version as base. Delta is computed at queue execution
+time (edit-then-revert lands correctly) but fixed before the
+first attempt (conflict retry reuses it verbatim). Try: partial
+server documents (keys absent from the snapshot are sent — can
+that clobber anything?); a GET merge landing while a PUT is
+queued (rev guards in Settings/AppShell vs the snapshot note
+order — snapshot is noted BEFORE the local merge applies; find a
+sequence where local prefs and snapshot disagree and a delta
+then restores a stale value); Reset Defaults under delta
+semantics (a key another tab changed that this tab's snapshot
+already holds at default is NOT reset — is that the right
+reading of "reset"?); two Settings mounts in one tab sharing the
+module queue/snapshot after account switch (snapshot keyed by
+employee — verify every read/write uses the same id source).
 
-### 3. Dashboard respects dates chosen before entry
+### 3. Every shared filter clear records the explicit All status
 
-Claim. Boot now marks pre-existing shared dates user-owned
-(`userDateTouched`, `bootedMode = null`) before any basis/prefs
-recompute can run (`DashboardPage.tsx`). Try: dates arriving via
-saved-view apply AFTER Dashboard mounts; Analyst restore setting
-dates then navigating to Dashboard; basis effect deps
-(`applyRangeBoot` identity) re-firing recomputes; the
-`rangeBooted` gate vs `userDateTouched` ordering on first render.
+Claim. `FilterContext.clearFilters` itself marks
+`touched = ""` for the current account (choke point), covering
+Analyst Clear All, FilterBar, Dashboard/Benchmarks/Creatives
+resets and `product.tsx` buttons. Analyst conversation restore
+re-marks AFTER its clear+set sequence; `SampleScopeBanner`
+captures the pre-demo touched state (`prevStatusTouched`,
+including "was untouched") and restores it on return via the new
+`clearCampaignStatusTouched`. Try: clears fired before identity
+loads (employee id `""` in FilterProvider vs the real id
+Campaigns reads — is the app reachable pre-identity?);
+SampleScopeBanner mounting in that same window (its apply
+effect captures the id from first render); saved-view applies
+and other programmatic `setFilter("status", …)` writers that
+bypass marking entirely; Campaigns' own status `<select>`
+onChange vs the choke point disagreeing after a clear on the
+Campaigns page itself.
 
-### 4. Campaign Reset records the explicit All choice
+### 4. Drive-by: pre-existing video journey test fixed
 
-Claim. `resetAll` calls `markCampaignStatusTouched(id, "")`
-before `clearFilters()` (`CampaignsPage.tsx`), so remounts restore
-touched-with-no-value (All) instead of the pre-reset status. Try:
-reset with no status ever touched; reset as account A then view
-as B; legacy `"1"` session entries; Reset buttons on other pages
-that clear shared filters without marking (Analyst Clear,
-Dashboard Reset) — same resurrection via Campaigns remount?
+Claim. `test_positive_journey_analysis_correction_review_export`
+failed IDENTICALLY on the untouched parent (`TypeError`:
+`LiveVision` test double rejects the `secret_for` kwarg added in
+round two). The double now accepts and ignores it
+(`tests/test_video_upload_api.py`). Verify the base failure
+yourself from history if you doubt it, and check no other test
+double in the tree stubs `LiveVision`/`readiness` with a stale
+signature.
 
 ### 5. Tests
 
-Claims. Backend: rewritten `test_stale_preference_revision_cannot_overwrite`
-(server increments, stale base loses, GET-then-save reload
-lifecycle succeeds) and new
-`test_preferences_write_for_another_account_is_rejected` (409 +
-own prefs untouched). Frontend: 330 passed; one Settings storage
-test flaked once in the full suite this session, then passed
-isolated and in the rerun — hunt for the timing dependency if you
-can find it by reading. Still missing (admitted): page-level UI
-tests for queued cross-account saves, Dashboard entry with
-pre-set dates, and Reset-then-navigate. Name exact tests you
-would require.
+Claims. Backend: stale save now asserted to RAISE with current
+prefs attached; new HTTP two-tab test (B saves → A 409 with B's
+prefs in body → A retry → both edits survive, nothing written by
+the rejected save). Frontend: Settings conflict test drives the
+real fetch mock (stateful merge-apply server) and asserts both
+PUT bodies (bases 3→9, prefs exactly `{theme}`); edit-then-
+revert lands `{theme: "light"}`; server-500 never shows saved;
+`serverPrefsDelta` unit tests; FilterContext clear test. Two
+partial `@/auth/AuthProvider` mocks (Dashboard, VideoUpload)
+gained the `useOptionalAuth` export FilterContext now uses —
+check no other test mock of that module is incomplete. Still
+missing (admitted): a page-level Analyst-Clear-All → Campaigns
+navigation test (mechanism covered at FilterContext level), and
+the previously flaky Settings storage test passed throughout
+this round (full suite + isolated) — its timing dependency is
+still unexplained.
 
 ## Evidence (implementer's machine; check plausibility, do not re-run)
 
-- `pytest tests/test_gap_completion.py`: 22 passed.
-- `pnpm test`: 330 passed (after one flaky Settings failure that
-  passed isolated and on rerun). `pnpm exec tsc --noEmit`: clean
-  (one unused-import fix). `pnpm build`: passed.
-- Full 899-test backend run remains unrepeated since round one.
-- Gemini key re-probed: still absent; user previously chose
-  "skip live run". Live workflow remains unverified.
+- FULL backend suite run this round: 911 passed, 1 skipped,
+  6 failed — the five named pre-existing failures plus the
+  video-journey double above (proven failing on the stashed
+  untouched tree, then fixed; the single test passes after).
+  `pytest tests/test_gap_completion.py`: 23 passed.
+- `pnpm test`: 338 passed. `pnpm exec tsc --noEmit`: clean.
+  `pnpm build`: passed.
+- Ruff on changed Python: 20 errors, ALL pre-existing import
+  sorting in `product.py` (identical count on `git show
+  HEAD:` content); none in the edited regions or new code.
+- Gemini key re-probed (env + Keychain): still absent; user
+  previously chose "skip live run". Live workflow unverified.
 
 ## Blocked / unverified — do not report as source defects
 

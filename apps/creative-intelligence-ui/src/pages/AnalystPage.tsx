@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, apiBlob } from "@/api/client";
 import { useFilters } from "@/state/FilterContext";
+import { markCampaignStatusTouched } from "@/state/prefs";
 import { useLocale } from "@/i18n";
 import { Icon } from "@/components/icons";
 import { LoadingButton } from "@/components/LoadingButton";
@@ -437,6 +438,11 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
       }
       setRestoredScope(Object.keys(full).length ? full : null);
       restoredFirstsRef.current = firsts;
+      // A restored status is an explicit scope choice: Campaigns'
+      // saved default must not overwrite it afterwards.
+      if (firsts["status"] !== undefined) {
+        markCampaignStatusTouched(accountKey);
+      }
       // Snapshot the exact filter object the restore produces
       // (cleared defaults + first values) for drift detection.
       restoredFiltersRef.current = JSON.stringify({

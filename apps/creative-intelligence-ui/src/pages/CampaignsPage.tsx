@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { api, ApiError, scopedPath } from "@/api/client";
 import { useFilters } from "@/state/FilterContext";
 import { useOptionalAuth } from "@/auth/AuthProvider";
-import { loadPrefs } from "@/state/prefs";
+import { campaignStatusTouched, loadPrefs, markCampaignStatusTouched } from "@/state/prefs";
 import { useLocale } from "@/i18n";
 import { Icon } from "@/components/icons";
 import { LoadingButton } from "@/components/LoadingButton";
@@ -86,12 +86,6 @@ function rate(cur: number, base: number): number | null {
   return ((cur - base) / Math.abs(base)) * 100;
 }
 
-/** Survives unmount/remount within the SPA session: once the user
- *  picks a status explicitly, the saved Default Campaign View must
- *  never override it again — including after navigating away and
- *  back (shared filters persist, component refs do not). */
-let statusTouchedAcrossMounts = false;
-
 export function CampaignsPage() {
   const { t, tp, locale, fmtNum } = useLocale();
   const unavailable = t("common.unavailable");
@@ -114,9 +108,8 @@ export function CampaignsPage() {
   // re-applied when server preferences land after mount (fresh
   // browser), until the user touches the status filter.
   const [viewBooted, setViewBooted] = useState(false);
-  const statusTouched = useRef(statusTouchedAcrossMounts);
   const applyCampaignView = useCallback(() => {
-    if (statusTouched.current || statusTouchedAcrossMounts) return;
+    if (campaignStatusTouched(me?.employee?.id ?? "")) return;
     const view = loadPrefs(me?.employee?.id ?? "").campaignView;
     if (view === "Active Only") {
       setFilter("status", "Active");
@@ -542,7 +535,7 @@ export function CampaignsPage() {
             </span>
             <select id="c-status" value={filters.status || "all"}
               title={t("campaigns.statusInfoBody")}
-              onChange={(e) => { statusTouched.current = true; statusTouchedAcrossMounts = true; setFilter("status", e.target.value === "all" ? "" : e.target.value); }}>
+              onChange={(e) => { markCampaignStatusTouched(me?.employee?.id ?? ""); setFilter("status", e.target.value === "all" ? "" : e.target.value); }}>
               <option value="all">{t("campaigns.statusAll")}</option>
               <option value="Active">{t("campaigns.statusNames.Active")}</option>
               <option value="Completed">{t("campaigns.statusNames.Completed")}</option>

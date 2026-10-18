@@ -226,11 +226,33 @@ export function DashboardPage() {
   // the boot (fresh browser), the booted window is recomputed —
   // but only while the visible dates still equal what boot set.
   const bootedWindow = useRef<{ from: string; to: string } | null>(null);
+  // Unrestricted date basis: `daily` is scoped by the very filters
+  // boot sets, so slicing it after a 30-day boot can never recover
+  // a later 90-day preference. Fetch the unscoped extent once.
+  const [basisDates, setBasisDates] = useState<string[] | null>(null);
+  useEffect(() => {
+    let live = true;
+    api<{ days: Array<{ date: string }> }>(
+      "GET", "/api/kpis/daily?days=366",
+    ).then((r) => {
+      if (live) setBasisDates((r.days ?? []).map((p) => p.date).sort());
+    }).catch(() => live && setBasisDates([]));
+    return () => { live = false; };
+  }, []);
   const applyRangeBoot = useCallback(() => {
-    if (!daily || daily.length < 2) return false;
+    const dates = basisDates && basisDates.length >= 2
+      ? basisDates
+      : (daily ?? []).map((p) => p.date).sort();
+    if (dates.length < 2) return false;
     const days = rangeDays(loadPrefs(me?.employee?.id ?? ""));
-    const dates = daily.map((p) => p.date).sort();
     if (days === null) {
+      // Late All Time: clear a previously booted window (only the
+      // exact dates boot set — user dates are never touched,
+      // enforced by the prefs-updated guard below).
+      if (bootedWindow.current) {
+        setFilter("date_from", "");
+        setFilter("date_to", "");
+      }
       bootedWindow.current = null;
       return true;
     }
@@ -239,7 +261,7 @@ export function DashboardPage() {
     setFilter("date_from", win[0]);
     setFilter("date_to", win[win.length - 1]);
     return true;
-  }, [daily, setFilter, me?.employee?.id]);
+  }, [daily, basisDates, setFilter, me?.employee?.id]);
   useEffect(() => {
     if (rangeBooted) return;
     if (filters.date || filters.date_from || filters.date_to) {

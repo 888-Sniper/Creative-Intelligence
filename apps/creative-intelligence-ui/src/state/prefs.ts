@@ -149,9 +149,11 @@ export function currentPrefsRevision(): number {
 }
 
 export function savePrefs(employeeId: string, prefs: Prefs): boolean {
+  // Bump first: an edit ATTEMPT must invalidate in-flight server
+  // merges even when storage itself fails (private mode).
+  prefsRevision += 1;
   try {
     window.localStorage.setItem(keyFor(employeeId), JSON.stringify(prefs));
-    prefsRevision += 1;
     return true;
   } catch {
     return false;
@@ -211,6 +213,32 @@ export function mergeServerPrefs(local: Prefs, server: Record<string, unknown>):
     }
   }
   return next;
+}
+
+/** Per-account "user explicitly chose a campaign status" memory.
+ *  Survives Campaigns unmount/remount within the tab session
+ *  (sessionStorage), is scoped per employee so account A's choice
+ *  never disables account B's saved default, and is also marked
+ *  when Analyst restores a conversation scope containing status. */
+const _statusTouchedMemory = new Set<string>();
+
+export function markCampaignStatusTouched(employeeId: string): void {
+  _statusTouchedMemory.add(employeeId);
+  try {
+    window.sessionStorage.setItem(`ci-status-touched:${employeeId}`, "1");
+  } catch {
+    /* memory copy still applies */
+  }
+}
+
+export function campaignStatusTouched(employeeId: string): boolean {
+  if (_statusTouchedMemory.has(employeeId)) return true;
+  try {
+    return window.sessionStorage.getItem(
+      `ci-status-touched:${employeeId}`) === "1";
+  } catch {
+    return false;
+  }
 }
 
 /** Fired after server preferences are merged into local storage so

@@ -425,11 +425,13 @@ def test_notification_forced_overlap_sends_once(tmp_path):
     release = threading.Event()
 
     def slow_sender(to, s, b):
-        # Signal mid-delivery, then BLOCK until the second thread
-        # has attempted its enqueue: overlap is guaranteed by
-        # synchronization, not by sleep timing.
+        # Signal mid-delivery, then BLOCK until released. Raise a
+        # distinctive error on timeout (not assert): enqueue would
+        # swallow AssertionError as a delivery failure and could
+        # mask a broken test as a pass.
         in_send.set()
-        assert release.wait(timeout=30)
+        if not release.wait(timeout=30):
+            raise RuntimeError("test harness: release never set")
         sent.append(to)
 
     outcomes = []
@@ -451,10 +453,20 @@ def test_notification_forced_overlap_sends_once(tmp_path):
     second = threading.Thread(target=worker)
     second.start()
     second.join(timeout=30)
+    # The second worker must have COMPLETED (as duplicate) while
+    # the first delivery was still blocked — under claim-after-
+    # send it would instead be inside its own sender here.
+    assert len(outcomes) == 1
+    assert outcomes[0].get("duplicate") is True
+    assert sent == []
     release.set()
     first.join(timeout=30)
     assert sent == ["a@b.c"]
+    assert len(outcomes) == 2
     assert sum(1 for o in outcomes if o.get("duplicate")) == 1
+    # The first (real) delivery must have SUCCEEDED — a sender
+    # timeout swallowed as "failed" must not satisfy this test.
+    assert sum(1 for o in outcomes if o.get("status") == "sent") == 1
 
 
 def test_analyst_narrative_mock_mode_is_labelled(conn, monkeypatch):

@@ -386,17 +386,11 @@ export function SettingsPage() {
     // zone return to defaults instead of staying on the previous
     // selection.
     const next = { ...DEFAULTS };
-    const id = employee?.id ?? me?.employee?.id ?? "";
-    savePrefs(id, next);
-    setPrefs(next);
-    setNameDraft(next.workspace);
+    // Go through commit(): local save + edit revision + server PUT,
+    // exactly like a normal edit — otherwise reopening Settings
+    // resurrects the pre-reset server copy.
+    commit(next);
     setNameError("");
-    setSaveState("saved");
-    setSaveError("");
-    setThemeMode(next.theme);
-    applyAccent(next.accent, next.density);
-    setLang(next.language);
-    setTimezone(next.timezone);
     notifyOk(t("toast.defaultsRestored"));
   };
 

@@ -2739,7 +2739,9 @@ async def preferences_put(request: Request,
     try:
         prefs = notify_mod.save_prefs(
             conn, who.id, raw.get("prefs") if isinstance(raw, dict)
-            else {})
+            else {},
+            revision=raw.get("revision") if isinstance(raw, dict)
+            else None)
     except ValueError as exc:
         raise _conflict(exc)
     return {"prefs": prefs}

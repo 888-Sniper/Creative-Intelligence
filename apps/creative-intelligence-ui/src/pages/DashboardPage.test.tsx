@@ -39,7 +39,16 @@ function mockFetch() {
   const mock = vi.fn(async (input: string | URL | Request) => {
     const url = String(input);
     if (url.startsWith("/api/kpis/compare")) return Response.json(comparePayload);
-    if (url.startsWith("/api/kpis/daily")) return Response.json({ days: dayPoints() });
+    if (url.startsWith("/api/kpis/daily")) {
+      // Mirror the real backend contract (benchmarks.daily_points:
+      // days must be 1..180) so an out-of-range request fails HERE
+      // instead of silently passing with mock data.
+      const days = Number(new URLSearchParams(url.split("?")[1] ?? "").get("days") ?? 30);
+      if (!Number.isInteger(days) || days < 1 || days > 180) {
+        return Response.json({ error: "days must be between 1 and 180" }, { status: 400 });
+      }
+      return Response.json({ days: dayPoints() });
+    }
     if (url.startsWith("/api/campaigns")) return Response.json({});
     if (url.startsWith("/api/creatives")) return Response.json([]);
     if (url.startsWith("/api/benchmarks")) return Response.json({});

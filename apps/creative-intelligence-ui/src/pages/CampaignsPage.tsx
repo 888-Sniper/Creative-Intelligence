@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { api, ApiError, scopedPath } from "@/api/client";
 import { useFilters } from "@/state/FilterContext";
 import { useOptionalAuth } from "@/auth/AuthProvider";
-import { campaignStatusTouched, loadPrefs, markCampaignStatusTouched } from "@/state/prefs";
+import { loadPrefs, markCampaignStatusTouched, touchedCampaignStatus } from "@/state/prefs";
 import { useLocale } from "@/i18n";
 import { Icon } from "@/components/icons";
 import { LoadingButton } from "@/components/LoadingButton";
@@ -109,7 +109,13 @@ export function CampaignsPage() {
   // browser), until the user touches the status filter.
   const [viewBooted, setViewBooted] = useState(false);
   const applyCampaignView = useCallback(() => {
-    if (campaignStatusTouched(me?.employee?.id ?? "")) return;
+    const touched = touchedCampaignStatus(me?.employee?.id ?? "");
+    if (touched !== null) {
+      // Reload case: filters reset to empty but the explicit
+      // choice survived — restore the VALUE, don't strand on All.
+      if (touched && !filters.status) setFilter("status", touched);
+      return;
+    }
     const view = loadPrefs(me?.employee?.id ?? "").campaignView;
     if (view === "Active Only") {
       setFilter("status", "Active");
@@ -535,7 +541,7 @@ export function CampaignsPage() {
             </span>
             <select id="c-status" value={filters.status || "all"}
               title={t("campaigns.statusInfoBody")}
-              onChange={(e) => { markCampaignStatusTouched(me?.employee?.id ?? ""); setFilter("status", e.target.value === "all" ? "" : e.target.value); }}>
+              onChange={(e) => { const v = e.target.value === "all" ? "" : e.target.value; markCampaignStatusTouched(me?.employee?.id ?? "", v); setFilter("status", v); }}>
               <option value="all">{t("campaigns.statusAll")}</option>
               <option value="Active">{t("campaigns.statusNames.Active")}</option>
               <option value="Completed">{t("campaigns.statusNames.Completed")}</option>

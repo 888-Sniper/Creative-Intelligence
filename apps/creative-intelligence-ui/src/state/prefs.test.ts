@@ -5,6 +5,7 @@ import {
   markCampaignStatusTouched,
   savePrefs,
   loadPrefs,
+  touchedCampaignStatus,
 } from "./prefs";
 
 describe("campaign status touched (per account)", () => {
@@ -19,10 +20,15 @@ describe("campaign status touched (per account)", () => {
 
   it("is scoped per employee and survives remount via sessionStorage", () => {
     expect(campaignStatusTouched("emp-a")).toBe(false);
-    markCampaignStatusTouched("emp-a");
+    expect(touchedCampaignStatus("emp-a")).toBeNull();
+    markCampaignStatusTouched("emp-a", "Completed");
     expect(campaignStatusTouched("emp-a")).toBe(true);
+    // The VALUE travels with the flag so a reload restores it
+    // instead of stranding the page on All.
+    expect(touchedCampaignStatus("emp-a")).toBe("Completed");
     // Account B's saved default must not be disabled by A's choice.
     expect(campaignStatusTouched("emp-b")).toBe(false);
+    expect(touchedCampaignStatus("emp-b")).toBeNull();
   });
 
   it("bumps the edit revision on every save, including revert-to-original", () => {

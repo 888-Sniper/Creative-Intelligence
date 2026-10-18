@@ -215,30 +215,44 @@ export function mergeServerPrefs(local: Prefs, server: Record<string, unknown>):
   return next;
 }
 
-/** Per-account "user explicitly chose a campaign status" memory.
- *  Survives Campaigns unmount/remount within the tab session
- *  (sessionStorage), is scoped per employee so account A's choice
- *  never disables account B's saved default, and is also marked
- *  when Analyst restores a conversation scope containing status. */
-const _statusTouchedMemory = new Set<string>();
+/** Per-account explicit campaign-status choice, VALUE included.
+ *  Flag and value live together (sessionStorage + memory) so a
+ *  reload — which resets shared filters to empty — restores the
+ *  chosen status instead of keeping the flag but losing the value
+ *  (which used to strand the page on "All"). Scoped per employee;
+ *  also marked when Analyst restores a scope containing status. */
+const _statusTouchedMemory = new Map<string, string>();
 
-export function markCampaignStatusTouched(employeeId: string): void {
-  _statusTouchedMemory.add(employeeId);
+export function markCampaignStatusTouched(employeeId: string,
+                                          value = ""): void {
+  _statusTouchedMemory.set(employeeId, value);
   try {
-    window.sessionStorage.setItem(`ci-status-touched:${employeeId}`, "1");
+    window.sessionStorage.setItem(
+      `ci-status-touched:${employeeId}`, value || "1");
   } catch {
     /* memory copy still applies */
   }
 }
 
-export function campaignStatusTouched(employeeId: string): boolean {
-  if (_statusTouchedMemory.has(employeeId)) return true;
-  try {
-    return window.sessionStorage.getItem(
-      `ci-status-touched:${employeeId}`) === "1";
-  } catch {
-    return false;
+/** The explicitly chosen status for this account, or null if none.
+ *  Legacy flag-only entries ("1") return "" (touched, value lost
+ *  before this fix — treated as touched with no value to restore). */
+export function touchedCampaignStatus(employeeId: string): string | null {
+  if (_statusTouchedMemory.has(employeeId)) {
+    return _statusTouchedMemory.get(employeeId) ?? "";
   }
+  try {
+    const raw = window.sessionStorage.getItem(
+      `ci-status-touched:${employeeId}`);
+    if (raw === null) return null;
+    return raw === "1" ? "" : raw;
+  } catch {
+    return null;
+  }
+}
+
+export function campaignStatusTouched(employeeId: string): boolean {
+  return touchedCampaignStatus(employeeId) !== null;
 }
 
 /** Fired after server preferences are merged into local storage so

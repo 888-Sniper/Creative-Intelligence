@@ -469,6 +469,22 @@ def test_notification_forced_overlap_sends_once(tmp_path):
     assert sum(1 for o in outcomes if o.get("status") == "sent") == 1
 
 
+def test_stale_preference_revision_cannot_overwrite(conn):
+    notifications.save_prefs(conn, "emp-1", {"density": "compact"},
+                             revision=5)
+    # A delayed older save (pre-reset edit) must lose.
+    out = notifications.save_prefs(conn, "emp-1",
+                                   {"density": "comfortable"},
+                                   revision=3)
+    assert out["density"] == "compact"
+    assert notifications.get_prefs(conn, "emp-1")["density"] == "compact"
+    # A newer save (the reset) applies.
+    out = notifications.save_prefs(conn, "emp-1",
+                                   {"density": "comfortable"},
+                                   revision=6)
+    assert out["density"] == "comfortable"
+
+
 def test_analyst_narrative_mock_mode_is_labelled(conn, monkeypatch):
     monkeypatch.delenv("CREATIVE_INTEL_PROVIDER_MODE", raising=False)
     from ci_backend import worker_handlers

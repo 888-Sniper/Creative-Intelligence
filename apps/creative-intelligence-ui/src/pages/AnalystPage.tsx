@@ -441,7 +441,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
       // A restored status is an explicit scope choice: Campaigns'
       // saved default must not overwrite it afterwards.
       if (firsts["status"] !== undefined) {
-        markCampaignStatusTouched(accountKey);
+        markCampaignStatusTouched(accountKey, firsts["status"]);
       }
       // Snapshot the exact filter object the restore produces
       // (cleared defaults + first values) for drift detection.

@@ -26,12 +26,25 @@ import {
   DEFAULTS,
   TIMEZONES,
   applyAccent,
+  currentPrefsRevision,
   loadPrefs,
   mergeServerPrefs,
   savePrefs,
   toServerPrefs,
   type Prefs,
 } from "@/state/prefs";
+
+/** Serialized preference PUTs: writes land in edit order (a slow
+ *  older request can never overwrite a newer save such as Reset),
+ *  and each carries the edit revision the server checks. */
+let prefsPutChain: Promise<unknown> = Promise.resolve();
+function putServerPrefs(next: Prefs): Promise<unknown> {
+  const revision = currentPrefsRevision();
+  prefsPutChain = prefsPutChain.catch(() => {}).then(() =>
+    api("PUT", "/api/preferences",
+        { prefs: toServerPrefs(next), revision }));
+  return prefsPutChain;
+}
 import type { PublicEmployee } from "@/types/auth";
 
 const ACCENTS: Record<string, { teal: string; dark: string; ink: string }> = {
@@ -254,7 +267,7 @@ export function SettingsPage() {
     }
     // Server copy: defaults + notification opt-ins must follow the
     // account (and drive email), not just this browser.
-    void api("PUT", "/api/preferences", { prefs: toServerPrefs(next) })
+    void putServerPrefs(next)
       .then(() => setSaveState("saved"))
       .catch(() => {
         setSaveState("error");
@@ -311,7 +324,7 @@ export function SettingsPage() {
       const id = employee?.id ?? me?.employee?.id ?? "";
       const next = { ...prefsRef.current, workspace: pending.slice(0, 80) };
       savePrefs(id, next);
-      void api("PUT", "/api/preferences", { prefs: toServerPrefs(next) }).catch(() => {});
+      void putServerPrefs(next).catch(() => {});
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

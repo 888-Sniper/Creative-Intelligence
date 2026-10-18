@@ -226,14 +226,21 @@ export function DashboardPage() {
   // the boot (fresh browser), the booted window is recomputed —
   // but only while the visible dates still equal what boot set.
   const bootedWindow = useRef<{ from: string; to: string } | null>(null);
+  // How boot resolved: "finite" window, automatic "all" (saved All
+  // Time applied by boot — a later finite preference may replace
+  // it), or null (not booted / user-owned dates).
+  const bootedMode = useRef<"finite" | "all" | null>(null);
+  const userDateTouched = useRef(false);
   // Unrestricted date basis: `daily` is scoped by the very filters
   // boot sets, so slicing it after a 30-day boot can never recover
   // a later 90-day preference. Fetch the unscoped extent once.
+  // Backend accepts days 1..180 — 180 covers the 90-day maximum
+  // saved range; requesting more fails validation outright.
   const [basisDates, setBasisDates] = useState<string[] | null>(null);
   useEffect(() => {
     let live = true;
     api<{ days: Array<{ date: string }> }>(
-      "GET", "/api/kpis/daily?days=366",
+      "GET", "/api/kpis/daily?days=180",
     ).then((r) => {
       if (live) setBasisDates((r.days ?? []).map((p) => p.date).sort());
     }).catch(() => live && setBasisDates([]));
@@ -254,10 +261,12 @@ export function DashboardPage() {
         setFilter("date_to", "");
       }
       bootedWindow.current = null;
+      bootedMode.current = "all";
       return true;
     }
     const win = dates.slice(-days);
     bootedWindow.current = { from: win[0], to: win[win.length - 1] };
+    bootedMode.current = "finite";
     setFilter("date_from", win[0]);
     setFilter("date_to", win[win.length - 1]);
     return true;
@@ -270,8 +279,37 @@ export function DashboardPage() {
     }
     if (applyRangeBoot()) setRangeBooted(true);
   }, [filters.date, filters.date_from, filters.date_to, rangeBooted, applyRangeBoot]);
+  // Any date the user sets outside the booted window marks the
+  // range user-owned (including an explicit clear back to empty).
+  useEffect(() => {
+    const booted = bootedWindow.current;
+    const hasDates = Boolean(filters.date || filters.date_from || filters.date_to);
+    if (bootedMode.current === "finite" && booted) {
+      if (filters.date_from !== booted.from || filters.date_to !== booted.to) {
+        userDateTouched.current = true;
+      }
+    } else if (bootedMode.current === "all" && hasDates) {
+      userDateTouched.current = true;
+    }
+  }, [filters.date, filters.date_from, filters.date_to]);
+  // When the unrestricted basis lands after a scoped-fallback boot,
+  // recompute the window from it (still only while untouched).
+  useEffect(() => {
+    if (!basisDates || basisDates.length < 2) return;
+    if (!rangeBooted || userDateTouched.current) return;
+    applyRangeBoot();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [basisDates]);
   useEffect(() => {
     const onPrefs = () => {
+      if (userDateTouched.current) return;
+      if (bootedMode.current === "all") {
+        // Automatic All Time → a late finite preference applies.
+        if (!filters.date && !filters.date_from && !filters.date_to) {
+          applyRangeBoot();
+        }
+        return;
+      }
       const booted = bootedWindow.current;
       if (!booted) return;
       // User changed dates since boot: their choice wins.
@@ -280,7 +318,7 @@ export function DashboardPage() {
     };
     window.addEventListener("ci-prefs-updated", onPrefs);
     return () => window.removeEventListener("ci-prefs-updated", onPrefs);
-  }, [applyRangeBoot, filters.date_from, filters.date_to]);
+  }, [applyRangeBoot, filters.date, filters.date_from, filters.date_to]);
 
   const hour = new Date().getHours();
   const part = hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening";

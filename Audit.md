@@ -12,9 +12,11 @@ it were your own finding.
 - Repository: https://github.com/888-Sniper/Creative-Intelligence
 - Base (reviewed `main`): `5dcb3a0a0d68a15bf3bd67174402944a0cdf2c55`
   (`Fix the frontend typecheck and ignore a stale Compare response`)
-- Under review: branch `feature/complete-gaps-2026-10-18`, commit
-  `d6a8ae7b220507c2346a93ed3fc809e60d621061`
-  (`Complete the video-to-report, Analyst, templates, export and settings gaps`)
+- Under review: branch `feature/complete-gaps-2026-10-18`, code
+  commit `d6a8ae7b220507c2346a93ed3fc809e60d621061`
+  (`Complete the video-to-report, Analyst, templates, export and settings gaps`).
+  Commits after it on this branch touch only this `Audit.md`;
+  review the code at `d6a8ae7` regardless of branch head.
 - This branch is local only. It has NOT been pushed to `main` and
   NOT deployed; Render still serves `5dcb3a0`. GitHub `main` will
   NOT show this Audit.md or the change. Check out the local branch.
@@ -34,7 +36,8 @@ deletions are this file replacing the 2026-10-09 audit). If your
 diff disagrees, stop and say so. Also confirm:
 
 ```
-git rev-parse HEAD            # must be d6a8ae7b220507c2346a93ed3fc809e60d621061
+git rev-parse d6a8ae7b220507c2346a93ed3fc809e60d621061   # must resolve (the code under review)
+git diff --stat d6a8ae7b220507c2346a93ed3fc809e60d621061 HEAD   # must touch Audit.md only
 git rev-parse origin/main     # must be 5dcb3a0a0d68a15bf3bd67174402944a0cdf2c55
 git status                    # stop only if the worktree is dirty
 ```

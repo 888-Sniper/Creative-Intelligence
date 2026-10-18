@@ -1,4 +1,4 @@
-# Creative Intelligence — audit of the second-round fix push
+# Creative Intelligence — audit of the third-round fix push
 
 You are the second, independent reviewer. Your job is to find what is
 still missing, wrong, or unsafe in the change below. Be adversarial:
@@ -11,14 +11,14 @@ it were your own finding.
 
 - Repository: https://github.com/888-Sniper/Creative-Intelligence
 - Parent on `main` (previous push):
-  `5336e41171cf27ab6c1fbfbf23664adfb54eae33`
-  (code `8d60451` + Audit.md-only commit; see git history)
+  `f86be61b62fab6a3a32e4d81dcb60b481fb97d9e`
+  (code `6e7c003` + Audit.md-only commit; see git history)
 - Under review in THIS push: code commit
-  `6e7c003f9134a5571b21c44a49373fbe26c3d07b`
-  (`Fix the second-round audit defects (managed video threads, GA4 ownership, races)`)
+  `6a610fb9265be3768473047def1cfb435a1d2c2d`
+  (`Fix the third-round audit defects (migration recovery, scope and merge races)`)
 - After `git fetch`, the commit under review is `origin/main`.
-  Commits after `6e7c003` on this push touch only this `Audit.md`;
-  review the code at `6e7c003` regardless of branch head. Render
+  Commits after `6a610fb` on this push touch only this `Audit.md`;
+  review the code at `6a610fb` regardless of branch head. Render
   auto-deploys from `main` (`render.yaml autoDeploy: true`), but
   deployment was not verified by the implementer — do not claim
   the live site shows this push without checking it, and do not
@@ -28,186 +28,158 @@ Confirm the change with both ends named (never a one-revision diff;
 a behind checkout invents changes that are not in this push):
 
 ```
-git diff --stat 5336e41171cf27ab6c1fbfbf23664adfb54eae33 6e7c003f9134a5571b21c44a49373fbe26c3d07b
-git diff 5336e41171cf27ab6c1fbfbf23664adfb54eae33 6e7c003f9134a5571b21c44a49373fbe26c3d07b
-git rev-parse 6e7c003f9134a5571b21c44a49373fbe26c3d07b    # must resolve
-git diff --stat 6e7c003f9134a5571b21c44a49373fbe26c3d07b HEAD  # must touch Audit.md only
+git diff --stat f86be61b62fab6a3a32e4d81dcb60b481fb97d9e 6a610fb9265be3768473047def1cfb435a1d2c2d
+git diff f86be61b62fab6a3a32e4d81dcb60b481fb97d9e 6a610fb9265be3768473047def1cfb435a1d2c2d
+git rev-parse 6a610fb9265be3768473047def1cfb435a1d2c2d    # must resolve
+git diff --stat 6a610fb9265be3768473047def1cfb435a1d2c2d HEAD  # must touch Audit.md only
 git rev-parse origin/main     # the commit under review, after fetch
 git status                    # stop only if the worktree is dirty
 ```
 
-Expected shape for the code diff: 15 files, 318 insertions, 129
+Expected shape for the code diff: 9 files, 262 insertions, 54
 deletions. If yours disagrees, stop and say so. A behind local
 checkout, or no local `main` branch, is not a reason to stop.
-Read files at the reviewed commit (`git show 6e7c003:PATH` if
+Read files at the reviewed commit (`git show 6a610fb:PATH` if
 needed); if a later edit moves a line, follow the symbol, not the
-stale number. For full history read the earlier audits in git
-history: `git show fbb9a65:Audit.md` (base `5dcb3a0`, code
-`d6a8ae7`) and `git show 5336e41:Audit.md` (parent `fbb9a65`, code
-`8d60451`). This push answers the second review of `8d60451`
-(9 fixed / 3 partly fixed, 8 remaining defects, plus its
-"Requirements missing" list); re-verify those first, then hunt wider.
+stale number. Earlier audits live in git history
+(`git show fbb9a65:Audit.md`, `git show 5336e41:Audit.md`,
+`git show f86be61:Audit.md`). This push answers the third review
+of `6e7c003` (defects 1–7 + consumer-reactivity note); re-verify
+those first, then hunt wider. Earlier rounds' fixed items should
+be regression-checked, not re-reported unless broken again.
 
 ## Hard rules for this audit
 
 - Do NOT edit, commit, push, build, install, start the server, or
   activate a provider. Read-only inspection only.
-- Report ONLY defects still true at `6e7c003`, each with: severity
-  (P1/P2/P3), observed behavior, exact file and line at `6e7c003`,
-  and the evidence (quoted code or a minimal reproduction by
-  reasoning over the code). No evidence, no defect — list it under
-  "Unverified" instead.
+- Report ONLY defects still true at `6a610fb`, each with: severity
+  (P1/P2/P3), observed behavior, exact file and line at `6a610fb`,
+  and the evidence. No evidence, no defect — use "Unverified".
 - Do NOT treat any of these as a source defect: an unrun live
   Gemini call, an unrun live browser/Render click-through, a
   previously stored analysis, missing SMTP/Meta/TikTok/GA4 console
   credentials, or the five pre-existing test failures named at the
-  end. They are blockers/unverified, recorded below.
-- Do NOT report an item as open when the cited lines do what the
-  matching section says. Conversely, do NOT mark an item fixed from
-  a summary, a comment, or a test name — open the implementation.
-  For each of the second review's 8 defects, state explicitly:
+  end.
+- For each of the third review's 7 defects, state explicitly:
   fixed / partly fixed / still open, with line evidence.
-- Check the tests as skeptically as the code: a test that encodes
-  the same wrong assumption as the fix proves nothing.
-- Secrets: never print a credential value. If you find one in the
-  diff, report file and line only, redacted.
+- Check the tests as skeptically as the code.
+- Secrets: never print a credential value (file/line only, redacted).
 
 ## Required output format
 
-1. `Second-review 8 defects` — one verdict line each (fixed /
-   partly fixed / still open) with file:line evidence at `6e7c003`.
-2. `Defects still true` — numbered, severity-ordered (above format).
+1. `Third-review 7 defects` — one verdict line each with evidence.
+2. `Defects still true` — numbered, severity-ordered.
 3. `Requirements missing or only partly done`.
-4. `Areas checked, no defect found` — one line per numbered section
-   below, naming what you actually opened. Silence is not a pass.
-5. `Unverified` — anything you could not confirm by reading, and
-   exactly what run/access would settle it.
-6. End with one verdict sentence: ship / ship after fixes / do not
-   ship, naming the blocking items by number.
+4. `Areas checked, no defect found` — one line per section below.
+5. `Unverified` — what reading cannot settle, and what would.
+6. One verdict sentence: ship / ship after fixes / do not ship.
 
 ## What the implementer claims — falsify each one
 
-### 1. Managed video credentials work in worker threads (was P1)
+### 1. GA4 migration is transactional and recoverable (was P1)
 
-Claim. `_managed_credentials(conn)` (`video_analysis.py`) resolves
-`{provider: (secret, base_url)}` once on the worker thread;
-`run()` builds `LiveVision(roster, secret_for=lambda p: creds.get(p))`
-— plain dict reads, no DB access in the frame thread pool.
-`LiveVision._annotate_batch` unpacks `(secret, base_url)` into
-`make_chat`. Try: any remaining DB/conn use inside `race()` workers;
-secret/base for non-Gemini managed providers; `_resolve` raising the
-not-configured sentinel (must degrade to `{}`, not crash the job);
-thread-safety of the shared `creds` dict and `last_winner`.
+Claim. `_migrate_ga4_owner_unique` (`schema.py`) first recovers a
+stranded `ga4_rows_new` (rename if `ga4_rows` is gone; stash+merge
+if both exist), then rebuilds inside one `BEGIN IMMEDIATE`
+transaction (copy live + stash, drop, rename, index, COMMIT;
+ROLLBACK on error). Try: crash points before BEGIN, mid-transaction,
+and between COMMIT and `migrate()`; connections already inside a
+transaction when `init_db` runs; `ga4_rows_stash` left by a crash
+inside the transaction (does rollback really restore the rename?);
+foreign keys/indexes lost; duplicate rows across live+stash with
+different metrics (which copy wins, is that honest?).
 
-### 2. Managed Gemini transcription
+### 2. AppShell cannot undo a newer edit; consumers react
 
-Claim. `GeminiStt(models, secret, base_url)` (`providers.py`) passes
-both into `GeminiChat`; `run()` enables it when legacy Gemini is
-configured OR `"gemini" in creds`. Try: managed-only install with
-speech, silent clip vs transcription failure honesty, base-URL
-providers whose Gemini-compatible endpoint rejects audio parts.
+Claim. AppShell snapshots local prefs JSON at fetch start and drops
+the server response if local prefs changed meanwhile; on merge it
+fires `ci-prefs-updated` (`state/prefs.ts` `notifyPrefsUpdated`).
+`LocalePrefsSync` re-applies language/timezone on that event (tick
+state + appliedFor reset). Campaigns re-applies Default Campaign
+View on the event until the user touches the status select
+(`statusTouched`). Try: edit-in-flight via theme toggle (does it
+write prefs?), Settings and AppShell fetches racing each other,
+event loops (merge → savePrefs → event → re-apply), campaign view
+re-applying over a status set by saved-view/deep-link rather than
+the select.
 
-### 3. Analyst conversation races and scope fidelity
+### 3. Analyst scope coherence and Clear-All race
 
-Claims. First-question sends are guarded too: append happens only
-when `data.conversation_id === activeIdRef.current`, or when both
-sent-in and visible ids are null (`AnalystPage.tsx`, `send()`).
-Restored scope keeps the FULL multi-value map as `restoredScope`
-(submitted verbatim) while controls show first values; any drift
-from the restored first values clears the override. Try: React
-batching assumptions in the drift effect (clear-then-set in one
-tick); scope keys outside `FilterValues`; restored scope surviving
-into a NEW conversation; objective/language vs scope disagreement.
+Claims. Drift detection compares the ENTIRE filters object to the
+exact snapshot the restore produced (`restoredFiltersRef`), so
+adding any new filter ends the override. Downloads use
+`restoredScope ?? scopeBody(scope)` like chat. `send()` captures
+`convGenRef` and drops late answers after Clear All/selection
+bumps. Try: key-order fragility of the JSON snapshot vs
+`EMPTY_FILTERS` order; React batching (clear+sets landing in
+separate renders killing the override instantly); date-range
+preset buttons that set filters through other paths; workbook
+download scope (separate path — still single-value?); Clear during
+`loadConversations` await.
 
-### 4. Settings/AppShell preference freshness
+### 4. Discovery cache identity; managed STT precedence
 
-Claims. Both server-merge sites capture `revRef` at fetch start and
-discard the response if any commit landed meanwhile
-(`SettingsPage.tsx`). `SERVER_PREF_MAP`/`toServerPrefs`/
-`mergeServerPrefs` moved to `state/prefs.ts`; `AppShell.tsx`
-fetches `/api/preferences` at account init, merges server-first,
-persists locally, and applies theme/accent/density — a fresh
-browser no longer needs a Settings visit. Try: AppShell fetch
-racing a Settings edit (no rev guard there — can it clobber?);
-account switch mid-fetch (`live` flag scope); theme select in
-Settings vs shell-applied mode disagreeing.
+Claims. Cache key hashes the actual secret + base URL (managed) or
+the legacy secret — fingerprints only, secrets never stored.
+Managed Gemini replaces a legacy `GeminiStt`/`_Unavailable` STT;
+dedicated `LiveStt` (Deepgram/Groq) is untouched. Try: two managed
+accounts alternating within 5 minutes; secret rotation to an
+invalid key (discovery returns None → offline roster — honest?);
+`live_secret` Keychain access cost/failure inside `_gemini_live_models`
+on every readiness poll; providers whose bundle STT is `LiveStt`
+wrapping a Gemini entry (does the precedence rule miss it?).
 
-### 5. GA4 ownership, selector truth, cap
+### 5. GA4 rows generation guard
 
-Claims. `ga4_rows` UNIQUE now includes `imported_by` (DDL +
-`_migrate_ga4_owner_unique` rebuild in `schema.py`); the upsert no
-longer overwrites `imported_by`. The 250000-row cap is checked
-before every success exit in `fetch_rows`. `Ga4Tools` reloads and
-clears rows on property change and shows a property column. Try:
-migration on a database with duplicate legacy rows, foreign keys /
-indexes lost in the rebuild, concurrent imports by two employees,
-cap boundary at exactly 250000/250001, selector showing rows while
-a reload is in flight.
+Claim. `loadRows` captures a generation + selected property and
+drops stale responses (`IntegrationCards.tsx`). Try: initial
+all-properties load racing the first selection; import-triggered
+reload racing a selector change; unmount during flight.
 
-### 6. No raw fetch left for exports/uploads
+### 6. Tests
 
-Claims. Campaign/Creative/Benchmark exports use `apiBlob`;
-`uploadMedia` uses `apiForm`; `importDataset` uses `api()` and
-recovers sheet lists from `ApiError.body` (new field, populated in
-`parse()`; bare 401 also re-gates). Grep should find no
-`fetch("/api…` outside `api/client.ts`. Try: `SheetConflictError`
-flow end to end (envelope shapes), error-message regressions from
-`errorMessage` removal at those sites, downloads that relied on
-saving non-2xx bodies, any `fetch(` with template-built `/api`
-URLs the grep missed.
-
-### 7. Tests actually cover the races
-
-Claims. New in `tests/test_gap_completion.py` (18 total):
-two-employee same-property GA4 imports keep both owners' rows;
-two-thread same-dedup-key enqueue sends exactly once (file DB +
-barrier); `GeminiStt` forwards managed secret/base into
-`GeminiChat`. Judge whether the thread test would fail against the
-pre-fix claim-after-send code, and name still-missing coverage
-(e.g. eager credential resolution under a thread-bound connection,
-250001-row cap, first-question race UI test).
+Claims. New in `tests/test_gap_completion.py` (20 total):
+`test_ga4_migration_recovers_stranded_rows` (pre-fix table +
+stranded `_new`, both rows survive, idempotent reopen) and
+`test_notification_forced_overlap_sends_once` (slow sender holds
+delivery open while the second thread arrives). Judge whether the
+overlap test would fail against claim-after-send, and whether the
+migration test covers the crash-after-DROP state (only `_new`
+exists) — it seeds both tables; check the rename-only branch by
+reading. Name still-missing UI race tests specifically.
 
 ## Evidence (implementer's machine; check plausibility, do not re-run)
 
-- `pytest tests/test_gap_completion.py`: 18 passed.
-- `pytest tests/test_video_analysis.py tests/test_analyst_api.py
-  tests/test_provider_status.py`: 84 passed.
-- `pnpm test`: 328 passed. `pnpm exec tsc --noEmit`: clean (one
-  cast fix in the drift effect). `pnpm build`: passed. Ruff on
-  changed Python: clean.
-- The full 899-test backend run from the first push was NOT
-  repeated for either fix push — flag any area whose risk makes
-  that omission matter.
-- Gemini key re-probed before this push: still absent (env, login
-  shell, launchctl, Keychain). Live workflow remains unverified.
+- `pytest tests/test_gap_completion.py`: 20 passed.
+- `pytest tests/test_video_analysis.py tests/test_analyst_api.py`:
+  82 passed. Ruff on changed Python: clean.
+- `pnpm test`: 328 passed (one earlier run in this session failed
+  with no named test, then passed twice consecutively — treat as
+  an unexamined flake; hunt for timing-sensitive tests touched
+  here). `pnpm exec tsc --noEmit`: clean. `pnpm build`: passed.
+- Full 899-test backend run still not repeated since the first
+  push. Gemini key re-probed: still absent everywhere checked.
 
 ## Blocked / unverified — do not report as source defects
 
 - **Live Gemini run: BLOCKED.** `CREATIVE_INTEL_KEY_GEMINI` empty
-  everywhere checked. No live model call, job id, browser
-  click-through, or screenshot exists for any push. Unblock: set
-  the key (env or Keychain `creative-intel-gemini`),
-  `CREATIVE_INTEL_PROVIDER_MODE=live`, activate a Gemini model in
-  AI Providers, run `04-quentin-retargeting-si.mp4` through the
-  wizard, reload, download, compare findings.
+  in env, login shell, launchctl, and macOS Keychain. No live
+  model call, job id, browser click-through, FPS measurement, or
+  screenshot exists for any push. Unblock steps as in prior audits.
 - **Email delivery: BLOCKED** on `CREATIVE_INTEL_SMTP_*`.
 - **Meta/TikTok/GA4 live OAuth/imports: BLOCKED** on console
   credentials in `docs/RENDER.md`.
-- **Production:** Render auto-deploys `main`; no deployment of any
-  push was verified.
+- **Production:** Render auto-deploys `main`; unverified.
 
 ## Known still-open items (already admitted — only re-report if worse)
 
-- Scheduled GA4 sync not implemented (manual import only);
-  `sync.py` sources still exclude GA4.
-- Privacy toggles (data usage / share analytics / retention) are
-  persisted preferences; no telemetry or server retention engine
-  exists behind them. Check copy does not claim enforcement.
+- Scheduled GA4 sync not implemented (manual import only).
+- Privacy toggles are persisted preferences; no telemetry or
+  server retention engine exists behind them.
 - Admin "teams" are browser-local; no per-employee team backend.
 - Deterministic Analyst tables render en/pl only; Spanish is the
-  provider narrative.
-- Compare page hardcoded English copy (pre-existing).
-- Five pre-existing backend failures on the original base,
-  unchanged here: `test_no_licensing_concepts` (.venv walker),
-  three `test_ci_migrations.py` tests,
+  provider narrative. Compare page English copy (pre-existing).
+- Five pre-existing backend failures on the original base:
+  `test_no_licensing_concepts` (.venv walker), three
+  `test_ci_migrations.py` tests,
   `test_deploy_migration_command_from_repo_root` (`0012` vs `0013`).

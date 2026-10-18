@@ -71,22 +71,46 @@ def fetch_rows(token, property_id, start_date, end_date):
             raise Ga4Unavailable("GA4 dates must be YYYY-MM-DD.")
     if str(start_date) > str(end_date):
         raise Ga4Unavailable("GA4 start date is after end date.")
-    payload = {
-        "dateRanges": [{"startDate": str(start_date),
-                        "endDate": str(end_date)}],
-        "dimensions": [{"name": "date"}, {"name": "sessionSource"},
-                       {"name": "sessionMedium"},
-                       {"name": "sessionCampaignName"}],
-        "metrics": [{"name": "sessions"}, {"name": "totalUsers"},
-                    {"name": "conversions"}],
-        "limit": 10000,
-    }
-    got = _post("%s/properties/%s:runReport" % (DATA_API, pid),
-                token, payload)
-    timezone = ((got.get("metadata") or {}).get("timeZone")
-                or (got.get("propertyQuota") and "") or "")
+    # Page through runReport with offset until rowCount is covered:
+    # a single capped page must never masquerade as a complete import.
+    page_size = 10000
+    raw_rows = []
+    timezone = ""
+    offset = 0
+    while True:
+        payload = {
+            "dateRanges": [{"startDate": str(start_date),
+                            "endDate": str(end_date)}],
+            "dimensions": [{"name": "date"}, {"name": "sessionSource"},
+                           {"name": "sessionMedium"},
+                           {"name": "sessionCampaignName"}],
+            "metrics": [{"name": "sessions"}, {"name": "totalUsers"},
+                        {"name": "conversions"}],
+            "limit": page_size,
+            "offset": offset,
+        }
+        got = _post("%s/properties/%s:runReport" % (DATA_API, pid),
+                    token, payload)
+        if not timezone:
+            timezone = ((got.get("metadata") or {}).get("timeZone") or "")
+        batch = got.get("rows") or []
+        raw_rows.extend(batch)
+        total = got.get("rowCount")
+        try:
+            total = int(total) if total is not None else None
+        except (TypeError, ValueError):
+            total = None
+        if not batch or len(batch) < page_size:
+            break
+        if total is not None and len(raw_rows) >= total:
+            break
+        offset += len(batch)
+        if offset > 250000:  # hard stop: never loop unbounded
+            raise Ga4Unavailable(
+                "GA4 result exceeds the 250000-row import cap; "
+                "narrow the date range.")
     rows = []
-    for row in got.get("rows") or []:
+    for row in raw_rows:
         dims = [d.get("value", "") for d in row.get("dimensionValues") or []]
         mets = [m.get("value", "0") for m in row.get("metricValues") or []]
         raw_date = dims[0] if dims else ""

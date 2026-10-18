@@ -128,7 +128,7 @@ def providers_status(request: Request,
     # Vision reflects the worker's truth (frame-eligible roster);
     # speech-to-text counts a Gemini key (multimodal transcription).
     from creative_intel import video_analysis as _va
-    _eligible = _va.eligible_vision_roster()
+    _eligible = _va.eligible_vision_roster(conn)
     _stt = sorted({p for p, _m, _t
                    in providers_mod.LiveBundle.STT_ROSTER
                    if providers_mod._configured(p)})
@@ -1363,8 +1363,8 @@ class AnalystBody(BaseModel):
         if value is None:
             return None
         text = str(value).lower()
-        if text not in ("pl", "en"):
-            raise ValueError("language must be pl or en")
+        if text not in ("pl", "en", "es"):
+            raise ValueError("language must be pl, en or es")
         return text
 
     @field_validator("rank_by", mode="before")
@@ -1687,6 +1687,12 @@ async def report(request: Request, conn=Depends(get_product_conn),
         raise _conflict(exc)
     paudit.audit_request(request, conn, employee_id=who.id,
                          action="report_generated")
+    from creative_intel import notifications as notify_mod
+    notify_mod.notify_employee(
+        conn, who.id, "report_generated",
+        "Your Creative Intelligence report is ready",
+        "A report you generated has finished and is ready to "
+        "download in Generated Reports.")
     return out
 
 
@@ -2180,6 +2186,14 @@ async def dataset_import(request: Request, conn=Depends(get_product_conn),
     _invalidate_draft_review(conn, body.draft_id)
     paudit.audit_request(request, conn, employee_id=who.id,
                          action="dataset_imported", target=dsid)
+    from creative_intel import notifications as notify_mod
+    notify_mod.notify_employee(
+        conn, who.id, "campaign_import",
+        "Campaign data import finished",
+        "Imported %d rows (%s)." % (
+            result["inserted"] + result["updated"],
+            body.filename or "dataset"),
+        dedup_key="import:%s" % result["import_id"])
     return {"dataset_id": dsid, "draft_id": body.draft_id,
             "rows": result["inserted"] + result["updated"],
             "version": result["import_id"],
@@ -2753,12 +2767,13 @@ def notifications_test(conn=Depends(get_product_conn),
 
 
 @router.get("/api/integrations/ga4/properties")
-def ga4_properties(db=Depends(get_db),
+def ga4_properties(request: Request, db=Depends(get_db),
                    who=Depends(get_current_employee)):
     from ci_backend import integrations_oauth
     from creative_intel import ga4 as ga4_mod
     try:
-        token = integrations_oauth.access_token_for(db, "ga4", who.id)
+        token = integrations_oauth.access_token_for(
+            db, "ga4", who.id, request.app.state.ci_settings)
     except Exception:
         token = None
     if not token:
@@ -2785,7 +2800,8 @@ async def ga4_import(request: Request, conn=Depends(get_product_conn),
     body = _validated(Ga4ImportBody, await json_payload(request),
                       "ga4 import")
     try:
-        token = integrations_oauth.access_token_for(db, "ga4", who.id)
+        token = integrations_oauth.access_token_for(
+            db, "ga4", who.id, request.app.state.ci_settings)
     except Exception:
         token = None
     if not token:
@@ -2802,17 +2818,20 @@ async def ga4_import(request: Request, conn=Depends(get_product_conn),
 @router.get("/api/integrations/ga4/rows")
 def ga4_rows(request: Request, conn=Depends(get_product_conn),
              who=Depends(get_current_employee)):
-    _ = who
+    # Owner-scoped: an employee reads only rows they imported.
+    # Another employee's private GA4 property data never leaks here,
+    # whether or not the reader has connected Google.
     query = query_multidict(request)
     pid = str((query.get("property_id") or [""])[0])
     sql = ("SELECT property_id, date, session_source, session_medium,"
            " session_campaign, sessions, total_users, conversions,"
-           " timezone FROM ga4_rows")
-    params = ()
+           " timezone FROM ga4_rows WHERE imported_by=?")
+    params = [who.id]
     if pid:
-        sql += " WHERE property_id=?"
-        params = (pid.replace("properties/", ""),)
+        sql += " AND property_id=?"
+        params.append(pid.replace("properties/", ""))
     sql += " ORDER BY date DESC LIMIT 500"
+    params = tuple(params)
     cur = conn.execute(sql, params)
     cols = [d[0] for d in cur.description]
     return {"rows": [dict(zip(cols, r)) for r in cur.fetchall()],

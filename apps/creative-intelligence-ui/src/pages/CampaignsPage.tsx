@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { api, ApiError, scopedPath } from "@/api/client";
 import { useFilters } from "@/state/FilterContext";
+import { useOptionalAuth } from "@/auth/AuthProvider";
+import { loadPrefs } from "@/state/prefs";
 import { useLocale } from "@/i18n";
 import { Icon } from "@/components/icons";
 import { LoadingButton } from "@/components/LoadingButton";
@@ -99,7 +101,22 @@ export function CampaignsPage() {
   };
   const location = useLocation();
   const navigate = useNavigate();
+  const me = useOptionalAuth()?.me ?? null;
   const { filters, setFilter, clearFilters, scope } = useFilters();
+  // Settings → Default Campaign View, applied once per mount and
+  // never over an explicit filter the user already chose.
+  const [viewBooted, setViewBooted] = useState(false);
+  useEffect(() => {
+    if (viewBooted) return;
+    setViewBooted(true);
+    const view = loadPrefs(me?.employee?.id ?? "").campaignView;
+    if (view === "Active Only" && !filters.status) {
+      setFilter("status", "Active");
+    } else if (view === "By Platform") {
+      setMoreFilters(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [applied, setApplied] = useState(0);
   const [moreFilters, setMoreFilters] = useState(false);
   const [platMetric, setPlatMetric] = useState<(typeof PLATFORM_METRICS)[number]["value"]>("spend");

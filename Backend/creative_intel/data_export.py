@@ -51,14 +51,15 @@ def build_export(conn, employee):
     conversations = _rows(
         conn,
         "SELECT id, title, objective, language, created_at, updated_at"
-        " FROM analyst_conversations WHERE owner_id=? ORDER BY created_at",
+        " FROM analyst_conversations WHERE owner_employee_id=?"
+        " ORDER BY created_at",
         (employee_id,))
     messages = _rows(
         conn,
         "SELECT m.conversation_id, m.role, m.kind, m.body_text,"
         " m.created_at FROM analyst_messages m"
         " JOIN analyst_conversations c ON c.id = m.conversation_id"
-        " WHERE c.owner_id=? ORDER BY m.id", (employee_id,))
+        " WHERE c.owner_employee_id=? ORDER BY m.id", (employee_id,))
     templates = _rows(
         conn,
         "SELECT id, name, config_json, created_at, updated_at"

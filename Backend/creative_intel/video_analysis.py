@@ -34,7 +34,66 @@ def utcnow() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
-def eligible_vision_roster():
+def _roster(conn=None):
+    """eligible_vision_roster with tolerance for no-arg test doubles."""
+    try:
+        return eligible_vision_roster(conn)
+    except TypeError:
+        return eligible_vision_roster()
+
+
+_GEMINI_MODELS_CACHE = {"at": 0.0, "models": None}
+
+
+def _gemini_live_models():
+    """Cached (5 min) live Gemini model list, or None when unknown.
+
+    Discovery failure keeps the offline roster (unknown, not
+    "unavailable"); a successful list is authoritative, so
+    readiness never names a Gemini model the key cannot call.
+    """
+    import time
+    now = time.time()
+    if _GEMINI_MODELS_CACHE["models"] is not None \
+            and now - _GEMINI_MODELS_CACHE["at"] < 300:
+        return _GEMINI_MODELS_CACHE["models"]
+    try:
+        from creative_intel import providers as prov_mod
+        models = prov_mod.gemini_available_models()
+    except Exception:
+        return None
+    if models:
+        _GEMINI_MODELS_CACHE.update({"at": now, "models": set(models)})
+        return set(models)
+    return None
+
+
+def _managed_vision_entry(conn):
+    """(provider, model, 'active') for the admin-selected model when
+    it is frame-eligible, else None. Lets an admin-saved managed
+    Gemini credential enable video analysis without a legacy
+    env/Keychain key — AI Providers and the worker agree."""
+    if conn is None:
+        return None
+    try:
+        from creative_intel import dispatcher as dispatcher_mod
+        from creative_intel import provider_inventory as inv
+        db_path = _identity_db(conn)
+        if not db_path:
+            return None
+        with dispatcher_mod._connect(db_path) as sel_conn:
+            sel = dispatcher_mod.load_selection(sel_conn)
+        if not sel:
+            return None
+        provider, model = sel["provider_id"], sel["model_id"]
+        if inv.frame_eligible(provider, model):
+            return (provider, model, "active")
+    except Exception:
+        return None
+    return None
+
+
+def eligible_vision_roster(conn=None):
     """Configured live vision entries that may consume frames.
 
     Intersects the vision roster with the verified support table:
@@ -43,8 +102,10 @@ def eligible_vision_roster():
     LiveBundle: the bundle requires every capability at once, so a
     Gemini-only install (no separate speech-to-text key) used to
     report vision unavailable even with a working Gemini key.
-    Empty (or mock mode) means analysis is unavailable — never a
-    mock substitution.
+    The admin-managed selection (when frame-eligible) leads the
+    roster, and a successful live Gemini model list filters out
+    ids the key cannot actually call. Empty (or mock mode) means
+    analysis is unavailable — never a mock substitution.
     """
     from creative_intel import provider_inventory as inv
     from creative_intel import providers as prov_mod
@@ -53,8 +114,18 @@ def eligible_vision_roster():
     # Frame-eligible and actually configured. An unverified roster
     # id stays out, and so does a verified id whose key is missing:
     # otherwise readiness names a model the worker cannot call.
-    return [(p, m, t) for p, m, t in prov_mod.LiveBundle.VISION_ROSTER
-            if inv.frame_eligible(p, m) and prov_mod._configured(p)]
+    roster = [(p, m, t) for p, m, t in prov_mod.LiveBundle.VISION_ROSTER
+              if inv.frame_eligible(p, m) and prov_mod._configured(p)]
+    live_gemini = _gemini_live_models()
+    if live_gemini is not None:
+        roster = [(p, m, t) for p, m, t in roster
+                  if p != "gemini" or m in live_gemini]
+    managed = _managed_vision_entry(conn)
+    if managed and (managed[0] != "gemini" or live_gemini is None
+                    or managed[1] in live_gemini):
+        roster = [managed] + [e for e in roster
+                               if (e[0], e[1]) != (managed[0], managed[1])]
+    return roster
 
 
 def readiness(conn=None):
@@ -65,7 +136,7 @@ def readiness(conn=None):
     managed model. With no conn the managed selection cannot be
     read and llm_ready stays None (unknown), never a false yes.
     """
-    roster = eligible_vision_roster()
+    roster = _roster(conn)
     llm_ready = None
     if conn is not None:
         llm_ready = _managed_llm_ready(conn)
@@ -563,7 +634,7 @@ def run(conn, snapshot, owner="", media_dir="", providers=None,
         from creative_intel import providers as prov_mod
         prov = prov_mod.Providers(
             db_path=_identity_db(conn))
-        roster = eligible_vision_roster()
+        roster = _roster(conn)
         if not roster:
             raise AnalysisUnavailable(
                 readiness(conn)["reason"] or "no video-eligible provider")
@@ -574,7 +645,21 @@ def run(conn, snapshot, owner="", media_dir="", providers=None,
                 "AI is not configured. Contact your administrator.")
         import copy
         prov = copy.copy(prov)
-        prov.vision = prov_mod.LiveVision(roster)
+
+        def _managed_secret(provider, _conn=conn):
+            try:
+                from creative_intel import dispatcher as _disp
+                db_path = _identity_db(_conn)
+                if not db_path:
+                    return None
+                with _disp._connect(db_path) as sel_conn:
+                    _pid, _mid, _secret, _base = _disp._resolve(sel_conn)
+            except Exception:
+                return None
+            return _secret if _pid == provider else None
+
+        prov.vision = prov_mod.LiveVision(
+            roster, secret_for=_managed_secret)
         if isinstance(prov.stt, prov_mod._Unavailable) \
                 and prov_mod._configured("gemini"):
             prov.stt = prov_mod.GeminiStt()
@@ -1102,7 +1187,12 @@ def build_creative_report(annotation, transcript="", creative_key="",
 
 
 def _vision_model(prov):
+    # The model that actually answered (race winner) when known;
+    # the roster head is only the pre-call expectation.
     try:
+        winner = getattr(prov.vision, "last_winner", None)
+        if winner:
+            return "%s/%s" % (winner[0], winner[1])
         provider, model, _tier = prov.vision.roster[0]
         return "%s/%s" % (provider, model)
     except (AttributeError, IndexError, TypeError, ValueError):

@@ -828,8 +828,13 @@ class LiveVision:
 
     MAX_IMAGES = 6
 
-    def __init__(self, roster):
+    def __init__(self, roster, secret_for=None):
         self.roster = roster  # [(provider, model, tier), ...]
+        self.last_winner = None  # (provider, model, tier) that answered
+        # Optional managed-secret resolver: provider -> secret|None.
+        # Lets an admin-saved credential drive vision without a
+        # legacy env/Keychain key.
+        self._secret_for = secret_for
 
     def sample_frames(self, creative_key, every_s=3.0, duration_s=30.0):
         n = max(1, int(duration_s / every_s))
@@ -874,7 +879,9 @@ class LiveVision:
     def _annotate_batch(self, use, t_secs):
         def call(item):
             provider, model, _tier = item
-            client = make_chat(provider, model)
+            secret = self._secret_for(provider) if self._secret_for \
+                else None
+            client = make_chat(provider, model, secret=secret)
             content = [{"type": "text",
                         "text": VISION_PROMPT % ", ".join(str(t) for t in t_secs)}]
             content += [_image_part(b) for b in use]
@@ -909,6 +916,9 @@ class LiveVision:
             [r for r in self.roster if r[2] == "fallback"], call)
         if not value:
             raise ProviderUnavailable("all vision models unavailable")
+        # Record the model that actually answered so saved analyses
+        # name the winner, not merely the first roster entry.
+        self.last_winner = winner
         return value
 
 

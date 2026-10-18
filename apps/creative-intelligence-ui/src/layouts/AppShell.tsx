@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "@/auth/AuthProvider";
 import { AccountMenu } from "@/auth/AccountMenu";
@@ -6,7 +6,8 @@ import { Icon } from "@/components/icons";
 import { GlobalSearch } from "@/components/GlobalSearch";
 import { SampleScopeBanner } from "@/components/SampleScopeBanner";
 import { useLocale } from "@/i18n";
-import { loadPrefs } from "@/state/prefs";
+import { applyAccent, loadPrefs } from "@/state/prefs";
+import { useTheme, type ThemeMode } from "@/app/useTheme";
 
 const NAV = [
   { to: "/", key: "nav.dashboard", icon: "dashboard", end: true },
@@ -40,6 +41,19 @@ function loadCollapsed(): boolean {
 export function AppShell() {
   const { me } = useAuth();
   const { t } = useLocale();
+  const { set: setThemeMode } = useTheme();
+  // Appearance follows the account at shell init (theme, accent,
+  // density), not only after a Settings visit.
+  const employeeId = me?.employee?.id ?? "";
+  useEffect(() => {
+    if (!employeeId) return;
+    const prefs = loadPrefs(employeeId);
+    applyAccent(prefs.accent, prefs.density);
+    if (prefs.theme === "light" || prefs.theme === "dark" || prefs.theme === "system") {
+      setThemeMode(prefs.theme as ThemeMode);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [employeeId]);
   // Mobile drawer state (slide-over under 900px) — independent from
   // the desktop collapse state below.
   const [open, setOpen] = useState(false);

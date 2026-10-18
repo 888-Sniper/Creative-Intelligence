@@ -599,6 +599,19 @@ export function ReportsPage() {
       : t("reports.templateApplied", { name: tpl.name }));
   };
 
+  const updateTemplate = async (tpl: ReportTemplate) => {
+    try {
+      await api("PUT", `/api/report-templates/${encodeURIComponent(tpl.id)}`, {
+        name: tpl.name,
+        config: { campaigns: checkedCampaigns, kpis, benchmark, format },
+      });
+      setStatus(t("reports.templateUpdated", { name: tpl.name }));
+      await loadTemplates();
+    } catch {
+      setStatus(t("reports.templateFailed"));
+    }
+  };
+
   const deleteTemplate = async (tpl: ReportTemplate) => {
     try {
       await api("DELETE", `/api/report-templates/${encodeURIComponent(tpl.id)}`);
@@ -684,6 +697,11 @@ export function ReportsPage() {
                   <span key={tpl.id} style={{ display: "inline-flex", gap: 4 }}>
                     <button type="button" className="chip" onClick={() => applyTemplate(tpl)}>
                       {tpl.name}
+                    </button>
+                    <button type="button" className="chip" aria-label={t("reports.templateUpdateLabel", { name: tpl.name })}
+                      title={t("reports.templateUpdateLabel", { name: tpl.name })}
+                      onClick={() => void updateTemplate(tpl)}>
+                      {t("reports.templateUpdateBtn")}
                     </button>
                     <button type="button" className="chip" aria-label={t("reports.templateDeleteLabel", { name: tpl.name })}
                       onClick={() => void deleteTemplate(tpl)}>

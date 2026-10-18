@@ -230,6 +230,81 @@ def test_templates_and_prefs_endpoints(tmp_path):
     assert prefs["email_reports"] is False
 
 
+def test_export_includes_seeded_conversation_history(conn):
+    conn.execute(
+        "INSERT INTO analyst_conversations (id, owner_employee_id, title,"
+        " objective, language, scope_json, dataset_version, created_at,"
+        " updated_at) VALUES ('c1', 'emp-1', 'T', 'reach', 'en', '{}', '',"
+        " '2026-01-01', '2026-01-01')")
+    conn.execute(
+        "INSERT INTO analyst_messages (id, conversation_id, role, kind,"
+        " body_text, payload_json, created_at) VALUES (1, 'c1', 'user',"
+        " 'question', 'hello history', '{}', '2026-01-01')")
+    conn.commit()
+    blob, _name = data_export.build_export(
+        conn, {"id": "emp-1", "email": "a@b.c", "status": "active"})
+    zf = zipfile.ZipFile(io.BytesIO(blob))
+    convs = json.loads(zf.read("conversations.json"))
+    msgs = json.loads(zf.read("messages.json"))
+    assert [c["id"] for c in convs] == ["c1"]
+    assert msgs and msgs[0]["body_text"] == "hello history"
+
+
+def test_ga4_pagination_and_owner_rows(conn, tmp_path, monkeypatch):
+    import creative_intel.ga4 as ga4_mod
+
+    def row(date, src):
+        return {"dimensionValues": [{"value": date}, {"value": src},
+                                    {"value": "cpc"}, {"value": ""}],
+                "metricValues": [{"value": "3"}, {"value": "2"},
+                                 {"value": "1"}]}
+
+    big = [row("20260101", "s%d" % i) for i in range(10000)]
+    small = [row("20260102", "tail")]
+    pages = iter([
+        {"rows": big, "rowCount": 10001,
+         "metadata": {"timeZone": "Europe/Warsaw"}},
+        {"rows": small, "rowCount": 10001,
+         "metadata": {"timeZone": "Europe/Warsaw"}}])
+    monkeypatch.setattr(ga4_mod, "_post", lambda u, t, p: next(pages))
+    rows = ga4_mod.fetch_rows("tok", "123", "2026-01-01", "2026-01-02")
+    assert len(rows) == 10001
+    assert rows[-1]["session_source"] == "tail"
+    assert rows[0]["timezone"] == "Europe/Warsaw"
+
+    http = _authed_client(tmp_path)
+    seeded = http.get("/api/integrations/ga4/rows")
+    assert seeded.status_code == 200
+    assert seeded.json()["rows"] == []
+
+
+def test_notification_dedup_claimed_before_send(conn):
+    # A pre-claimed queued slot (concurrent winner) must block sending.
+    conn.execute(
+        "INSERT INTO notification_outbox (id, employee_id, kind, subject,"
+        " body, status, detail, dedup_key, created_at, sent_at) VALUES"
+        " ('n0', 'emp-1', 'analysis_ready', 's', 'b', 'queued', '',"
+        " 'dup-1', '2026-01-01', '')")
+    conn.commit()
+    sent = []
+    out = notifications.enqueue(
+        conn, "emp-1", "analysis_ready", "s", "b", dedup_key="dup-1",
+        recipient="a@b.c", sender=lambda to, s, b: sent.append(to))
+    assert out.get("duplicate") is True
+    assert sent == []
+
+
+def test_spanish_language_accepted_by_analyst_body(tmp_path):
+    http = _authed_client(tmp_path)
+    res = http.post("/api/analyst/conversations", json={
+        "objective": "reach", "language": "es"})
+    assert res.status_code == 200, res.text
+    cid = res.json()["id"]
+    got = http.get("/api/analyst/conversations/%s" % cid)
+    assert got.status_code == 200, got.text
+    assert got.json()["language"] == "es"
+
+
 def test_analyst_narrative_mock_mode_is_labelled(conn, monkeypatch):
     monkeypatch.delenv("CREATIVE_INTEL_PROVIDER_MODE", raising=False)
     from ci_backend import worker_handlers

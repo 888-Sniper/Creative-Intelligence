@@ -308,12 +308,19 @@ def run_video_analysis(conn, payload, owner, ctx, job_id=None,
                 drafts_mod.update_draft(conn, did, status="analyzing")
             except Exception:
                 pass
-        return video_analysis.run(
+        result = video_analysis.run(
             conn, snapshot, owner=owner or "", media_dir=media_dir or "",
             progress=progress, cancelled=cancelled, queued_at=queued_at,
             job_id=job_id, run_token=attempt_token,
             brand_terms=payload.get("brand_terms") or None,
             speech_language=payload.get("speech_language") or None)
+        from creative_intel import notifications as notify_mod
+        notify_mod.notify_employee(
+            conn, owner or "", "analysis_ready",
+            "Your video analysis is ready",
+            "Video analysis finished and is ready for review.",
+            dedup_key="analysis:%s" % (job_id or did or ""))
+        return result
     except jobs_mod.JobCancelled:
         # Owner cancel: the draft returns to cancelled (re-analysable),
         # never strands in analyzing — unless a replacement owns it.

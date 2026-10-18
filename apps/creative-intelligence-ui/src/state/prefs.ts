@@ -155,6 +155,25 @@ export function clearPrefs(employeeId: string): void {
   }
 }
 
+const ACCENTS: Record<string, { teal: string; dark: string; ink: string }> = {
+  "Teal (Default)": { teal: "#00C7B2", dark: "#08786E", ink: "#182536" },
+  Blue: { teal: "#2F6FBE", dark: "#1F4E86", ink: "#FFFFFF" },
+  Violet: { teal: "#6D5BD0", dark: "#4A3F96", ink: "#FFFFFF" },
+};
+
+/** Apply a saved accent + density to the document. Shared by
+ *  Settings (on change) and the app shell (on account init) so
+ *  appearance follows the account everywhere, not only after a
+ *  Settings visit. */
+export function applyAccent(accentName: string, density: string): void {
+  const accent = ACCENTS[accentName] ?? ACCENTS["Teal (Default)"];
+  document.documentElement.style.setProperty("--shell-teal", accent.teal);
+  document.documentElement.style.setProperty("--shell-teal-dark", accent.dark);
+  document.documentElement.style.setProperty("--brand-teal", accent.teal);
+  document.documentElement.style.setProperty("--brand-teal-ink", accent.ink);
+  document.body.dataset.density = density === "Compact" ? "compact" : "";
+}
+
 /** Route for the saved Default View ("Dashboard" stays "/"). */
 export function defaultViewPath(prefs: Prefs): string {
   const paths: Record<string, string> = {

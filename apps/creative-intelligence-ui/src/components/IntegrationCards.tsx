@@ -152,6 +152,118 @@ export function IntegrationCards() {
       {ROWS.map((row) => (
         <IntegrationRow key={row.id} {...row} flag={flag?.name === row.id ? flag.result : ""} />
       ))}
+      <Ga4Tools />
     </>
+  );
+}
+
+interface Ga4Property { property_id: string; display_name: string }
+interface Ga4Row {
+  date: string; session_source: string; session_medium: string;
+  sessions: number; total_users: number; conversions: number;
+}
+
+/** GA4 property selection + manual import + own imported rows.
+ *  Website analytics only — kept visibly separate from ad metrics. */
+function Ga4Tools() {
+  const { t } = useLocale();
+  const [properties, setProperties] = useState<Ga4Property[]>([]);
+  const [propertyId, setPropertyId] = useState("");
+  const [start, setStart] = useState("");
+  const [end, setEnd] = useState("");
+  const [rows, setRows] = useState<Ga4Row[]>([]);
+  const [status, setStatus] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const loadRows = async (pid: string) => {
+    try {
+      const q = pid ? `?property_id=${encodeURIComponent(pid)}` : "";
+      const res = await api<{ rows: Ga4Row[] }>(
+        "GET", `/api/integrations/ga4/rows${q}`);
+      setRows(res.rows ?? []);
+    } catch {
+      /* rows are optional context; import status carries errors */
+    }
+  };
+
+  useEffect(() => {
+    let live = true;
+    api<{ properties: Ga4Property[] }>(
+      "GET", "/api/integrations/ga4/properties",
+    ).then((res) => {
+      if (!live) return;
+      setProperties(res.properties ?? []);
+      if (res.properties?.[0]) setPropertyId(res.properties[0].property_id);
+    }).catch(() => live && setProperties([]));
+    void loadRows("");
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const doImport = async () => {
+    setBusy(true);
+    setStatus("");
+    try {
+      const res = await api<{ rows: number; note: string }>(
+        "POST", "/api/integrations/ga4/import",
+        { property_id: propertyId, start_date: start, end_date: end });
+      setStatus(t("settings.integrations.ga4Imported", { count: res.rows }));
+      await loadRows(propertyId);
+    } catch (err) {
+      setStatus(err instanceof ApiError ? err.message
+        : t("settings.integrations.ga4ImportFailed"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!properties.length && !rows.length) return null;
+  return (
+    <div className="insight" id="integration-ga4-tools">
+      <div style={{ flex: 1 }}>
+        <h4>{t("settings.integrations.ga4ToolsTitle")}</h4>
+        <p>{t("settings.integrations.ga4ToolsBody")}</p>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
+          <select aria-label={t("settings.integrations.ga4PropertyLabel")}
+            value={propertyId} onChange={(e) => setPropertyId(e.target.value)}>
+            {properties.map((p) => (
+              <option key={p.property_id} value={p.property_id}>
+                {p.display_name} ({p.property_id})
+              </option>
+            ))}
+          </select>
+          <input type="date" aria-label={t("settings.integrations.ga4StartLabel")}
+            value={start} onChange={(e) => setStart(e.target.value)} />
+          <input type="date" aria-label={t("settings.integrations.ga4EndLabel")}
+            value={end} onChange={(e) => setEnd(e.target.value)} />
+          <LoadingButton type="button" className="btn-outline" loading={busy}
+            loadingLabel={t("settings.integrations.working")} disabled={busy || !propertyId || !start || !end}
+            onClick={() => void doImport()}>
+            {t("settings.integrations.ga4ImportBtn")}
+          </LoadingButton>
+        </div>
+        {status ? <p role="status" style={{ margin: "6px 0 0" }}>{status}</p> : null}
+        {rows.length ? (
+          <table className="tbl" style={{ marginTop: 8 }}>
+            <thead><tr>
+              <th>{t("settings.integrations.ga4Date")}</th>
+              <th>{t("settings.integrations.ga4Source")}</th>
+              <th>{t("settings.integrations.ga4Sessions")}</th>
+              <th>{t("settings.integrations.ga4Users")}</th>
+            </tr></thead>
+            <tbody>
+              {rows.slice(0, 10).map((r, i) => (
+                <tr key={`${r.date}-${r.session_source}-${i}`}>
+                  <td>{r.date}</td>
+                  <td>{r.session_source} / {r.session_medium}</td>
+                  <td>{r.sessions}</td>
+                  <td>{r.total_users}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : null}
+      </div>
+    </div>
   );
 }

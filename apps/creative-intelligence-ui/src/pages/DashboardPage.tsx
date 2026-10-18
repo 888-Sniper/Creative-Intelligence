@@ -207,7 +207,9 @@ export function DashboardPage() {
   const [curveLoading, setCurveLoading] = useState(true);
 
   const { data: compare, error: compareError } = useCompareState(applied);
-  const daily = useDaily(30, applied);
+  // 90 points so a saved "Last 90 Days" default covers 90 real
+  // populated dates, not the 30 this page used to fetch.
+  const daily = useDaily(90, applied);
   const [rangeBooted, setRangeBooted] = useState(false);
   const campaigns = useScopedApi<Record<string, CampaignTotals>>("/api/campaigns", applied);
   const creatives = useScopedApi<CreativeRow[]>("/api/creatives", applied);

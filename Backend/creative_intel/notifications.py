@@ -118,6 +118,26 @@ def enqueue(conn, employee_id, kind, subject, body, dedup_key="",
     opt_in = prefs.get(NOTIFY_KINDS[kind])
     nid = uuid.uuid4().hex
     now = _now()
+    # Claim the dedup slot BEFORE any send: the unique index is the
+    # lock, so two concurrent calls with the same key cannot both
+    # deliver. The loser returns as a duplicate without sending.
+    try:
+        conn.execute(
+            "INSERT INTO notification_outbox (id, employee_id, kind,"
+            " subject, body, status, detail, dedup_key, created_at,"
+            " sent_at) VALUES (?, ?, ?, ?, ?, 'queued', '', ?, ?, '')",
+            (nid, employee_id, kind, subject[:300], body[:5000],
+             dedup_key, now))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        if dedup_key:
+            row = conn.execute(
+                "SELECT id, status FROM notification_outbox"
+                " WHERE dedup_key=?", (dedup_key,)).fetchone()
+            if row:
+                return {"id": row[0], "status": row[1], "duplicate": True}
+        raise
     if opt_in is False:
         status, detail, sent_at = "skipped", "opted out", ""
     elif kind == "product_update":
@@ -136,24 +156,27 @@ def enqueue(conn, employee_id, kind, subject, body, dedup_key="",
                 status, detail, sent_at = "sent", "", now
             except Exception as exc:
                 status, detail, sent_at = "failed", str(exc)[:300], ""
-    try:
-        conn.execute(
-            "INSERT INTO notification_outbox (id, employee_id, kind,"
-            " subject, body, status, detail, dedup_key, created_at,"
-            " sent_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (nid, employee_id, kind, subject[:300], body[:5000], status,
-             detail, dedup_key, now, sent_at))
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        if dedup_key:
-            row = conn.execute(
-                "SELECT id, status FROM notification_outbox"
-                " WHERE dedup_key=?", (dedup_key,)).fetchone()
-            if row:
-                return {"id": row[0], "status": row[1], "duplicate": True}
-        raise
+    conn.execute(
+        "UPDATE notification_outbox SET status=?, detail=?, sent_at=?"
+        " WHERE id=?", (status, detail, sent_at, nid))
+    conn.commit()
     return {"id": nid, "status": status, "detail": detail}
+
+
+def notify_employee(conn, employee_id, kind, subject, body,
+                    dedup_key=""):
+    """Event trigger entry point: resolve the employee's own email
+    and enqueue. Best-effort by design — notification problems must
+    never fail the underlying report/import/analysis."""
+    try:
+        row = conn.execute(
+            "SELECT email FROM employees WHERE id=?",
+            (employee_id,)).fetchone()
+        recipient = (row[0] or "") if row else ""
+        return enqueue(conn, employee_id, kind, subject, body,
+                       dedup_key=dedup_key, recipient=recipient)
+    except Exception:
+        return None
 
 
 def list_outbox(conn, employee_id, limit=50):

@@ -232,11 +232,8 @@ export function WorkbookPage() {
       if (description.trim()) params.set("description", description.trim());
       if (modules.length) params.set("modules", modules.join(","));
       if (kpis.length) params.set("kpis", kpis.join(","));
-      const res = await fetch(`/api/analyst/workbook?${params.toString()}`, {
-        credentials: "same-origin",
-      });
-      if (!res.ok) throw new Error(`${t("workbook.exportFailed")} (${res.status})`);
-      const blob = await res.blob();
+      const { apiBlob } = await import("@/api/client");
+      const blob = await apiBlob("GET", `/api/analyst/workbook?${params.toString()}`);
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;

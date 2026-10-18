@@ -123,6 +123,25 @@ export async function apiBlob(method: string, path: string, body?: unknown): Pro
   return res.blob();
 }
 
+/** Multipart upload with the same session/gate handling as api():
+ *  an expired session re-gates instead of surfacing a bare 401, and
+ *  error JSON is parsed rather than trusted blindly. */
+export async function apiForm<T>(method: string, path: string, form: FormData): Promise<T> {
+  const res = await fetch(path, { method, body: form });
+  const raw = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  const data = (raw["detail"] && typeof raw["detail"] === "object"
+    ? (raw["detail"] as Record<string, unknown>) : raw) as Record<string, unknown>;
+  if (!res.ok) {
+    const gate = typeof data["gate"] === "string" ? (data["gate"] as Gate) : "";
+    if (gate === "login" || gate === "pending" || gate === "suspended" || gate === "revoked") {
+      gateHandler?.(gate);
+    }
+    if (res.status === 401 && !gate) gateHandler?.("login");
+    throw new ApiError(typeof data["error"] === "string" ? data["error"] : `Request failed (${res.status})`, res.status, gate);
+  }
+  return data as T;
+}
+
 /** Append the shared top-filter-bar scope to scoped analytics endpoints,
  *  mirroring the legacy filtered_path() behaviour. */
 export function scopedPath(path: string, scope: URLSearchParams): string {

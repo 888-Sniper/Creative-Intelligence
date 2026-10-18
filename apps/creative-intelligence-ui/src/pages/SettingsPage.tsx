@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { api, apiBlob, ApiError } from "@/api/client";
+import { api, apiBlob, apiForm, ApiError } from "@/api/client";
 import { useAuth } from "@/auth/AuthProvider";
 import { Icon } from "@/components/icons";
 import { LoadingButton } from "@/components/LoadingButton";
@@ -25,6 +25,7 @@ import { useLocale } from "@/i18n";
 import {
   DEFAULTS,
   TIMEZONES,
+  applyAccent,
   loadPrefs,
   savePrefs,
   type Prefs,
@@ -54,14 +55,7 @@ const RETENTION_LABEL_KEYS: Record<string, string> = {
   Indefinite: "settings.privacy.retentionOptions.indefinite",
 };
 
-function applyAccent(accentName: string, density: string): void {
-  const accent = ACCENTS[accentName] ?? ACCENTS["Teal (Default)"];
-  document.documentElement.style.setProperty("--shell-teal", accent.teal);
-  document.documentElement.style.setProperty("--shell-teal-dark", accent.dark);
-  document.documentElement.style.setProperty("--brand-teal", accent.teal);
-  document.documentElement.style.setProperty("--brand-teal-ink", accent.ink);
-  document.body.dataset.density = density === "Compact" ? "compact" : "";
-}
+// applyAccent lives in @/state/prefs (shared with the app shell).
 const VIEWS = ["Dashboard", "Campaigns", "Creatives", "Compare", "Ask The Data", "Reports"];
 const CURRENCIES = ["USD – US Dollar", "AUD – Australian Dollar", "EUR – Euro", "GBP – British Pound"];
 const RANGES = ["Last 7 Days", "Last 30 Days", "Last 90 Days", "All Time"];
@@ -350,8 +344,28 @@ export function SettingsPage() {
   // arrives. With autosave there is no staged form to clobber, but a
   // debounced name commit still in flight must not be lost: persist
   // the live values under the new key instead of reloading.
+  // prefOwner starts as the current identity, so a fresh visit must
+  // ALSO merge the server copy once: otherwise a fresh browser shows
+  // local defaults and its first change overwrites the saved
+  // server preferences.
+  const serverMergedFor = useRef("");
   useEffect(() => {
     const id = employee?.id ?? me?.employee?.id ?? "";
+    if (id && id === prefOwner && serverMergedFor.current !== id
+      && saveState !== "saving"
+      && nameDraftRef.current === prefsRef.current.workspace) {
+      serverMergedFor.current = id;
+      void api<{ prefs: Record<string, unknown> }>("GET", "/api/preferences")
+        .then((r) => {
+          if (!r.prefs || !Object.keys(r.prefs).length) return;
+          const merged = mergeServerPrefs(adoptPrefs(id, liveThemeMode), r.prefs);
+          setPrefs(merged);
+          setNameDraft(merged.workspace);
+          savePrefs(id, merged);
+          applyLive(merged);
+        })
+        .catch(() => { /* local copy stays authoritative offline */ });
+    }
     if (id && id !== prefOwner) {
       setPrefOwner(id);
       if (saveState === "saving" || nameDraftRef.current !== prefsRef.current.workspace) {
@@ -508,12 +522,8 @@ export function SettingsPage() {
       // The upload endpoint accepts multipart FormData only (avatar file field).
       const form = new FormData();
       form.append("avatar", file);
-      const up = await fetch("/api/auth/me/avatar", { method: "POST", body: form });
-      const uj = (await up.json().catch(() => ({}))) as {
-        error?: string;
-        employee?: PublicEmployee;
-      };
-      if (!up.ok) throw new Error(uj.error || String(up.status));
+      const uj = await apiForm<{ error?: string; employee?: PublicEmployee }>(
+        "POST", "/api/auth/me/avatar", form);
       if (uj.employee) {
         setEmployee(uj.employee);
         setAvatarUrl(uj.employee.avatar_url || "");

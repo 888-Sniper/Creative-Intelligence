@@ -84,6 +84,7 @@ interface ChatMessage {
   answer?: AnalystAnswer | null;
   narrative?: string;
   narrativeSource?: string;
+  narrativeDetail?: string;
 }
 
 interface BenchGroup {
@@ -334,11 +335,14 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
   // Late responses carrying the previous account's key are dropped
   // instead of rendering Account A's content under Account B.
   const accountRef = useRef(accountKey);
+  // Live mirror of the visible conversation for late-answer guards.
+  const activeIdRef = useRef<string | null>(null);
+  useEffect(() => { activeIdRef.current = activeId; }, [activeId]);
   accountRef.current = accountKey;
   const [input, setInput] = useState("");
   const [objective, setObjective] = useState(filters.objective || "reach");
   const [locale, setLocale] = useState("auto");
-  // Backend contract (AnalystBody.language): "pl" | "en" | omitted.
+  // Backend contract (AnalystBody.language): "pl" | "en" | "es" | omitted.
   // "auto" means omit so the backend detects from the question text.
   const language = locale === "auto" ? undefined : locale;
   const [busy, setBusy] = useState(false);
@@ -398,6 +402,17 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
       if (data.language) setLocale(data.language);
       setDatasetVersion(data.dataset_version ?? null);
       setLastScope(fmtScope(data.scope));
+      // Restore the conversation's filters too: a follow-up must
+      // analyse the scope the visible history is about, not
+      // whatever shared filters happen to be active now.
+      const scopeIn = (data.scope ?? {}) as Record<string, unknown>;
+      clearFilters();
+      for (const [k, v] of Object.entries(scopeIn)) {
+        const first = Array.isArray(v) ? v[0] : v;
+        if (typeof first === "string") {
+          setFilter(k as Parameters<typeof setFilter>[0], first);
+        }
+      }
     } catch (e) {
       if (gen !== convGenRef.current || key !== accountRef.current) return;
       setMessages([]);
@@ -502,6 +517,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
     setError(null);
     setMessages((prev) => [...prev, { role: "user", text: question }]);
     setInput("");
+    const sentIn = activeId;
     try {
       const data = await api<AskResponse>("POST", "/api/analyst/ask", {
         conversation_id: activeId,
@@ -512,6 +528,13 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
         max_points: maxPoints,
       });
       if (key !== accountRef.current) return;
+      // The user opened another conversation while this ran: the
+      // answer belongs to the sent-in conversation only. Refresh
+      // the list, never append into the now-visible transcript.
+      if (sentIn !== null && data.conversation_id !== activeIdRef.current) {
+        await loadConversations();
+        return;
+      }
       if (!activeId) setActiveId(data.conversation_id);
       setLastScope(fmtScope(data.scope_snapshot));
       setDatasetVersion(data.dataset_version ?? null);
@@ -519,7 +542,8 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
         ...prev,
         { role: "assistant", text: data.answer.text, answer: data.answer,
           narrative: data.narrative || undefined,
-          narrativeSource: data.narrative_source },
+          narrativeSource: data.narrative_source,
+          narrativeDetail: data.narrative_detail },
       ]);
       await loadConversations();
     } catch (e) {
@@ -1266,6 +1290,12 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
                     <p className="panel-sub" style={{ marginTop: 8 }}>
                       <strong>{t("analyst.narrativeLabel")}:</strong> {m.narrative}
                       {m.narrativeSource === "managed_provider" ? ` (${t("analyst.narrativeProvider")})` : ""}
+                    </p>
+                  ) : null}
+                  {m.role === "assistant" && !m.narrative && m.narrativeDetail
+                    && m.narrativeSource === "deterministic" ? (
+                    <p className="panel-sub" role="note" style={{ marginTop: 8 }}>
+                      {t("analyst.narrativeFallback", { detail: m.narrativeDetail })}
                     </p>
                   ) : null}
                   {m.role === "assistant" && m.answer ? (

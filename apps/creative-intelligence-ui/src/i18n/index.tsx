@@ -147,7 +147,18 @@ export function LocalePrefsSync() {
   const { me } = useAuth();
   const { setLang, setTimezone } = useLocale();
   const appliedFor = useRef<string | null>(null);
+  const [prefsTick, setPrefsTick] = useState(0);
   const id = me?.employee?.id ?? "";
+  // Re-apply when server preferences land after identity (AppShell
+  // merge), not only on identity change.
+  useEffect(() => {
+    const onPrefs = () => {
+      appliedFor.current = null;
+      setPrefsTick((n) => n + 1);
+    };
+    window.addEventListener("ci-prefs-updated", onPrefs);
+    return () => window.removeEventListener("ci-prefs-updated", onPrefs);
+  }, []);
   useEffect(() => {
     // Signed out (or identity not yet known): arm for the next
     // sign-in without changing the currently applied locale.
@@ -160,7 +171,7 @@ export function LocalePrefsSync() {
     const prefs = loadPrefs(id);
     setLang(languageOf(prefs.language));
     setTimezone(prefs.timezone);
-  }, [id, setLang, setTimezone]);
+  }, [id, setLang, setTimezone, prefsTick]);
   return null;
 }
 

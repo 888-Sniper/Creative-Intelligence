@@ -202,6 +202,19 @@ export function mergeServerPrefs(local: Prefs, server: Record<string, unknown>):
   return next;
 }
 
+/** Fired after server preferences are merged into local storage so
+ *  mounted consumers (locale sync, campaign defaults) can react
+ *  without waiting for an identity change or remount. */
+export const PREFS_UPDATED_EVENT = "ci-prefs-updated";
+
+export function notifyPrefsUpdated(): void {
+  try {
+    window.dispatchEvent(new CustomEvent(PREFS_UPDATED_EVENT));
+  } catch {
+    /* non-browser test env */
+  }
+}
+
 /** Route for the saved Default View ("Dashboard" stays "/"). */
 export function defaultViewPath(prefs: Prefs): string {
   const paths: Record<string, string> = {

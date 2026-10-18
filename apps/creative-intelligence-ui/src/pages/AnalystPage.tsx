@@ -343,11 +343,15 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
   const [restoredScope, setRestoredScope] =
     useState<Record<string, string[]> | null>(null);
   const restoredFirstsRef = useRef<Record<string, string>>({});
+  const restoredFiltersRef = useRef<string>("");
   useEffect(() => {
     if (!restoredScope) return;
-    const drifted = Object.entries(restoredFirstsRef.current)
-      .some(([k, v]) => (filters as unknown as Record<string, string>)[k] !== v);
-    if (drifted) setRestoredScope(null);
+    // ANY filter change (including adding a key the restored scope
+    // never had) ends the override: visible controls, submitted
+    // chat scope, and downloads must never disagree.
+    if (JSON.stringify(filters) !== restoredFiltersRef.current) {
+      setRestoredScope(null);
+    }
   }, [filters, restoredScope]);
   accountRef.current = accountKey;
   const [input, setInput] = useState("");
@@ -433,6 +437,16 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
       }
       setRestoredScope(Object.keys(full).length ? full : null);
       restoredFirstsRef.current = firsts;
+      // Snapshot the exact filter object the restore produces
+      // (cleared defaults + first values) for drift detection.
+      restoredFiltersRef.current = JSON.stringify({
+        client: "", project: "", team: "", campaign: "",
+        platform: "all", vertical: "", market: "", funnel: "",
+        objective: "", status: "", spend_min: "", spend_max: "",
+        kpi: "all", hook_type: "", creator_vs_branded: "",
+        format: "", date: "", date_from: "", date_to: "",
+        ...firsts,
+      });
       clearFilters();
       for (const [k, first] of Object.entries(firsts)) {
         setFilter(k as Parameters<typeof setFilter>[0], first);
@@ -542,6 +556,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
     setMessages((prev) => [...prev, { role: "user", text: question }]);
     setInput("");
     const sentIn = activeId;
+    const sentGen = convGenRef.current;
     try {
       const data = await api<AskResponse>("POST", "/api/analyst/ask", {
         conversation_id: activeId,
@@ -552,6 +567,12 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
         max_points: maxPoints,
       });
       if (key !== accountRef.current) return;
+      // Clear All (or a newer selection) bumped the generation:
+      // a late answer must not repopulate the cleared screen.
+      if (sentGen !== convGenRef.current) {
+        await loadConversations();
+        return;
+      }
       // The user opened another conversation while this ran: the
       // answer belongs to its own conversation only — including a
       // first question sent with no active conversation. Refresh
@@ -589,6 +610,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
 
   function clearAll() {
     convGenRef.current += 1;
+    setRestoredScope(null);
     setMessages([]);
     setInput("");
     setError(null);
@@ -610,7 +632,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
       const blob =
         fmt === "xlsx"
           ? await downloadReportBlob({
-              scope: scopeBody(scope),
+              scope: restoredScope ?? scopeBody(scope),
               objective: objective || undefined,
               language,
               fmt,
@@ -622,7 +644,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
                     "POST",
                     "/api/analyst/report",
                     {
-                      scope: scopeBody(scope),
+                      scope: restoredScope ?? scopeBody(scope),
                       objective: objective || undefined,
                       language,
                       fmt,

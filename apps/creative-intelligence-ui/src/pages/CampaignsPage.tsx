@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { api, ApiError, scopedPath } from "@/api/client";
 import { useFilters } from "@/state/FilterContext";
@@ -104,19 +104,31 @@ export function CampaignsPage() {
   const me = useOptionalAuth()?.me ?? null;
   const { filters, setFilter, clearFilters, scope } = useFilters();
   // Settings → Default Campaign View, applied once per mount and
-  // never over an explicit filter the user already chose.
+  // never over an explicit filter the user already chose. Also
+  // re-applied when server preferences land after mount (fresh
+  // browser), until the user touches the status filter.
   const [viewBooted, setViewBooted] = useState(false);
-  useEffect(() => {
-    if (viewBooted) return;
-    setViewBooted(true);
+  const statusTouched = useRef(false);
+  const applyCampaignView = useCallback(() => {
+    if (statusTouched.current) return;
     const view = loadPrefs(me?.employee?.id ?? "").campaignView;
-    if (view === "Active Only" && !filters.status) {
+    if (view === "Active Only") {
       setFilter("status", "Active");
     } else if (view === "By Platform") {
       setMoreFilters(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [me?.employee?.id]);
+  useEffect(() => {
+    if (viewBooted) return;
+    setViewBooted(true);
+    applyCampaignView();
+  }, [viewBooted, applyCampaignView]);
+  useEffect(() => {
+    const onPrefs = () => applyCampaignView();
+    window.addEventListener("ci-prefs-updated", onPrefs);
+    return () => window.removeEventListener("ci-prefs-updated", onPrefs);
+  }, [applyCampaignView]);
   const [applied, setApplied] = useState(0);
   const [moreFilters, setMoreFilters] = useState(false);
   const [platMetric, setPlatMetric] = useState<(typeof PLATFORM_METRICS)[number]["value"]>("spend");
@@ -524,7 +536,7 @@ export function CampaignsPage() {
             </span>
             <select id="c-status" value={filters.status || "all"}
               title={t("campaigns.statusInfoBody")}
-              onChange={(e) => setFilter("status", e.target.value === "all" ? "" : e.target.value)}>
+              onChange={(e) => { statusTouched.current = true; setFilter("status", e.target.value === "all" ? "" : e.target.value); }}>
               <option value="all">{t("campaigns.statusAll")}</option>
               <option value="Active">{t("campaigns.statusNames.Active")}</option>
               <option value="Completed">{t("campaigns.statusNames.Completed")}</option>

@@ -369,6 +369,82 @@ def test_gemini_stt_uses_managed_secret(monkeypatch):
     assert captured["base_url"] == "http://127.0.0.1:9"
 
 
+def test_ga4_migration_recovers_stranded_rows(tmp_path):
+    db = str(tmp_path / "mig.db")
+    c = sqlite3.connect(db)
+    # Pre-fix schema (owner-less UNIQUE) with live data, plus a
+    # stranded ga4_rows_new from an interrupted earlier migration.
+    c.executescript(
+        "CREATE TABLE ga4_rows (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        " property_id TEXT NOT NULL DEFAULT '', date TEXT NOT NULL"
+        " DEFAULT '', session_source TEXT NOT NULL DEFAULT '',"
+        " session_medium TEXT NOT NULL DEFAULT '', session_campaign"
+        " TEXT NOT NULL DEFAULT '', sessions INTEGER NOT NULL DEFAULT 0,"
+        " total_users INTEGER NOT NULL DEFAULT 0, conversions REAL"
+        " NOT NULL DEFAULT 0, timezone TEXT NOT NULL DEFAULT '',"
+        " imported_by TEXT NOT NULL DEFAULT '', imported_at TEXT NOT"
+        " NULL DEFAULT '', UNIQUE (property_id, date, session_source,"
+        " session_medium, session_campaign));"
+        "CREATE TABLE ga4_rows_new (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        " property_id TEXT NOT NULL DEFAULT '', date TEXT NOT NULL"
+        " DEFAULT '', session_source TEXT NOT NULL DEFAULT '',"
+        " session_medium TEXT NOT NULL DEFAULT '', session_campaign"
+        " TEXT NOT NULL DEFAULT '', sessions INTEGER NOT NULL DEFAULT 0,"
+        " total_users INTEGER NOT NULL DEFAULT 0, conversions REAL"
+        " NOT NULL DEFAULT 0, timezone TEXT NOT NULL DEFAULT '',"
+        " imported_by TEXT NOT NULL DEFAULT '', imported_at TEXT NOT"
+        " NULL DEFAULT '', UNIQUE (property_id, date, session_source,"
+        " session_medium, session_campaign, imported_by));")
+    c.execute("INSERT INTO ga4_rows (property_id, date, session_source,"
+              " imported_by) VALUES ('123', '2026-01-01', 'a', 'emp-A')")
+    c.execute("INSERT INTO ga4_rows_new (property_id, date,"
+              " session_source, imported_by) VALUES"
+              " ('123', '2026-01-02', 'b', 'emp-B')")
+    c.commit()
+    schema_mod.init_db(c)
+    rows = sorted(r[0] for r in c.execute(
+        "SELECT session_source FROM ga4_rows WHERE property_id='123'"))
+    assert rows == ["a", "b"]
+    names = {r[0] for r in c.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "ga4_rows_new" not in names and "ga4_rows_stash" not in names
+    # Idempotent second open.
+    schema_mod.init_db(c)
+    assert c.execute("SELECT COUNT(*) FROM ga4_rows").fetchone()[0] == 2
+    c.close()
+
+
+def test_notification_forced_overlap_sends_once(tmp_path):
+    import threading
+    import time
+    db = str(tmp_path / "race2.db")
+    c0 = sqlite3.connect(db)
+    schema_mod.init_db(c0)
+    c0.close()
+    sent = []
+
+    def slow_sender(to, s, b):
+        # Hold the send open so the second thread is guaranteed to
+        # arrive while the first is mid-delivery (the old
+        # claim-after-send race window).
+        time.sleep(0.3)
+        sent.append(to)
+
+    def worker():
+        c = sqlite3.connect(db, timeout=30)
+        notifications.enqueue(
+            c, "emp-1", "analysis_ready", "s", "b",
+            dedup_key="race-2", recipient="a@b.c", sender=slow_sender)
+        c.close()
+
+    threads = [threading.Thread(target=worker) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=30)
+    assert sent == ["a@b.c"]
+
+
 def test_analyst_narrative_mock_mode_is_labelled(conn, monkeypatch):
     monkeypatch.delenv("CREATIVE_INTEL_PROVIDER_MODE", raising=False)
     from ci_backend import worker_handlers

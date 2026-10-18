@@ -81,8 +81,15 @@ def _gemini_live_models(conn=None):
     import time
     creds = _managed_credentials(conn)
     secret, base = creds.get("gemini", (None, None))
-    cache_key = hashlib.sha256(
-        ("managed" if secret else "legacy").encode()).hexdigest()[:16]
+    # Fingerprint the actual credential + endpoint (never stored):
+    # changing key or base URL must not reuse another config's list.
+    if secret:
+        ident = "managed:%s|%s" % (secret, base or "")
+    else:
+        from creative_intel.providers import live_secret
+        ident = "legacy:%s" % (live_secret("creative-intel-gemini")
+                                or "")
+    cache_key = hashlib.sha256(ident.encode()).hexdigest()[:16]
     now = time.time()
     if _GEMINI_MODELS_CACHE.get("key") == cache_key \
             and _GEMINI_MODELS_CACHE["models"] is not None \
@@ -686,11 +693,20 @@ def run(conn, snapshot, owner="", media_dir="", providers=None,
         creds = _managed_credentials(conn)
         prov.vision = prov_mod.LiveVision(
             roster, secret_for=lambda p: creds.get(p))
-        if isinstance(prov.stt, prov_mod._Unavailable) and (
-                prov_mod._configured("gemini") or "gemini" in creds):
-            _gsecret, _gbase = creds.get("gemini", (None, None))
+        # Managed Gemini wins for transcription too: a stale legacy
+        # Gemini key must not keep serving STT after an admin saved
+        # a valid replacement. Dedicated Deepgram/Groq STT (LiveStt)
+        # is left alone — only the Gemini fallback/unavailable
+        # adapters are replaced.
+        if "gemini" in creds and (
+                isinstance(prov.stt, prov_mod._Unavailable)
+                or isinstance(prov.stt, prov_mod.GeminiStt)):
+            _gsecret, _gbase = creds["gemini"]
             prov.stt = prov_mod.GeminiStt(secret=_gsecret,
                                           base_url=_gbase)
+        elif isinstance(prov.stt, prov_mod._Unavailable) \
+                and prov_mod._configured("gemini"):
+            prov.stt = prov_mod.GeminiStt()
     media = {"audio": ((prep["audio"], prep["audio_mime"])
                        if prep["audio"] else (None, None)),
              "images": prep["images"], "image_times": prep["image_times"],

@@ -6,7 +6,7 @@ import { Icon } from "@/components/icons";
 import { GlobalSearch } from "@/components/GlobalSearch";
 import { SampleScopeBanner } from "@/components/SampleScopeBanner";
 import { useLocale } from "@/i18n";
-import { applyAccent, loadPrefs, mergeServerPrefs, savePrefs } from "@/state/prefs";
+import { applyAccent, loadPrefs, mergeServerPrefs, notifyPrefsUpdated, savePrefs } from "@/state/prefs";
 import { api } from "@/api/client";
 import { useTheme, type ThemeMode } from "@/app/useTheme";
 
@@ -58,12 +58,17 @@ export function AppShell() {
     apply(loadPrefs(employeeId));
     // Server copy wins at account init too, so a fresh browser gets
     // saved appearance/defaults without visiting Settings first.
+    // Guarded like Settings: if local prefs changed while the GET
+    // was in flight (a newer edit), the stale response is dropped.
+    const localAtFetch = JSON.stringify(loadPrefs(employeeId));
     void api<{ prefs: Record<string, unknown> }>("GET", "/api/preferences")
       .then((r) => {
         if (!live || !r.prefs || !Object.keys(r.prefs).length) return;
+        if (JSON.stringify(loadPrefs(employeeId)) !== localAtFetch) return;
         const merged = mergeServerPrefs(loadPrefs(employeeId), r.prefs);
         savePrefs(employeeId, merged);
         apply(merged);
+        notifyPrefsUpdated();
       })
       .catch(() => { /* local copy stays authoritative offline */ });
     return () => { live = false; };

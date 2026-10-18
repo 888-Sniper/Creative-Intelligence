@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "@/api/client";
 import { useAuth } from "@/auth/AuthProvider";
@@ -222,25 +222,43 @@ export function DashboardPage() {
   // blank scope makes the backend compare the whole dataset extent
   // against an empty previous window (honest "none", no percentages),
   // so the dashboard opens on a range with a real previous equivalent.
-  // User-chosen dates always win; this runs once per mount.
+  // User-chosen dates always win. If server preferences land AFTER
+  // the boot (fresh browser), the booted window is recomputed —
+  // but only while the visible dates still equal what boot set.
+  const bootedWindow = useRef<{ from: string; to: string } | null>(null);
+  const applyRangeBoot = useCallback(() => {
+    if (!daily || daily.length < 2) return false;
+    const days = rangeDays(loadPrefs(me?.employee?.id ?? ""));
+    const dates = daily.map((p) => p.date).sort();
+    if (days === null) {
+      bootedWindow.current = null;
+      return true;
+    }
+    const win = dates.slice(-days);
+    bootedWindow.current = { from: win[0], to: win[win.length - 1] };
+    setFilter("date_from", win[0]);
+    setFilter("date_to", win[win.length - 1]);
+    return true;
+  }, [daily, setFilter, me?.employee?.id]);
   useEffect(() => {
     if (rangeBooted) return;
     if (filters.date || filters.date_from || filters.date_to) {
       setRangeBooted(true);
       return;
     }
-    if (!daily || daily.length < 2) return;
-    const days = rangeDays(loadPrefs(me?.employee?.id ?? ""));
-    if (days === null) {
-      setRangeBooted(true);
-      return;
-    }
-    const dates = daily.map((p) => p.date).sort();
-    const window = dates.slice(-days);
-    setFilter("date_from", window[0]);
-    setFilter("date_to", window[window.length - 1]);
-    setRangeBooted(true);
-  }, [daily, filters.date, filters.date_from, filters.date_to, rangeBooted, setFilter, me?.employee?.id]);
+    if (applyRangeBoot()) setRangeBooted(true);
+  }, [filters.date, filters.date_from, filters.date_to, rangeBooted, applyRangeBoot]);
+  useEffect(() => {
+    const onPrefs = () => {
+      const booted = bootedWindow.current;
+      if (!booted) return;
+      // User changed dates since boot: their choice wins.
+      if (filters.date_from !== booted.from || filters.date_to !== booted.to) return;
+      applyRangeBoot();
+    };
+    window.addEventListener("ci-prefs-updated", onPrefs);
+    return () => window.removeEventListener("ci-prefs-updated", onPrefs);
+  }, [applyRangeBoot, filters.date_from, filters.date_to]);
 
   const hour = new Date().getHours();
   const part = hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening";

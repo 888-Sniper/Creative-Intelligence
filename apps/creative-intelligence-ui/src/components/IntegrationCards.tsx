@@ -177,17 +177,21 @@ function Ga4Tools() {
   const [busy, setBusy] = useState(false);
   // Generation guard: a slower earlier response must never
   // overwrite rows for the property selected most recently.
+  // selectedRef mirrors the SELECTOR (updated in an effect), never
+  // the request argument — an import finishing for property A must
+  // not become "current" while the selector shows B.
   const rowsGen = useRef(0);
   const selectedRef = useRef("");
+  useEffect(() => { selectedRef.current = propertyId; }, [propertyId]);
 
   const loadRows = async (pid: string) => {
     const gen = ++rowsGen.current;
-    selectedRef.current = pid;
     try {
       const q = pid ? `?property_id=${encodeURIComponent(pid)}` : "";
       const res = await api<{ rows: Ga4Row[] }>(
         "GET", `/api/integrations/ga4/rows${q}`);
-      if (gen !== rowsGen.current || selectedRef.current !== pid) return;
+      if (gen !== rowsGen.current) return;
+      if (pid && selectedRef.current && pid !== selectedRef.current) return;
       setRows(res.rows ?? []);
     } catch {
       /* rows are optional context; import status carries errors */
@@ -216,7 +220,10 @@ function Ga4Tools() {
         "POST", "/api/integrations/ga4/import",
         { property_id: propertyId, start_date: start, end_date: end });
       setStatus(t("settings.integrations.ga4Imported", { count: res.rows }));
-      await loadRows(propertyId);
+      // Reload only what the selector currently shows; if the user
+      // switched properties mid-import, A's completion must not
+      // replace B's rows.
+      await loadRows(selectedRef.current);
     } catch (err) {
       setStatus(err instanceof ApiError ? err.message
         : t("settings.integrations.ga4ImportFailed"));

@@ -416,33 +416,45 @@ def test_ga4_migration_recovers_stranded_rows(tmp_path):
 
 def test_notification_forced_overlap_sends_once(tmp_path):
     import threading
-    import time
     db = str(tmp_path / "race2.db")
     c0 = sqlite3.connect(db)
     schema_mod.init_db(c0)
     c0.close()
     sent = []
+    in_send = threading.Event()
+    release = threading.Event()
 
     def slow_sender(to, s, b):
-        # Hold the send open so the second thread is guaranteed to
-        # arrive while the first is mid-delivery (the old
-        # claim-after-send race window).
-        time.sleep(0.3)
+        # Signal mid-delivery, then BLOCK until the second thread
+        # has attempted its enqueue: overlap is guaranteed by
+        # synchronization, not by sleep timing.
+        in_send.set()
+        assert release.wait(timeout=30)
         sent.append(to)
+
+    outcomes = []
 
     def worker():
         c = sqlite3.connect(db, timeout=30)
-        notifications.enqueue(
+        outcomes.append(notifications.enqueue(
             c, "emp-1", "analysis_ready", "s", "b",
-            dedup_key="race-2", recipient="a@b.c", sender=slow_sender)
+            dedup_key="race-2", recipient="a@b.c", sender=slow_sender))
         c.close()
 
-    threads = [threading.Thread(target=worker) for _ in range(2)]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join(timeout=30)
+    first = threading.Thread(target=worker)
+    first.start()
+    # Deterministic overlap: thread two starts only once thread
+    # one is provably inside the sender, then releases it after
+    # thread two's enqueue attempt has completed (duplicate) —
+    # under claim-after-send both would deliver.
+    assert in_send.wait(timeout=30)
+    second = threading.Thread(target=worker)
+    second.start()
+    second.join(timeout=30)
+    release.set()
+    first.join(timeout=30)
     assert sent == ["a@b.c"]
+    assert sum(1 for o in outcomes if o.get("duplicate")) == 1
 
 
 def test_analyst_narrative_mock_mode_is_labelled(conn, monkeypatch):

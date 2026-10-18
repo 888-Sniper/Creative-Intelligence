@@ -138,9 +138,20 @@ export function loadPrefs(employeeId = ""): Prefs {
   return { ...DEFAULTS };
 }
 
+/** Monotonic edit revision: every save bumps it, so a delayed
+ *  server-prefs response can tell "edited then reverted to the
+ *  same values" apart from "never edited" (value comparison
+ *  cannot). Module-scoped: one app instance per tab. */
+let prefsRevision = 0;
+
+export function currentPrefsRevision(): number {
+  return prefsRevision;
+}
+
 export function savePrefs(employeeId: string, prefs: Prefs): boolean {
   try {
     window.localStorage.setItem(keyFor(employeeId), JSON.stringify(prefs));
+    prefsRevision += 1;
     return true;
   } catch {
     return false;

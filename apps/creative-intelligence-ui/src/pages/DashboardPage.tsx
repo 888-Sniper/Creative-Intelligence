@@ -274,6 +274,11 @@ export function DashboardPage() {
   useEffect(() => {
     if (rangeBooted) return;
     if (filters.date || filters.date_from || filters.date_to) {
+      // Dates chosen on another page before entering Dashboard are
+      // USER-OWNED from the start: basis/prefs recomputes must
+      // never overwrite them.
+      userDateTouched.current = true;
+      bootedMode.current = null;
       setRangeBooted(true);
       return;
     }

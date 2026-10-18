@@ -470,19 +470,38 @@ def test_notification_forced_overlap_sends_once(tmp_path):
 
 
 def test_stale_preference_revision_cannot_overwrite(conn):
-    notifications.save_prefs(conn, "emp-1", {"density": "compact"},
-                             revision=5)
-    # A delayed older save (pre-reset edit) must lose.
+    # Server-issued versions: each accepted save increments _rev;
+    # clients echo the last version seen as their base.
+    first = notifications.save_prefs(conn, "emp-1",
+                                     {"density": "compact"})
+    assert first["_rev"] == 1
+    second = notifications.save_prefs(
+        conn, "emp-1", {"density": "comfortable"}, base_revision=1)
+    assert second["_rev"] == 2
+    # A delayed older save (base 1, pre-reset edit) must lose.
     out = notifications.save_prefs(conn, "emp-1",
-                                   {"density": "comfortable"},
-                                   revision=3)
-    assert out["density"] == "compact"
-    assert notifications.get_prefs(conn, "emp-1")["density"] == "compact"
-    # A newer save (the reset) applies.
-    out = notifications.save_prefs(conn, "emp-1",
-                                   {"density": "comfortable"},
-                                   revision=6)
+                                   {"density": "compact"},
+                                   base_revision=1)
     assert out["density"] == "comfortable"
+    assert notifications.get_prefs(conn, "emp-1")["_rev"] == 2
+    # Reload lifecycle: a fresh client that GETs first (base =
+    # current server version) saves successfully — no catch-up
+    # rejection loop like the old client-counter design.
+    seen = notifications.get_prefs(conn, "emp-1")["_rev"]
+    third = notifications.save_prefs(
+        conn, "emp-1", {"density": "compact"}, base_revision=seen)
+    assert third["density"] == "compact"
+    assert third["_rev"] == 3
+
+
+def test_preferences_write_for_another_account_is_rejected(tmp_path):
+    http = _authed_client(tmp_path)
+    res = http.put("/api/preferences", json={
+        "prefs": {"workspace": "Stolen"},
+        "employee_id": "someone-else"})
+    assert res.status_code == 409, res.text
+    mine = http.get("/api/preferences").json()["prefs"]
+    assert mine.get("workspace") != "Stolen"
 
 
 def test_analyst_narrative_mock_mode_is_labelled(conn, monkeypatch):

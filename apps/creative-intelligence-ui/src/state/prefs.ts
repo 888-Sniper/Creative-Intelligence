@@ -255,6 +255,33 @@ export function campaignStatusTouched(employeeId: string): boolean {
   return touchedCampaignStatus(employeeId) !== null;
 }
 
+/** Last SERVER-ISSUED prefs version seen for an account, persisted
+ *  in localStorage so it survives reloads and is shared across
+ *  tabs (unlike the in-memory edit counter above, which only
+ *  guards in-flight merges within one tab). */
+export function serverPrefsRevision(employeeId: string): number | null {
+  try {
+    const raw = window.localStorage.getItem(
+      `ci-prefs-server-rev:${employeeId}`);
+    const n = raw === null ? NaN : Number(raw);
+    return Number.isInteger(n) ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+export function noteServerPrefsRevision(employeeId: string,
+                                        prefs: Record<string, unknown>): void {
+  const rev = prefs["_rev"];
+  if (typeof rev !== "number" || !Number.isInteger(rev)) return;
+  try {
+    window.localStorage.setItem(
+      `ci-prefs-server-rev:${employeeId}`, String(rev));
+  } catch {
+    /* storage unavailable: next save bootstraps with unknown base */
+  }
+}
+
 /** Fired after server preferences are merged into local storage so
  *  mounted consumers (locale sync, campaign defaults) can react
  *  without waiting for an identity change or remount. */

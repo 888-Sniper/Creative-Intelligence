@@ -313,6 +313,9 @@ export function CampaignsPage() {
    * name search (status/spend live in shared state since the
    * consistency pass, so clearFilters covers them too). */
   const resetAll = () => {
+    // Reset is an explicit All-status choice: record it so a
+    // remount restores All, not the pre-reset remembered status.
+    markCampaignStatusTouched(me?.employee?.id ?? "", "");
     clearFilters();
     setSearch("");
   };

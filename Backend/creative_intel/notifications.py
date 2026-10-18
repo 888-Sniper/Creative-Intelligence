@@ -51,26 +51,33 @@ def get_prefs(conn, employee_id):
     return data if isinstance(data, dict) else {}
 
 
-def save_prefs(conn, employee_id, prefs, revision=None):
-    """Merge-save preferences. With a client revision, stale writes
-    lose: a delayed older PUT (e.g. a pre-reset edit still in
-    flight) must never overwrite a newer save. The stored `_rev`
-    only moves forward; equal/newer revisions apply."""
+def save_prefs(conn, employee_id, prefs, base_revision=None):
+    """Merge-save preferences with a SERVER-ISSUED version.
+
+    The server owns `_rev`: every accepted save increments it and
+    returns the new value. Clients echo the last version they saw
+    as `base_revision` (persisted locally, so it survives reloads
+    and is shared across tabs). A write whose base is older than
+    the current version is stale (e.g. a pre-reset edit still in
+    flight) and is dropped, returning current prefs unchanged.
+    Unknown base (None) accepts — first contact after a GET is the
+    normal bootstrap path."""
     if not employee_id:
         raise ValueError("preferences need an employee")
     if not isinstance(prefs, dict):
         raise ValueError("preferences must be an object")
     clean = {k: prefs[k] for k in prefs if k in PREF_KEYS}
     existing = get_prefs(conn, employee_id)
-    if revision is not None:
+    current = existing.get("_rev")
+    current = current if isinstance(current, int) else 0
+    if base_revision is not None:
         try:
-            revision = int(revision)
+            base_revision = int(base_revision)
         except (TypeError, ValueError):
-            raise ValueError("revision must be an integer")
-        current = existing.get("_rev")
-        if isinstance(current, int) and revision < current:
+            raise ValueError("base_revision must be an integer")
+        if base_revision < current:
             return existing
-        clean["_rev"] = revision
+    clean["_rev"] = current + 1
     merged = {**existing, **clean}
     conn.execute(
         "INSERT INTO employee_prefs (employee_id, prefs_json, updated_at)"

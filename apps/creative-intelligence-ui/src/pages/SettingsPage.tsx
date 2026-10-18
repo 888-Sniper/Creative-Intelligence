@@ -26,23 +26,31 @@ import {
   DEFAULTS,
   TIMEZONES,
   applyAccent,
-  currentPrefsRevision,
   loadPrefs,
+  noteServerPrefsRevision,
+  serverPrefsRevision,
   mergeServerPrefs,
   savePrefs,
   toServerPrefs,
   type Prefs,
 } from "@/state/prefs";
 
-/** Serialized preference PUTs: writes land in edit order (a slow
- *  older request can never overwrite a newer save such as Reset),
- *  and each carries the edit revision the server checks. */
+/** Serialized, ACCOUNT-BOUND preference PUTs: writes land in edit
+ *  order, each stamped with its originating employee (the server
+ *  drops mismatches after an account switch) and the last
+ *  server-issued version as base (stale bases lose server-side). */
 let prefsPutChain: Promise<unknown> = Promise.resolve();
-function putServerPrefs(next: Prefs): Promise<unknown> {
-  const revision = currentPrefsRevision();
-  prefsPutChain = prefsPutChain.catch(() => {}).then(() =>
-    api("PUT", "/api/preferences",
-        { prefs: toServerPrefs(next), revision }));
+function putServerPrefs(next: Prefs, employeeId: string): Promise<unknown> {
+  prefsPutChain = prefsPutChain.catch(() => {}).then(async () => {
+    const res = await api<{ prefs: Record<string, unknown> }>(
+      "PUT", "/api/preferences", {
+        prefs: toServerPrefs(next),
+        employee_id: employeeId,
+        base_revision: serverPrefsRevision(employeeId),
+      });
+    noteServerPrefsRevision(employeeId, res.prefs ?? {});
+    return res;
+  });
   return prefsPutChain;
 }
 import type { PublicEmployee } from "@/types/auth";
@@ -267,7 +275,7 @@ export function SettingsPage() {
     }
     // Server copy: defaults + notification opt-ins must follow the
     // account (and drive email), not just this browser.
-    void putServerPrefs(next)
+    void putServerPrefs(next, id)
       .then(() => setSaveState("saved"))
       .catch(() => {
         setSaveState("error");
@@ -324,7 +332,7 @@ export function SettingsPage() {
       const id = employee?.id ?? me?.employee?.id ?? "";
       const next = { ...prefsRef.current, workspace: pending.slice(0, 80) };
       savePrefs(id, next);
-      void putServerPrefs(next).catch(() => {});
+      void putServerPrefs(next, id).catch(() => {});
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -351,6 +359,7 @@ export function SettingsPage() {
           // was in flight: any commit since the fetch started wins.
           if (revRef.current !== revAtFetch) return;
           if (!r.prefs || !Object.keys(r.prefs).length) return;
+          noteServerPrefsRevision(id, r.prefs);
           const merged = mergeServerPrefs(adoptPrefs(id, liveThemeMode), r.prefs);
           setPrefs(merged);
           setNameDraft(merged.workspace);
@@ -374,7 +383,8 @@ export function SettingsPage() {
           .then((r) => {
             if (revRef.current !== revAtFetch) return;
             if (!r.prefs || !Object.keys(r.prefs).length) return;
-            const merged = mergeServerPrefs(adoptPrefs(id, liveThemeMode), r.prefs);
+            noteServerPrefsRevision(id, r.prefs);
+          const merged = mergeServerPrefs(adoptPrefs(id, liveThemeMode), r.prefs);
             setPrefs(merged);
             setNameDraft(merged.workspace);
             savePrefs(id, merged);

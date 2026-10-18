@@ -2736,12 +2736,20 @@ async def preferences_put(request: Request,
                           who=Depends(get_current_employee)):
     from creative_intel import notifications as notify_mod
     raw = await json_payload(request)
+    # Account binding: a queued write created under account A must
+    # NEVER land on account B after a session switch. The client
+    # stamps the originating employee; mismatch is dropped (409),
+    # not silently re-attributed to whoever is signed in now.
+    claimed = raw.get("employee_id") if isinstance(raw, dict) else None
+    if claimed and str(claimed) != str(who.id):
+        raise HTTPException(status_code=409, detail={
+            "error": "stale preferences write for another account"})
     try:
         prefs = notify_mod.save_prefs(
             conn, who.id, raw.get("prefs") if isinstance(raw, dict)
             else {},
-            revision=raw.get("revision") if isinstance(raw, dict)
-            else None)
+            base_revision=raw.get("base_revision")
+            if isinstance(raw, dict) else None)
     except ValueError as exc:
         raise _conflict(exc)
     return {"prefs": prefs}

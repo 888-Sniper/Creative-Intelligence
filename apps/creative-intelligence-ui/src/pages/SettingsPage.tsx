@@ -31,6 +31,7 @@ import {
   withoutPendingPrefs,
   loadPrefs,
   noteServerPrefsSnapshot,
+  pendingPrefsChanges,
   queuePrefsChanges,
   replacePendingPrefs,
   serverPrefsChanges,
@@ -306,6 +307,9 @@ export function SettingsPage() {
   // commit only lands when no newer keystroke superseded it
   // (last-write-wins with an in-flight guard against lost updates).
   const revRef = useRef(0);
+  // Whether the last settled save FAILED. Name validation runs
+  // on the same status slot and must restore (never hide) this.
+  const saveFailedRef = useRef(false);
   const nameTimer = useRef<number | null>(null);
   const [nameDraft, setNameDraft] = useState(prefs.workspace);
   const [nameError, setNameError] = useState("");
@@ -364,6 +368,7 @@ export function SettingsPage() {
     else queuePrefsChanges(id, serverPrefsChanges(prev, next));
     const ok = savePrefs(id, next);
     if (!ok) {
+      saveFailedRef.current = true;
       setSaveState("error");
       setSaveError(t("settings.footer.couldNotSave"));
       return false;
@@ -376,18 +381,21 @@ export function SettingsPage() {
     void flushServerPrefs(id)
       .then((res) => {
         if (revRef.current !== commitRev) return;
+        saveFailedRef.current = false;
         if (res?.prefs) reconcileLocal(id, res.prefs);
         // A debounced workspace-name draft that has not committed
         // yet is still an unsaved change: don't claim "saved"
-        // for it — its own commit will settle the status. Compare
-        // against THIS commit's workspace value (render-lagged
-        // refs could still show the pre-commit name here).
-        setSaveState(
-          nameDraftRef.current.trim() !== next.workspace
-            ? "saving" : "saved");
+        // for it — its own commit will settle the status. A BLANK
+        // draft is not outstanding (it can never commit; the
+        // validation message owns that feedback). Compare against
+        // THIS commit's workspace value (render-lagged refs could
+        // still show the pre-commit name here).
+        const draft = nameDraftRef.current.trim();
+        setSaveState(draft && draft !== next.workspace ? "saving" : "saved");
       })
       .catch(() => {
         if (revRef.current !== commitRev) return;
+        saveFailedRef.current = true;
         setSaveState("error");
         setSaveError(t("settings.footer.couldNotSave"));
       });
@@ -431,12 +439,20 @@ export function SettingsPage() {
       const value = raw.trim();
       if (!value) {
         setNameError(t("settings.general.workspaceRequired"));
-        setSaveState("idle");
+        // Validation owns the name error only — it must not hide
+        // a persistence failure (and its Retry) from another
+        // setting's save, nor pre-empt an in-flight flush that
+        // will settle the status itself.
+        const id = employee?.id ?? me?.employee?.id ?? "";
+        if (saveFailedRef.current) setSaveState("error");
+        else if (!Object.keys(pendingPrefsChanges(id)).length) {
+          setSaveState("idle");
+        }
         return;
       }
       commit({ ...prefsRef.current, workspace: value.slice(0, 80) });
     }, 450);
-  }, [commit, t]);
+  }, [commit, t, employee?.id, me?.employee?.id]);
 
   // Flush a pending debounced workspace-name autosave on unmount:
   // navigating away inside the 450ms window must not drop the edit.

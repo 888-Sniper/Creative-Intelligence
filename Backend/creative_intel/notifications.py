@@ -38,6 +38,12 @@ def _now():
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
+def _is_int(value):
+    """True only for real integers — JSON booleans are ints in
+    Python (isinstance(True, int)) but never valid revisions."""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
 def get_prefs(conn, employee_id):
     row = conn.execute(
         "SELECT prefs_json FROM employee_prefs WHERE employee_id=?",
@@ -54,7 +60,7 @@ def get_prefs(conn, employee_id):
     # version 0. Saying so explicitly lets clients order this
     # response against confirmed newer state instead of
     # treating an unversioned payload as ageless.
-    if not isinstance(data.get("_rev"), int):
+    if not _is_int(data.get("_rev")):
         data["_rev"] = 0
     return data
 
@@ -91,7 +97,9 @@ def save_prefs(conn, employee_id, prefs, base_revision=None):
     clean = {k: prefs[k] for k in prefs if k in PREF_KEYS}
     existing = get_prefs(conn, employee_id)
     current = existing.get("_rev")
-    current = current if isinstance(current, int) else 0
+    current = current if _is_int(current) else 0
+    if isinstance(base_revision, bool):
+        raise ValueError("base_revision must be an integer")
     if base_revision is not None:
         try:
             base_revision = int(base_revision)

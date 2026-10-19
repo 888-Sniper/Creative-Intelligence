@@ -519,6 +519,18 @@ def test_legacy_preferences_without_revision_are_version_zero(conn):
     assert notifications.get_prefs(conn, "emp-legacy")["density"] == "compact"
     # No row at all is version 0 too.
     assert notifications.get_prefs(conn, "emp-new") == {"_rev": 0}
+    # A boolean _rev is malformed data, not revision 1
+    # (isinstance(True, int) is True in Python).
+    conn.execute(
+        "INSERT INTO employee_prefs (employee_id, prefs_json, updated_at)"
+        " VALUES (?, ?, ?)",
+        ("emp-bool", json.dumps({"density": "compact", "_rev": True}),
+         "2026-01-01T00:00:00+00:00"))
+    conn.commit()
+    assert notifications.get_prefs(conn, "emp-bool")["_rev"] == 0
+    with pytest.raises(ValueError):
+        notifications.save_prefs(conn, "emp-bool", {"density": "compact"},
+                                 base_revision=True)
 
 
 def test_preferences_two_tab_conflict_then_reconcile(tmp_path):

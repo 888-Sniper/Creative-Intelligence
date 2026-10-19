@@ -1179,6 +1179,57 @@ describe("SettingsPage", () => {
       .toBe("Compact");
   });
 
+  it("blank-name validation does not hide another save's failure", async () => {
+    mockFetch({ prefsPut: "fail", employeeId: "e-blankfail" });
+    renderSettings();
+    await waitFor(() => {
+      expect(screen.getByLabelText("Workspace Name")).toBeDefined();
+    });
+    vi.useFakeTimers();
+    fireEvent.change(screen.getByLabelText("Workspace Name"),
+                     { target: { value: "   " } });
+    fireEvent.change(screen.getByLabelText("Interface Density"),
+                     { target: { value: "Compact" } });
+    // The density PUT fails inside the debounce window.
+    await vi.advanceTimersByTimeAsync(0);
+    expect(screen.getByRole("button", { name: "Retry" })).toBeDefined();
+    // The blank-name validation fires: it owns the name error
+    // only and must not clear the persistence failure / Retry.
+    await vi.advanceTimersByTimeAsync(600);
+    vi.useRealTimers();
+    expect(await screen.findByText("Workspace name cannot be empty."))
+      .toBeDefined();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeDefined();
+    expect(screen.getByRole("status").textContent)
+      .toBe("Could not save settings in this browser.");
+  });
+
+  it("a successful save after blank-name validation does not stick on Saving", async () => {
+    const hold = { release: () => {} };
+    mockFetch({ holdFirstPut: hold, employeeId: "e-blankok" });
+    renderSettings();
+    await waitFor(() => {
+      expect(screen.getByLabelText("Workspace Name")).toBeDefined();
+    });
+    vi.useFakeTimers();
+    fireEvent.change(screen.getByLabelText("Workspace Name"),
+                     { target: { value: "   " } });
+    fireEvent.change(screen.getByLabelText("Interface Density"),
+                     { target: { value: "Compact" } });
+    // Validation fires while the density PUT is still held.
+    await vi.advanceTimersByTimeAsync(600);
+    vi.useRealTimers();
+    expect(await screen.findByText("Workspace name cannot be empty."))
+      .toBeDefined();
+    hold.release();
+    // The committed change IS saved (the blank draft is invalid
+    // input owned by its own message, not an unsaved change).
+    await waitFor(() => {
+      expect(screen.getByRole("status").textContent).toBe("All Changes Saved.");
+    });
+    expect(screen.getByText("Workspace name cannot be empty.")).toBeDefined();
+  });
+
   it("does not claim saved when the server rejects the write", async () => {
     mockFetch({ prefsPut: "fail" });
     renderSettings();

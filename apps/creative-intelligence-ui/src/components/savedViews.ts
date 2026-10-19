@@ -1,4 +1,5 @@
 import type { FilterValues } from "@/state/FilterContext";
+import { markCampaignStatusTouched } from "@/state/prefs";
 
 export interface SavedViewState {
   filters?: Record<string, string[]>;
@@ -62,6 +63,7 @@ export type SetFilter = (key: keyof FilterValues, value: string) => void;
  *  reload would reset filter state and silently drop the restore. */
 export function applySavedView(
   v: SavedView, setFilter: SetFilter, navigate: (to: string) => void,
+  employeeId = "",
 ): string {
   const link = compareDeepLink(v);
   const f = v.state?.filters ?? {};
@@ -77,6 +79,10 @@ export function applySavedView(
     const vals = f[k] ?? [];
     setFilter(k, vals[0] ?? "");
   }
+  // Applying a view IS an explicit status choice (the view's
+  // status, or All when it has none): record it, or Campaigns
+  // resurrects the previously remembered status over the view.
+  markCampaignStatusTouched(employeeId, (f["status"] ?? [])[0] ?? "");
   if (v.state?.kpi) setFilter("kpi", v.state.kpi);
   const dest = link ?? (v.state?.view ? (VIEW_ROUTES[v.state.view] ?? "/") : "/");
   navigate(dest);

@@ -314,20 +314,58 @@ export function serverPrefsSnapshot(employeeId: string): Record<string, unknown>
   return _serverSnapshots.get(employeeId) ?? null;
 }
 
-/** Server-shaped keys whose value in `next` differs from the
- *  snapshot this tab last confirmed. Null snapshot (nothing
- *  confirmed yet) yields the full document — the bootstrap
- *  save. Only these keys are PUT, so a stale tab can never
- *  restore values another tab changed after its snapshot. */
-export function serverPrefsDelta(snapshot: Record<string, unknown> | null,
-                                 next: Prefs): Record<string, unknown> {
-  const full = toServerPrefs(next);
-  if (!snapshot) return full;
-  const delta: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(full)) {
-    if (snapshot[key] !== value) delta[key] = value;
+/** Server-shaped keys THIS commit changed (prev local → next
+ *  local). Saves are built from these — never from a
+ *  local-vs-snapshot diff, which would re-send stale local
+ *  values for keys another tab changed after this tab's
+ *  snapshot (the form legitimately diverges from the snapshot
+ *  until a merge reconciles it). */
+export function serverPrefsChanges(prev: Prefs,
+                                   next: Prefs): Record<string, unknown> {
+  const changes: Record<string, unknown> = {};
+  for (const [local, server] of SERVER_PREF_MAP) {
+    if (prev[local] !== next[local]) changes[server] = next[local];
   }
-  return delta;
+  return changes;
+}
+
+/** Unconfirmed changed keys per account, accumulated across
+ *  commits until the server accepts them. A failed or
+ *  still-queued write leaves its keys here, so Retry (which
+ *  re-commits identical prefs, an empty diff) still flushes
+ *  them, and an edit reverted while a write is in flight
+ *  overwrites the pending value instead of vanishing. */
+const _pendingPrefs = new Map<string, Record<string, unknown>>();
+
+export function queuePrefsChanges(employeeId: string,
+                                  changes: Record<string, unknown>): void {
+  const pending = _pendingPrefs.get(employeeId) ?? {};
+  _pendingPrefs.set(employeeId, { ...pending, ...changes });
+}
+
+/** Reset Defaults: EVERY key is an intended write, superseding
+ *  any accumulated pending changes. */
+export function replacePendingPrefs(employeeId: string,
+                                    serverPrefs: Record<string, unknown>): void {
+  _pendingPrefs.set(employeeId, { ...serverPrefs });
+}
+
+export function pendingPrefsChanges(employeeId: string): Record<string, unknown> {
+  return { ...(_pendingPrefs.get(employeeId) ?? {}) };
+}
+
+/** Drop keys the server just accepted — only where the pending
+ *  value is still the sent one (a newer edit of the same key
+ *  queued behind the in-flight write must survive). */
+export function confirmPrefsChanges(employeeId: string,
+                                    sent: Record<string, unknown>): void {
+  const pending = _pendingPrefs.get(employeeId);
+  if (!pending) return;
+  const next = { ...pending };
+  for (const [key, value] of Object.entries(sent)) {
+    if (next[key] === value) delete next[key];
+  }
+  _pendingPrefs.set(employeeId, next);
 }
 
 /** Fired after server preferences are merged into local storage so

@@ -26,13 +26,18 @@ import {
   DEFAULTS,
   TIMEZONES,
   applyAccent,
+  confirmPrefsChanges,
   loadPrefs,
   noteServerPrefsSnapshot,
-  serverPrefsDelta,
+  pendingPrefsChanges,
+  queuePrefsChanges,
+  replacePendingPrefs,
+  serverPrefsChanges,
   serverPrefsRevision,
   serverPrefsSnapshot,
   mergeServerPrefs,
   savePrefs,
+  toServerPrefs,
   type Prefs,
 } from "@/state/prefs";
 
@@ -56,43 +61,53 @@ function snapshotBase(employeeId: string): number | null {
     ? rev : serverPrefsRevision(employeeId);
 }
 
-/** Serialized, ACCOUNT-BOUND, DELTA-ONLY preference PUTs. Each
- *  write sends only the keys that differ from this tab's
- *  confirmed snapshot, stamped with its originating employee
- *  and that snapshot's version as base. A stale base is an
- *  explicit 409 carrying the current prefs: the same delta is
- *  re-applied once on the fresh base, so unrelated edits from
- *  another tab survive and success is reported only after the
- *  server actually accepts the write. */
+/** Serialized, ACCOUNT-BOUND flush of accumulated preference
+ *  changes. Each run sends the pending changed keys (queued by
+ *  commits, never a whole stale document), stamped with the
+ *  originating employee and this tab's snapshot version as
+ *  base. A stale base is an explicit 409 carrying the current
+ *  prefs: the same batch is re-applied once on the fresh base,
+ *  so unrelated edits from another tab survive. Resolves with
+ *  the confirmed server prefs (null when nothing was pending)
+ *  so the caller can reconcile the form before claiming saved. */
 let prefsPutChain: Promise<unknown> = Promise.resolve();
-function putServerPrefs(next: Prefs, employeeId: string): Promise<unknown> {
-  prefsPutChain = prefsPutChain.catch(() => {}).then(async () => {
-    // Delta computed at EXECUTION against the latest confirmed
-    // snapshot: an edit reverted while an earlier write was
-    // still queued must land as the reverted value, not vanish
-    // against a snapshot the earlier write has since moved.
-    // The same fixed delta is reused for the conflict retry.
-    const delta = serverPrefsDelta(serverPrefsSnapshot(employeeId), next);
+function flushServerPrefs(employeeId: string):
+    Promise<{ prefs: Record<string, unknown> } | null> {
+  const run = prefsPutChain.catch(() => {}).then(async () => {
+    // Hydration: a first save in a fresh tab establishes the
+    // snapshot/base from the server before writing, so an early
+    // edit can never go out as an unbased overwrite. If the GET
+    // fails, the pending-keys-only payload is still safe.
+    if (!serverPrefsSnapshot(employeeId)) {
+      try {
+        const r = await api<{ prefs: Record<string, unknown> }>(
+          "GET", "/api/preferences");
+        if (r.prefs) noteServerPrefsSnapshot(employeeId, r.prefs);
+      } catch { /* offline: pending keys stay queued on failure */ }
+    }
+    const batch = pendingPrefsChanges(employeeId);
+    if (!Object.keys(batch).length) return null;
     const attempt = (base: number | null) =>
       api<{ prefs: Record<string, unknown> }>("PUT", "/api/preferences", {
-        prefs: delta,
+        prefs: batch,
         employee_id: employeeId,
         base_revision: base,
       });
+    let res: { prefs: Record<string, unknown> };
     try {
-      const res = await attempt(snapshotBase(employeeId));
-      noteServerPrefsSnapshot(employeeId, res.prefs ?? {});
-      return res;
+      res = await attempt(snapshotBase(employeeId));
     } catch (e) {
       const current = conflictCurrentPrefs(e);
       if (!current) throw e;
       noteServerPrefsSnapshot(employeeId, current);
-      const res = await attempt(snapshotBase(employeeId));
-      noteServerPrefsSnapshot(employeeId, res.prefs ?? {});
-      return res;
+      res = await attempt(snapshotBase(employeeId));
     }
+    noteServerPrefsSnapshot(employeeId, res.prefs ?? {});
+    confirmPrefsChanges(employeeId, batch);
+    return res;
   });
-  return prefsPutChain;
+  prefsPutChain = run;
+  return run;
 }
 import type { PublicEmployee } from "@/types/auth";
 
@@ -296,12 +311,34 @@ export function SettingsPage() {
     setTimezone(next.timezone);
   }, [setThemeMode, setLang, setTimezone]);
 
+  /** Adopt confirmed server values for keys this tab has no
+   *  unconfirmed edit for (e.g. another tab's change learned
+   *  through a conflict), so the form, local copy and snapshot
+   *  reconverge instead of the next save re-sending stale form
+   *  values. An in-progress workspace-name draft is untouched. */
+  const reconcileLocal = useCallback((id: string,
+                                      serverPrefs: Record<string, unknown>) => {
+    const pending = pendingPrefsChanges(id);
+    const filtered: Record<string, unknown> = { ...serverPrefs };
+    for (const k of Object.keys(pending)) delete filtered[k];
+    const typingName = nameDraftRef.current !== prefsRef.current.workspace;
+    if (typingName) delete filtered["workspace"];
+    const merged = mergeServerPrefs(prefsRef.current, filtered);
+    if (JSON.stringify(merged) === JSON.stringify(prefsRef.current)) return;
+    setPrefs(merged);
+    if (!typingName) setNameDraft(merged.workspace);
+    savePrefs(id, merged);
+    applyLive(merged);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [applyLive]);
+
   /** Persist one autosave commit synchronously (localStorage).
    *  Optimistic: live values apply first so the controls never snap
    *  back; storage failure keeps them visible with an error + Retry
    *  (which re-persists exactly what is shown). */
-  const commit = useCallback((next: Prefs) => {
+  const commit = useCallback((next: Prefs, opts?: { replaceAll?: boolean }) => {
     const id = employee?.id ?? me?.employee?.id ?? "";
+    const prev = prefsRef.current;
     revRef.current += 1;
     const commitRev = revRef.current;
     setPrefs(next);
@@ -316,13 +353,18 @@ export function SettingsPage() {
       return false;
     }
     // Server copy: defaults + notification opt-ins must follow the
-    // account (and drive email), not just this browser.
-    // "saved" only once the server accepts the write (including
-    // after a conflict reconcile-retry) — never optimistically,
+    // account (and drive email), not just this browser. Queue ONLY
+    // this commit's changed keys (Reset replaces every key), then
+    // flush. "saved" only once the server accepts the write —
+    // after reconciling the form with the confirmed server state,
     // and only if no newer commit is still in flight behind it.
-    void putServerPrefs(next, id)
-      .then(() => {
-        if (revRef.current === commitRev) setSaveState("saved");
+    if (opts?.replaceAll) replacePendingPrefs(id, toServerPrefs(next));
+    else queuePrefsChanges(id, serverPrefsChanges(prev, next));
+    void flushServerPrefs(id)
+      .then((res) => {
+        if (revRef.current !== commitRev) return;
+        if (res?.prefs) reconcileLocal(id, res.prefs);
+        setSaveState("saved");
       })
       .catch(() => {
         if (revRef.current !== commitRev) return;
@@ -331,7 +373,7 @@ export function SettingsPage() {
       });
     return true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [employee?.id, t, applyLive]);
+  }, [employee?.id, t, applyLive, reconcileLocal]);
 
   // A header toggle (or a stored ci-theme) can move the painted mode
   // without a Settings change. Catch up so the menu matches the page
@@ -379,7 +421,8 @@ export function SettingsPage() {
       const id = employee?.id ?? me?.employee?.id ?? "";
       const next = { ...prefsRef.current, workspace: pending.slice(0, 80) };
       savePrefs(id, next);
-      void putServerPrefs(next, id).catch(() => {});
+      queuePrefsChanges(id, { workspace: next.workspace });
+      void flushServerPrefs(id).catch(() => {});
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -456,10 +499,11 @@ export function SettingsPage() {
     // zone return to defaults instead of staying on the previous
     // selection.
     const next = { ...DEFAULTS };
-    // Go through commit(): local save + edit revision + server PUT,
-    // exactly like a normal edit — otherwise reopening Settings
-    // resurrects the pre-reset server copy.
-    commit(next);
+    // Go through commit() with replaceAll: reset means EVERY key
+    // on the server returns to default — including keys another
+    // tab changed that already look defaulted in this tab —
+    // otherwise reopening Settings resurrects them.
+    commit(next, { replaceAll: true });
     setNameError("");
     notifyOk(t("toast.defaultsRestored"));
   };

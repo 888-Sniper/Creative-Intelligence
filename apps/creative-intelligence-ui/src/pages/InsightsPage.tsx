@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { api } from "@/api/client";
 import { applySavedView, VIEW_ROUTES, type SavedView } from "@/components/savedViews";
 import { useFilters } from "@/state/FilterContext";
+import { useOptionalAuth } from "@/auth/AuthProvider";
 import { useLocale } from "@/i18n";
 import { Icon } from "@/components/icons";
 import { LoadingButton } from "@/components/LoadingButton";
@@ -62,6 +63,7 @@ function withinDays(iso: string | null | undefined, days: number): boolean {
 
 export function InsightsPage() {
   const { filters, setFilter, scope } = useFilters();
+  const employeeId = useOptionalAuth()?.me?.employee?.id ?? "";
   const { t, tp, fmtDate } = useLocale();
   const navigate = useNavigate();
   const location = useLocation();
@@ -206,7 +208,8 @@ export function InsightsPage() {
   /* Shared restore: comparison deep link (full selection) when one
    * applies, otherwise the saved route — every stored scope axis and
    * the saved KPI travel along either way. */
-  const applyView = (v: SavedView) => applySavedView(v, setFilter, navigate);
+  const applyView = (v: SavedView) =>
+    applySavedView(v, setFilter, navigate, employeeId);
 
   const saveInsight = async () => {
     setSaving(true);

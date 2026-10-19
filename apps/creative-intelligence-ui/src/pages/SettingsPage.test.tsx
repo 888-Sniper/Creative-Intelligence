@@ -47,7 +47,7 @@ const adminMe: MeResponse = {
 
 let failGoogleStatus = false;
 
-function mockFetch(opts?: { googleConnected?: boolean; me?: MeResponse; sessions?: number; cohorts?: typeof cohortsData; deleteFails?: number; rejectEmail?: boolean; rejectProfile?: boolean; serverPrefs?: Record<string, unknown>; conflictPrefs?: Record<string, unknown>; prefsPut?: "conflict-once" | "fail" }) {
+function mockFetch(opts?: { googleConnected?: boolean; me?: MeResponse; sessions?: number; cohorts?: typeof cohortsData; deleteFails?: number; rejectEmail?: boolean; rejectProfile?: boolean; serverPrefs?: Record<string, unknown>; conflictPrefs?: Record<string, unknown>; prefsPut?: "conflict-once" | "fail"; prefsGet?: "fail"; holdFirstPut?: { release: () => void } }) {
   const calls: Array<[string, RequestInit | undefined]> = [];
   const googleConnected = opts?.googleConnected ?? false;
   // Stateful cohort list: DELETE removes the row so a re-fetched
@@ -111,29 +111,40 @@ function mockFetch(opts?: { googleConnected?: boolean; me?: MeResponse; sessions
       return Response.json({ id: 3, name: "Beauty", filters: {}, created_at: "" });
     }
     if (url === "/api/preferences" && method === "GET") {
+      if (opts?.prefsGet === "fail") {
+        return Response.json({ error: "down" }, { status: 500 });
+      }
       return Response.json({ prefs: storedPrefs });
     }
     if (url === "/api/preferences" && method === "PUT") {
       prefsPuts += 1;
-      if (opts?.prefsPut === "fail") {
-        return Response.json({ error: "down" }, { status: 500 });
-      }
-      if (opts?.prefsPut === "conflict-once" && prefsPuts === 1) {
-        storedPrefs = { ...(opts?.conflictPrefs ?? {}) };
-        return Response.json(
-          { error: "preferences changed since they were loaded",
-            prefs: storedPrefs },
-          { status: 409 });
-      }
-      const sent = (JSON.parse(String(init?.body ?? "{}")) as {
-        prefs?: Record<string, unknown>;
-      }).prefs ?? {};
-      storedPrefs = {
-        ...storedPrefs, ...sent,
-        _rev: (typeof storedPrefs["_rev"] === "number"
-          ? (storedPrefs["_rev"] as number) : 0) + 1,
+      const applyPut = (): Response => {
+        if (opts?.prefsPut === "fail") {
+          return Response.json({ error: "down" }, { status: 500 });
+        }
+        if (opts?.prefsPut === "conflict-once" && prefsPuts === 1) {
+          storedPrefs = { ...(opts?.conflictPrefs ?? {}) };
+          return Response.json(
+            { error: "preferences changed since they were loaded",
+              prefs: storedPrefs },
+            { status: 409 });
+        }
+        const sent = (JSON.parse(String(init?.body ?? "{}")) as {
+          prefs?: Record<string, unknown>;
+        }).prefs ?? {};
+        storedPrefs = {
+          ...storedPrefs, ...sent,
+          _rev: (typeof storedPrefs["_rev"] === "number"
+            ? (storedPrefs["_rev"] as number) : 0) + 1,
+        };
+        return Response.json({ prefs: storedPrefs });
       };
-      return Response.json({ prefs: storedPrefs });
+      if (opts?.holdFirstPut && prefsPuts === 1) {
+        return new Promise<Response>((resolve) => {
+          opts.holdFirstPut!.release = () => resolve(applyPut());
+        });
+      }
+      return applyPut();
     }
     return Response.json({});
   }) as unknown as typeof fetch;
@@ -308,7 +319,12 @@ describe("SettingsPage", () => {
     await waitFor(() => {
       expect(store.get("ci-settings-prefs:e1")).toContain("Compact");
     });
-    expect(screen.getByRole("status").textContent).toBe("All Changes Saved.");
+    // Local persistence is synchronous; the "saved" status now
+    // waits for the async server write — poll for it instead of
+    // asserting in the same tick (the old flake's timing gap).
+    await waitFor(() => {
+      expect(screen.getByRole("status").textContent).toBe("All Changes Saved.");
+    });
   });
 
   it("validates the workspace name instead of saving blanks", async () => {
@@ -853,6 +869,102 @@ describe("SettingsPage", () => {
     expect(puts[1]!.base_revision).toBe(9);
     // Density is never re-sent: the other tab's newer value survives.
     expect(puts[1]!.prefs).toEqual({ theme: "dark" });
+    // The form RECONCILES with the confirmed server state: the
+    // other tab's density now shows here too…
+    await waitFor(() => {
+      expect((screen.getByLabelText("Interface Density") as HTMLSelectElement).value)
+        .toBe("Comfortable");
+    });
+    // …and the NEXT unrelated edit still cannot resurrect the
+    // stale density: it sends only its own changed key.
+    fireEvent.change(screen.getByLabelText("Accent Color"),
+                     { target: { value: "Blue" } });
+    await waitFor(() => {
+      expect(screen.getByRole("status").textContent).toBe("All Changes Saved.");
+    });
+    const puts2 = calls
+      .filter(([u, i]) => u === "/api/preferences" && (i?.method ?? "GET") === "PUT")
+      .map(([, i]) => JSON.parse(String(i?.body ?? "{}")) as {
+        prefs: Record<string, unknown>;
+      });
+    expect(puts2[puts2.length - 1]!.prefs).toEqual({ accent: "Blue" });
+  });
+
+  it("editing before preferences hydrate sends only the changed key", async () => {
+    // Server holds saved prefs, but every GET fails: the tab has
+    // no snapshot when the user edits. The write must still be
+    // the single changed key, never the whole local document.
+    const calls = mockFetch({ serverPrefs: fullServerPrefs, prefsGet: "fail" });
+    renderSettings();
+    await waitFor(() => {
+      expect(screen.getByLabelText("Theme")).toBeDefined();
+    });
+    fireEvent.change(screen.getByLabelText("Theme"), { target: { value: "dark" } });
+    await waitFor(() => {
+      expect(screen.getByRole("status").textContent).toBe("All Changes Saved.");
+    });
+    const puts = calls
+      .filter(([u, i]) => u === "/api/preferences" && (i?.method ?? "GET") === "PUT")
+      .map(([, i]) => JSON.parse(String(i?.body ?? "{}")) as {
+        prefs: Record<string, unknown>;
+      });
+    expect(puts.length).toBeGreaterThanOrEqual(1);
+    expect(puts[puts.length - 1]!.prefs).toEqual({ theme: "dark" });
+  });
+
+  it("Reset Defaults resets keys another tab changed too", async () => {
+    const mine = { ...fullServerPrefs, theme: "dark", density: "Comfortable" };
+    const conflictPrefs = { ...mine, density: "Compact", _rev: 9 };
+    const calls = mockFetch({
+      serverPrefs: mine, prefsPut: "conflict-once", conflictPrefs,
+    });
+    renderSettings();
+    await waitFor(() => {
+      expect((screen.getByLabelText("Theme") as HTMLSelectElement).value).toBe("dark");
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Reset Defaults" }));
+    // Reset also raises a toast with role=status; match any.
+    await waitFor(() => {
+      expect(screen.getAllByRole("status")
+        .some((el) => el.textContent === "All Changes Saved.")).toBe(true);
+    });
+    const puts = calls
+      .filter(([u, i]) => u === "/api/preferences" && (i?.method ?? "GET") === "PUT")
+      .map(([, i]) => JSON.parse(String(i?.body ?? "{}")) as {
+        prefs: Record<string, unknown>;
+      });
+    const last = puts[puts.length - 1]!.prefs;
+    // Full-document replace: density returns to the default even
+    // though this tab's snapshot already showed it as default.
+    expect(last["density"]).toBe("Comfortable");
+    expect(last["theme"]).toBe("light");
+  });
+
+  it("a revert queued behind an in-flight save still lands", async () => {
+    const hold = { release: () => {} };
+    const calls = mockFetch({ serverPrefs: fullServerPrefs, holdFirstPut: hold });
+    renderSettings();
+    await waitFor(() => {
+      expect((screen.getByLabelText("Interface Density") as HTMLSelectElement).value)
+        .toBe("Compact");
+    });
+    fireEvent.change(screen.getByLabelText("Theme"), { target: { value: "dark" } });
+    await waitFor(() => {
+      expect(calls.some(([u, i]) =>
+        u === "/api/preferences" && (i?.method ?? "GET") === "PUT")).toBe(true);
+    });
+    // First PUT still held: queue the revert behind it.
+    fireEvent.change(screen.getByLabelText("Theme"), { target: { value: "light" } });
+    hold.release();
+    await waitFor(() => {
+      expect(screen.getByRole("status").textContent).toBe("All Changes Saved.");
+    });
+    const puts = calls
+      .filter(([u, i]) => u === "/api/preferences" && (i?.method ?? "GET") === "PUT")
+      .map(([, i]) => JSON.parse(String(i?.body ?? "{}")) as {
+        prefs: Record<string, unknown>;
+      });
+    expect(puts.map((p) => p.prefs)).toEqual([{ theme: "dark" }, { theme: "light" }]);
   });
 
   it("an edit followed by a revert lands as the reverted value", async () => {

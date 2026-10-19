@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { api, scopedPath } from "@/api/client";
 import { applySavedView, type SavedView } from "@/components/savedViews";
 import { useFilters } from "@/state/FilterContext";
+import { useOptionalAuth } from "@/auth/AuthProvider";
 import { useLocale } from "@/i18n";
 import { Icon } from "@/components/icons";
 import { LoadingButton } from "@/components/LoadingButton";
@@ -97,6 +98,7 @@ function BenchmarkViewSub({ view }: { view: SavedView }) {
 
 export function BenchmarksPage() {
   const { filters, setFilter, clearFilters, scope } = useFilters();
+  const employeeId = useOptionalAuth()?.me?.employee?.id ?? "";
   const { t, tp, fmtDate, fmtNum, locale } = useLocale();
   const unavailable = t("common.unavailable");
   const [axis, setAxis] = useState<Axis>("platform");
@@ -176,7 +178,7 @@ export function BenchmarksPage() {
     if (axis && (BENCHMARK_AXES as ReadonlyArray<string>).includes(axis)) {
       setAxis(axis as Axis);
     }
-    applySavedView(v, setFilter, navigate);
+    applySavedView(v, setFilter, navigate, employeeId);
   };
 
   /* What Create Benchmark persists (verified against the backend

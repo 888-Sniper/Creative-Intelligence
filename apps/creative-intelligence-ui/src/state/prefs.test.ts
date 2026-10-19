@@ -3,12 +3,16 @@ import {
   DEFAULTS,
   campaignStatusTouched,
   clearCampaignStatusTouched,
+  confirmPrefsChanges,
   currentPrefsRevision,
   markCampaignStatusTouched,
   noteServerPrefsSnapshot,
+  pendingPrefsChanges,
+  queuePrefsChanges,
+  replacePendingPrefs,
   savePrefs,
   loadPrefs,
-  serverPrefsDelta,
+  serverPrefsChanges,
   serverPrefsSnapshot,
   touchedCampaignStatus,
 } from "./prefs";
@@ -52,21 +56,34 @@ describe("campaign status touched (per account)", () => {
   });
 });
 
-describe("server prefs snapshot + delta (cross-tab safety)", () => {
-  it("delta contains only keys changed since this tab's snapshot", () => {
-    const snapshot = { theme: "light", density: "Compact", _rev: 3 };
-    const delta = serverPrefsDelta(
-      snapshot, { ...DEFAULTS, theme: "dark", density: "Compact" });
-    expect(delta["theme"]).toBe("dark");
-    // Unchanged since the snapshot: never re-sent, so another
-    // tab's newer density cannot be overwritten by this tab.
-    expect(delta).not.toHaveProperty("density");
+describe("server prefs snapshot + pending changes (cross-tab safety)", () => {
+  it("a commit's changes contain only the keys it actually changed", () => {
+    const prev = { ...DEFAULTS, density: "Comfortable" };
+    const next = { ...prev, theme: "dark" as const };
+    // Even if another tab has since set density Compact on the
+    // server, this commit never mentions density at all.
+    expect(serverPrefsChanges(prev, next)).toEqual({ theme: "dark" });
   });
 
-  it("null snapshot yields the full bootstrap document", () => {
-    const delta = serverPrefsDelta(null, { ...DEFAULTS });
-    expect(delta["theme"]).toBe(DEFAULTS.theme);
-    expect(delta["density"]).toBe(DEFAULTS.density);
+  it("pending changes accumulate and confirm only what was sent", () => {
+    queuePrefsChanges("emp-p", { theme: "dark" });
+    queuePrefsChanges("emp-p", { accent: "Blue" });
+    expect(pendingPrefsChanges("emp-p"))
+      .toEqual({ theme: "dark", accent: "Blue" });
+    // A revert queued behind the in-flight write overwrites the
+    // pending value; confirming the sent batch must not drop it.
+    queuePrefsChanges("emp-p", { theme: "light" });
+    confirmPrefsChanges("emp-p", { theme: "dark", accent: "Blue" });
+    expect(pendingPrefsChanges("emp-p")).toEqual({ theme: "light" });
+    confirmPrefsChanges("emp-p", { theme: "light" });
+    expect(pendingPrefsChanges("emp-p")).toEqual({});
+  });
+
+  it("replace supersedes accumulated pending changes (Reset Defaults)", () => {
+    queuePrefsChanges("emp-r", { theme: "dark" });
+    replacePendingPrefs("emp-r", { theme: "light", density: "Comfortable" });
+    expect(pendingPrefsChanges("emp-r"))
+      .toEqual({ theme: "light", density: "Comfortable" });
   });
 
   it("snapshots are noted per account for this tab", () => {

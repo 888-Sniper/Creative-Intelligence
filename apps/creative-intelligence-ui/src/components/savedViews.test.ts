@@ -4,6 +4,10 @@ import {
   compareDeepLink,
   type SavedView,
 } from "@/components/savedViews";
+import {
+  markCampaignStatusTouched,
+  touchedCampaignStatus,
+} from "@/state/prefs";
 
 const CMP4: SavedView = {
   id: 1,
@@ -87,5 +91,21 @@ describe("applySavedView", () => {
     const got = Object.fromEntries(setFilter.mock.calls.map(([k, v]) => [k, v]));
     expect(got["vertical"]).toBe("Beauty");
     expect(got["kpi"]).toBe("cpa");
+  });
+
+  it("records the view's status choice so Campaigns cannot resurrect the old one", () => {
+    markCampaignStatusTouched("emp-view", "Completed");
+    // A view with NO status: applying it is an explicit All.
+    applySavedView({
+      id: 6, name: "plain",
+      state: { filters: { vertical: ["Beauty"] }, view: "benchmark" },
+    }, vi.fn(), vi.fn(), "emp-view");
+    expect(touchedCampaignStatus("emp-view")).toBe("");
+    // A view WITH a status: that value becomes the remembered one.
+    applySavedView({
+      id: 7, name: "active",
+      state: { filters: { status: ["Active"] }, view: "campaign" },
+    }, vi.fn(), vi.fn(), "emp-view");
+    expect(touchedCampaignStatus("emp-view")).toBe("Active");
   });
 });

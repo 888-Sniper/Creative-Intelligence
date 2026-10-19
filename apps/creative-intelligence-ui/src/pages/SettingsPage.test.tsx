@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { AuthProvider } from "@/auth/AuthProvider";
+import { AuthProvider, useAuth } from "@/auth/AuthProvider";
+import { StrictMode } from "react";
 import { FilterProvider } from "@/state/FilterContext";
 import { useTheme } from "@/app/useTheme";
 import { SettingsPage } from "@/pages/SettingsPage";
@@ -190,6 +191,28 @@ function renderSettings(withToggle = false) {
       </AuthProvider>
     </MemoryRouter>,
   );
+}
+
+/** Production shape: the auth gate mounts Settings only once an
+ *  authenticated identity exists (main.tsx also wraps StrictMode
+ *  when asked). */
+function GatedSettings() {
+  const { me } = useAuth();
+  if (!me?.employee) return null;
+  return <SettingsPage />;
+}
+
+function renderSettingsGated(strict = false) {
+  const tree = (
+    <MemoryRouter>
+      <AuthProvider>
+        <FilterProvider>
+          <GatedSettings />
+        </FilterProvider>
+      </AuthProvider>
+    </MemoryRouter>
+  );
+  return render(strict ? <StrictMode>{tree}</StrictMode> : tree);
 }
 
 describe("SettingsPage", () => {
@@ -1421,6 +1444,47 @@ describe("SettingsPage", () => {
     expect(document.body.dataset["density"]).not.toBe("compact");
     expect(document.documentElement.style.getPropertyValue("--shell-teal"))
       .not.toBe("#2F6FBE");
+  });
+
+  it("employee loading cannot cancel preference hydration permanently", async () => {
+    const holdGet = { release: () => {} };
+    mockFetch({
+      serverPrefs: { ...fullServerPrefs, density: "Compact", _rev: 50 },
+      holdPrefsGet: holdGet, employeeId: "e-loadrace",
+    });
+    // Gated mount: identity is present at first render (as in
+    // production), so the merge effect starts its GET, then the
+    // page's own employee load flips employee?.id and replays
+    // the effect — the discarded response must be refetched.
+    renderSettingsGated();
+    await waitFor(() => {
+      expect((screen.getByLabelText("First Name") as HTMLInputElement).value)
+        .toBe("Ada");
+    });
+    holdGet.release();
+    await waitFor(() => {
+      expect((screen.getByLabelText("Interface Density") as HTMLSelectElement).value)
+        .toBe("Compact");
+    });
+  });
+
+  it("save feedback works under StrictMode effect replay", async () => {
+    mockFetch({
+      serverPrefs: { ...fullServerPrefs, density: "Compact", _rev: 60 },
+      employeeId: "e-strict",
+    });
+    renderSettingsGated(true);
+    // Hydration merge must land despite setup→cleanup→setup.
+    await waitFor(() => {
+      expect((screen.getByLabelText("Interface Density") as HTMLSelectElement).value)
+        .toBe("Compact");
+    });
+    // And settle handlers must not be permanently "unmounted".
+    fireEvent.change(screen.getByLabelText("Accent Color"),
+                     { target: { value: "Blue" } });
+    await waitFor(() => {
+      expect(screen.getByRole("status").textContent).toBe("All Changes Saved.");
+    });
   });
 
   it("does not claim saved when the server rejects the write", async () => {

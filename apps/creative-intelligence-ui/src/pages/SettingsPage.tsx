@@ -312,7 +312,13 @@ export function SettingsPage() {
   // this page): they must never run after unmount or under a
   // different account than the one they fetched/saved for.
   const mountedRef = useRef(true);
-  useEffect(() => () => { mountedRef.current = false; }, []);
+  useEffect(() => {
+    // Restore on setup: StrictMode's dev replay (setup → cleanup
+    // → setup) must not leave the active page permanently
+    // "unmounted" for settle handlers.
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
   const accountRef = useRef("");
   accountRef.current = employee?.id ?? me?.employee?.id ?? "";
   const stillCurrent = (id: string) =>
@@ -507,7 +513,6 @@ export function SettingsPage() {
     if (id && id === prefOwner && serverMergedFor.current !== id
       && saveState !== "saving"
       && nameDraftRef.current === prefsRef.current.workspace) {
-      serverMergedFor.current = id;
       const revAtFetch = revRef.current;
       void api<{ prefs: Record<string, unknown> }>("GET", "/api/preferences")
         .then((r) => {
@@ -515,10 +520,16 @@ export function SettingsPage() {
           // was in flight: any commit since the fetch started wins.
           if (!live || !stillCurrent(id)) return;
           if (revRef.current !== revAtFetch) return;
-          if (!r.prefs || !Object.keys(r.prefs).length) return;
+          if (!r.prefs) return;
           // Nor may a response read before an in-flight PUT (from
           // this or a previous mount) landed undo that save.
           if (isStaleServerPrefs(id, r.prefs)) return;
+          // Mark merged only once a response is ACCEPTED: marking
+          // at fetch start let an effect replay (employee loading
+          // flips employee?.id, cleanup discards this response)
+          // skip hydration forever with no replacement request.
+          serverMergedFor.current = id;
+          if (!Object.keys(r.prefs).length) return;
           noteServerPrefsSnapshot(id, r.prefs);
           const merged = mergeServerPrefs(
             adoptPrefs(id, liveThemeMode), withoutPendingPrefs(id, r.prefs));

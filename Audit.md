@@ -1,4 +1,4 @@
-# Creative Intelligence — audit of the fourteenth-round fix push
+# Creative Intelligence — audit of the fifteenth-round fix push
 
 You are the second, independent reviewer. Your job is to find what is
 still missing, wrong, or unsafe in the change below. Be adversarial:
@@ -11,14 +11,14 @@ it were your own finding.
 
 - Repository: https://github.com/888-Sniper/Creative-Intelligence
 - Parent on `main` (previous push):
-  `d97fd3b24bb9b8cec6e6f63c684e10b7df16e55c`
-  (code `6f779bf` + Audit.md-only commit; see git history)
+  `bf0556f8a3263e4a3b2719733dcf2fefbcb2f73d`
+  (code `01102ea` + Audit.md-only commit; see git history)
 - Under review in THIS push: code commit
-  `01102eabcb584e04e284405705502deb776204b2`
-  (`Fix the fourteenth-round audit defect (settle outcomes vs keystrokes)`)
+  `573b2ac2517716ed2f04b2a556e91eda47b99254`
+  (`Fix the fifteenth-round audit defect (generation-stamped save outcomes)`)
 - After `git fetch`, the commit under review is `origin/main`.
-  Commits after `01102ea` on this push touch only this `Audit.md`;
-  review the code at `01102ea` regardless of branch head. Render
+  Commits after `573b2ac` on this push touch only this `Audit.md`;
+  review the code at `573b2ac` regardless of branch head. Render
   auto-deploys from `main` (`render.yaml autoDeploy: true`), but
   deployment was not verified by the implementer — do not claim
   the live site shows this push without checking it, and do not
@@ -28,23 +28,23 @@ Confirm the change with both ends named (never a one-revision diff;
 a behind checkout invents changes that are not in this push):
 
 ```
-git diff --stat d97fd3b24bb9b8cec6e6f63c684e10b7df16e55c 01102eabcb584e04e284405705502deb776204b2
-git diff d97fd3b24bb9b8cec6e6f63c684e10b7df16e55c 01102eabcb584e04e284405705502deb776204b2
-git rev-parse 01102eabcb584e04e284405705502deb776204b2    # must resolve
-git diff --stat 01102eabcb584e04e284405705502deb776204b2 HEAD  # must touch Audit.md only
+git diff --stat bf0556f8a3263e4a3b2719733dcf2fefbcb2f73d 573b2ac2517716ed2f04b2a556e91eda47b99254
+git diff bf0556f8a3263e4a3b2719733dcf2fefbcb2f73d 573b2ac2517716ed2f04b2a556e91eda47b99254
+git rev-parse 573b2ac2517716ed2f04b2a556e91eda47b99254    # must resolve
+git diff --stat 573b2ac2517716ed2f04b2a556e91eda47b99254 HEAD  # must touch Audit.md only
 git rev-parse origin/main     # the commit under review, after fetch
 git status                    # stop only if the worktree is dirty
 ```
 
-Expected shape for the code diff: 2 files, 69 insertions, 3
+Expected shape for the code diff: 2 files, 84 insertions, 9
 deletions, frontend only. If yours disagrees, stop and say so. A
 behind local checkout, or no local `main` branch, is not a
 reason to stop. Read files at the reviewed commit
-(`git show 01102ea:PATH` if needed); if a later edit moves a
+(`git show 573b2ac:PATH` if needed); if a later edit moves a
 line, follow the symbol, not the stale number. Earlier audits
-live in git history (most recently `git show d97fd3b:Audit.md`,
-parent `c25fa1f`, code `6f779bf`). This push answers the
-fourteenth review of `6f779bf` (one P2 defect); re-verify it
+live in git history (most recently `git show bf0556f:Audit.md`,
+parent `d97fd3b`, code `01102ea`). This push answers the
+fifteenth review of `01102ea` (one P2 defect); re-verify it
 first, then hunt wider. Earlier rounds' fixed items should be
 regression-checked, not re-reported unless broken.
 
@@ -52,8 +52,8 @@ regression-checked, not re-reported unless broken.
 
 - Do NOT edit, commit, push, build, install, start the server, or
   activate a provider. Read-only inspection only.
-- Report ONLY defects still true at `01102ea`, each with: severity
-  (P1/P2/P3), observed behavior, exact file and line at `01102ea`,
+- Report ONLY defects still true at `573b2ac`, each with: severity
+  (P1/P2/P3), observed behavior, exact file and line at `573b2ac`,
   and the evidence. No evidence, no defect — use "Unverified".
 - Do NOT treat any of these as a source defect: an unrun live
   Gemini call, an unrun live browser/Render click-through, a
@@ -67,7 +67,7 @@ regression-checked, not re-reported unless broken.
 
 ## Required output format
 
-1. `Fourteenth-review defect` — verdict with evidence.
+1. `Fifteenth-review defect` — verdict with evidence.
 2. `Defects still true` — numbered, severity-ordered.
 3. `Requirements missing or only partly done`.
 4. `Areas checked, no defect found` — one line per section below.
@@ -76,47 +76,58 @@ regression-checked, not re-reported unless broken.
 
 ## What the implementer claims — falsify each one
 
-### 1. Keystrokes can no longer suppress a save outcome
+### 1. An older success cannot erase a newer synchronous failure
 
-Claim. Settle handlers record `saveFailedRef` unconditionally
-(settles arrive in flush order), and their UI updates are gated
-by a COMMIT-only generation (`commitGenRef`) instead of the
-shared revision that keystrokes also bump (`SettingsPage.tsx`).
-`revRef` still guards GET merges (keystrokes count as newer
-there). Try: the reviewer's sequence in both outcomes
-(failure recorded → validation restores error + Retry; success
-after validation settles to saved); a stale settle recording
-over a NEWER synchronous local-storage failure (commit2
-throws locally while commit1's flush later succeeds — trace
-what `saveFailedRef`, the visible state, and a subsequent
-validation each do); reconcile now running on settles that a
-keystroke intervened on (typing-guard inside
-`reconcileLocal`); the theme catch-up effect as the
-"intervening commit"; rapid double-commit where the first
-settle's UI skip must still hold.
+Claim. Save outcomes are stamped with their commit generation
+(`saveOutcomeRef`/`recordSaveOutcome`, `SettingsPage.tsx`):
+recording is unconditional in settle order, but a settle whose
+generation is older than the recorded outcome cannot overwrite
+it — including a synchronous local-storage failure recorded by
+a newer commit while the older write was in flight. Try:
+gen2 storage-failure, then gen1 success, then gen3 Retry
+success (outcome clearing + status path); gen2 storage-failure
+whose queued keys ride gen1's in-flight batch (batch timing:
+taken before vs after gen2 queued — what does each settle
+record, and can the visible error outlive the server actually
+holding the change?); validation restoring "error" from a
+failure whose keys a later flush already confirmed (can
+`saveOutcomeRef.failed` be true while pending is empty?);
+account switch remount (per-mount outcome ref, module-level
+pending — owed anything?).
 
-### 2. Tests
+### 2. Debounce guard no longer depends on render timing
 
-Claims. Two new tests drive the reviewer's exact ordering
-(density PUT held → clear name → release): failure keeps
-Retry + error after validation; success released after
-validation settles to saved with the name error still shown.
-Judge the held-PUT timing (`advanceTimersByTimeAsync(0)` to
-reach the PUT before clearing the name). Flake disclosure:
-during this round's development the Settings file showed two
-transient failures in ONE intermediate run (`storage throws`,
-`blank-name validation…`), then 1, then 0; both pass in
-isolation and in the final full runs, and the storage test has
-a documented flake history since round seven. Decide whether
-you can find a timing dependency by reading, and say so
-plainly if you cannot. Still missing (admitted): legacy-GET
-remount at page level; fresh-module new-tab tests;
+Claim. `onWorkspaceInput` mirrors the draft into
+`nameDraftRef` synchronously, so the timer's supersede check
+cannot read a render-lagged old name. Try: every other reader
+of `nameDraftRef` (reconcile typing check, settle draft check,
+unmount flush, GET-merge preconditions, identity-adopt
+branch) under the earlier-visible value; Reset's
+`setNameDraft` without a synchronous ref write (its timer is
+cleared explicitly — verify no other path re-arms it).
+
+### 3. Tests
+
+Claims. New test drives the reviewer's exact sequence with a
+held PUT: density in flight → accent commit under throwing
+storage (Retry visible) → older PUT succeeds → name cleared →
+validation still shows Retry/error, and Retry then flushes
+the stranded accent. Flake disclosure: during development the
+full suite twice failed ONE pre-existing test
+(`validates the workspace name instead of saving blanks`,
+error text never appeared, status stuck Saving) while it
+passed in isolation and in the final runs (356 passed). The
+implementer attributes it to the render-lagged ref in claim 2
+under parallel load and fixed that mechanism — judge whether
+that explanation holds from source, and whether other
+fake-timer tests share the hazard. Still missing (admitted):
+legacy-GET remount at page level; fresh-module new-tab tests;
 Analyst→Campaigns navigation; three-tab double-409.
 
 ## Evidence (implementer's machine; check plausibility, do not re-run)
 
-- `pnpm test`: 355 passed (final run; see flake disclosure
-  above). `pnpm exec tsc --noEmit`: clean. `pnpm build`: passed.
+- `pnpm test`: 356 passed (final run; see flake disclosure).
+  `pnpm exec tsc --noEmit`: clean. `pnpm build`: passed.
 - Backend untouched this round (round-eight full run on
   near-identical backend: 911 passed / 5 named failures).
 - Gemini key re-probed (env + Keychain): still absent; user

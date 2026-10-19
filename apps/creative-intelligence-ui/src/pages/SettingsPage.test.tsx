@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { AuthProvider } from "@/auth/AuthProvider";
 import { FilterProvider } from "@/state/FilterContext";
@@ -1384,6 +1384,43 @@ describe("SettingsPage", () => {
         prefs: Record<string, unknown>;
       });
     expect(puts[puts.length - 1]!.prefs).toEqual({ density: "Compact" });
+  });
+
+  it("a delayed previous-account response cannot repaint the new account", async () => {
+    const holdGet = { release: () => {} };
+    // Account A: Blue accent + Compact; its GET is held.
+    mockFetch({
+      serverPrefs: {
+        ...fullServerPrefs, accent: "Blue", density: "Compact", _rev: 50,
+      },
+      holdPrefsGet: holdGet, employeeId: "e-acc-a",
+    });
+    renderSettings();
+    await waitFor(() => {
+      expect(screen.getByLabelText("Interface Density")).toBeDefined();
+    });
+    cleanup(); // leave A (its GET still in flight)
+    // Account B loads normally with its own prefs.
+    mockFetch({
+      serverPrefs: {
+        ...fullServerPrefs, accent: "Teal (Default)",
+        density: "Comfortable", _rev: 50,
+      },
+      employeeId: "e-acc-b",
+    });
+    renderSettings();
+    await waitFor(() => {
+      expect((screen.getByLabelText("Interface Density") as HTMLSelectElement).value)
+        .toBe("Comfortable");
+    });
+    // A's delayed response finally arrives: it must not apply
+    // A's live appearance (accent/density) over B's session.
+    await act(async () => { holdGet.release(); });
+    expect((screen.getByLabelText("Interface Density") as HTMLSelectElement).value)
+      .toBe("Comfortable");
+    expect(document.body.dataset["density"]).not.toBe("compact");
+    expect(document.documentElement.style.getPropertyValue("--shell-teal"))
+      .not.toBe("#2F6FBE");
   });
 
   it("does not claim saved when the server rejects the write", async () => {

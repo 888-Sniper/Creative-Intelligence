@@ -307,6 +307,16 @@ export function SettingsPage() {
   // closures inside timers).
   const prefsRef = useRef(prefs);
   prefsRef.current = prefs;
+  // Async preference appliers (GET merges, flush settles) touch
+  // SHARED live state (theme/language/timezone contexts survive
+  // this page): they must never run after unmount or under a
+  // different account than the one they fetched/saved for.
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
+  const accountRef = useRef("");
+  accountRef.current = employee?.id ?? me?.employee?.id ?? "";
+  const stillCurrent = (id: string) =>
+    mountedRef.current && accountRef.current === id;
   // Monotonic revision: each commit bumps it, so a debounced text
   // commit only lands when no newer keystroke superseded it
   // (last-write-wins with an in-flight guard against lost updates).
@@ -390,7 +400,7 @@ export function SettingsPage() {
         // commit's synchronous failure already on record wins);
         // only the UI updates below are generation-gated.
         recordSaveOutcome(id, commitGen, false);
-        if (currentCommitGen() !== commitGen) return;
+        if (!stillCurrent(id) || currentCommitGen() !== commitGen) return;
         if (res?.prefs) reconcileLocal(id, res.prefs);
         // A debounced workspace-name draft that has not committed
         // yet is still an unsaved change: don't claim "saved"
@@ -404,7 +414,7 @@ export function SettingsPage() {
       })
       .catch(() => {
         recordSaveOutcome(id, commitGen, true);
-        if (currentCommitGen() !== commitGen) return;
+        if (!stillCurrent(id) || currentCommitGen() !== commitGen) return;
         setSaveState("error");
         setSaveError(t("settings.footer.couldNotSave"));
       });
@@ -492,6 +502,7 @@ export function SettingsPage() {
   // server preferences.
   const serverMergedFor = useRef("");
   useEffect(() => {
+    let live = true;
     const id = employee?.id ?? me?.employee?.id ?? "";
     if (id && id === prefOwner && serverMergedFor.current !== id
       && saveState !== "saving"
@@ -502,6 +513,7 @@ export function SettingsPage() {
         .then((r) => {
           // A slow GET must never overwrite an edit made while it
           // was in flight: any commit since the fetch started wins.
+          if (!live || !stillCurrent(id)) return;
           if (revRef.current !== revAtFetch) return;
           if (!r.prefs || !Object.keys(r.prefs).length) return;
           // Nor may a response read before an in-flight PUT (from
@@ -530,6 +542,7 @@ export function SettingsPage() {
         const revAtFetch = revRef.current;
         void api<{ prefs: Record<string, unknown> }>("GET", "/api/preferences")
           .then((r) => {
+            if (!live || !stillCurrent(id)) return;
             if (revRef.current !== revAtFetch) return;
             if (!r.prefs || !Object.keys(r.prefs).length) return;
             if (isStaleServerPrefs(id, r.prefs)) return;
@@ -544,6 +557,7 @@ export function SettingsPage() {
           .catch(() => { /* local copy stays authoritative offline */ });
       }
     }
+    return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [employee?.id]);
 
@@ -564,7 +578,7 @@ export function SettingsPage() {
     void flushServerPrefs(id)
       .then((res) => {
         recordSaveOutcome(id, gen, false);
-        if (currentCommitGen() !== gen) return;
+        if (!stillCurrent(id) || currentCommitGen() !== gen) return;
         if (res?.prefs) reconcileLocal(id, res.prefs);
         const draft = nameDraftRef.current.trim();
         setSaveState(
@@ -572,7 +586,7 @@ export function SettingsPage() {
       })
       .catch(() => {
         recordSaveOutcome(id, gen, true);
-        if (currentCommitGen() !== gen) return;
+        if (!stillCurrent(id) || currentCommitGen() !== gen) return;
         setSaveState("error");
         setSaveError(t("settings.footer.couldNotSave"));
       });

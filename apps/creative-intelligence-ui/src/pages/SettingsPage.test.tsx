@@ -1230,6 +1230,64 @@ describe("SettingsPage", () => {
     expect(screen.getByText("Workspace name cannot be empty.")).toBeDefined();
   });
 
+  it("clearing the name during a save does not hide its failure", async () => {
+    const hold = { release: () => {} };
+    const calls = mockFetch({
+      prefsPut: "fail", holdFirstPut: hold, employeeId: "e-blankrev",
+    });
+    renderSettings();
+    await waitFor(() => {
+      expect(screen.getByLabelText("Workspace Name")).toBeDefined();
+    });
+    vi.useFakeTimers();
+    // Density first: its PUT is in flight (held)…
+    fireEvent.change(screen.getByLabelText("Interface Density"),
+                     { target: { value: "Compact" } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls.some(([u, i]) =>
+      u === "/api/preferences" && (i?.method ?? "GET") === "PUT")).toBe(true);
+    // …then the name is cleared (a keystroke, not a commit)…
+    fireEvent.change(screen.getByLabelText("Workspace Name"),
+                     { target: { value: "   " } });
+    // …then the PUT fails, and the validation timer fires.
+    hold.release();
+    await vi.advanceTimersByTimeAsync(600);
+    vi.useRealTimers();
+    expect(await screen.findByText("Workspace name cannot be empty."))
+      .toBeDefined();
+    // The failure was RECORDED despite the intervening keystroke:
+    // validation restores the error instead of stranding Saving.
+    expect(screen.getByRole("button", { name: "Retry" })).toBeDefined();
+    expect(screen.getByRole("status").textContent)
+      .toBe("Could not save settings in this browser.");
+  });
+
+  it("a save succeeding after blank-name validation settles the status", async () => {
+    const hold = { release: () => {} };
+    mockFetch({ holdFirstPut: hold, employeeId: "e-blanklate" });
+    renderSettings();
+    await waitFor(() => {
+      expect(screen.getByLabelText("Workspace Name")).toBeDefined();
+    });
+    vi.useFakeTimers();
+    fireEvent.change(screen.getByLabelText("Interface Density"),
+                     { target: { value: "Compact" } });
+    fireEvent.change(screen.getByLabelText("Workspace Name"),
+                     { target: { value: "   " } });
+    // Validation fires while the PUT is still held…
+    await vi.advanceTimersByTimeAsync(600);
+    vi.useRealTimers();
+    expect(await screen.findByText("Workspace name cannot be empty."))
+      .toBeDefined();
+    // …then the PUT succeeds: its settle must still land even
+    // though a keystroke intervened after the commit.
+    hold.release();
+    await waitFor(() => {
+      expect(screen.getByRole("status").textContent).toBe("All Changes Saved.");
+    });
+    expect(screen.getByText("Workspace name cannot be empty.")).toBeDefined();
+  });
+
   it("does not claim saved when the server rejects the write", async () => {
     mockFetch({ prefsPut: "fail" });
     renderSettings();

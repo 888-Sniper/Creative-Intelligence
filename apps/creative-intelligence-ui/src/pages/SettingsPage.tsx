@@ -307,6 +307,11 @@ export function SettingsPage() {
   // commit only lands when no newer keystroke superseded it
   // (last-write-wins with an in-flight guard against lost updates).
   const revRef = useRef(0);
+  // Commit-only generation: revRef also bumps on mere keystrokes
+  // (GET-merge protection), so settle handlers must not use it —
+  // a keystroke after a commit would otherwise suppress the
+  // commit's outcome entirely, stranding the status on Saving.
+  const commitGenRef = useRef(0);
   // Whether the last settled save FAILED. Name validation runs
   // on the same status slot and must restore (never hide) this.
   const saveFailedRef = useRef(false);
@@ -350,7 +355,8 @@ export function SettingsPage() {
     const id = employee?.id ?? me?.employee?.id ?? "";
     const prev = prefsRef.current;
     revRef.current += 1;
-    const commitRev = revRef.current;
+    commitGenRef.current += 1;
+    const commitGen = commitGenRef.current;
     setPrefs(next);
     // Sync the name draft only when THIS commit changes the
     // workspace; an unrelated commit must leave an in-progress
@@ -380,8 +386,10 @@ export function SettingsPage() {
     // newer commit is still in flight behind it.
     void flushServerPrefs(id)
       .then((res) => {
-        if (revRef.current !== commitRev) return;
+        // Record the outcome unconditionally (settles arrive in
+        // flush order); only the UI updates are generation-gated.
         saveFailedRef.current = false;
+        if (commitGenRef.current !== commitGen) return;
         if (res?.prefs) reconcileLocal(id, res.prefs);
         // A debounced workspace-name draft that has not committed
         // yet is still an unsaved change: don't claim "saved"
@@ -394,8 +402,8 @@ export function SettingsPage() {
         setSaveState(draft && draft !== next.workspace ? "saving" : "saved");
       })
       .catch(() => {
-        if (revRef.current !== commitRev) return;
         saveFailedRef.current = true;
+        if (commitGenRef.current !== commitGen) return;
         setSaveState("error");
         setSaveError(t("settings.footer.couldNotSave"));
       });

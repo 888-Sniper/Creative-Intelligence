@@ -1,4 +1,4 @@
-# Creative Intelligence — audit of the twelfth-round fix push
+# Creative Intelligence — audit of the thirteenth-round fix push
 
 You are the second, independent reviewer. Your job is to find what is
 still missing, wrong, or unsafe in the change below. Be adversarial:
@@ -11,14 +11,14 @@ it were your own finding.
 
 - Repository: https://github.com/888-Sniper/Creative-Intelligence
 - Parent on `main` (previous push):
-  `dbebd4f3db2e5b538cf530fc9af920050e4ce27f`
-  (code `6a9829c` + Audit.md-only commit; see git history)
+  `c25fa1fbc1b9514eaac9af3c8d8cf974a001e4ed`
+  (code `7f8f708` + Audit.md-only commit; see git history)
 - Under review in THIS push: code commit
-  `7f8f708d00431c95908750e28855524fe709fdac`
-  (`Fix the twelfth-round audit defects (reset timer, legacy revisions)`)
+  `6f779bf3d52175af0ab7dce7fda287cc03b5378b`
+  (`Fix the thirteenth-round audit defects (validation vs save failure)`)
 - After `git fetch`, the commit under review is `origin/main`.
-  Commits after `7f8f708` on this push touch only this `Audit.md`;
-  review the code at `7f8f708` regardless of branch head. Render
+  Commits after `6f779bf` on this push touch only this `Audit.md`;
+  review the code at `6f779bf` regardless of branch head. Render
   auto-deploys from `main` (`render.yaml autoDeploy: true`), but
   deployment was not verified by the implementer — do not claim
   the live site shows this push without checking it, and do not
@@ -28,45 +28,46 @@ Confirm the change with both ends named (never a one-revision diff;
 a behind checkout invents changes that are not in this push):
 
 ```
-git diff --stat dbebd4f3db2e5b538cf530fc9af920050e4ce27f 7f8f708d00431c95908750e28855524fe709fdac
-git diff dbebd4f3db2e5b538cf530fc9af920050e4ce27f 7f8f708d00431c95908750e28855524fe709fdac
-git rev-parse 7f8f708d00431c95908750e28855524fe709fdac    # must resolve
-git diff --stat 7f8f708d00431c95908750e28855524fe709fdac HEAD  # must touch Audit.md only
+git diff --stat c25fa1fbc1b9514eaac9af3c8d8cf974a001e4ed 6f779bf3d52175af0ab7dce7fda287cc03b5378b
+git diff c25fa1fbc1b9514eaac9af3c8d8cf974a001e4ed 6f779bf3d52175af0ab7dce7fda287cc03b5378b
+git rev-parse 6f779bf3d52175af0ab7dce7fda287cc03b5378b    # must resolve
+git diff --stat 6f779bf3d52175af0ab7dce7fda287cc03b5378b HEAD  # must touch Audit.md only
 git rev-parse origin/main     # the commit under review, after fetch
 git status                    # stop only if the worktree is dirty
 ```
 
-Expected shape for the code diff: 6 files, 95 insertions, 5
+Expected shape for the code diff: 4 files, 97 insertions, 10
 deletions. If yours disagrees, stop and say so. A behind local
 checkout, or no local `main` branch, is not a reason to stop.
-Read files at the reviewed commit (`git show 7f8f708:PATH` if
+Read files at the reviewed commit (`git show 6f779bf:PATH` if
 needed); if a later edit moves a line, follow the symbol, not the
 stale number. Earlier audits live in git history (most recently
-`git show dbebd4f:Audit.md`, parent `b974235`, code `6a9829c`).
-This push answers the twelfth review of `6a9829c` (defects 1–3);
-re-verify those first, then hunt wider. Earlier rounds' fixed
-items should be regression-checked, not re-reported unless broken.
+`git show c25fa1f:Audit.md`, parent `dbebd4f`, code `7f8f708`).
+This push answers the thirteenth review of `7f8f708` (one P2
+defect plus the boolean-`_rev` gap it flagged); re-verify those
+first, then hunt wider. Earlier rounds' fixed items should be
+regression-checked, not re-reported unless broken.
 
 ## Hard rules for this audit
 
 - Do NOT edit, commit, push, build, install, start the server, or
   activate a provider. Read-only inspection only.
-- Report ONLY defects still true at `7f8f708`, each with: severity
-  (P1/P2/P3), observed behavior, exact file and line at `7f8f708`,
+- Report ONLY defects still true at `6f779bf`, each with: severity
+  (P1/P2/P3), observed behavior, exact file and line at `6f779bf`,
   and the evidence. No evidence, no defect — use "Unverified".
 - Do NOT treat any of these as a source defect: an unrun live
   Gemini call, an unrun live browser/Render click-through, a
   previously stored analysis, missing SMTP/Meta/TikTok/GA4 console
   credentials, or the five pre-existing test failures named at
   the end.
-- For each of the twelfth review's 3 defects, state explicitly:
+- For the P2 defect and the boolean-`_rev` gap, state explicitly:
   fixed / partly fixed / still open, with line evidence.
 - Check the tests as skeptically as the code.
 - Secrets: never print a credential value (file/line only, redacted).
 
 ## Required output format
 
-1. `Twelfth-review 3 defects` — one verdict line each with evidence.
+1. `Thirteenth-review findings` — one verdict line each with evidence.
 2. `Defects still true` — numbered, severity-ordered.
 3. `Requirements missing or only partly done`.
 4. `Areas checked, no defect found` — one line per section below.
@@ -75,66 +76,55 @@ items should be regression-checked, not re-reported unless broken.
 
 ## What the implementer claims — falsify each one
 
-### 1. Reset Defaults cannot be undone by a pending name timer
+### 1. Name validation can no longer hide a save failure (or stick on Saving)
 
-Claim. `resetDefaults` clears the debounce timer and rewrites
-the draft before committing (`SettingsPage.tsx`). Try: timer
-already fired and its name commit is queued/in-flight when
-Reset is clicked (replace-pending vs an already-taken batch —
-which workspace wins, in what order do the flushes land?);
-Reset, then immediately typing a new name (fresh timer must
-work); Reset while the draft equals a non-default saved name
-(the round-11 draft-sync path).
+Claim. A `saveFailedRef` records the last settled outcome;
+blank-name validation restores `"error"` when a failure is
+recorded, leaves state alone while changes are pending, and
+only idles when nothing is outstanding. Symmetrically, a
+successful settle treats a BLANK draft as not outstanding, so
+it cannot stick on "Saving…" (`SettingsPage.tsx`). Try every
+ordering: failure → validation (the reported case); validation
+→ success; validation → failure; keystroke (which sets
+`saving` unconditionally in `onWorkspaceInput`) while an error
++ Retry is showing, followed by (a) a valid name commit whose
+flush also carries the failed keys, (b) deleting back to
+blank; local-storage failure (not PUT) as the recorded
+failure; a second mount inheriting `saveFailedRef` (it is a
+per-mount ref — is anything owed across mounts given pending
+keys are module-level?).
 
-### 2. Legacy unversioned preferences are explicitly version 0
+### 2. Boolean `_rev` values are malformed, not revision 1
 
-Claim. Backend `get_prefs` normalizes every read to carry an
-integer `_rev` (legacy/missing/corrupt ⇒ 0)
-(`Backend/creative_intel/notifications.py`), and the client's
-staleness check also treats an unversioned non-empty payload
-as 0 (`prefs.ts`). Try: consumers of `get_prefs` beyond the
-API (`data_export.py`, notification opt-in reads — does an
-injected `_rev` leak anywhere user-visible or change export
-contents?); a stored `_rev` that is a bool/float/string
-(`isinstance(True, int)` is True in Python — trace it);
-client/server disagreement during a rolling deploy (old
-client vs new backend and vice versa); the conflict (409)
-body for a legacy row.
+Claim. Backend `_is_int` excludes bool in `get_prefs`
+normalization, current-revision extraction, and
+`base_revision` acceptance (`Backend/creative_intel/
+notifications.py`). Try: `_rev` as float (`3.0`), string
+(`"3"`), negative, and huge int through `get_prefs`,
+`save_prefs`, the 409 body, and the client's ordering; a
+client sending `base_revision: true` end-to-end (router →
+409 vs 500?).
 
-### 3. "All Changes Saved" waits for an outstanding name draft
+### 3. Tests
 
-Claim. A commit's completion sets `saving` (not `saved`) while
-the trimmed name draft differs from that commit's workspace
-value. Try: draft typed AFTER the unrelated commit but before
-its flush settles (the input handler's revision bump vs the
-completion guard — which wins?); draft retyped to exactly the
-saved name (timer still pending: status path); draft cleared
-to empty (error path interaction); name commit's own
-completion when the user typed FURTHER characters after the
-timer fired but before its flush settled.
-
-### 4. Tests
-
-Claims. Backend: legacy row → `_rev: 0` on read, first save →
-1, missing row → `{"_rev": 0}`. Frontend: unversioned payload
-is stale against a confirmed snapshot and cannot replace it;
-Reset-with-pending-typed-name (fake timers) sends no typed
-name and restores the default in the input; the round-11
-mixed-edit test now asserts "Saving…" mid-window. Still
-missing (admitted): a Settings test driving an actual legacy
-(no-`_rev`) GET through the remount sequence (unit-covered at
-the prefs layer); true fresh-module new-tab tests; page-level
+Claims. New Settings tests drive both orderings with fake
+timers (failed PUT inside the debounce window keeps Retry +
+error status after validation; held successful PUT released
+after validation settles to saved with the name error still
+visible). Backend legacy test extended with the boolean case.
+Judge whether the held-PUT test still proves ordering after
+its restructure (validation asserted after restoring real
+timers, before release). Still missing (admitted): legacy-GET
+remount sequence at page level; fresh-module new-tab tests;
 Analyst→Campaigns navigation; three-tab double-409.
 
 ## Evidence (implementer's machine; check plausibility, do not re-run)
 
-- `pnpm test`: 351 passed. `pnpm exec tsc --noEmit`: clean.
+- `pnpm test`: 353 passed. `pnpm exec tsc --noEmit`: clean.
   `pnpm build`: passed.
-- `pytest tests/test_gap_completion.py`: 24 passed; prefs/
-  export/notification-filtered backend run: 27 passed. Full
-  backend suite not repeated this round (only `get_prefs`
-  changed; round-eight full run on near-identical backend:
-  911 passed / 5 named failures).
+- `pytest tests/test_gap_completion.py`: 24 passed. Full
+  backend suite not repeated (backend change is the `_is_int`
+  guard; round-eight full run: 911 passed / 5 named failures).
 - Gemini key re-probed (env + Keychain): still absent; user
   previously chose "skip live run". Live workflow unverified.
 

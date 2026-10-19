@@ -1288,6 +1288,66 @@ describe("SettingsPage", () => {
     expect(screen.getByText("Workspace name cannot be empty.")).toBeDefined();
   });
 
+  it("an older success cannot erase a newer storage failure", async () => {
+    const hold = { release: () => {} };
+    const calls = mockFetch({ holdFirstPut: hold, employeeId: "e-oldwin" });
+    renderSettings();
+    await waitFor(() => {
+      expect(screen.getByLabelText("Workspace Name")).toBeDefined();
+    });
+    vi.useFakeTimers();
+    // 1) Density save starts; its PUT is held in flight.
+    fireEvent.change(screen.getByLabelText("Interface Density"),
+                     { target: { value: "Compact" } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls.some(([u, i]) =>
+      u === "/api/preferences" && (i?.method ?? "GET") === "PUT")).toBe(true);
+    // 2) Accent commit while local storage is failing: the
+    //    synchronous failure shows Error + Retry immediately.
+    const store = new Map<string, string>();
+    const working = {
+      getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
+      setItem: (k: string, v: string) => { store.set(k, String(v)); },
+      removeItem: (k: string) => { store.delete(k); },
+      clear: () => { store.clear(); },
+    };
+    Object.defineProperty(window, "localStorage", {
+      value: { ...working, setItem: () => { throw new Error("quota"); } },
+      configurable: true, writable: true,
+    });
+    fireEvent.change(screen.getByLabelText("Accent Color"),
+                     { target: { value: "Blue" } });
+    expect(screen.getByRole("button", { name: "Retry" })).toBeDefined();
+    Object.defineProperty(window, "localStorage", {
+      value: working, configurable: true, writable: true,
+    });
+    // 3) The OLDER density PUT now succeeds — it must not erase
+    //    the newer failure on record.
+    hold.release();
+    await vi.advanceTimersByTimeAsync(0);
+    // 4) Clearing the name + validation must still show Retry.
+    fireEvent.change(screen.getByLabelText("Workspace Name"),
+                     { target: { value: "   " } });
+    await vi.advanceTimersByTimeAsync(600);
+    vi.useRealTimers();
+    expect(await screen.findByText("Workspace name cannot be empty."))
+      .toBeDefined();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeDefined();
+    expect(screen.getByRole("status").textContent)
+      .toBe("Could not save settings in this browser.");
+    // And Retry really does flush the stranded accent change.
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => {
+      expect(screen.getByRole("status").textContent).toBe("All Changes Saved.");
+    });
+    const puts = calls
+      .filter(([u, i]) => u === "/api/preferences" && (i?.method ?? "GET") === "PUT")
+      .map(([, i]) => JSON.parse(String(i?.body ?? "{}")) as {
+        prefs: Record<string, unknown>;
+      });
+    expect(puts.some((p) => p.prefs["accent"] === "Blue")).toBe(true);
+  });
+
   it("does not claim saved when the server rejects the write", async () => {
     mockFetch({ prefsPut: "fail" });
     renderSettings();

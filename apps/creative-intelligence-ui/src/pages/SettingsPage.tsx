@@ -312,9 +312,19 @@ export function SettingsPage() {
   // a keystroke after a commit would otherwise suppress the
   // commit's outcome entirely, stranding the status on Saving.
   const commitGenRef = useRef(0);
-  // Whether the last settled save FAILED. Name validation runs
-  // on the same status slot and must restore (never hide) this.
-  const saveFailedRef = useRef(false);
+  // Last settled save outcome, stamped with its commit
+  // generation. Name validation runs on the same status slot
+  // and must restore (never hide) a failure — and an older
+  // settle must never overwrite a NEWER commit's outcome
+  // (including a synchronous local-storage failure recorded
+  // while the older write was still in flight).
+  const saveOutcomeRef = useRef<{ gen: number; failed: boolean }>(
+    { gen: 0, failed: false });
+  const recordSaveOutcome = (gen: number, failed: boolean) => {
+    if (gen >= saveOutcomeRef.current.gen) {
+      saveOutcomeRef.current = { gen, failed };
+    }
+  };
   const nameTimer = useRef<number | null>(null);
   const [nameDraft, setNameDraft] = useState(prefs.workspace);
   const [nameError, setNameError] = useState("");
@@ -374,7 +384,7 @@ export function SettingsPage() {
     else queuePrefsChanges(id, serverPrefsChanges(prev, next));
     const ok = savePrefs(id, next);
     if (!ok) {
-      saveFailedRef.current = true;
+      recordSaveOutcome(commitGen, true);
       setSaveState("error");
       setSaveError(t("settings.footer.couldNotSave"));
       return false;
@@ -386,9 +396,10 @@ export function SettingsPage() {
     // newer commit is still in flight behind it.
     void flushServerPrefs(id)
       .then((res) => {
-        // Record the outcome unconditionally (settles arrive in
-        // flush order); only the UI updates are generation-gated.
-        saveFailedRef.current = false;
+        // Record the outcome (generation-stamped, so a newer
+        // commit's synchronous failure already on record wins);
+        // only the UI updates below are generation-gated.
+        recordSaveOutcome(commitGen, false);
         if (commitGenRef.current !== commitGen) return;
         if (res?.prefs) reconcileLocal(id, res.prefs);
         // A debounced workspace-name draft that has not committed
@@ -402,7 +413,7 @@ export function SettingsPage() {
         setSaveState(draft && draft !== next.workspace ? "saving" : "saved");
       })
       .catch(() => {
-        saveFailedRef.current = true;
+        recordSaveOutcome(commitGen, true);
         if (commitGenRef.current !== commitGen) return;
         setSaveState("error");
         setSaveError(t("settings.footer.couldNotSave"));
@@ -428,6 +439,10 @@ export function SettingsPage() {
   }, [commit]);
 
   const onWorkspaceInput = useCallback((raw: string) => {
+    // Mirror the draft into the ref SYNCHRONOUSLY: the debounce
+    // timer's supersede guard reads it, and a render-lagged ref
+    // could still hold the old name when the timer fires.
+    nameDraftRef.current = raw;
     setNameDraft(raw);
     setNameError("");
     setSaveState("saving");
@@ -452,7 +467,7 @@ export function SettingsPage() {
         // setting's save, nor pre-empt an in-flight flush that
         // will settle the status itself.
         const id = employee?.id ?? me?.employee?.id ?? "";
-        if (saveFailedRef.current) setSaveState("error");
+        if (saveOutcomeRef.current.failed) setSaveState("error");
         else if (!Object.keys(pendingPrefsChanges(id)).length) {
           setSaveState("idle");
         }

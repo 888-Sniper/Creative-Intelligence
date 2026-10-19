@@ -1,4 +1,4 @@
-# Creative Intelligence — audit of the eighth-round fix push
+# Creative Intelligence — audit of the ninth-round fix push
 
 You are the second, independent reviewer. Your job is to find what is
 still missing, wrong, or unsafe in the change below. Be adversarial:
@@ -11,14 +11,14 @@ it were your own finding.
 
 - Repository: https://github.com/888-Sniper/Creative-Intelligence
 - Parent on `main` (previous push):
-  `018a937782330cbd6e5eda98af0f530dd9823d52`
-  (code `06a8fa7` + Audit.md-only commit; see git history)
+  `0bf4bb78d3c8068cfe0da23f45931d5f0411ca6e`
+  (code `63020ee` + Audit.md-only commit; see git history)
 - Under review in THIS push: code commit
-  `63020ee718c0b4836c773628ed4753e9a00ec4b1`
-  (`Fix the eighth-round audit defects (preference conflicts, filter clears)`)
+  `28f9a63761e9698a0fb4fee53bce2afbffd3bc58`
+  (`Fix the ninth-round audit defects (pending preference changes, saved views)`)
 - After `git fetch`, the commit under review is `origin/main`.
-  Commits after `63020ee` on this push touch only this `Audit.md`;
-  review the code at `63020ee` regardless of branch head. Render
+  Commits after `28f9a63` on this push touch only this `Audit.md`;
+  review the code at `28f9a63` regardless of branch head. Render
   auto-deploys from `main` (`render.yaml autoDeploy: true`), but
   deployment was not verified by the implementer — do not claim
   the live site shows this push without checking it, and do not
@@ -28,22 +28,23 @@ Confirm the change with both ends named (never a one-revision diff;
 a behind checkout invents changes that are not in this push):
 
 ```
-git diff --stat 018a937782330cbd6e5eda98af0f530dd9823d52 63020ee718c0b4836c773628ed4753e9a00ec4b1
-git diff 018a937782330cbd6e5eda98af0f530dd9823d52 63020ee718c0b4836c773628ed4753e9a00ec4b1
-git rev-parse 63020ee718c0b4836c773628ed4753e9a00ec4b1    # must resolve
-git diff --stat 63020ee718c0b4836c773628ed4753e9a00ec4b1 HEAD  # must touch Audit.md only
+git diff --stat 0bf4bb78d3c8068cfe0da23f45931d5f0411ca6e 28f9a63761e9698a0fb4fee53bce2afbffd3bc58
+git diff 0bf4bb78d3c8068cfe0da23f45931d5f0411ca6e 28f9a63761e9698a0fb4fee53bce2afbffd3bc58
+git rev-parse 28f9a63761e9698a0fb4fee53bce2afbffd3bc58    # must resolve
+git diff --stat 28f9a63761e9698a0fb4fee53bce2afbffd3bc58 HEAD  # must touch Audit.md only
 git rev-parse origin/main     # the commit under review, after fetch
 git status                    # stop only if the worktree is dirty
 ```
 
-Expected shape for the code diff: 15 files, 410 insertions, 41
-deletions. If yours disagrees, stop and say so. A behind local
-checkout, or no local `main` branch, is not a reason to stop.
-Read files at the reviewed commit (`git show 63020ee:PATH` if
-needed); if a later edit moves a line, follow the symbol, not the
-stale number. Earlier audits live in git history (most recently
-`git show 018a937:Audit.md`, parent `55b4c96`, code `06a8fa7`).
-This push answers the eighth review of `06a8fa7` (defects 1–3);
+Expected shape for the code diff: 8 files, 329 insertions, 87
+deletions, frontend only (no backend changes this round). If
+yours disagrees, stop and say so. A behind local checkout, or no
+local `main` branch, is not a reason to stop. Read files at the
+reviewed commit (`git show 28f9a63:PATH` if needed); if a later
+edit moves a line, follow the symbol, not the stale number.
+Earlier audits live in git history (most recently
+`git show 0bf4bb7:Audit.md`, parent `018a937`, code `63020ee`).
+This push answers the ninth review of `63020ee` (defects 1–4);
 re-verify those first, then hunt wider. Earlier rounds' fixed
 items should be regression-checked, not re-reported unless broken.
 
@@ -51,22 +52,22 @@ items should be regression-checked, not re-reported unless broken.
 
 - Do NOT edit, commit, push, build, install, start the server, or
   activate a provider. Read-only inspection only.
-- Report ONLY defects still true at `63020ee`, each with: severity
-  (P1/P2/P3), observed behavior, exact file and line at `63020ee`,
+- Report ONLY defects still true at `28f9a63`, each with: severity
+  (P1/P2/P3), observed behavior, exact file and line at `28f9a63`,
   and the evidence. No evidence, no defect — use "Unverified".
 - Do NOT treat any of these as a source defect: an unrun live
   Gemini call, an unrun live browser/Render click-through, a
   previously stored analysis, missing SMTP/Meta/TikTok/GA4 console
   credentials, or the five pre-existing test failures named at
   the end.
-- For each of the eighth review's 3 defects, state explicitly:
+- For each of the ninth review's 4 defects, state explicitly:
   fixed / partly fixed / still open, with line evidence.
 - Check the tests as skeptically as the code.
 - Secrets: never print a credential value (file/line only, redacted).
 
 ## Required output format
 
-1. `Eighth-review 3 defects` — one verdict line each with evidence.
+1. `Ninth-review 4 defects` — one verdict line each with evidence.
 2. `Defects still true` — numbered, severity-ordered.
 3. `Requirements missing or only partly done`.
 4. `Areas checked, no defect found` — one line per section below.
@@ -75,105 +76,89 @@ items should be regression-checked, not re-reported unless broken.
 
 ## What the implementer claims — falsify each one
 
-### 1. Stale preference saves are explicit conflicts, reconciled before "saved"
+The save model changed: payloads are no longer derived from a
+local-vs-snapshot diff at all. Each commit queues ONLY the keys
+it changed (`serverPrefsChanges` + pending map, `prefs.ts`);
+`flushServerPrefs` sends the accumulated pending batch and
+confirms exactly the sent key/value pairs on acceptance.
 
-Claim. `save_prefs` raises `StalePreferenceRevision` (carrying the
-current prefs) instead of returning success
-(`Backend/creative_intel/notifications.py`); `PUT /api/preferences`
-answers 409 with `{error, prefs}` (flat body — the app strips
-FastAPI's `detail` envelope, `Backend/ci_backend/app.py`).
-Settings retries once on the fresh base and shows "saved" only
-after acceptance; the optimistic immediate "saved" and the
-earlier-commit-completion flash are gone (`SettingsPage.tsx`,
-`commitRev` guard). Try: a second consecutive 409 (three tabs);
-409 without `prefs` (account mismatch) proving no retry loop;
-retry succeeding but the OTHER keys in the conflict body being
-adopted as snapshot without the UI showing them (local UI now
-diverges from snapshot — what does the next delta do?); a failed
-LOCAL save followed by Retry (`retrySave` re-commits identical
-prefs — delta vs snapshot must still contain the unsaved keys).
+### 1. Post-reconcile saves cannot overwrite another tab's change
 
-### 2. One tab cannot overwrite another tab's unrelated edits
+Claim. The batch can only contain keys some commit in this tab
+actually edited, so a diverged form value is never emitted; and
+after each accepted flush `reconcileLocal` (`SettingsPage.tsx`)
+adopts confirmed server values for all non-pending keys into
+the form + local copy. Try: an edit queued behind the conflict
+(same key AND different key); reconcile adopting a server value
+for a key the user changed via the header theme toggle between
+PUT and response; reconcile while the workspace-name debounce
+is mid-typing (workspace excluded — what about the debounce
+then committing a name typed against the pre-reconcile form?);
+`confirmPrefsChanges` value-equality for boolean toggles
+flipped twice in flight.
 
-Claim. Each tab keeps its own confirmed server snapshot
-(`noteServerPrefsSnapshot`/`serverPrefsSnapshot`, `prefs.ts`);
-saves send ONLY `serverPrefsDelta(snapshot, next)` with the
-snapshot's version as base. Delta is computed at queue execution
-time (edit-then-revert lands correctly) but fixed before the
-first attempt (conflict retry reuses it verbatim). Try: partial
-server documents (keys absent from the snapshot are sent — can
-that clobber anything?); a GET merge landing while a PUT is
-queued (rev guards in Settings/AppShell vs the snapshot note
-order — snapshot is noted BEFORE the local merge applies; find a
-sequence where local prefs and snapshot disagree and a delta
-then restores a stale value); Reset Defaults under delta
-semantics (a key another tab changed that this tab's snapshot
-already holds at default is NOT reset — is that the right
-reading of "reset"?); two Settings mounts in one tab sharing the
-module queue/snapshot after account switch (snapshot keyed by
-employee — verify every read/write uses the same id source).
+### 2. Editing before hydration cannot overwrite server preferences
 
-### 3. Every shared filter clear records the explicit All status
+Claim. Two layers: payloads are changed-keys-only regardless of
+snapshot, and `flushServerPrefs` GETs first when this tab has
+no snapshot to establish base/snapshot before any PUT. Try:
+GET fails AND localStorage holds a stale `serverPrefsRevision`
+from an older session (base fallback path into 409/retry);
+Settings' own GET merge racing the flush GET (snapshot noted
+twice, rev guards); controls editable during employee loading
+with id `""` — pending queued under `""`, then identity arrives:
+whose pending flushes, under what stamp?
 
-Claim. `FilterContext.clearFilters` itself marks
-`touched = ""` for the current account (choke point), covering
-Analyst Clear All, FilterBar, Dashboard/Benchmarks/Creatives
-resets and `product.tsx` buttons. Analyst conversation restore
-re-marks AFTER its clear+set sequence; `SampleScopeBanner`
-captures the pre-demo touched state (`prevStatusTouched`,
-including "was untouched") and restores it on return via the new
-`clearCampaignStatusTouched`. Try: clears fired before identity
-loads (employee id `""` in FilterProvider vs the real id
-Campaigns reads — is the app reachable pre-identity?);
-SampleScopeBanner mounting in that same window (its apply
-effect captures the id from first render); saved-view applies
-and other programmatic `setFilter("status", …)` writers that
-bypass marking entirely; Campaigns' own status `<select>`
-onChange vs the choke point disagreeing after a clear on the
-Campaigns page itself.
+### 3. Reset Defaults resets every server key
 
-### 4. Drive-by: pre-existing video journey test fixed
+Claim. Reset commits with `replaceAll`, replacing the pending
+batch with the full defaults document; the conflict retry
+re-sends that full batch on the fresh base. Try: reset while a
+normal edit is still in flight (replace supersedes its pending
+keys — its flush may already hold the old batch); reset in a
+tab whose snapshot is null (hydration GET inside flush vs the
+full batch ordering); reset's toast appearing before server
+acceptance (`notifyOk` fires synchronously in `resetDefaults` —
+decide whether that toast wording claims more than the footer
+status does).
 
-Claim. `test_positive_journey_analysis_correction_review_export`
-failed IDENTICALLY on the untouched parent (`TypeError`:
-`LiveVision` test double rejects the `secret_for` kwarg added in
-round two). The double now accepts and ignores it
-(`tests/test_video_upload_api.py`). Verify the base failure
-yourself from history if you doubt it, and check no other test
-double in the tree stubs `LiveVision`/`readiness` with a stale
-signature.
+### 4. Saved-view apply records the remembered campaign status
+
+Claim. `applySavedView` now marks touched with the view's
+status (or `""`) for the caller's account; both callers
+(Insights, Benchmarks) pass `useOptionalAuth` employee id.
+Try: other programmatic status writers still unmarked (grep
+every `setFilter("status"` and saved-view-like restore: report
+templates applying scope? deep links?); the comparison-deep-
+link branch (status axis still set + marked — intended?);
+callers rendering before identity loads (id `""` mark vs the
+id Campaigns reads); views whose status value is `"all"`.
 
 ### 5. Tests
 
-Claims. Backend: stale save now asserted to RAISE with current
-prefs attached; new HTTP two-tab test (B saves → A 409 with B's
-prefs in body → A retry → both edits survive, nothing written by
-the rejected save). Frontend: Settings conflict test drives the
-real fetch mock (stateful merge-apply server) and asserts both
-PUT bodies (bases 3→9, prefs exactly `{theme}`); edit-then-
-revert lands `{theme: "light"}`; server-500 never shows saved;
-`serverPrefsDelta` unit tests; FilterContext clear test. Two
-partial `@/auth/AuthProvider` mocks (Dashboard, VideoUpload)
-gained the `useOptionalAuth` export FilterContext now uses —
-check no other test mock of that module is incomplete. Still
-missing (admitted): a page-level Analyst-Clear-All → Campaigns
-navigation test (mechanism covered at FilterContext level), and
-the previously flaky Settings storage test passed throughout
-this round (full suite + isolated) — its timing dependency is
-still unexplained.
+Claims. Conflict test extended: after retry, the density
+control shows the other tab's value and a subsequent accent
+edit sends exactly `{accent}`. New: pre-hydration edit (GET
+500s) sends exactly `{theme}`; cross-tab Reset re-sends the
+full defaults incl. density after 409; a revert made while
+the first PUT is artificially HELD still lands as a second
+PUT (the queued-behind case the last review asked for);
+pending-map unit tests; saved-view status marking test. The
+storage-retry test now polls for the async saved status
+(reviewer's flake hypothesis) — check whether the asserted
+sequence can still pass spuriously. Still missing (admitted):
+page-level Analyst→Campaigns and saved-view→Campaigns
+navigation tests (mechanisms unit-covered); three-tab
+double-409 test.
 
 ## Evidence (implementer's machine; check plausibility, do not re-run)
 
-- FULL backend suite run this round: 911 passed, 1 skipped,
-  6 failed — the five named pre-existing failures plus the
-  video-journey double above (proven failing on the stashed
-  untouched tree, then fixed; the single test passes after).
-  `pytest tests/test_gap_completion.py`: 23 passed.
-- `pnpm test`: 338 passed. `pnpm exec tsc --noEmit`: clean.
-  `pnpm build`: passed.
-- Ruff on changed Python: 20 errors, ALL pre-existing import
-  sorting in `product.py` (identical count on `git show
-  HEAD:` content); none in the edited regions or new code.
+- `pnpm test`: 343 passed (5 new/changed net). `pnpm exec tsc
+  --noEmit`: clean. `pnpm build`: passed.
+- Backend untouched this round; sanity re-run
+  `pytest tests/test_gap_completion.py`: 23 passed. The full
+  backend run (911 passed / 5 named pre-existing failures) is
+  from the eighth round on identical backend code.
 - Gemini key re-probed (env + Keychain): still absent; user
   previously chose "skip live run". Live workflow unverified.
 

@@ -1,4 +1,4 @@
-# Creative Intelligence — audit of the sixteenth-round fix push
+# Creative Intelligence — audit of the seventeenth-round fix push
 
 You are the second, independent reviewer. Your job is to find what is
 still missing, wrong, or unsafe in the change below. Be adversarial:
@@ -11,14 +11,14 @@ it were your own finding.
 
 - Repository: https://github.com/888-Sniper/Creative-Intelligence
 - Parent on `main` (previous push):
-  `0cb60828177f5908d2d6d5139cde6b33d1cba441`
-  (code `573b2ac` + Audit.md-only commit; see git history)
+  `9c7f051b7e3ac03110290c100ef5de1b09457bcc`
+  (code `35179f5` + Audit.md-only commit; see git history)
 - Under review in THIS push: code commit
-  `35179f54429924968d97449efd8f5c21f7fcc474`
-  (`Fix the sixteenth-round audit defect (recovery across navigation)`)
+  `e25d38ad0764fe8fdb61bac4548e2ee8a00a8a27`
+  (`Fix the seventeenth-round audit defect (stale account callbacks)`)
 - After `git fetch`, the commit under review is `origin/main`.
-  Commits after `35179f5` on this push touch only this `Audit.md`;
-  review the code at `35179f5` regardless of branch head. Render
+  Commits after `e25d38a` on this push touch only this `Audit.md`;
+  review the code at `e25d38a` regardless of branch head. Render
   auto-deploys from `main` (`render.yaml autoDeploy: true`), but
   deployment was not verified by the implementer — do not claim
   the live site shows this push without checking it, and do not
@@ -28,23 +28,23 @@ Confirm the change with both ends named (never a one-revision diff;
 a behind checkout invents changes that are not in this push):
 
 ```
-git diff --stat 0cb60828177f5908d2d6d5139cde6b33d1cba441 35179f54429924968d97449efd8f5c21f7fcc474
-git diff 0cb60828177f5908d2d6d5139cde6b33d1cba441 35179f54429924968d97449efd8f5c21f7fcc474
-git rev-parse 35179f54429924968d97449efd8f5c21f7fcc474    # must resolve
-git diff --stat 35179f54429924968d97449efd8f5c21f7fcc474 HEAD  # must touch Audit.md only
+git diff --stat 9c7f051b7e3ac03110290c100ef5de1b09457bcc e25d38ad0764fe8fdb61bac4548e2ee8a00a8a27
+git diff 9c7f051b7e3ac03110290c100ef5de1b09457bcc e25d38ad0764fe8fdb61bac4548e2ee8a00a8a27
+git rev-parse e25d38ad0764fe8fdb61bac4548e2ee8a00a8a27    # must resolve
+git diff --stat e25d38ad0764fe8fdb61bac4548e2ee8a00a8a27 HEAD  # must touch Audit.md only
 git rev-parse origin/main     # the commit under review, after fetch
 git status                    # stop only if the worktree is dirty
 ```
 
-Expected shape for the code diff: 4 files, 138 insertions, 28
+Expected shape for the code diff: 2 files, 56 insertions, 5
 deletions, frontend only. If yours disagrees, stop and say so. A
 behind local checkout, or no local `main` branch, is not a
 reason to stop. Read files at the reviewed commit
-(`git show 35179f5:PATH` if needed); if a later edit moves a
+(`git show e25d38a:PATH` if needed); if a later edit moves a
 line, follow the symbol, not the stale number. Earlier audits
-live in git history (most recently `git show 0cb6082:Audit.md`,
-parent `bf0556f`, code `573b2ac`). This push answers the
-sixteenth review of `573b2ac` (one P2 defect); re-verify it
+live in git history (most recently `git show 9c7f051:Audit.md`,
+parent `0cb6082`, code `35179f5`). This push answers the
+seventeenth review of `35179f5` (one P2 defect); re-verify it
 first, then hunt wider. Earlier rounds' fixed items should be
 regression-checked, not re-reported unless broken.
 
@@ -52,8 +52,8 @@ regression-checked, not re-reported unless broken.
 
 - Do NOT edit, commit, push, build, install, start the server, or
   activate a provider. Read-only inspection only.
-- Report ONLY defects still true at `35179f5`, each with: severity
-  (P1/P2/P3), observed behavior, exact file and line at `35179f5`,
+- Report ONLY defects still true at `e25d38a`, each with: severity
+  (P1/P2/P3), observed behavior, exact file and line at `e25d38a`,
   and the evidence. No evidence, no defect — use "Unverified".
 - Do NOT treat any of these as a source defect: an unrun live
   Gemini call, an unrun live browser/Render click-through, a
@@ -67,7 +67,7 @@ regression-checked, not re-reported unless broken.
 
 ## Required output format
 
-1. `Sixteenth-review defect` — verdict with evidence.
+1. `Seventeenth-review defect` — verdict with evidence.
 2. `Defects still true` — numbered, severity-ordered.
 3. `Requirements missing or only partly done`.
 4. `Areas checked, no defect found` — one line per section below.
@@ -76,39 +76,44 @@ regression-checked, not re-reported unless broken.
 
 ## What the implementer claims — falsify each one
 
-### 1. Failed-save recovery survives navigation
+### 1. Stale async callbacks cannot repaint a newer account/session
 
-Claim. Commit generations and save outcomes moved to
-module-level per-account state in `prefs.ts` (beside the
-pending map), and Settings mount now retries any pending
-edits once per account, settling the status from the real
-result (`SettingsPage.tsx` recovery effect). Try: the
-reviewer's exact sequence; reopening while the original
-flush is STILL in flight (chain serialization + generation
-guards across mounts — the unmounted page's settle handlers
-vs the new page's recovery settle); account switch A→B→A
-within one tab (per-account outcome/pending isolation, the
-recovery guard keyed by account); recovery flush racing the
-mount GET merges (snapshot noting order, reconcile sources);
-recovery when pending exists but the last outcome was a
-success (can that state exist?); a full page RELOAD after
-failure (module state dies — what is honestly recovered from
-local storage + server GET, and what is lost?).
+Claim. Every async preference applier in Settings is guarded by
+mount + account currency (`mountedRef`/`accountRef`/
+`stillCurrent`, plus a cleanup `live` flag on the GET-merge
+effect): both GET-merge callbacks, commit settle handlers, and
+the mount-recovery settle (`SettingsPage.tsx`). Outcome
+recording itself stays unconditional (module state is
+per-account by construction). Try: the reviewer's sequence
+in-place (identity swap WITHOUT unmount — effect deps are
+`[employee?.id]`; trace `me.employee.id`-only changes and the
+identity-adopt branch's synchronous `setPrefOwner` path);
+AppShell's equivalent callback (pre-existing `live` flag —
+verify it also covers the account dimension, since its effect
+deps are `[employeeId]`); Analyst/AppShell or any other caller
+of `applyLive`-equivalents (theme/language/timezone setters)
+with unguarded async paths; the unmount name-flush effect
+(module flush on unmount — account-stamped, but trace it);
+`accountRef` assigned during render vs callbacks firing
+between renders of an identity swap.
 
 ### 2. Tests
 
-Claims. New end-to-end test: density PUT gated to fail →
-Retry → unmount → remount (recovery retries, fails again,
-Retry + error restored) → clear name (validation keeps
-Retry) → gate opens → Retry flushes `{density: "Compact"}`
-and settles saved. Unit tests for per-account
-generation-ordered outcomes. Still missing (admitted):
-legacy-GET remount at page level; fresh-module new-tab
-tests; Analyst→Campaigns navigation; three-tab double-409.
+Claim. New test: account A's GET held → unmount → account B
+loads (Comfortable/Teal) → A's response released → B's density
+control, body density dataset, and accent CSS variable are
+unchanged. Admitted limits: the test remounts a fresh tree
+(new providers) rather than swapping identity in place, so
+the shared-locale-provider aspect is asserted only through
+document-level side effects (`applyAccent`); judge whether
+the in-place swap is equivalently guarded from source. Still
+missing (admitted): legacy-GET remount at page level;
+fresh-module new-tab tests; Analyst→Campaigns navigation;
+three-tab double-409.
 
 ## Evidence (implementer's machine; check plausibility, do not re-run)
 
-- `pnpm test`: 358 passed. `pnpm exec tsc --noEmit`: clean.
+- `pnpm test`: 359 passed. `pnpm exec tsc --noEmit`: clean.
   `pnpm build`: passed.
 - Backend untouched this round (round-eight full run on
   near-identical backend: 911 passed / 5 named failures).
@@ -128,6 +133,9 @@ tests; Analyst→Campaigns navigation; three-tab double-409.
 
 ## Known still-open items (already admitted — only re-report if worse)
 
+- No durable recovery across a full page reload: pending edits
+  and outcomes are memory-only (noted by the sixteenth review
+  as a separate limitation, not a classified defect).
 - Scheduled GA4 sync not implemented (manual import only).
 - Privacy toggles are persisted preferences; no telemetry or
   server retention engine exists behind them.

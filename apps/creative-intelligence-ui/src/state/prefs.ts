@@ -304,8 +304,39 @@ export function noteServerPrefsRevision(employeeId: string,
  *  send only the keys that differ from this snapshot. */
 const _serverSnapshots = new Map<string, Record<string, unknown>>();
 
+function prefsRevisionOf(prefs: Record<string, unknown> | null): number | null {
+  const rev = prefs?.["_rev"];
+  return typeof rev === "number" && Number.isInteger(rev) ? rev : null;
+}
+
+/** Newest server version this browser has confirmed for the
+ *  account (in-memory snapshot or the persisted note). */
+function confirmedRevision(employeeId: string): number | null {
+  const a = prefsRevisionOf(_serverSnapshots.get(employeeId) ?? null);
+  const b = serverPrefsRevision(employeeId);
+  if (a === null) return b;
+  if (b === null) return a;
+  return Math.max(a, b);
+}
+
+/** True when a GET response is OLDER than state this browser
+ *  already confirmed (e.g. it was read before an in-flight PUT
+ *  landed, then delivered after it — possibly to a remounted
+ *  page whose local guards know nothing of that save). Server
+ *  versions only move forward, so an older response can be
+ *  dropped wholesale. */
+export function isStaleServerPrefs(employeeId: string,
+                                   prefs: Record<string, unknown>): boolean {
+  const incoming = prefsRevisionOf(prefs);
+  const confirmed = confirmedRevision(employeeId);
+  return incoming !== null && confirmed !== null && incoming < confirmed;
+}
+
 export function noteServerPrefsSnapshot(employeeId: string,
                                         prefs: Record<string, unknown>): void {
+  // The snapshot never moves backward: a stale response must
+  // not downgrade the confirmed state (or its base version).
+  if (isStaleServerPrefs(employeeId, prefs)) return;
   _serverSnapshots.set(employeeId, { ...prefs });
   noteServerPrefsRevision(employeeId, prefs);
 }
@@ -364,6 +395,20 @@ export function pendingPrefsChanges(employeeId: string): Record<string, unknown>
   const out: Record<string, unknown> = {};
   for (const [k, e] of Object.entries(_pendingPrefs.get(employeeId) ?? {})) {
     out[k] = e.value;
+  }
+  return out;
+}
+
+/** A server prefs copy minus keys with unconfirmed local edits:
+ *  merging it can never undo an edit whose write is still in
+ *  flight (including one started by a previous mount of the
+ *  page — pending state is module-level and survives remount). */
+export function withoutPendingPrefs(employeeId: string,
+                                    prefs: Record<string, unknown>):
+    Record<string, unknown> {
+  const out = { ...prefs };
+  for (const k of Object.keys(_pendingPrefs.get(employeeId) ?? {})) {
+    delete out[k];
   }
   return out;
 }

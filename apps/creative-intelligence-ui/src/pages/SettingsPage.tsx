@@ -27,9 +27,10 @@ import {
   TIMEZONES,
   applyAccent,
   confirmPrefsChanges,
+  isStaleServerPrefs,
+  withoutPendingPrefs,
   loadPrefs,
   noteServerPrefsSnapshot,
-  pendingPrefsChanges,
   queuePrefsChanges,
   replacePendingPrefs,
   serverPrefsChanges,
@@ -325,9 +326,7 @@ export function SettingsPage() {
    *  values. An in-progress workspace-name draft is untouched. */
   const reconcileLocal = useCallback((id: string,
                                       serverPrefs: Record<string, unknown>) => {
-    const pending = pendingPrefsChanges(id);
-    const filtered: Record<string, unknown> = { ...serverPrefs };
-    for (const k of Object.keys(pending)) delete filtered[k];
+    const filtered: Record<string, unknown> = withoutPendingPrefs(id, serverPrefs);
     const typingName = nameDraftRef.current !== prefsRef.current.workspace;
     if (typingName) delete filtered["workspace"];
     const merged = mergeServerPrefs(prefsRef.current, filtered);
@@ -349,7 +348,10 @@ export function SettingsPage() {
     revRef.current += 1;
     const commitRev = revRef.current;
     setPrefs(next);
-    if (next.workspace !== nameDraftRef.current) setNameDraft(next.workspace);
+    // Sync the name draft only when THIS commit changes the
+    // workspace; an unrelated commit must leave an in-progress
+    // debounced name edit (and the input showing it) untouched.
+    if (next.workspace !== prev.workspace) setNameDraft(next.workspace);
     applyLive(next);
     setSaveState("saving");
     setSaveError("");
@@ -406,13 +408,19 @@ export function SettingsPage() {
     setNameDraft(raw);
     setNameError("");
     setSaveState("saving");
-    const rev = revRef.current + 1;
-    revRef.current = rev;
+    // Bump the commit revision so in-flight GET merges treat the
+    // typing as newer — but the timer itself must NOT key on
+    // that revision: an unrelated control commit in the debounce
+    // window used to invalidate the timer and silently discard
+    // the typed name. The draft is its own guard: only a newer
+    // keystroke (or an explicit workspace change such as Reset,
+    // which rewrites the draft) supersedes this timer. The
+    // commit below builds from the then-current prefs, so it
+    // cannot clobber the intervening change either.
+    revRef.current += 1;
     if (nameTimer.current !== null) window.clearTimeout(nameTimer.current);
     nameTimer.current = window.setTimeout(() => {
-      // In-flight guard: a newer keystroke already superseded this
-      // commit — drop it so the latest text wins.
-      if (rev !== revRef.current || raw !== nameDraftRef.current) return;
+      if (raw !== nameDraftRef.current) return;
       const value = raw.trim();
       if (!value) {
         setNameError(t("settings.general.workspaceRequired"));
@@ -460,8 +468,12 @@ export function SettingsPage() {
           // was in flight: any commit since the fetch started wins.
           if (revRef.current !== revAtFetch) return;
           if (!r.prefs || !Object.keys(r.prefs).length) return;
+          // Nor may a response read before an in-flight PUT (from
+          // this or a previous mount) landed undo that save.
+          if (isStaleServerPrefs(id, r.prefs)) return;
           noteServerPrefsSnapshot(id, r.prefs);
-          const merged = mergeServerPrefs(adoptPrefs(id, liveThemeMode), r.prefs);
+          const merged = mergeServerPrefs(
+            adoptPrefs(id, liveThemeMode), withoutPendingPrefs(id, r.prefs));
           setPrefs(merged);
           setNameDraft(merged.workspace);
           savePrefs(id, merged);
@@ -484,8 +496,10 @@ export function SettingsPage() {
           .then((r) => {
             if (revRef.current !== revAtFetch) return;
             if (!r.prefs || !Object.keys(r.prefs).length) return;
+            if (isStaleServerPrefs(id, r.prefs)) return;
             noteServerPrefsSnapshot(id, r.prefs);
-          const merged = mergeServerPrefs(adoptPrefs(id, liveThemeMode), r.prefs);
+          const merged = mergeServerPrefs(
+            adoptPrefs(id, liveThemeMode), withoutPendingPrefs(id, r.prefs));
             setPrefs(merged);
             setNameDraft(merged.workspace);
             savePrefs(id, merged);

@@ -12,6 +12,8 @@ import {
   replacePendingPrefs,
   savePrefs,
   loadPrefs,
+  isStaleServerPrefs,
+  withoutPendingPrefs,
   serverPrefsChanges,
   takePendingBatch,
   serverPrefsSnapshot,
@@ -107,5 +109,28 @@ describe("server prefs snapshot + pending changes (cross-tab safety)", () => {
     noteServerPrefsSnapshot("emp-x", { theme: "dark", _rev: 7 });
     expect(serverPrefsSnapshot("emp-x")?.["_rev"]).toBe(7);
     expect(serverPrefsSnapshot("emp-y")).toBeNull();
+  });
+
+  it("a stale GET response cannot move the snapshot backward", () => {
+    noteServerPrefsSnapshot("emp-s", { density: "Compact", _rev: 12 });
+    // Read before an in-flight PUT landed, delivered after it:
+    expect(isStaleServerPrefs("emp-s", { density: "Comfortable", _rev: 11 }))
+      .toBe(true);
+    noteServerPrefsSnapshot("emp-s", { density: "Comfortable", _rev: 11 });
+    expect(serverPrefsSnapshot("emp-s")?.["density"]).toBe("Compact");
+    expect(serverPrefsSnapshot("emp-s")?.["_rev"]).toBe(12);
+    // Equal/newer revisions are not stale.
+    expect(isStaleServerPrefs("emp-s", { _rev: 12 })).toBe(false);
+    expect(isStaleServerPrefs("emp-s", { _rev: 13 })).toBe(false);
+    expect(isStaleServerPrefs("emp-none", { _rev: 1 })).toBe(false);
+  });
+
+  it("merging can exclude keys whose writes are still in flight", () => {
+    queuePrefsChanges("emp-w", { density: "Compact" });
+    const filtered = withoutPendingPrefs("emp-w", {
+      density: "Comfortable", theme: "dark", _rev: 5,
+    });
+    expect(filtered).not.toHaveProperty("density");
+    expect(filtered["theme"]).toBe("dark");
   });
 });

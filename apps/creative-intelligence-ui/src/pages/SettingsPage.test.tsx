@@ -47,7 +47,11 @@ const adminMe: MeResponse = {
 
 let failGoogleStatus = false;
 
-function mockFetch(opts?: { googleConnected?: boolean; me?: MeResponse; sessions?: number; cohorts?: typeof cohortsData; deleteFails?: number; rejectEmail?: boolean; rejectProfile?: boolean; serverPrefs?: Record<string, unknown>; conflictPrefs?: Record<string, unknown>; prefsPut?: "conflict-once" | "fail"; prefsGet?: "fail"; holdFirstPut?: { release: () => void }; holdPrefsGet?: { release: () => void } }) {
+function mockFetch(opts?: { googleConnected?: boolean; me?: MeResponse; sessions?: number; cohorts?: typeof cohortsData; deleteFails?: number; rejectEmail?: boolean; rejectProfile?: boolean; serverPrefs?: Record<string, unknown>; conflictPrefs?: Record<string, unknown>; prefsPut?: "conflict-once" | "fail"; prefsGet?: "fail"; holdFirstPut?: { release: () => void }; holdPrefsGet?: { release: () => void }; employeeId?: string }) {
+  const meBase: MeResponse = opts?.me ?? authed;
+  const me: MeResponse = opts?.employeeId && meBase.employee
+    ? { ...meBase, employee: { ...meBase.employee, id: opts.employeeId } }
+    : meBase;
   const calls: Array<[string, RequestInit | undefined]> = [];
   const googleConnected = opts?.googleConnected ?? false;
   // Stateful cohort list: DELETE removes the row so a re-fetched
@@ -82,12 +86,12 @@ function mockFetch(opts?: { googleConnected?: boolean; me?: MeResponse; sessions
       if (opts?.rejectProfile) {
         return Response.json({ error: "Could not save profile." }, { status: 500 });
       }
-      return Response.json({ employee: { ...(opts?.me ?? authed).employee, ...body } });
+      return Response.json({ employee: { ...me.employee, ...body } });
     }
-    if (url === "/api/auth/me") return Response.json(opts?.me ?? authed);
+    if (url === "/api/auth/me") return Response.json(me);
     if (url === "/api/auth/me/avatar" && method === "POST") {
       return Response.json({
-        employee: { ...(opts?.me ?? authed).employee, avatar_url: "/api/auth/avatar/e1" },
+        employee: { ...me.employee, avatar_url: "/api/auth/avatar/e1" },
       });
     }
     if (url === "/api/auth/sessions") return Response.json({ count: opts?.sessions ?? 2 });
@@ -392,7 +396,7 @@ describe("SettingsPage", () => {
   });
 
   it("applies appearance choices immediately, with no staged state", async () => {
-    mockFetch();
+    mockFetch({ employeeId: "e-appear" });
     renderSettings();
     await waitFor(() => {
       expect(screen.getByLabelText("Theme")).toBeDefined();
@@ -404,7 +408,7 @@ describe("SettingsPage", () => {
       expect(document.documentElement.style.getPropertyValue("--shell-teal")).toBe("#2F6FBE");
     });
     expect(document.documentElement.dataset["theme"] ?? "").toBe("");
-    expect(window.localStorage.getItem("ci-settings-prefs:e1")).toContain("Blue");
+    expect(window.localStorage.getItem("ci-settings-prefs:e-appear")).toContain("Blue");
   });
 
   it("shows the painted dark theme and returns to light in one step", async () => {
@@ -872,6 +876,7 @@ describe("SettingsPage", () => {
     const conflictPrefs = { ...fullServerPrefs, density: "Comfortable", _rev: 9 };
     const calls = mockFetch({
       serverPrefs: fullServerPrefs, prefsPut: "conflict-once", conflictPrefs,
+      employeeId: "e-conflict",
     });
     renderSettings();
     await waitFor(() => {
@@ -918,7 +923,7 @@ describe("SettingsPage", () => {
     // Server holds saved prefs, but every GET fails: the tab has
     // no snapshot when the user edits. The write must still be
     // the single changed key, never the whole local document.
-    const calls = mockFetch({ serverPrefs: fullServerPrefs, prefsGet: "fail" });
+    const calls = mockFetch({ serverPrefs: fullServerPrefs, prefsGet: "fail", employeeId: "e-hydrate" });
     renderSettings();
     await waitFor(() => {
       expect(screen.getByLabelText("Theme")).toBeDefined();
@@ -941,6 +946,7 @@ describe("SettingsPage", () => {
     const conflictPrefs = { ...mine, density: "Compact", _rev: 9 };
     const calls = mockFetch({
       serverPrefs: mine, prefsPut: "conflict-once", conflictPrefs,
+      employeeId: "e-resetx",
     });
     renderSettings();
     await waitFor(() => {
@@ -966,7 +972,7 @@ describe("SettingsPage", () => {
 
   it("a revert queued behind an in-flight save still lands", async () => {
     const hold = { release: () => {} };
-    const calls = mockFetch({ serverPrefs: fullServerPrefs, holdFirstPut: hold });
+    const calls = mockFetch({ serverPrefs: fullServerPrefs, holdFirstPut: hold, employeeId: "e-qrev" });
     renderSettings();
     await waitFor(() => {
       expect((screen.getByLabelText("Interface Density") as HTMLSelectElement).value)
@@ -993,7 +999,7 @@ describe("SettingsPage", () => {
 
   it("a newer edit returning to the in-flight value is still sent", async () => {
     const hold = { release: () => {} };
-    const calls = mockFetch({ serverPrefs: fullServerPrefs, holdFirstPut: hold });
+    const calls = mockFetch({ serverPrefs: fullServerPrefs, holdFirstPut: hold, employeeId: "e-repeat" });
     renderSettings();
     await waitFor(() => {
       expect((screen.getByLabelText("Interface Density") as HTMLSelectElement).value)
@@ -1024,7 +1030,7 @@ describe("SettingsPage", () => {
     // Fresh tab: server density Compact, form shows the local
     // Comfortable default while every preferences GET is held.
     const holdGet = { release: () => {} };
-    mockFetch({ serverPrefs: fullServerPrefs, holdPrefsGet: holdGet });
+    mockFetch({ serverPrefs: fullServerPrefs, holdPrefsGet: holdGet, employeeId: "e-combined" });
     renderSettings();
     await waitFor(() => {
       expect(screen.getByLabelText("Theme")).toBeDefined();
@@ -1047,7 +1053,7 @@ describe("SettingsPage", () => {
   });
 
   it("an edit followed by a revert lands as the reverted value", async () => {
-    const calls = mockFetch({ serverPrefs: fullServerPrefs });
+    const calls = mockFetch({ serverPrefs: fullServerPrefs, employeeId: "e-erev" });
     renderSettings();
     await waitFor(() => {
       expect((screen.getByLabelText("Interface Density") as HTMLSelectElement).value)
@@ -1070,6 +1076,72 @@ describe("SettingsPage", () => {
     // The revert is a real delta against the post-edit snapshot,
     // not an empty write that would leave "dark" on the server.
     expect(puts[puts.length - 1]!.prefs).toEqual({ theme: "light" });
+  });
+
+  it("typing a workspace name survives an unrelated control change", async () => {
+    const calls = mockFetch({ employeeId: "e-name" });
+    renderSettings();
+    await waitFor(() => {
+      expect(screen.getByLabelText("Workspace Name")).toBeDefined();
+    });
+    vi.useFakeTimers();
+    fireEvent.change(screen.getByLabelText("Workspace Name"),
+                     { target: { value: "Night Shift" } });
+    // Unrelated commit inside the 450ms debounce window: it must
+    // neither reset the input nor invalidate the name timer.
+    fireEvent.change(screen.getByLabelText("Interface Density"),
+                     { target: { value: "Compact" } });
+    expect((screen.getByLabelText("Workspace Name") as HTMLInputElement).value)
+      .toBe("Night Shift");
+    await vi.advanceTimersByTimeAsync(600);
+    vi.useRealTimers();
+    await waitFor(() => {
+      expect(screen.getByRole("status").textContent).toBe("All Changes Saved.");
+    });
+    expect(window.localStorage.getItem("ci-settings-prefs:e-name"))
+      .toContain("Night Shift");
+    const puts = calls
+      .filter(([u, i]) => u === "/api/preferences" && (i?.method ?? "GET") === "PUT")
+      .map(([, i]) => JSON.parse(String(i?.body ?? "{}")) as {
+        prefs: Record<string, unknown>;
+      });
+    expect(puts.some((p) => p.prefs["workspace"] === "Night Shift")).toBe(true);
+    expect(puts.some((p) => p.prefs["density"] === "Compact")).toBe(true);
+  });
+
+  it("reopening Settings during a save does not undo the saved value", async () => {
+    const mine = { ...fullServerPrefs, density: "Comfortable", _rev: 1000 };
+    const hold = { release: () => {} };
+    const calls = mockFetch({ serverPrefs: mine, holdFirstPut: hold, employeeId: "e-remount" });
+    renderSettings();
+    await waitFor(() => {
+      expect((screen.getByLabelText("Interface Density") as HTMLSelectElement).value)
+        .toBe("Comfortable");
+    });
+    fireEvent.change(screen.getByLabelText("Interface Density"),
+                     { target: { value: "Compact" } });
+    await waitFor(() => {
+      expect(calls.some(([u, i]) =>
+        u === "/api/preferences" && (i?.method ?? "GET") === "PUT")).toBe(true);
+    });
+    cleanup(); // navigate away while the PUT is in flight
+    renderSettings(); // reopen: its GET still reads Comfortable
+    await waitFor(() => {
+      expect(calls.filter(([u, i]) =>
+        u === "/api/preferences" && (i?.method ?? "GET") === "GET").length)
+        .toBeGreaterThanOrEqual(2);
+    });
+    // The reopened page must not let that GET undo the edit.
+    expect((screen.getByLabelText("Interface Density") as HTMLSelectElement).value)
+      .toBe("Compact");
+    hold.release();
+    fireEvent.change(screen.getByLabelText("Accent Color"),
+                     { target: { value: "Blue" } });
+    await waitFor(() => {
+      expect(screen.getByRole("status").textContent).toBe("All Changes Saved.");
+    });
+    expect((screen.getByLabelText("Interface Density") as HTMLSelectElement).value)
+      .toBe("Compact");
   });
 
   it("does not claim saved when the server rejects the write", async () => {

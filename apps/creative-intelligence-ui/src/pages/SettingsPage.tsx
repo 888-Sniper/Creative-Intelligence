@@ -31,6 +31,10 @@ import {
   withoutPendingPrefs,
   loadPrefs,
   noteServerPrefsSnapshot,
+  currentCommitGen,
+  nextCommitGen,
+  recordSaveOutcome,
+  saveOutcome,
   pendingPrefsChanges,
   queuePrefsChanges,
   replacePendingPrefs,
@@ -307,24 +311,11 @@ export function SettingsPage() {
   // commit only lands when no newer keystroke superseded it
   // (last-write-wins with an in-flight guard against lost updates).
   const revRef = useRef(0);
-  // Commit-only generation: revRef also bumps on mere keystrokes
-  // (GET-merge protection), so settle handlers must not use it —
-  // a keystroke after a commit would otherwise suppress the
-  // commit's outcome entirely, stranding the status on Saving.
-  const commitGenRef = useRef(0);
-  // Last settled save outcome, stamped with its commit
-  // generation. Name validation runs on the same status slot
-  // and must restore (never hide) a failure — and an older
-  // settle must never overwrite a NEWER commit's outcome
-  // (including a synchronous local-storage failure recorded
-  // while the older write was still in flight).
-  const saveOutcomeRef = useRef<{ gen: number; failed: boolean }>(
-    { gen: 0, failed: false });
-  const recordSaveOutcome = (gen: number, failed: boolean) => {
-    if (gen >= saveOutcomeRef.current.gen) {
-      saveOutcomeRef.current = { gen, failed };
-    }
-  };
+  // Commit generations and save outcomes live in prefs.ts
+  // (module-level, per account): revRef also bumps on mere
+  // keystrokes (GET-merge protection), so settle handlers gate
+  // on the commit generation — and a failed save's recovery
+  // status survives remounts alongside the pending edits.
   const nameTimer = useRef<number | null>(null);
   const [nameDraft, setNameDraft] = useState(prefs.workspace);
   const [nameError, setNameError] = useState("");
@@ -365,8 +356,7 @@ export function SettingsPage() {
     const id = employee?.id ?? me?.employee?.id ?? "";
     const prev = prefsRef.current;
     revRef.current += 1;
-    commitGenRef.current += 1;
-    const commitGen = commitGenRef.current;
+    const commitGen = nextCommitGen();
     setPrefs(next);
     // Sync the name draft only when THIS commit changes the
     // workspace; an unrelated commit must leave an in-progress
@@ -384,7 +374,7 @@ export function SettingsPage() {
     else queuePrefsChanges(id, serverPrefsChanges(prev, next));
     const ok = savePrefs(id, next);
     if (!ok) {
-      recordSaveOutcome(commitGen, true);
+      recordSaveOutcome(id, commitGen, true);
       setSaveState("error");
       setSaveError(t("settings.footer.couldNotSave"));
       return false;
@@ -399,8 +389,8 @@ export function SettingsPage() {
         // Record the outcome (generation-stamped, so a newer
         // commit's synchronous failure already on record wins);
         // only the UI updates below are generation-gated.
-        recordSaveOutcome(commitGen, false);
-        if (commitGenRef.current !== commitGen) return;
+        recordSaveOutcome(id, commitGen, false);
+        if (currentCommitGen() !== commitGen) return;
         if (res?.prefs) reconcileLocal(id, res.prefs);
         // A debounced workspace-name draft that has not committed
         // yet is still an unsaved change: don't claim "saved"
@@ -413,8 +403,8 @@ export function SettingsPage() {
         setSaveState(draft && draft !== next.workspace ? "saving" : "saved");
       })
       .catch(() => {
-        recordSaveOutcome(commitGen, true);
-        if (commitGenRef.current !== commitGen) return;
+        recordSaveOutcome(id, commitGen, true);
+        if (currentCommitGen() !== commitGen) return;
         setSaveState("error");
         setSaveError(t("settings.footer.couldNotSave"));
       });
@@ -467,7 +457,7 @@ export function SettingsPage() {
         // setting's save, nor pre-empt an in-flight flush that
         // will settle the status itself.
         const id = employee?.id ?? me?.employee?.id ?? "";
-        if (saveOutcomeRef.current.failed) setSaveState("error");
+        if (saveOutcome(id).failed) setSaveState("error");
         else if (!Object.keys(pendingPrefsChanges(id)).length) {
           setSaveState("idle");
         }
@@ -556,6 +546,38 @@ export function SettingsPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [employee?.id]);
+
+  // Recovery across navigation: pending edits and their last
+  // outcome are module-level, so reopening Settings after a
+  // failed save restores BOTH — unsent changes are retried at
+  // once and the status (incl. Retry on failure) reflects the
+  // result instead of resetting to idle over a stranded queue.
+  const recoveryFor = useRef("");
+  useEffect(() => {
+    const id = employee?.id ?? me?.employee?.id ?? "";
+    if (!id || recoveryFor.current === id) return;
+    recoveryFor.current = id;
+    if (!Object.keys(pendingPrefsChanges(id)).length) return;
+    const gen = nextCommitGen();
+    setSaveState("saving");
+    setSaveError("");
+    void flushServerPrefs(id)
+      .then((res) => {
+        recordSaveOutcome(id, gen, false);
+        if (currentCommitGen() !== gen) return;
+        if (res?.prefs) reconcileLocal(id, res.prefs);
+        const draft = nameDraftRef.current.trim();
+        setSaveState(
+          draft && draft !== prefsRef.current.workspace ? "saving" : "saved");
+      })
+      .catch(() => {
+        recordSaveOutcome(id, gen, true);
+        if (currentCommitGen() !== gen) return;
+        setSaveState("error");
+        setSaveError(t("settings.footer.couldNotSave"));
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [employee?.id, me?.employee?.id]);
 
   useEffect(() => {
     applyAccent(prefs.accent, prefs.density);

@@ -47,7 +47,7 @@ const adminMe: MeResponse = {
 
 let failGoogleStatus = false;
 
-function mockFetch(opts?: { googleConnected?: boolean; me?: MeResponse; sessions?: number; cohorts?: typeof cohortsData; deleteFails?: number; rejectEmail?: boolean; rejectProfile?: boolean; serverPrefs?: Record<string, unknown>; conflictPrefs?: Record<string, unknown>; prefsPut?: "conflict-once" | "fail"; prefsGet?: "fail"; holdFirstPut?: { release: () => void }; holdPrefsGet?: { release: () => void }; employeeId?: string }) {
+function mockFetch(opts?: { googleConnected?: boolean; me?: MeResponse; sessions?: number; cohorts?: typeof cohortsData; deleteFails?: number; rejectEmail?: boolean; rejectProfile?: boolean; serverPrefs?: Record<string, unknown>; conflictPrefs?: Record<string, unknown>; prefsPut?: "conflict-once" | "fail"; prefsGet?: "fail"; holdFirstPut?: { release: () => void }; holdPrefsGet?: { release: () => void }; employeeId?: string; prefsPutGate?: { fail: boolean } }) {
   const meBase: MeResponse = opts?.me ?? authed;
   const me: MeResponse = opts?.employeeId && meBase.employee
     ? { ...meBase, employee: { ...meBase.employee, id: opts.employeeId } }
@@ -138,7 +138,7 @@ function mockFetch(opts?: { googleConnected?: boolean; me?: MeResponse; sessions
     if (url === "/api/preferences" && method === "PUT") {
       prefsPuts += 1;
       const applyPut = (): Response => {
-        if (opts?.prefsPut === "fail") {
+        if (opts?.prefsPut === "fail" || opts?.prefsPutGate?.fail) {
           return Response.json({ error: "down" }, { status: 500 });
         }
         if (opts?.prefsPut === "conflict-once" && prefsPuts === 1) {
@@ -1346,6 +1346,44 @@ describe("SettingsPage", () => {
         prefs: Record<string, unknown>;
       });
     expect(puts.some((p) => p.prefs["accent"] === "Blue")).toBe(true);
+  });
+
+  it("reopening Settings after a failed save restores recovery", async () => {
+    const gate = { fail: true };
+    const calls = mockFetch({ prefsPutGate: gate, employeeId: "e-reopen" });
+    renderSettings();
+    await waitFor(() => {
+      expect(screen.getByLabelText("Interface Density")).toBeDefined();
+    });
+    fireEvent.change(screen.getByLabelText("Interface Density"),
+                     { target: { value: "Compact" } });
+    expect(await screen.findByRole("button", { name: "Retry" })).toBeDefined();
+    cleanup(); // navigate away with the edit still unsent
+    renderSettings(); // reopen: recovery retries, still fails
+    expect(await screen.findByRole("button", { name: "Retry" })).toBeDefined();
+    expect(screen.getByRole("status").textContent)
+      .toBe("Could not save settings in this browser.");
+    // Clearing the name must not strand the status either.
+    vi.useFakeTimers();
+    fireEvent.change(screen.getByLabelText("Workspace Name"),
+                     { target: { value: "   " } });
+    await vi.advanceTimersByTimeAsync(600);
+    vi.useRealTimers();
+    expect(await screen.findByText("Workspace name cannot be empty."))
+      .toBeDefined();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeDefined();
+    // Server recovers: Retry flushes the stranded density edit.
+    gate.fail = false;
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => {
+      expect(screen.getByRole("status").textContent).toBe("All Changes Saved.");
+    });
+    const puts = calls
+      .filter(([u, i]) => u === "/api/preferences" && (i?.method ?? "GET") === "PUT")
+      .map(([, i]) => JSON.parse(String(i?.body ?? "{}")) as {
+        prefs: Record<string, unknown>;
+      });
+    expect(puts[puts.length - 1]!.prefs).toEqual({ density: "Compact" });
   });
 
   it("does not claim saved when the server rejects the write", async () => {

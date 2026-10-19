@@ -12,7 +12,11 @@ import {
   replacePendingPrefs,
   savePrefs,
   loadPrefs,
+  currentCommitGen,
   isStaleServerPrefs,
+  nextCommitGen,
+  recordSaveOutcome,
+  saveOutcome,
   withoutPendingPrefs,
   serverPrefsChanges,
   takePendingBatch,
@@ -130,6 +134,21 @@ describe("server prefs snapshot + pending changes (cross-tab safety)", () => {
     noteServerPrefsSnapshot("emp-s", { density: "Comfortable" });
     expect(serverPrefsSnapshot("emp-s")?.["density"]).toBe("Compact");
     expect(serverPrefsSnapshot("emp-s")?.["_rev"]).toBe(12);
+  });
+
+  it("save outcomes are per-account, generation-ordered, and survive remounts", () => {
+    const g1 = nextCommitGen();
+    const g2 = nextCommitGen();
+    expect(g2).toBeGreaterThan(g1);
+    expect(currentCommitGen()).toBe(g2);
+    recordSaveOutcome("emp-o", g2, true);
+    // An older settle cannot overwrite the newer failure.
+    recordSaveOutcome("emp-o", g1, false);
+    expect(saveOutcome("emp-o").failed).toBe(true);
+    // A newer success clears it; other accounts unaffected.
+    recordSaveOutcome("emp-o", nextCommitGen(), false);
+    expect(saveOutcome("emp-o").failed).toBe(false);
+    expect(saveOutcome("emp-other").failed).toBe(false);
   });
 
   it("merging can exclude keys whose writes are still in flight", () => {

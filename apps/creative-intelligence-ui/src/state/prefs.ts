@@ -432,6 +432,37 @@ export function takePendingBatch(employeeId: string): {
   return { values, seqs };
 }
 
+/** Commit generations and save outcomes, module-level like
+ *  the pending map they describe: a failed save's recovery
+ *  status must survive navigating away and back (a remounted
+ *  Settings page re-derives its status from these, instead of
+ *  starting "idle" while unsent edits are still queued). */
+let _commitGen = 0;
+
+export function nextCommitGen(): number {
+  return ++_commitGen;
+}
+
+export function currentCommitGen(): number {
+  return _commitGen;
+}
+
+const _saveOutcomes = new Map<string, { gen: number; failed: boolean }>();
+
+/** Record a save outcome under its commit generation: an
+ *  older settle can never overwrite a newer commit's outcome
+ *  (including a synchronous local-storage failure recorded
+ *  while the older write was still in flight). */
+export function recordSaveOutcome(employeeId: string, gen: number,
+                                  failed: boolean): void {
+  const cur = _saveOutcomes.get(employeeId);
+  if (!cur || gen >= cur.gen) _saveOutcomes.set(employeeId, { gen, failed });
+}
+
+export function saveOutcome(employeeId: string): { gen: number; failed: boolean } {
+  return _saveOutcomes.get(employeeId) ?? { gen: 0, failed: false };
+}
+
 /** Drop keys the server just accepted — only the exact
  *  generations the accepted batch carried. */
 export function confirmPrefsChanges(employeeId: string,

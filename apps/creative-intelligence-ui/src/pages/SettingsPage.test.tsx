@@ -47,7 +47,7 @@ const adminMe: MeResponse = {
 
 let failGoogleStatus = false;
 
-function mockFetch(opts?: { googleConnected?: boolean; me?: MeResponse; sessions?: number; cohorts?: typeof cohortsData; deleteFails?: number; rejectEmail?: boolean; rejectProfile?: boolean; serverPrefs?: Record<string, unknown>; conflictPrefs?: Record<string, unknown>; prefsPut?: "conflict-once" | "fail"; prefsGet?: "fail"; holdFirstPut?: { release: () => void } }) {
+function mockFetch(opts?: { googleConnected?: boolean; me?: MeResponse; sessions?: number; cohorts?: typeof cohortsData; deleteFails?: number; rejectEmail?: boolean; rejectProfile?: boolean; serverPrefs?: Record<string, unknown>; conflictPrefs?: Record<string, unknown>; prefsPut?: "conflict-once" | "fail"; prefsGet?: "fail"; holdFirstPut?: { release: () => void }; holdPrefsGet?: { release: () => void } }) {
   const calls: Array<[string, RequestInit | undefined]> = [];
   const googleConnected = opts?.googleConnected ?? false;
   // Stateful cohort list: DELETE removes the row so a re-fetched
@@ -57,6 +57,16 @@ function mockFetch(opts?: { googleConnected?: boolean; me?: MeResponse; sessions
   // Stateful server prefs: PUTs merge-apply like the real endpoint
   // so snapshot/delta behavior across sequential saves is real.
   let storedPrefs: Record<string, unknown> = { ...(opts?.serverPrefs ?? {}) };
+  let getWaiters: Array<() => void> = [];
+  let getsReleased = !opts?.holdPrefsGet;
+  if (opts?.holdPrefsGet) {
+    opts.holdPrefsGet.release = () => {
+      getsReleased = true;
+      const waiters = getWaiters;
+      getWaiters = [];
+      waiters.forEach((f) => f());
+    };
+  }
   window.fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     calls.push([url, init]);
@@ -113,6 +123,11 @@ function mockFetch(opts?: { googleConnected?: boolean; me?: MeResponse; sessions
     if (url === "/api/preferences" && method === "GET") {
       if (opts?.prefsGet === "fail") {
         return Response.json({ error: "down" }, { status: 500 });
+      }
+      if (!getsReleased) {
+        return new Promise<Response>((resolve) => {
+          getWaiters.push(() => resolve(Response.json({ prefs: storedPrefs })));
+        });
       }
       return Response.json({ prefs: storedPrefs });
     }
@@ -291,7 +306,7 @@ describe("SettingsPage", () => {
   });
 
   it("shows failure with retry when storage throws, keeping the attempted values", async () => {
-    mockFetch();
+    const calls = mockFetch();
     renderSettings();
     await waitFor(() => {
       expect(screen.getByLabelText("Interface Density")).toBeDefined();
@@ -325,6 +340,15 @@ describe("SettingsPage", () => {
     await waitFor(() => {
       expect(screen.getByRole("status").textContent).toBe("All Changes Saved.");
     });
+    // The edit must actually REACH the server on Retry: it was
+    // queued before the storage attempt, so Retry's flush sends
+    // it even though the re-commit itself diffs to nothing.
+    const puts = calls
+      .filter(([u, i]) => u === "/api/preferences" && (i?.method ?? "GET") === "PUT")
+      .map(([, i]) => JSON.parse(String(i?.body ?? "{}")) as {
+        prefs: Record<string, unknown>;
+      });
+    expect(puts.some((p) => p.prefs["density"] === "Compact")).toBe(true);
   });
 
   it("validates the workspace name instead of saving blanks", async () => {
@@ -965,6 +989,61 @@ describe("SettingsPage", () => {
         prefs: Record<string, unknown>;
       });
     expect(puts.map((p) => p.prefs)).toEqual([{ theme: "dark" }, { theme: "light" }]);
+  });
+
+  it("a newer edit returning to the in-flight value is still sent", async () => {
+    const hold = { release: () => {} };
+    const calls = mockFetch({ serverPrefs: fullServerPrefs, holdFirstPut: hold });
+    renderSettings();
+    await waitFor(() => {
+      expect((screen.getByLabelText("Interface Density") as HTMLSelectElement).value)
+        .toBe("Compact");
+    });
+    fireEvent.change(screen.getByLabelText("Theme"), { target: { value: "dark" } });
+    await waitFor(() => {
+      expect(calls.some(([u, i]) =>
+        u === "/api/preferences" && (i?.method ?? "GET") === "PUT")).toBe(true);
+    });
+    // While Dark is in flight: Light, then Dark again. The
+    // delayed Dark response must not "confirm" the re-selection.
+    fireEvent.change(screen.getByLabelText("Theme"), { target: { value: "light" } });
+    fireEvent.change(screen.getByLabelText("Theme"), { target: { value: "dark" } });
+    hold.release();
+    await waitFor(() => {
+      expect(screen.getByRole("status").textContent).toBe("All Changes Saved.");
+    });
+    const puts = calls
+      .filter(([u, i]) => u === "/api/preferences" && (i?.method ?? "GET") === "PUT")
+      .map(([, i]) => JSON.parse(String(i?.body ?? "{}")) as {
+        prefs: Record<string, unknown>;
+      });
+    expect(puts.map((p) => p.prefs)).toEqual([{ theme: "dark" }, { theme: "dark" }]);
+  });
+
+  it("edits combined into one flush still reconcile the form", async () => {
+    // Fresh tab: server density Compact, form shows the local
+    // Comfortable default while every preferences GET is held.
+    const holdGet = { release: () => {} };
+    mockFetch({ serverPrefs: fullServerPrefs, holdPrefsGet: holdGet });
+    renderSettings();
+    await waitFor(() => {
+      expect(screen.getByLabelText("Theme")).toBeDefined();
+    });
+    expect((screen.getByLabelText("Interface Density") as HTMLSelectElement).value)
+      .toBe("Comfortable");
+    fireEvent.change(screen.getByLabelText("Theme"), { target: { value: "dark" } });
+    fireEvent.change(screen.getByLabelText("Accent Color"),
+                     { target: { value: "Blue" } });
+    holdGet.release();
+    await waitFor(() => {
+      expect(screen.getByRole("status").textContent).toBe("All Changes Saved.");
+    });
+    // Both edits rode one flush; the second commit's (empty)
+    // flush must still reconcile: the form adopts Compact.
+    await waitFor(() => {
+      expect((screen.getByLabelText("Interface Density") as HTMLSelectElement).value)
+        .toBe("Compact");
+    });
   });
 
   it("an edit followed by a revert lands as the reverted value", async () => {

@@ -330,40 +330,69 @@ export function serverPrefsChanges(prev: Prefs,
 }
 
 /** Unconfirmed changed keys per account, accumulated across
- *  commits until the server accepts them. A failed or
- *  still-queued write leaves its keys here, so Retry (which
- *  re-commits identical prefs, an empty diff) still flushes
- *  them, and an edit reverted while a write is in flight
- *  overwrites the pending value instead of vanishing. */
-const _pendingPrefs = new Map<string, Record<string, unknown>>();
+ *  commits until the server accepts them. Each entry carries
+ *  the GENERATION (sequence) of the edit that produced it: a
+ *  delayed response confirms only the edits it actually
+ *  carried, never a newer edit that merely returns to the
+ *  same value. A failed or still-queued write leaves its
+ *  entries here, so Retry (which re-commits identical prefs,
+ *  an empty diff) still flushes them. */
+interface PendingEntry { value: unknown; seq: number }
+const _pendingPrefs = new Map<string, Record<string, PendingEntry>>();
+let _pendingSeq = 0;
 
 export function queuePrefsChanges(employeeId: string,
                                   changes: Record<string, unknown>): void {
-  const pending = _pendingPrefs.get(employeeId) ?? {};
-  _pendingPrefs.set(employeeId, { ...pending, ...changes });
+  if (!Object.keys(changes).length) return;
+  const seq = ++_pendingSeq;
+  const pending = { ...(_pendingPrefs.get(employeeId) ?? {}) };
+  for (const [k, v] of Object.entries(changes)) pending[k] = { value: v, seq };
+  _pendingPrefs.set(employeeId, pending);
 }
 
 /** Reset Defaults: EVERY key is an intended write, superseding
  *  any accumulated pending changes. */
 export function replacePendingPrefs(employeeId: string,
                                     serverPrefs: Record<string, unknown>): void {
-  _pendingPrefs.set(employeeId, { ...serverPrefs });
+  const seq = ++_pendingSeq;
+  const pending: Record<string, PendingEntry> = {};
+  for (const [k, v] of Object.entries(serverPrefs)) pending[k] = { value: v, seq };
+  _pendingPrefs.set(employeeId, pending);
 }
 
 export function pendingPrefsChanges(employeeId: string): Record<string, unknown> {
-  return { ...(_pendingPrefs.get(employeeId) ?? {}) };
+  const out: Record<string, unknown> = {};
+  for (const [k, e] of Object.entries(_pendingPrefs.get(employeeId) ?? {})) {
+    out[k] = e.value;
+  }
+  return out;
 }
 
-/** Drop keys the server just accepted — only where the pending
- *  value is still the sent one (a newer edit of the same key
- *  queued behind the in-flight write must survive). */
+/** A flush batch: values to send plus the generation of each,
+ *  captured together so confirmation can tell "the edit this
+ *  response carried" from "a newer edit with an equal value". */
+export function takePendingBatch(employeeId: string): {
+  values: Record<string, unknown>;
+  seqs: Record<string, number>;
+} {
+  const values: Record<string, unknown> = {};
+  const seqs: Record<string, number> = {};
+  for (const [k, e] of Object.entries(_pendingPrefs.get(employeeId) ?? {})) {
+    values[k] = e.value;
+    seqs[k] = e.seq;
+  }
+  return { values, seqs };
+}
+
+/** Drop keys the server just accepted — only the exact
+ *  generations the accepted batch carried. */
 export function confirmPrefsChanges(employeeId: string,
-                                    sent: Record<string, unknown>): void {
+                                    seqs: Record<string, number>): void {
   const pending = _pendingPrefs.get(employeeId);
   if (!pending) return;
   const next = { ...pending };
-  for (const [key, value] of Object.entries(sent)) {
-    if (next[key] === value) delete next[key];
+  for (const [key, seq] of Object.entries(seqs)) {
+    if (next[key]?.seq === seq) delete next[key];
   }
   _pendingPrefs.set(employeeId, next);
 }

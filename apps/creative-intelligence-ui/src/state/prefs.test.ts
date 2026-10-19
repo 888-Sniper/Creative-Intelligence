@@ -13,6 +13,7 @@ import {
   savePrefs,
   loadPrefs,
   serverPrefsChanges,
+  takePendingBatch,
   serverPrefsSnapshot,
   touchedCampaignStatus,
 } from "./prefs";
@@ -70,13 +71,29 @@ describe("server prefs snapshot + pending changes (cross-tab safety)", () => {
     queuePrefsChanges("emp-p", { accent: "Blue" });
     expect(pendingPrefsChanges("emp-p"))
       .toEqual({ theme: "dark", accent: "Blue" });
+    const batch = takePendingBatch("emp-p");
     // A revert queued behind the in-flight write overwrites the
     // pending value; confirming the sent batch must not drop it.
     queuePrefsChanges("emp-p", { theme: "light" });
-    confirmPrefsChanges("emp-p", { theme: "dark", accent: "Blue" });
+    confirmPrefsChanges("emp-p", batch.seqs);
     expect(pendingPrefsChanges("emp-p")).toEqual({ theme: "light" });
-    confirmPrefsChanges("emp-p", { theme: "light" });
+    confirmPrefsChanges("emp-p", takePendingBatch("emp-p").seqs);
     expect(pendingPrefsChanges("emp-p")).toEqual({});
+  });
+
+  it("a delayed response cannot confirm a newer edit with an equal value", () => {
+    queuePrefsChanges("emp-g", { theme: "dark" });
+    const first = takePendingBatch("emp-g"); // in flight, response delayed
+    // Newer edits while it is in flight: Light, then Dark again.
+    queuePrefsChanges("emp-g", { theme: "light" });
+    queuePrefsChanges("emp-g", { theme: "dark" });
+    // The delayed response for the FIRST edit arrives: value
+    // equality would wrongly drop the pending Dark re-selection;
+    // generation matching must keep it.
+    confirmPrefsChanges("emp-g", first.seqs);
+    expect(pendingPrefsChanges("emp-g")).toEqual({ theme: "dark" });
+    confirmPrefsChanges("emp-g", takePendingBatch("emp-g").seqs);
+    expect(pendingPrefsChanges("emp-g")).toEqual({});
   });
 
   it("replace supersedes accumulated pending changes (Reset Defaults)", () => {

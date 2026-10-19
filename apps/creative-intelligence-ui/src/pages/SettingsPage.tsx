@@ -33,6 +33,7 @@ import {
   queuePrefsChanges,
   replacePendingPrefs,
   serverPrefsChanges,
+  takePendingBatch,
   serverPrefsRevision,
   serverPrefsSnapshot,
   mergeServerPrefs,
@@ -85,11 +86,17 @@ function flushServerPrefs(employeeId: string):
         if (r.prefs) noteServerPrefsSnapshot(employeeId, r.prefs);
       } catch { /* offline: pending keys stay queued on failure */ }
     }
-    const batch = pendingPrefsChanges(employeeId);
-    if (!Object.keys(batch).length) return null;
+    const batch = takePendingBatch(employeeId);
+    if (!Object.keys(batch.values).length) {
+      // Nothing to send (an earlier queued flush already carried
+      // these edits): still resolve with the latest confirmed
+      // snapshot so the caller's reconciliation always runs.
+      const snap = serverPrefsSnapshot(employeeId);
+      return snap ? { prefs: snap } : null;
+    }
     const attempt = (base: number | null) =>
       api<{ prefs: Record<string, unknown> }>("PUT", "/api/preferences", {
-        prefs: batch,
+        prefs: batch.values,
         employee_id: employeeId,
         base_revision: base,
       });
@@ -103,7 +110,7 @@ function flushServerPrefs(employeeId: string):
       res = await attempt(snapshotBase(employeeId));
     }
     noteServerPrefsSnapshot(employeeId, res.prefs ?? {});
-    confirmPrefsChanges(employeeId, batch);
+    confirmPrefsChanges(employeeId, batch.seqs);
     return res;
   });
   prefsPutChain = run;
@@ -346,6 +353,13 @@ export function SettingsPage() {
     applyLive(next);
     setSaveState("saving");
     setSaveError("");
+    // Queue this commit's changed keys FIRST (Reset replaces
+    // every key): the pending intent must survive a local-storage
+    // failure below, or Retry — which re-commits the already-
+    // updated form and therefore diffs to nothing — would flush
+    // an empty batch and claim saved without sending the edit.
+    if (opts?.replaceAll) replacePendingPrefs(id, toServerPrefs(next));
+    else queuePrefsChanges(id, serverPrefsChanges(prev, next));
     const ok = savePrefs(id, next);
     if (!ok) {
       setSaveState("error");
@@ -353,13 +367,10 @@ export function SettingsPage() {
       return false;
     }
     // Server copy: defaults + notification opt-ins must follow the
-    // account (and drive email), not just this browser. Queue ONLY
-    // this commit's changed keys (Reset replaces every key), then
-    // flush. "saved" only once the server accepts the write —
-    // after reconciling the form with the confirmed server state,
-    // and only if no newer commit is still in flight behind it.
-    if (opts?.replaceAll) replacePendingPrefs(id, toServerPrefs(next));
-    else queuePrefsChanges(id, serverPrefsChanges(prev, next));
+    // account (and drive email), not just this browser. "saved"
+    // only once the server accepts the write — after reconciling
+    // the form with the confirmed server state, and only if no
+    // newer commit is still in flight behind it.
     void flushServerPrefs(id)
       .then((res) => {
         if (revRef.current !== commitRev) return;

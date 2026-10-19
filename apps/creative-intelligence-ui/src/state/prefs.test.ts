@@ -123,6 +123,13 @@ describe("server prefs snapshot + pending changes (cross-tab safety)", () => {
     expect(isStaleServerPrefs("emp-s", { _rev: 12 })).toBe(false);
     expect(isStaleServerPrefs("emp-s", { _rev: 13 })).toBe(false);
     expect(isStaleServerPrefs("emp-none", { _rev: 1 })).toBe(false);
+    // An UNVERSIONED legacy payload counts as version 0: stale
+    // against any confirmed save, and it cannot replace the
+    // snapshot either.
+    expect(isStaleServerPrefs("emp-s", { density: "Comfortable" })).toBe(true);
+    noteServerPrefsSnapshot("emp-s", { density: "Comfortable" });
+    expect(serverPrefsSnapshot("emp-s")?.["density"]).toBe("Compact");
+    expect(serverPrefsSnapshot("emp-s")?.["_rev"]).toBe(12);
   });
 
   it("merging can exclude keys whose writes are still in flight", () => {

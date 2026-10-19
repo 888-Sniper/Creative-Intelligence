@@ -43,12 +43,20 @@ def get_prefs(conn, employee_id):
         "SELECT prefs_json FROM employee_prefs WHERE employee_id=?",
         (employee_id,)).fetchone()
     if not row:
-        return {}
+        return {"_rev": 0}
     try:
         data = json.loads(row[0] or "{}")
     except ValueError:
-        return {}
-    return data if isinstance(data, dict) else {}
+        return {"_rev": 0}
+    if not isinstance(data, dict):
+        return {"_rev": 0}
+    # Legacy rows predate server-issued versions: they ARE
+    # version 0. Saying so explicitly lets clients order this
+    # response against confirmed newer state instead of
+    # treating an unversioned payload as ageless.
+    if not isinstance(data.get("_rev"), int):
+        data["_rev"] = 0
+    return data
 
 
 class StalePreferenceRevision(ValueError):

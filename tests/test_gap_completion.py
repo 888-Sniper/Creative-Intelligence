@@ -499,6 +499,28 @@ def test_stale_preference_revision_cannot_overwrite(conn):
     assert third["_rev"] == 3
 
 
+def test_legacy_preferences_without_revision_are_version_zero(conn):
+    # Rows saved before server-issued versions existed have no
+    # _rev: reads must report them as version 0 (never unversioned),
+    # so clients can order them against confirmed newer state, and
+    # the first versioned save moves them to revision 1.
+    conn.execute(
+        "INSERT INTO employee_prefs (employee_id, prefs_json, updated_at)"
+        " VALUES (?, ?, ?)",
+        ("emp-legacy", json.dumps({"density": "comfortable"}),
+         "2026-01-01T00:00:00+00:00"))
+    conn.commit()
+    got = notifications.get_prefs(conn, "emp-legacy")
+    assert got["density"] == "comfortable"
+    assert got["_rev"] == 0
+    saved = notifications.save_prefs(
+        conn, "emp-legacy", {"density": "compact"}, base_revision=0)
+    assert saved["_rev"] == 1
+    assert notifications.get_prefs(conn, "emp-legacy")["density"] == "compact"
+    # No row at all is version 0 too.
+    assert notifications.get_prefs(conn, "emp-new") == {"_rev": 0}
+
+
 def test_preferences_two_tab_conflict_then_reconcile(tmp_path):
     """The cross-tab contract over HTTP: tab B saves first; tab A's
     stale-base save is a 409 carrying B's current prefs (not a

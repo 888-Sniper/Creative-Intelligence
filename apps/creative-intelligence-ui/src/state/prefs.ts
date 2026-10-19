@@ -327,7 +327,10 @@ function confirmedRevision(employeeId: string): number | null {
  *  dropped wholesale. */
 export function isStaleServerPrefs(employeeId: string,
                                    prefs: Record<string, unknown>): boolean {
-  const incoming = prefsRevisionOf(prefs);
+  // An unversioned non-empty payload is a legacy (pre-version)
+  // record: version 0, older than any confirmed save.
+  const incoming = prefsRevisionOf(prefs)
+    ?? (Object.keys(prefs).length ? 0 : null);
   const confirmed = confirmedRevision(employeeId);
   return incoming !== null && confirmed !== null && incoming < confirmed;
 }

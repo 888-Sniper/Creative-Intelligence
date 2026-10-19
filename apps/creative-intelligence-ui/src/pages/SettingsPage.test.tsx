@@ -1093,6 +1093,11 @@ describe("SettingsPage", () => {
                      { target: { value: "Compact" } });
     expect((screen.getByLabelText("Workspace Name") as HTMLInputElement).value)
       .toBe("Night Shift");
+    // The density write completes inside the window, but the
+    // status must NOT claim saved while the name is still an
+    // uncommitted draft.
+    await vi.advanceTimersByTimeAsync(0);
+    expect(screen.getByRole("status").textContent).toBe("Saving…");
     await vi.advanceTimersByTimeAsync(600);
     vi.useRealTimers();
     await waitFor(() => {
@@ -1107,6 +1112,36 @@ describe("SettingsPage", () => {
       });
     expect(puts.some((p) => p.prefs["workspace"] === "Night Shift")).toBe(true);
     expect(puts.some((p) => p.prefs["density"] === "Compact")).toBe(true);
+  });
+
+  it("Reset Defaults cancels a pending workspace-name edit", async () => {
+    const calls = mockFetch({ employeeId: "e-resetname" });
+    renderSettings();
+    await waitFor(() => {
+      expect(screen.getByLabelText("Workspace Name")).toBeDefined();
+    });
+    // Saved name already IS the default: only the timer can
+    // resurrect the typed draft after Reset — it must be dead.
+    vi.useFakeTimers();
+    fireEvent.change(screen.getByLabelText("Workspace Name"),
+                     { target: { value: "Typed Name" } });
+    fireEvent.click(screen.getByRole("button", { name: "Reset Defaults" }));
+    await vi.advanceTimersByTimeAsync(600);
+    vi.useRealTimers();
+    await waitFor(() => {
+      expect(screen.getAllByRole("status")
+        .some((el) => el.textContent === "All Changes Saved.")).toBe(true);
+    });
+    expect((screen.getByLabelText("Workspace Name") as HTMLInputElement).value)
+      .toBe("Foap Creative Intelligence");
+    const puts = calls
+      .filter(([u, i]) => u === "/api/preferences" && (i?.method ?? "GET") === "PUT")
+      .map(([, i]) => JSON.parse(String(i?.body ?? "{}")) as {
+        prefs: Record<string, unknown>;
+      });
+    expect(puts.some((p) => p.prefs["workspace"] === "Typed Name")).toBe(false);
+    expect(puts.some((p) => p.prefs["workspace"] === "Foap Creative Intelligence"))
+      .toBe(true);
   });
 
   it("reopening Settings during a save does not undo the saved value", async () => {

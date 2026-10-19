@@ -377,7 +377,14 @@ export function SettingsPage() {
       .then((res) => {
         if (revRef.current !== commitRev) return;
         if (res?.prefs) reconcileLocal(id, res.prefs);
-        setSaveState("saved");
+        // A debounced workspace-name draft that has not committed
+        // yet is still an unsaved change: don't claim "saved"
+        // for it — its own commit will settle the status. Compare
+        // against THIS commit's workspace value (render-lagged
+        // refs could still show the pre-commit name here).
+        setSaveState(
+          nameDraftRef.current.trim() !== next.workspace
+            ? "saving" : "saved");
       })
       .catch(() => {
         if (revRef.current !== commitRev) return;
@@ -524,6 +531,14 @@ export function SettingsPage() {
     // zone return to defaults instead of staying on the previous
     // selection.
     const next = { ...DEFAULTS };
+    // Cancel any debounced workspace-name edit outright: commit's
+    // draft sync only fires when the workspace value changes, so
+    // resetting while the saved name already IS the default
+    // would otherwise leave the typed draft (and its timer)
+    // alive to overwrite the reset 450ms later.
+    if (nameTimer.current !== null) window.clearTimeout(nameTimer.current);
+    nameTimer.current = null;
+    setNameDraft(next.workspace);
     // Go through commit() with replaceAll: reset means EVERY key
     // on the server returns to default — including keys another
     // tab changed that already look defaulted in this tab —

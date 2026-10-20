@@ -104,7 +104,11 @@ function mockFetch(opts?: { googleConnected?: boolean; me?: MeResponse; sessions
       return Response.json({ error: "Meta Ads is not configured." }, { status: 409 });
     }
     if (/\/api\/auth\/integrations\/(meta|tiktok|ga4)\/status$/.test(url)) {
-      return Response.json({ connected: false });
+      // Meta models an unconfigured deployment; the others are
+      // configured but not yet connected.
+      return Response.json({
+        connected: false, configured: !url.includes("/meta/"),
+      });
     }
     if (url === "/api/auth/google/status") {
       if (failGoogleStatus) throw new TypeError("Failed to fetch");
@@ -793,8 +797,13 @@ describe("SettingsPage", () => {
     expect((await screen.findByTestId("totp-secret")).textContent).toBe("TESTSECRETKEY");
     const integrations = (await screen.findByRole("heading", { name: "Integrations" })).closest("section") as HTMLElement;
     expect(within(integrations).queryByText("Unavailable")).toBeNull();
-    fireEvent.click(within(integrations).getByRole("button", { name: "Connect Meta Ads" }));
-    expect(await within(integrations).findByText("Meta Ads is not configured.")).toBeDefined();
+    // Unconfigured deployments say so up front (disabled), instead
+    // of offering a Connect button that can only fail on click.
+    const metaBtn = within(integrations).getByRole(
+      "button", { name: "Meta Ads Not Configured" }) as HTMLButtonElement;
+    expect(metaBtn.disabled).toBe(true);
+    expect(within(integrations).queryByRole(
+      "button", { name: "Connect Meta Ads" })).toBeNull();
     expect(within(integrations).getByRole("button", { name: "Connect TikTok Ads" })).toBeDefined();
     expect(within(integrations).getByRole("button", { name: "Connect Google Analytics 4" })).toBeDefined();
   });

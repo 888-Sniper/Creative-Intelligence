@@ -93,10 +93,16 @@ def integration_callback(provider: str, request: Request, db=Depends(get_db),
 
 
 @router.get("/{provider}/status")
-def integration_status(provider: str, request: Request, db=Depends(get_db)):
+def integration_status(provider: str, request: Request, db=Depends(get_db),
+                       settings: Settings = Depends(get_settings)):
     provider = _known(provider)
     employee = _actor(request, db)
-    return integ.status(db, provider, employee.id)
+    out = integ.status(db, provider, employee.id)
+    # Let the UI say "Not configured" up front instead of offering
+    # a Connect button that can only fail until deployment
+    # credentials exist.
+    out["configured"] = integ.configured(provider, settings)
+    return out
 
 
 @router.post("/{provider}/disconnect")

@@ -110,11 +110,6 @@ export function AppShell() {
           <img className="brand-full" src="/foap-logo.png" alt="Foap" />
           <img className="brand-mark" src="/foap-mark.png" alt="" aria-hidden="true" />
         </Link>
-        {!collapsed && loadPrefs(me?.employee?.id ?? "").workspace ? (
-          <p className="side-workspace" style={{ margin: "0 14px 8px", fontSize: 12, opacity: 0.75 }}>
-            {loadPrefs(me?.employee?.id ?? "").workspace}
-          </p>
-        ) : null}
         <nav className="side-nav">
           {NAV.filter((n) => !("admin" in n && n.admin) || me?.is_admin).map((n) => {
             const label = t(n.key);

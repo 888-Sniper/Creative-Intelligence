@@ -17,17 +17,19 @@ const ROWS: Array<{ id: Provider; name: string; bodyKey: string; logo: string; i
 
 function useIntegrationStatus(provider: Provider) {
   const [connected, setConnected] = useState<boolean | null>(null);
+  const [configured, setConfigured] = useState<boolean | null>(null);
   const [account, setAccount] = useState("");
   const [error, setError] = useState(false);
   const [tick, setTick] = useState(0);
   useEffect(() => {
     let live = true;
     setError(false);
-    api<{ connected: boolean; account?: string }>(
+    api<{ connected: boolean; configured?: boolean; account?: string }>(
       "GET", `/api/auth/integrations/${provider}/status`,
     ).then((res) => {
       if (!live) return;
       setConnected(res.connected === true);
+      setConfigured(res.configured === true);
       setAccount(res.account ?? "");
     }).catch(() => {
       if (!live) return;
@@ -36,7 +38,7 @@ function useIntegrationStatus(provider: Provider) {
     });
     return () => { live = false; };
   }, [provider, tick]);
-  return { connected, account, error, reload: () => setTick((n) => n + 1) };
+  return { connected, configured, account, error, reload: () => setTick((n) => n + 1) };
 }
 
 function IntegrationRow({
@@ -112,6 +114,11 @@ function IntegrationRow({
             aria-label={disconnectLabel} disabled={busy} onClick={() => void disconnect()}>
             {t("settings.integrations.disconnect")}
           </LoadingButton>
+        ) : status.connected === false && status.configured === false ? (
+          <button type="button" className="btn-outline" disabled
+            aria-label={`${name} ${t("settings.integrations.notConfigured")}`}>
+            {t("settings.integrations.notConfigured")}
+          </button>
         ) : status.connected === false ? (
           <LoadingButton type="button" className="btn-outline" loading={busy}
             loadingLabel={t("settings.integrations.connecting")} spinnerClass="spinner dark"

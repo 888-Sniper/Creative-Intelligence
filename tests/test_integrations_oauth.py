@@ -132,6 +132,9 @@ def test_start_refuses_when_unconfigured(tmp_path):
         client.cookies.set("ci_session", token)
         for provider, name in (("meta", "Meta Ads"), ("tiktok", "TikTok Ads"),
                               ("ga4", "Google Analytics 4")):
+            status = client.get(
+                "/api/auth/integrations/%s/status" % provider).json()
+            assert status == {"connected": False, "configured": False}
             response = client.post("/api/auth/integrations/%s/start" % provider)
             assert response.status_code == 409, response.text
             assert response.json()["error"] == "%s is not configured." % name
@@ -144,7 +147,7 @@ def test_meta_connect_stores_encrypted_token(http, monkeypatch):
     calls = []
     _fake_http(monkeypatch, calls)
     assert client.get("/api/auth/integrations/meta/status").json() == {
-        "connected": False}
+        "connected": False, "configured": True}
     response = _connect(client, "meta")
     assert response.status_code == 302
     assert response.headers["location"].endswith(
@@ -165,7 +168,7 @@ def test_meta_connect_stores_encrypted_token(http, monkeypatch):
     gone = client.post("/api/auth/integrations/meta/disconnect")
     assert gone.json() == {"ok": True}
     assert client.get("/api/auth/integrations/meta/status").json() == {
-        "connected": False}
+        "connected": False, "configured": True}
 
 
 def test_tiktok_and_ga4_connect(http, monkeypatch):
@@ -216,10 +219,10 @@ def test_callback_does_not_store_under_a_different_employee(http, monkeypatch):
     assert rows == []
     client.cookies.set("ci_session", started_as)
     assert client.get("/api/auth/integrations/meta/status").json() == {
-        "connected": False}
+        "connected": False, "configured": True}
     client.cookies.set("ci_session", other_token)
     assert client.get("/api/auth/integrations/meta/status").json() == {
-        "connected": False}
+        "connected": False, "configured": True}
     _ = other_id
 
 
@@ -232,7 +235,7 @@ def test_callback_rejects_a_foreign_state(http):
     assert response.status_code == 302
     assert "result=expired" in response.headers["location"]
     assert client.get("/api/auth/integrations/meta/status").json() == {
-        "connected": False}
+        "connected": False, "configured": True}
 
 
 def test_unknown_provider_is_not_found(http):

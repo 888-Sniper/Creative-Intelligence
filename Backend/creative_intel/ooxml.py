@@ -408,8 +408,9 @@ def build_xlsx(sheets):
         rows = sheet.get("rows", [])
         # An empty header means the sheet carries its own title/header
         # rows (e.g. the analyst workbook) — emit no blank first row.
-        grid = ([header] if header else []) + \
-            [list(map(str_or_num, r_)) for r_ in rows]
+        # Preserve caller types: strings stay text cells; numeric
+        # measures must arrive as int/float (see _xlsx_cell).
+        grid = ([header] if header else []) + [list(r_) for r_ in rows]
         width = max([len(row) for row in grid] or [0])
         cols = "".join(
             '<col min="%d" max="%d" width="%d" customWidth="1"/>' % (i + 1, i + 1, w)
@@ -499,21 +500,58 @@ def _text_of(node_xml):
     return re.sub(r"<[^>]+>", "", node_xml or "")
 
 
+def _catalogue_entries(zf):
+    """Ordered [(sheet name, relationship id)] from workbook.xml."""
+    try:
+        book = zf.read("xl/workbook.xml").decode("utf-8")
+    except KeyError:
+        raise ValueError("xlsx has no workbook catalogue")
+    entries = []
+    for tag in re.findall(r"<sheet\b[^>]*>", book):
+        name = re.search(r'\bname="([^"]+)"', tag)
+        rid = re.search(r'\br:id="([^"]+)"', tag)
+        if not name or not rid:
+            raise ValueError("xlsx catalogue entry has no relationship")
+        entries.append((name.group(1), rid.group(1)))
+    if not entries:
+        raise ValueError("xlsx has no worksheets")
+    return entries
+
+
+def _worksheet_parts(zf):
+    """Worksheet part paths in catalogue order, resolved via rels."""
+    entries = _catalogue_entries(zf)
+    try:
+        rels = zf.read("xl/_rels/workbook.xml.rels").decode("utf-8")
+    except KeyError:
+        raise ValueError("xlsx has no workbook relationships")
+    targets = {}
+    for tag in re.findall(r"<Relationship\b[^>]*>", rels):
+        rid = re.search(r'\bId="([^"]+)"', tag)
+        target = re.search(r'\bTarget="([^"]+)"', tag)
+        if rid and target:
+            targets[rid.group(1)] = target.group(1)
+    parts = []
+    for _name, rid in entries:
+        target = targets.get(rid)
+        if not target:
+            raise ValueError(
+                "xlsx catalogue relationship %s is missing" % rid)
+        part = target.lstrip("/")
+        if not part.startswith("xl/"):
+            part = "xl/" + part
+        parts.append(part)
+    return parts
+
+
 def sheet_names(blob):
-    """Workbook sheet names in order (stdlib zip + regex)."""
+    """Workbook sheet names in catalogue order (stdlib zip + regex)."""
     try:
         zf = zipfile.ZipFile(BytesIO(bytes(blob)))
     except zipfile.BadZipFile:
         raise ValueError("not an xlsx file (bad zip)")
     try:
-        try:
-            book = zf.read("xl/workbook.xml").decode("utf-8")
-        except KeyError:
-            raise ValueError("xlsx has no workbook catalogue")
-        names = re.findall(r"<sheet\b[^>]*\bname=\"([^\"]+)\"", book)
-        if not names:
-            raise ValueError("xlsx has no worksheets")
-        return names
+        return [name for name, _rid in _catalogue_entries(zf)]
     finally:
         zf.close()
 
@@ -537,14 +575,13 @@ def parse_xlsx(blob, sheet=0):
                       re.findall(r"<si>(.*?)</si>", sst, re.S)]
         except KeyError:
             pass
-        names = [n for n in zf.namelist()
-                 if re.fullmatch(r"xl/worksheets/sheet\d+\.xml", n)]
-        if not names:
-            raise ValueError("xlsx has no worksheets")
-        ordered = sorted(names)
+        ordered = _worksheet_parts(zf)
         if not isinstance(sheet, int) or not 0 <= sheet < len(ordered):
             raise ValueError("xlsx sheet %r out of range" % (sheet,))
-        sheet = zf.read(ordered[sheet]).decode("utf-8")
+        try:
+            sheet = zf.read(ordered[sheet]).decode("utf-8")
+        except KeyError:
+            raise ValueError("xlsx worksheet part is missing")
     finally:
         zf.close()
     grid = {}

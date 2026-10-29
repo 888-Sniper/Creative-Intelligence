@@ -7,6 +7,7 @@ import { LoadingButton } from "@/components/LoadingButton";
 import { useLocale } from "@/i18n";
 import { TrendChart } from "@/components/charts";
 import { PeriodComparisonTable, type PeriodResponse } from "@/components/PeriodComparisonTable";
+import { dailyMetricValue } from "@/components/compareDaily";
 import {
   CreativeThumb,
   EmptyState,
@@ -87,6 +88,11 @@ interface DayPoint {
   spend: number;
   conversions: number;
   revenue: number;
+  cpa?: number | null;
+  cpm?: number | null;
+  roas?: number | null;
+  currency?: string | null;
+  mixed_currency?: boolean;
 }
 
 interface CreativeMeta {
@@ -373,7 +379,7 @@ export function ComparePage() {
       setMode(linkMode);
       setPicked(valid);
       if (valid.length >= 2) {
-        if (linkMode === "campaigns") void runCampaigns(valid, "roas");
+        if (linkMode === "campaigns") void runCampaigns(valid, campaignRank);
         else void runCreatives(valid, creativeRank);
       }
       return;
@@ -385,7 +391,7 @@ export function ComparePage() {
     setPicked(top);
     // Fewer than two available options: leave the empty state —
     // never an alert before the user has done anything.
-    if (top.length >= 2) void runCampaigns(top, "roas");
+    if (top.length >= 2) void runCampaigns(top, campaignRank);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [booted, campaignOptions.data, creativeOptions.data]);
 
@@ -522,13 +528,7 @@ export function ComparePage() {
         soft: "#E4EAF7",
         points: trendDates.map((date) => {
           const p = byDate.get(date);
-          if (!p) return null;
-          if (perfMetric === "roas") return p.spend ? p.revenue / p.spend : null;
-          if (perfMetric === "ctr") return p.impressions ? (p.clicks / p.impressions) * 100 : null;
-          if (perfMetric === "cpa") return p.conversions ? p.spend / p.conversions : null;
-          if (perfMetric === "cpm") return p.impressions ? (p.spend / p.impressions) * 1000 : null;
-          const raw = num((p as unknown as Record<string, number>)[perfMetric]);
-          return Number.isFinite(raw) ? raw : null;
+          return p ? dailyMetricValue(p, perfMetric) : null;
         }),
       };
     });

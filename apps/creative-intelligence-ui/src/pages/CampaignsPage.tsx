@@ -242,7 +242,9 @@ export function CampaignsPage() {
     const val = (g: BenchSummary) =>
       platMetric === "spend" ? num(g.spend) : platMetric === "impressions" ? num(g.impressions) : num(g.clicks);
     const total = list.reduce((t, g) => t + val(g), 0);
-    const avg = list.length ? total / list.length : 0;
+    const avg = platMetric === "spend" && !hasComparableBenchmarkCurrency(list)
+      ? null
+      : list.length ? total / list.length : 0;
     return list
       .sort((a, b) => val(b) - val(a))
       .slice(0, 6)
@@ -252,12 +254,12 @@ export function CampaignsPage() {
   const rail = useMemo(() => {
     const items: Array<{ icon: string; tint: string; title: string; body: string; action: string; href: string }> = [];
     const plats = Object.entries(benchPlatform.data ?? {})
-      .map(([key, g]) => ({ key, roas: g.roas ?? null }))
+      .map(([key, g]) => ({ key, g, roas: g.roas ?? null }))
       .filter((r) => r.roas != null)
       .sort((a, b) => (b.roas ?? 0) - (a.roas ?? 0));
     if (plats.length > 1 && plats[0].roas != null) {
-      const avg = plats.reduce((t, p) => t + (p.roas ?? 0), 0) / plats.length;
-      const d = rate(plats[0].roas ?? 0, avg);
+      const avg = pooledBenchmarkValue(plats.map((p) => p.g), "roas");
+      const d = avg == null ? null : rate(plats[0].roas ?? 0, avg);
       items.push({
         icon: "trend", tint: "var(--shell-teal-soft)",
         title: t("campaigns.rail.scaleTitle"),

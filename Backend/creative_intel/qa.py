@@ -593,13 +593,15 @@ def answer(conn, question, llm=None, scope=None, owner=None,
             impr = sum(x["impressions"] for x in group)
             clicks = sum(x["clicks"] for x in group)
             conv = sum(x["conversions"] for x in group)
-            rev = sum(x.get("revenue") or 0 for x in group)
             if metric == "cpa":
                 return (spend / conv) if conv else None
             if metric == "ctr":
                 return (clicks / impr) if impr else None
             if metric == "roas":
-                return (rev / spend) if spend else None
+                from creative_intel import metric_availability as _availability
+                value, _coverage, _details = (
+                    _availability.reported_roas_details(group))
+                return value
             if metric == "vtr":
                 return _bench.pooled_registry_ratio(group, _rate_id)
             return spend

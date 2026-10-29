@@ -178,16 +178,22 @@ class AskAnswerLevelTest(unittest.TestCase):
     """Best-X answers rank at the requested level and share tied leads."""
 
     def _conn(self, meta_rev, tik_rev):
+        return self._conn_rows([
+            ("meta", "A", "k1", 100, meta_rev, 1),
+            ("tiktok", "B", "k2", 100, tik_rev, 1)])
+
+    def _conn_rows(self, rows):
         conn = sqlite3.connect(":memory:")
         schema.init_db(conn)
         conn.executemany(
-            "INSERT INTO ads (platform, campaign, creative_key, spend,"
-            " impressions, clicks, conversions, revenue, date)"
-            " VALUES (?,?,?,?,?,?,?,?,?)",
-            [("meta", "A", "k1", 100, 10000, 200, 10, meta_rev,
-              "2026-08-01"),
-             ("tiktok", "B", "k2", 100, 10000, 200, 10, tik_rev,
-              "2026-08-01")])
+            "INSERT INTO ads (platform, campaign, ad_name, creative_key,"
+            " spend, impressions, clicks, conversions, revenue,"
+            " revenue_reported, date)"
+            " VALUES (?,?,?,?,?,10000,200,10,?,?,?)",
+            [(platform, campaign, key, key, spend, revenue, reported,
+              "2026-08-01")
+             for platform, campaign, key, spend, revenue, reported
+             in rows])
         return conn
 
     def test_platform_question_ranks_platforms(self):
@@ -227,6 +233,42 @@ class AskAnswerLevelTest(unittest.TestCase):
         try:
             got = qa.answer(conn, "Which campaign has the best ROAS?")
             self.assertIn("Top campaign by ROAS is B at 3.0x",
+                          got["answer"])
+        finally:
+            conn.close()
+
+    def test_roas_uses_only_revenue_reporting_spend(self):
+        # Meta matched ROAS is 200/100 = 2.0; its extra unreported
+        # spend must not dilute it to 1.0 behind TikTok's 1.5.
+        conn = self._conn_rows([
+            ("meta", "A", "k1", 100, 200, 1),
+            ("meta", "A", "k2", 100, 0, 0),
+            ("tiktok", "B", "k3", 100, 150, 1)])
+        try:
+            got = qa.answer(conn, "Which platform has the best ROAS?")
+            self.assertIn("Top platform by ROAS is Meta at 2.0x",
+                          got["answer"])
+        finally:
+            conn.close()
+
+    def test_roas_without_reported_revenue_has_no_winner(self):
+        conn = self._conn_rows([
+            ("meta", "A", "k1", 100, 200, 0),
+            ("tiktok", "B", "k2", 100, 300, 0)])
+        try:
+            got = qa.answer(conn, "Which platform has the best ROAS?")
+            self.assertIn("no ROAS winner", got["answer"])
+            self.assertNotIn("Top platform by ROAS is", got["answer"])
+        finally:
+            conn.close()
+
+    def test_roas_reported_zero_stays_measurable(self):
+        conn = self._conn_rows([
+            ("meta", "A", "k1", 100, 0, 1),
+            ("tiktok", "B", "k2", 100, 300, 0)])
+        try:
+            got = qa.answer(conn, "Which platform has the best ROAS?")
+            self.assertIn("Top platform by ROAS is Meta at 0.0x",
                           got["answer"])
         finally:
             conn.close()

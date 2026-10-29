@@ -204,15 +204,19 @@ def _series_for(rows):
         freq = metrics.frequency(day)
         vtr = metrics.pooled_ratio(day, "vtr", "views_100",
                                    "impressions")
+        money = metrics.money_scope(day)
+        spend_state, spend_rows = metrics.field_state(day, "spend")
+        spend = (sum(metrics._num(r, "spend") for r in spend_rows)
+                 if spend_state == metrics.MEASURED and money["currency_known"]
+                 else None)
         # A14: daily money blends are as meaningless as pooled ones.
         cpa = (metrics.unavailable_mixed_currency("cpa", day)
-               if not metrics._currency_ok(day)
+               if money["mixed_currency"]
                else metrics.pooled_ratio(day, "cpa", "spend",
                                          "conversions", scale=1.0))
-        series.append({"date": date, "frequency": freq, "vtr": vtr,
+        series.append({**money, "date": date, "frequency": freq, "vtr": vtr,
                        "cpa": cpa,
-                       "spend": sum(metrics._num(r, "spend")
-                                    for r in day)})
+                       "spend": spend, "spend_state": spend_state})
     return series
 
 

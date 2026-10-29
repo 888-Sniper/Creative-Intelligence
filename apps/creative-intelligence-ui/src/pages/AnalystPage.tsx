@@ -1,3 +1,5 @@
+import { pooledBenchmark, type BenchmarkMetadata } from "../components/benchmarkPooling";
+import { BenchmarkScopeNote } from "../components/BenchmarkScopeNote";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, apiBlob } from "@/api/client";
 import { useFilters } from "@/state/FilterContext";
@@ -5,6 +7,8 @@ import { markCampaignStatusTouched } from "@/state/prefs";
 import { useLocale } from "@/i18n";
 import { Icon } from "@/components/icons";
 import { LoadingButton } from "@/components/LoadingButton";
+import { AnalystDateRangeSelect } from "./AnalystDateRangeSelect";
+import { selectTopCreatives } from "@/components/performanceRanking";
 import {
   CreativeThumb,
   EmptyState,
@@ -88,7 +92,7 @@ interface ChatMessage {
   narrativeDetail?: string;
 }
 
-interface BenchGroup {
+interface BenchGroup extends BenchmarkMetadata {
   spend: number;
   impressions: number;
   clicks: number;
@@ -133,16 +137,6 @@ interface CreativeRow {
 const OBJECTIVES = ["reach", "video_views", "traffic", "conversions", ""] as const;
 
 const TRY_KEYS = ["t0", "t1", "t2", "t3"] as const;
-
-const DATE_RANGES = [
-  { value: "all", key: "all" },
-  { value: "7", key: "d7" },
-  { value: "30", key: "d30" },
-  { value: "90", key: "d90" },
-  // Shown when a window was set on another page: the label must
-  // match the applied shared filter, never read "All Time".
-  { value: "custom", key: "custom" },
-] as const;
 
 type TFn = (key: string, vars?: Record<string, string | number>) => string;
 
@@ -755,12 +749,11 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
       ctr: g.ctr == null ? null : g.ctr * 100,
       spend: num(g.spend),
     }));
-    const totRev = rows.reduce((t, r) => t + (r.roas ?? 0) * r.spend, 0);
-    const totSpend = rows.reduce((t, r) => t + r.spend, 0);
-    const avg = totSpend ? totRev / totSpend : null;
+    const baseline = pooledBenchmark(Object.values(plats.data ?? {}), "roas");
     return {
       rows: rows.filter((r) => r.roas != null).sort((a, b) => (b.roas ?? 0) - (a.roas ?? 0)),
-      avg,
+      avg: baseline.value,
+      baseline,
     };
   }, [plats.data]);
 
@@ -996,8 +989,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
 
   const topCreatives = useMemo(() => {
     const rows = creatives.data ?? [];
-    const score = (c: CreativeRow) => c.metrics?.roas ?? c.metrics?.ctr ?? -1;
-    return rows.slice().sort((a, b) => score(b) - score(a)).slice(0, 4);
+    return selectTopCreatives(rows);
   }, [creatives.data]);
 
   const campaignNames = useMemo(
@@ -1180,9 +1172,8 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
           </div>
           <div className="field">
             <label htmlFor="a-range">{t("filters.dateRange")}</label>
-            <select id="a-range" value={range}
-              onChange={(e) => {
-                const v = e.target.value;
+            <AnalystDateRangeSelect value={range} t={t}
+              onChange={(v) => {
                 setRange(v);
                 if (v === "all") {
                   setFilter("date", "");
@@ -1191,9 +1182,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
                 } else {
                   applyPresetDays(Number(v));
                 }
-              }}>
-              {DATE_RANGES.map((r) => <option key={r.value} value={r.value}>{t(`analyst.ranges.${r.key}`)}</option>)}
-            </select>
+              }} />
           </div>
           <div className="field">
             <label htmlFor="a-objective">{t("analyst.objectiveLabel")}</label>
@@ -1308,6 +1297,10 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
                 </div>
               ))}
             </div>
+            {plats.data && (
+              <BenchmarkScopeNote active relativeComparison result={platRows.baseline}
+                metric="roas" locale={uiLocale} t={t} label={t("benchmarkReporting.roasBaseline")} />
+            )}
           </>
         )}
       </Panel>

@@ -1,12 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, scopedPath } from "@/api/client";
 import { applySavedView, type SavedView } from "@/components/savedViews";
 import { useFilters } from "@/state/FilterContext";
+import { useBenchmarkSelection } from "@/state/useBenchmarkSelection";
 import { useOptionalAuth } from "@/auth/AuthProvider";
 import { useLocale } from "@/i18n";
 import { Icon } from "@/components/icons";
 import { LoadingButton } from "@/components/LoadingButton";
+import { benchmarkChartData, benchmarkMetricValue as metricVal, type BenchmarkRow as BenchRow } from "@/components/benchmarkMetrics";
+import { BenchmarkMiniBars, BenchmarkMoneyCell } from "@/components/BenchmarkMetricDisplay";
+import { formatNativeMoney } from "@/components/sourceCurrency";
 import {
   EmptyState,
   MetaSelect,
@@ -15,7 +19,6 @@ import {
   Panel,
   Skeleton,
   fmtCell,
-  fmtMoney,
   fmtMult,
   fmtPct,
   platformLabel,
@@ -34,12 +37,6 @@ type Axis = "platform" | "hook_type" | "format" | "creator_vs_branded";
 const AXES: Array<Axis> = ["platform", "hook_type", "format", "creator_vs_branded"];
 
 type TFn = (key: string, vars?: Record<string, string | number>) => string;
-
-interface BenchRow {
-  spend: number; impressions: number; clicks: number; conversions: number;
-  revenue: number; ctr: number | null; cpc: number | null; cpa: number | null;
-  roas: number | null; n_ads: number;
-}
 
 const BENCHMARK_AXES: ReadonlyArray<Axis> =
   ["platform", "hook_type", "format", "creator_vs_branded"];
@@ -60,21 +57,6 @@ function axisLabel(t: TFn, axis: Axis, key: string): string {
     return hit === `filters.hooks.${key}` ? key : hit;
   }
   return key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-function MiniBars({ values, format }: { values: number[]; format: (v: number) => string }) {
-  const max = Math.max(1, ...values);
-  const colors = ["#2F6FBE", "#0E9F6E", "#7C6BD6"];
-  return (
-    <div style={{ display: "flex", alignItems: "flex-end", gap: 10, height: 96, paddingTop: 14 }}>
-      {values.map((v, i) => (
-        <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, height: "100%", justifyContent: "flex-end" }}>
-          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--shell-navy)" }}>{format(v)}</span>
-          <div style={{ width: "70%", height: `${Math.max(4, (v / max) * 72)}px`, borderRadius: "5px 5px 0 0", background: colors[i % colors.length] }} />
-        </div>
-      ))}
-    </div>
-  );
 }
 
 /* User-facing saved-benchmark description: the stored grouping plus
@@ -103,7 +85,6 @@ export function BenchmarksPage() {
   const unavailable = t("common.unavailable");
   const [axis, setAxis] = useState<Axis>("platform");
   const [applied, setApplied] = useState(0);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [status, setStatus] = useState("");
   const [saving, setSaving] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
@@ -133,21 +114,13 @@ export function BenchmarksPage() {
       : list.sort((a, b) => num(b.spend) - num(a.spend));
   }, [benchmarks.data, axis, t]);
 
+  // Only current response rows can initialize or constrain the selection.
+  const { selected, setSelected } = useBenchmarkSelection(axis, benchmarks.data === null ? null : rows);
+
   const compared = useMemo(
     () => rows.filter((r) => selected.has(r.key)).slice(0, 3),
     [rows, selected],
   );
-
-  /* Preselect the first two rows so Compare Benchmarks opens populated
-   * with real mini charts (mirrors Compare's four-way auto-run). Users
-   * can clear or change the selection; switching Group By reselects. */
-  const autoSel = useRef("");
-  useEffect(() => {
-    if (autoSel.current !== axis && rows.length >= 2 && selected.size === 0) {
-      autoSel.current = axis;
-      setSelected(new Set(rows.slice(0, 2).map((r) => r.key)));
-    }
-  }, [axis, rows, selected.size]);
 
   const coverage = useMemo(() => {
     const total = Object.values(benchmarks.data ?? {}).reduce((t, g) => t + num(g.n_ads), 0);
@@ -256,14 +229,6 @@ export function BenchmarksPage() {
     }
   };
 
-  const metricVal = (r: BenchRow, m: "cpm" | "ctr" | "vtr" | "cpa" | "roas"): number | null => {
-    if (m === "ctr") return r.ctr == null ? null : r.ctr * 100;
-    if (m === "roas") return r.roas;
-    if (m === "cpa") return r.cpa;
-    if (m === "cpm") return r.impressions ? (r.spend / r.impressions) * 1000 : null;
-    return null;
-  };
-
   return (
     <>
       <PageHeader
@@ -370,7 +335,7 @@ export function BenchmarksPage() {
                 <div className="panel-controls bench-controls">
                   <label htmlFor="b-axis" className="panel-sub" style={{ margin: 0 }}>{t("benchmarks.groupBy")}</label>
                   <select id="b-axis" aria-label={t("benchmarks.groupBy")} value={axis}
-                    onChange={(e) => { setAxis(e.target.value as Axis); setSelected(new Set()); }}
+                    onChange={(e) => setAxis(e.target.value as Axis)}
                     style={{ background: "var(--shell-card)", border: "1px solid var(--shell-line)", borderRadius: 8, padding: "7px 26px 7px 10px", fontSize: 12.5, color: "var(--shell-navy)", fontFamily: "inherit" }}>
                     {AXES.map((a) => <option key={a} value={a}>{t(`benchmarks.axes.${a}`)}</option>)}
                   </select>
@@ -418,9 +383,11 @@ export function BenchmarksPage() {
                           <td><span className="cell-main">{axisLabel(t, axis, r.key)}</span></td>
                           <td>{axis === "platform" ? t("filters.allVerticals") : t("filters.allPlatforms")}</td>
                           <td>{axis === "platform" ? axisLabel(t, axis, r.key) : t("filters.allPlatforms")}</td>
-                          <td className="num">{fmtCell(metricVal(r, "cpm"), (n) => fmtMoney(n as number, locale), unavailable)}</td>
+                          <td className="num"><BenchmarkMoneyCell row={r} metric="cpm" metricLabel={t("filters.kpis.cpm")}
+                            locale={locale} unavailable={unavailable} t={t} /></td>
                           <td className="num">{fmtCell(metricVal(r, "ctr"), (n) => fmtPct(n as number, 1, locale), unavailable)}</td>
-                          <td className="num">{fmtCell(metricVal(r, "cpa"), (n) => fmtMoney(n as number, locale), unavailable)}</td>
+                          <td className="num"><BenchmarkMoneyCell row={r} metric="cpa" metricLabel={t("filters.kpis.cpa")}
+                            locale={locale} unavailable={unavailable} t={t} /></td>
                           <td className="num">{fmtCell(r.roas, (n) => fmtMult(n, locale), unavailable)}</td>
                           <td className="num">{fmtNum(num(r.n_ads))}</td>
                         </tr>
@@ -440,18 +407,23 @@ export function BenchmarksPage() {
             ) : undefined}>
             {compared.length >= 2 ? (
               <div className="cards-4">
-                {(["cpm", "ctr", "cpa", "roas"] as const).map((m) => (
+                {(["cpm", "ctr", "cpa", "roas"] as const).map((m) => {
+                  const chart = benchmarkChartData(compared, m);
+                  return (
                   <div key={m} className="cmp-card" style={{ padding: 12 }}>
                     <strong style={{ fontSize: 13 }}>{m.toUpperCase()}</strong>
-                    <MiniBars
-                      values={compared.map((r) => metricVal(r, m) ?? 0)}
-                      format={(v) => (m === "ctr" ? fmtPct(v, 1, locale) : m === "roas" ? fmtMult(v, locale) : fmtMoney(v, locale))}
+                    <BenchmarkMiniBars
+                      groups={compared.map((r, index) => ({ label: axisLabel(t, axis, r.key), value: chart.values[index] }))}
+                      format={(v) => (m === "ctr" ? fmtPct(v, 1, locale) : m === "roas" ? fmtMult(v, locale) : formatNativeMoney(v, chart.currency, locale, unavailable))}
+                      unavailable={unavailable}
+                      emptyLabel={chart.currencyUnavailable ? t("sourceCurrency.benchmark") : t("benchmarkReporting.noValues")}
                     />
                     <div className="legend" style={{ justifyContent: "flex-start" }}>
                       {compared.map((r) => <span key={r.key}>{axisLabel(t, axis, r.key)}</span>)}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             ) : <EmptyState compact icon="compare" title={t("benchmarks.nothingTitle")} text={t("benchmarks.nothingBody")} />}
           </Panel>

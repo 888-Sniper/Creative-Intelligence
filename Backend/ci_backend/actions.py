@@ -122,27 +122,11 @@ def _creative_why(a, b, da, db):
     """Data-grounded pairwise notes: measured deltas plus observed
     annotation contrast across every creative dimension. Never causal
     claims, never invented data."""
+    from creative_intel.creative_comparison import pairwise_metric_notes, pairwise_primary_winner
+
     if not a or not b:
         return {"top": None, "differences": ["Pick two creatives to compare."]}
-    diffs = []
-    for metric, higher_wins in (("cpa", False), ("ctr", True), ("vtr", True),
-                                ("cpc", False), ("cpm", False), ("roas", True)):
-        # Missing is missing: a None KPI (e.g. CPA with no conversions)
-        # must never coerce to 0, which would make an unmeasured
-        # lower-is-better metric look unbeatable.
-        va, vb = da.get(metric), db.get(metric)
-        if va is None or vb is None:
-            if (va is None) != (vb is None):
-                diffs.append(
-                    "%s is not measurable for %s (insufficient data)"
-                    % (metric.upper(), a if va is None else b))
-            continue
-        if va == vb:
-            continue
-        winner = a if (va > vb) == higher_wins else b
-        diffs.append("%s leads %s on %s (%s vs %s)"
-                     % (winner, b if winner == a else a,
-                        metric.upper(), va, vb))
+    diffs = pairwise_metric_notes(a, b, da, db)
     aa, ab = da.get("annotation") or {}, db.get("annotation") or {}
     for field, label in (("hook_type", "hook"), ("creator_vs_branded", "format"),
                            ("edit_style", "style")):
@@ -190,15 +174,9 @@ def _creative_why(a, b, da, db):
             bits.append("%s has %s" % (b, ", ".join(only_b)))
         if bits:
             diffs.append("Structure: %s." % "; ".join(bits))
-    top = None
-    if (da.get("conversions") or 0) > 0 and (db.get("conversions") or 0) > 0:
-        cpa_a, cpa_b = da.get("cpa"), db.get("cpa")
-        if cpa_a is not None and cpa_b is not None:
-            top = a if cpa_a <= cpa_b else b
-    elif (da.get("impressions") or 0) > 0 or (db.get("impressions") or 0) > 0:
-        top = a if (da.get("ctr", 0) or 0) >= (db.get("ctr", 0) or 0) else b
-    if top is None:
-        diffs.append("Neither creative has delivery data yet.")
+    top, reason = pairwise_primary_winner(a, b, da, db)
+    if reason and reason not in diffs:
+        diffs.append(reason)
     return {"top": top, "differences": diffs or ["No measurable difference."]}
 
 
@@ -206,22 +184,13 @@ def _multi_why(keys, datas):
     """Data-grounded N-way notes (3-6 creatives): per-metric leaders
     plus observed annotation contrast. Measured deltas only, never
     causal claims, never invented data."""
+    from creative_intel.creative_comparison import multi_metric_notes, multi_primary_winner
+
     keys = [k for k in keys if k]
     if len(keys) < 2:
         return {"top": None,
                 "differences": ["Pick two or more creatives to compare."]}
-    diffs = []
-    for metric, higher_wins in (("cpa", False), ("cpc", False),
-                                ("cpm", False), ("ctr", True),
-                                ("vtr", True), ("roas", True)):
-        valued = [(k, datas.get(k, {}).get(metric)) for k in keys]
-        valued = [(k, v) for k, v in valued if v is not None]
-        if len({v for _k, v in valued}) < 2:
-            continue
-        best = (max if higher_wins else min)(valued, key=lambda kv: kv[1])
-        diffs.append("%s leads on %s (%s vs %s)" % (
-            best[0], metric.upper(), best[1],
-            ", ".join("%s %s" % (k, v) for k, v in valued if k != best[0])))
+    diffs = multi_metric_notes(keys, datas)
     anns = {k: (datas.get(k, {}).get("annotation") or {}) for k in keys}
     for field, label in (("hook_type", "Hook"), ("hook_modality", "Modality"),
                          ("creator_vs_branded", "Format"),
@@ -247,20 +216,9 @@ def _multi_why(keys, datas):
     if cta and len(cta) != len(keys):
         diffs.append("CTA is annotated in %s but not in %s." % (
             ", ".join(cta), ", ".join(k for k in keys if k not in cta)))
-    converting = [k for k in keys if (datas.get(k, {}).get("conversions") or 0) > 0]
-    top = None
-    if converting:
-        ranked = [(k, datas[k].get("cpa")) for k in converting
-                  if datas.get(k, {}).get("cpa") is not None]
-        if ranked:
-            top = min(ranked, key=lambda kv: kv[1])[0]
-    else:
-        shown = [(k, datas.get(k, {}).get("ctr")) for k in keys]
-        shown = [(k, v) for k, v in shown if v is not None]
-        if shown:
-            top = max(shown, key=lambda kv: kv[1])[0]
-    if top is None:
-        diffs.append("Neither creative has delivery data yet.")
+    top, reason = multi_primary_winner(keys, datas)
+    if reason and reason not in diffs:
+        diffs.append(reason)
     return {"top": top, "differences": diffs or ["No measurable difference."]}
 
 
@@ -870,21 +828,13 @@ def _attribute_table(anns):
 def _rank_creatives(keys, per, rank_by):
     """Rank creative keys by rank_by (None always ranks last).
 
-    Returns (ranking, winner); winner is None when every candidate's
-    KPI is uncomputable. Never converts missing values to zero.
+    Returns (display order, winner); unavailable cost comparisons retain
+    input order with no winner. Never converts missing values to zero.
     """
-    higher = COMPARE_RANK_DIRECTIONS[rank_by] == "higher"
+    from creative_intel.creative_comparison import rank_creatives
 
-    def _key(key):
-        value = per.get(key, {}).get(rank_by)
-        if value is None:
-            return (1, 0.0)
-        return (0, -value if higher else value)
-
-    ranking = sorted(keys, key=_key)
-    if all(per.get(key, {}).get(rank_by) is None for key in ranking):
-        return ranking, None
-    return ranking, ranking[0]
+    return rank_creatives(keys, per, rank_by,
+                          higher=COMPARE_RANK_DIRECTIONS[rank_by] == "higher")
 
 
 def build_compare(conn, q, owner=None, admin=False):

@@ -327,6 +327,9 @@ class Evaluator:
             return any(self._truthy(a) for a in args)
         if name == "AND":
             return all(self._truthy(a) for a in args)
+        if name == "ISNUMBER":
+            value, = args
+            return isinstance(value, (int, float)) and not isinstance(value, bool)
         if name == "SUMIFS":
             sum_range = args[0]
             assert isinstance(sum_range, _Range)
@@ -371,7 +374,7 @@ class Evaluator:
 
     @staticmethod
     def _match_crit(crit, value):
-        # Only the "<>" / "=" criteria the workbook emits.
+        # Blank and literal-text exclusion criteria emitted by the workbook.
         blank = (value == "" or value is None)
         if isinstance(value, bool):
             blank = False
@@ -379,6 +382,8 @@ class Evaluator:
             return not blank
         if crit == "=":
             return blank
+        if crit.startswith("<>"):
+            return str(value).casefold() != crit[2:].casefold()
         raise ValueError("unsupported criterion %r" % (crit,))
 
     @staticmethod

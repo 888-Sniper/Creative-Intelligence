@@ -1,5 +1,10 @@
+import { benchmarkReportingMessages } from "../benchmarkReporting";
+import { sourceCurrencyMessages } from "../sourceCurrency";
+
 /** Polish interface strings (parity with en.ts required). */
 export const pl = {
+  benchmarkReporting: benchmarkReportingMessages.pl,
+  sourceCurrency: sourceCurrencyMessages.pl,
   common: {
     save: "Zapisz",
     saveChanges: "Zapisz zmiany",

@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, scopedPath } from "@/api/client";
 import { useFilters } from "@/state/FilterContext";
+import { useRequestResult } from "@/state/useRequestResult";
 import { Icon } from "@/components/icons";
 import { LoadingButton } from "@/components/LoadingButton";
 import { useLocale } from "@/i18n";
 import { TrendChart } from "@/components/charts";
+import { PeriodComparisonTable, type PeriodResponse } from "@/components/PeriodComparisonTable";
 import {
   CreativeThumb,
   EmptyState,
@@ -78,21 +80,6 @@ interface CampaignCompareResponse {
   scope?: string;
 }
 
-interface PeriodSide {
-  label: string;
-  from: string;
-  to: string;
-  n_ads: number;
-  kpis: Record<string, number | null>;
-}
-
-interface PeriodResponse {
-  a: PeriodSide;
-  b: PeriodSide;
-  delta: Record<string, number | null>;
-  scope?: string;
-}
-
 interface DayPoint {
   date: string;
   impressions: number;
@@ -118,7 +105,6 @@ interface CreativeMeta {
 
 const CREATIVE_RANKS = ["cpa", "cpm", "vtr", "ctr", "cpc", "roas"];
 const CAMPAIGN_RANKS = ["cpa", "cpm", "ctr", "vtr", "roas"];
-const PERIOD_KPIS = ["spend", "impressions", "clicks", "conversions", "cpm", "vtr", "view_rate", "ctr", "cpc", "cpa", "roas"];
 const CARD_KPIS = ["cpm", "ctr", "vtr", "cpa", "roas"] as const;
 const DIFF_KPIS = ["cpm", "ctr", "vtr", "cpa", "roas"] as const;
 const HIGHER_BETTER = new Set(["ctr", "vtr", "roas", "view_rate"]);
@@ -143,22 +129,13 @@ function fmtCard(kpi: (typeof CARD_KPIS)[number], v: number | null | undefined):
   });
 }
 
-/* Period table values are formatted by unit — never dumped raw. Deltas
- * are absolute B−A differences with an explicit sign. */
+/* Non-monetary period values retain their established formatting. Native
+ * currency values and signed deltas are handled by PeriodComparisonTable. */
 function fmtPeriod(kpi: string, v: number | null | undefined): string {
   return fmtCell(v, (n) => {
-    if (kpi === "spend" || kpi === "cpm" || kpi === "cpc" || kpi === "cpa") return fmtMoney(n);
     if (kpi === "roas") return `${n.toFixed(2)}x`;
     if (kpi === "ctr" || kpi === "vtr" || kpi === "view_rate") return fmtPct(n);
     return fmtCompact(n);
-  });
-}
-
-function fmtDelta(kpi: string, v: number | null | undefined): string {
-  return fmtCell(v, (n) => {
-    if (n === 0) return fmtPeriod(kpi, 0);
-    const sign = n > 0 ? "+" : "−";
-    return `${sign}${fmtPeriod(kpi, Math.abs(n))}`;
   });
 }
 
@@ -253,7 +230,7 @@ const TEST_IDEAS: Record<string, (name: string) => { title: string; body: string
 };
 
 export function ComparePage() {
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
   const kpiName = (k: string): string => {
     if (k === "vtr") return t("compare.vtrCompleted");
     if (k === "view_rate") return t("compare.playRate");
@@ -282,9 +259,10 @@ export function ComparePage() {
   const [aTo, setATo] = useState("");
   const [bFrom, setBFrom] = useState("");
   const [bTo, setBTo] = useState("");
-  const [periodData, setPeriodData] = useState<PeriodResponse | null>(null);
-  const [periodLoading, setPeriodLoading] = useState(false);
-  const [periodError, setPeriodError] = useState("");
+  const { data: periodData, loading: periodLoading, error: periodError,
+    run: runPeriodRequest, fail: failPeriodRequest } = useRequestResult<PeriodResponse>(
+      JSON.stringify([scope.toString(), aFrom, aTo, bFrom, bTo]),
+    );
 
   const campaignOptions = useScopedApi<Record<string, Record<string, number>>>("/api/campaigns");
   const creativeOptions = useScopedApi<CreativeMeta[]>("/api/creatives");
@@ -363,23 +341,15 @@ export function ComparePage() {
 
   async function comparePeriods(): Promise<void> {
     if (!aFrom || !aTo || !bFrom || !bTo) {
-      setPeriodError("Fill All Four Period Dates.");
+      failPeriodRequest("Fill All Four Period Dates.");
       return;
     }
-    setPeriodLoading(true);
-    setPeriodError("");
-    try {
+    await runPeriodRequest(() => {
       const params = new URLSearchParams({ a_from: aFrom, a_to: aTo, b_from: bFrom, b_to: bTo });
-      const r = await api<PeriodResponse>(
+      return api<PeriodResponse>(
         "GET", scopedPath(`/api/compare/periods?${params.toString()}`, scope),
       );
-      setPeriodData(r);
-    } catch (e) {
-      setPeriodData(null);
-      setPeriodError(e instanceof Error ? e.message : "Request Failed");
-    } finally {
-      setPeriodLoading(false);
-    }
+    });
   }
 
   // Auto-run once the option lists arrive: top 4 campaigns by spend,
@@ -404,7 +374,7 @@ export function ComparePage() {
       setPicked(valid);
       if (valid.length >= 2) {
         if (linkMode === "campaigns") void runCampaigns(valid, "roas");
-        else void runCreatives(valid, "ctr");
+        else void runCreatives(valid, creativeRank);
       }
       return;
     }
@@ -967,28 +937,9 @@ export function ComparePage() {
           {periodLoading ? <Skeleton height={120} /> : null}
           {periodError && !periodLoading ? <EmptyState text={periodError} /> : null}
           {periodData && !periodLoading ? (
-            <div className="tbl-wrap">
-              <table className="tbl">
-                <thead>
-                  <tr>
-                    <th scope="col">{t("compare.kpiCol")}</th>
-                    <th scope="col">{periodData.a.label} ({periodData.a.from}…{periodData.a.to}, n={periodData.a.n_ads})</th>
-                    <th scope="col">{periodData.b.label} ({periodData.b.from}…{periodData.b.to}, n={periodData.b.n_ads})</th>
-                    <th scope="col" className="num">{t("compare.deltaCol")}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {PERIOD_KPIS.map((m) => (
-                    <tr key={m}>
-                      <th scope="row">{kpiName(m)}</th>
-                      <td>{fmtPeriod(m, periodData.a.kpis[m])}</td>
-                      <td>{fmtPeriod(m, periodData.b.kpis[m])}</td>
-                      <td className="num">{fmtDelta(m, periodData.delta[m])}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <PeriodComparisonTable data={periodData} locale={locale}
+              headings={{ metric: t("compare.kpiCol"), delta: t("compare.deltaCol"), unavailable: t("common.unavailable") }}
+              metricLabel={kpiName} formatNonMoney={fmtPeriod} t={t} />
           ) : !periodLoading && !periodError ? (
             <EmptyState text={t("compare.fillPeriods")} verbatim />
           ) : null}

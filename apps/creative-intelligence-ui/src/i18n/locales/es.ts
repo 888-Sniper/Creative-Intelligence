@@ -1,5 +1,10 @@
+import { benchmarkReportingMessages } from "../benchmarkReporting";
+import { sourceCurrencyMessages } from "../sourceCurrency";
+
 /** Spanish interface strings (parity with en.ts required). */
 export const es = {
+  benchmarkReporting: benchmarkReportingMessages.es,
+  sourceCurrency: sourceCurrencyMessages.es,
   common: {
     save: "Guardar",
     saveChanges: "Guardar cambios",

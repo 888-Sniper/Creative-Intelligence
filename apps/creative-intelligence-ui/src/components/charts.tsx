@@ -1,5 +1,6 @@
 /** Hand-rolled SVG charts (no new dependencies). Responsive via viewBox. */
 import { useLocale } from "@/i18n";
+import { isMeasured } from "./performanceRanking";
 
 function niceMax(v: number): number {
   if (v <= 0) return 1;
@@ -11,21 +12,33 @@ function niceTicks(max: number, count = 5): number[] {
   const step = niceMax(max) / (count - 1);
   return Array.from({ length: count }, (_, i) => step * i);
 }
-export function fmtAxis(n: number, locale = "en"): string {
-  // Axis tick labels through the UI locale; English output matches the
-  // previous literals exactly (compact, at most one decimal).
+export function fmtAxis(n: number, locale = "en", step?: number): string {
+  // Preserve fractional tick spacing; standalone values keep up to six
+  // significant digits. Compact labels without a step retain one decimal.
   const abs = Math.abs(n);
+  const value = n === 0 ? 0 : n;
+  const precision = (scale: number) => step != null && Number.isFinite(step) && step > 0
+    ? Math.min(20, Math.max(0, 2 - Math.floor(Math.log10(step / scale))))
+    : undefined;
   if (abs >= 1_000) {
     try {
+      const scale = Math.pow(1000, Math.floor(Math.log10(abs) / 3));
       return new Intl.NumberFormat(locale, {
-        notation: "compact", maximumFractionDigits: 1,
-      }).format(n);
+        notation: "compact", maximumFractionDigits: precision(scale) ?? 1,
+      }).format(value);
     } catch {
-      if (abs >= 1_000_000) return `${+(n / 1_000_000).toFixed(1)}M`;
-      return `${+(n / 1_000).toFixed(1)}K`;
+      const scale = abs >= 1_000_000 ? 1_000_000 : 1_000;
+      return `${+(value / scale).toFixed(precision(scale) ?? 1)}${scale === 1_000_000 ? "M" : "K"}`;
     }
   }
-  return `${Math.round(n)}`;
+  const fractionDigits = precision(1);
+  try {
+    return new Intl.NumberFormat(locale, fractionDigits == null
+      ? { maximumSignificantDigits: 6 }
+      : { maximumFractionDigits: fractionDigits }).format(value);
+  } catch {
+    return String(Number(fractionDigits == null ? value.toPrecision(6) : value.toFixed(fractionDigits)));
+  }
 }
 
 export interface TrendSeries {
@@ -71,7 +84,7 @@ export function TrendChart({ series, labels, height = 240, ticks = 5 }: {
     return out;
   };
   const stroke = (pts: ReadonlyArray<number | null>, axis: "left" | "right" = "left") =>
-    runs(pts).map((run) => run.map(([i, v], n) =>
+    runs(pts).filter((run) => run.length > 1).map((run) => run.map(([i, v], n) =>
       `${n ? "L" : "M"}${x(i).toFixed(1)},${y(v, axis).toFixed(1)}`).join(" "));
   const fill = (pts: ReadonlyArray<number | null>, axis: "left" | "right" = "left") =>
     runs(pts).filter((run) => run.length > 1).map((run) => {
@@ -89,13 +102,13 @@ export function TrendChart({ series, labels, height = 240, ticks = 5 }: {
         <g key={g}>
           <line x1={PL} x2={W - PR} y1={y(g)} y2={y(g)} stroke="#E5EAF1" strokeWidth={1} />
           <text x={PL + 5} y={y(g) - 4} textAnchor="start" fontSize={10.5} fill="#8CA0B5">
-            {fmtAxis(g, locale)}
+            {fmtAxis(g, locale, grid[1] - grid[0])}
           </text>
         </g>
       ))}
       {rightGrid.map((g) => (
         <text key={`r-${g}`} x={W - PR + 7} y={y(g, "right") + 4} textAnchor="start" fontSize={10.5} fill="#8CA0B5">
-          {fmtAxis(g, locale)}
+          {fmtAxis(g, locale, rightGrid[1] - rightGrid[0])}
         </text>
       ))}
       {series.map((s) => (
@@ -107,6 +120,15 @@ export function TrendChart({ series, labels, height = 240, ticks = 5 }: {
             <path key={`s-${i}`} d={d} fill="none" stroke={s.color}
               strokeWidth={2.2} strokeLinejoin="round" strokeLinecap="round" />
           ))}
+          {runs(s.points).filter((run) => run.length === 1).map(([[i, v]]) => {
+            const label = `${s.label}${labels[i] ? `, ${labels[i]}` : ""}: ${v}`;
+            return (
+              <circle key={`p-${i}`} cx={x(i)} cy={y(v, s.axis ?? "left")}
+                r={3} fill={s.color} role="img" aria-label={label}>
+                <title>{label}</title>
+              </circle>
+            );
+          })}
         </g>
       ))}
       {labels.map((lb, i) => i % labelEvery !== 0 ? null : (
@@ -128,7 +150,7 @@ export function TrendLegend({ series }: { series: TrendSeries[] }) {
 }
 
 export interface BarGroup {
-  label: string; yours: number; bench: number; suffix?: string;
+  label: string; yours: number | null; bench: number | null; suffix?: string;
 }
 export function GroupBars({ groups, height = 230, format }: {
   groups: BarGroup[]; height?: number;
@@ -136,13 +158,13 @@ export function GroupBars({ groups, height = 230, format }: {
 }) {
   const { t, locale } = useLocale();
   const W = 560, H = 230, PL = 36, PB = 24, PT = 8, PR = 8;
-  const max = Math.max(1, ...groups.flatMap((g) => [g.yours, g.bench]));
+  const max = Math.max(1, ...groups.flatMap((g) => [g.yours, g.bench]).filter(isMeasured));
   const top = niceMax(max);
   const grid = niceTicks(top, 5);
   const y = (v: number) => PT + (H - PT - PB) * (1 - v / top);
   const slot = (W - PL - PR) / Math.max(1, groups.length);
   const bw = Math.min(30, slot / 4.4);
-  const fmt = format ?? ((v: number) => fmtAxis(v, locale));
+  const fmt = format ?? ((v: number) => fmtAxis(v, locale, grid[1] - grid[0]));
   return (
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height, display: "block" }}
       role="img" aria-label={t("charts.bars")}>
@@ -158,10 +180,18 @@ export function GroupBars({ groups, height = 230, format }: {
         const cx = PL + slot * (i + 0.5);
         return (
           <g key={g.label}>
-            <rect x={cx - bw - 3} y={y(g.yours)} width={bw}
-              height={Math.max(1, y(0) - y(g.yours))} rx={3} fill="#0A9183" />
-            <rect x={cx + 3} y={y(g.bench)} width={bw}
-              height={Math.max(1, y(0) - y(g.bench))} rx={3} fill="#CBD8E6" />
+            {isMeasured(g.yours) ? (
+              <rect x={cx - bw - 3} y={y(g.yours)} width={bw}
+                height={Math.max(1, y(0) - y(g.yours))} rx={3} fill="#0A9183" />
+            ) : (
+              <text x={cx - bw / 2 - 3} y={y(0) - 5} textAnchor="middle" fontSize={10.5} fill="#64748F">—</text>
+            )}
+            {isMeasured(g.bench) ? (
+              <rect x={cx + 3} y={y(g.bench)} width={bw}
+                height={Math.max(1, y(0) - y(g.bench))} rx={3} fill="#CBD8E6" />
+            ) : (
+              <text x={cx + bw / 2 + 3} y={y(0) - 5} textAnchor="middle" fontSize={10.5} fill="#64748F">—</text>
+            )}
             <text x={cx} y={H - 7} textAnchor="middle" fontSize={10.5} fill="#64748F">
               {g.label}
             </text>

@@ -15,8 +15,10 @@ measured zeros (documented limitation, surfaced in methodology).
 
 from __future__ import annotations
 
-import json
 import math
+
+from .currency_scope import money_scope
+from .metric_availability import missing_fields as _missing_of
 
 DEFINITION_VERSION = "analyst-metrics-v1"
 
@@ -356,13 +358,6 @@ METRICS = {
 }
 
 
-def _missing_of(row):
-    try:
-        return set(json.loads(row.get("missing_json") or "[]"))
-    except (ValueError, TypeError):
-        return set()
-
-
 def field_state(rows, field):
     """Availability of one raw field across rows.
 
@@ -404,8 +399,11 @@ def _result(metric_id, value, state, basis="", reasons=None,
 
 
 def _currencies(rows):
-    return sorted({(r.get("currency") or "").upper()
-                   for r in rows if (r.get("currency") or "").strip()})
+    scope = money_scope(rows)
+    currencies = scope["currencies"]
+    if currencies and scope["unknown_currency_contribution"]:
+        return currencies + ["(unknown)"]
+    return currencies
 
 
 def _currency_ok(rows):
@@ -415,7 +413,7 @@ def _currency_ok(rows):
     or none is recorded. Mixed currencies without a conversion policy
     are never combined.
     """
-    return len(_currencies(rows)) <= 1
+    return not money_scope(rows)["mixed_currency"]
 
 
 def unavailable_mixed_currency(metric_id, rows):
@@ -437,18 +435,25 @@ def pooled_ratio(rows, metric_id, num_field, den_field, scale=100.0):
     """
     if metric_id not in METRICS:
         raise ValueError("unknown metric %r" % (metric_id,))
-    num_state, num_rows = field_state(rows, num_field)
-    den_state, den_rows = field_state(rows, den_field)
-    if num_state == UNSUPPORTED or den_state == UNSUPPORTED:
+    num_supplied = den_supplied = 0
+    usable = []
+    for row in rows:
+        missing = _missing_of(row)
+        has_num = num_field not in missing
+        has_den = den_field not in missing
+        num_supplied += has_num
+        den_supplied += has_den
+        if has_num and has_den:
+            usable.append(row)
+    if not num_supplied or not den_supplied:
         return _result(metric_id, None, UNSUPPORTED,
                        reasons=["%s or %s not supplied in scope"
                                 % (num_field, den_field)])
-    usable = [r for r in rows
-              if r in num_rows and r in den_rows]
+    # Preserve input order, duplicate rows and Python's float summation.
     num = sum(_num(r, num_field) for r in usable)
     den = sum(_num(r, den_field) for r in usable)
     reasons = []
-    if num_state == MISSING or den_state == MISSING:
+    if num_supplied < len(rows) or den_supplied < len(rows):
         reasons.append("%d of %d rows lack %s/%s; pooled from %d rows"
                        % (len(rows) - len(usable), len(rows),
                           num_field, den_field, len(usable)))
@@ -543,7 +548,7 @@ def hold_rate(rows, num_field, den_field):
 
 def _watch_bases(rows):
     return sorted({(r.get("watch_time_basis") or "") for r in rows
-                   if _num(r, "watch_time_total_s") > 0})
+                   if _num(r, "watch_time_total_s") >= 0})
 
 
 def awt_per_view(rows, durations=None):
@@ -554,58 +559,65 @@ def awt_per_view(rows, durations=None):
     averages only when totals are absent but weights exist; per-user
     averages are never mixed in. Returns (awt_result, pct_result).
     """
-    total_state, total_rows = field_state(rows, "watch_time_total_s")
-    if total_state == UNSUPPORTED:
-        none = _result("awt_per_view", None, UNSUPPORTED,
-                       reasons=["no watch time supplied in scope"])
-        return none, _result("awt_pct_duration", None, UNSUPPORTED,
-                             reasons=["no watch time supplied in scope"])
-    bases = _watch_bases(rows)
-    if len(bases) > 1:
-        none = _result("awt_per_view", None, NA,
-                       reasons=["mixed watch-time bases %s cannot pool"
-                                % bases])
-        return none, _result("awt_pct_duration", None, NA,
-                             reasons=["mixed watch-time bases %s cannot pool"
-                                      % bases])
+    _, total_rows = field_state(rows, "watch_time_total_s")
     totals = [(r, _num(r, "watch_time_total_s")) for r in total_rows]
-    totals = [(r, v) for r, v in totals if v > 0]
+    totals = [(r, v) for r, v in totals if v >= 0]
     if totals:
+        # A supplied zero is a measurement. Include it with its matching
+        # positive count, and exclude incomplete rows from both sums.
+        matched = []
+        for row, value in totals:
+            count_field = ("video_starts" if row.get("watch_time_basis") == "starts"
+                           else "video_views")
+            count = _num(row, count_field)
+            if count_field not in _missing_of(row) and count > 0:
+                matched.append((row, value, count))
+        if not matched:
+            none = _result("awt_per_view", None, NA,
+                           reasons=["no positive matching view counts for supplied totals"])
+            return none, _result("awt_pct_duration", None, NA,
+                                 reasons=["no positive matching view counts"])
+        bases = _watch_bases([row for row, _, _ in matched])
+        if len(bases) > 1:
+            none = _result("awt_per_view", None, NA,
+                           reasons=["mixed watch-time bases %s cannot pool" % bases])
+            return none, _result("awt_pct_duration", None, NA,
+                                 reasons=["mixed watch-time bases %s cannot pool" % bases])
         count_field = ("video_starts" if (bases and bases[0] == "starts")
                        else "video_views")
-        count_state, count_rows = field_state(
-            [r for r, _ in totals], count_field)
-        # Both sides over the SAME rows: a watch total whose matching
-        # count is missing contributes to neither sum (missing is
-        # never a zero), or AWT inflates.
-        num = sum(v for r, v in totals if r in count_rows)
-        den = sum(_num(r, count_field) for r in count_rows)
-        if den <= 0:
-            none = _result("awt_per_view", None, NA,
-                           reasons=["no matching %s for supplied totals"
-                                    % count_field])
-            return none, _result("awt_pct_duration", None, NA,
-                                 reasons=["no matching %s" % count_field])
+        num = sum(value for _, value, _ in matched)
+        den = sum(count for _, _, count in matched)
         reasons = []
-        if count_state == MISSING or total_state == MISSING:
+        if len(matched) < len(rows):
             reasons.append(
-                "pooled from %d of %d rows; rows missing watch time"
-                " or %s are excluded from both sums"
-                % (len(count_rows), len(rows), count_field))
+                "pooled from %d of %d rows; rows without supplied watch time"
+                " or a positive matching %s are excluded from both sums"
+                % (len(matched), len(rows), count_field))
         awt = _result("awt_per_view", num / den, MEASURED,
                       basis="total_over_%s" % count_field,
                       numerator=num, denominator=den, reasons=reasons)
+    elif total_rows:
+        none = _result("awt_per_view", None, NA,
+                       reasons=["supplied watch totals contain no nonnegative values"])
+        return none, _result("awt_pct_duration", None, NA,
+                             reasons=["supplied watch totals contain no nonnegative values"])
     else:
         # Weighted mean of reported per-view averages with correct
         # weights; rounded source averages make this an approximation.
+        _, average_rows = field_state(rows, "avg_watch_per_view_s")
+        if not average_rows:
+            reason = "no watch totals or reported per-view averages supplied"
+            return (_result("awt_per_view", None, UNSUPPORTED, reasons=[reason]),
+                    _result("awt_pct_duration", None, UNSUPPORTED, reasons=[reason]))
         weighted, weights = 0.0, 0.0
-        for r in total_rows:
+        matched_count = 0
+        for r in average_rows:
             avg = _num(r, "avg_watch_per_view_s")
             w = _num(r, "video_views")
-            if avg > 0 and w > 0 and "avg_watch_per_view_s" not in \
-                    _missing_of(r):
+            if avg >= 0 and w > 0 and "video_views" not in _missing_of(r):
                 weighted += avg * w
                 weights += w
+                matched_count += 1
         if weights <= 0:
             none = _result("awt_per_view", None, NA,
                            reasons=["totals and weighted averages both"
@@ -613,11 +625,16 @@ def awt_per_view(rows, durations=None):
             return none, _result("awt_pct_duration", None, NA,
                                  reasons=["totals and weighted averages"
                                           " both unavailable"])
+        reasons = ["approximation from rounded source averages"]
+        if matched_count < len(rows):
+            reasons.append(
+                "pooled from %d of %d rows; rows without a supplied nonnegative"
+                " per-view average or positive video_views are excluded from both sums"
+                % (matched_count, len(rows)))
         awt = _result("awt_per_view", weighted / weights, ESTIMATED,
                       basis="weighted_mean_of_reported_avgs",
                       numerator=weighted, denominator=weights,
-                      reasons=["approximation from rounded source"
-                               " averages"])
+                      reasons=reasons)
     pct = _result("awt_pct_duration", None, NA,
                   reasons=["needs a single creative duration"])
     if durations is not None and len({r.get("creative_key") for r in rows
@@ -663,10 +680,14 @@ def cost_per_1000_reached(rows):
                                 " creative/day" % len(usable)])
     row = usable[0]
     reach = _num(row, "reach")
-    spend = _num(row, "spend")
     if reach <= 0:
         return _result("cost_per_1000_reached", None, NA,
                        reasons=["scope reach is zero"])
+    spend_state, _ = field_state([row], "spend")
+    if spend_state == UNSUPPORTED:
+        return _result("cost_per_1000_reached", None, UNSUPPORTED,
+                       reasons=["no spend supplied for the row with unique reach"])
+    spend = _num(row, "spend")
     if not _currency_ok(rows):
         return _result("cost_per_1000_reached", None, NA,
                        reasons=["mixed currencies %s need a conversion"
@@ -677,7 +698,7 @@ def cost_per_1000_reached(rows):
 
 
 def frequency(rows):
-    """Reported frequency, or impressions/reach at a single scope."""
+    """Reported frequency, or supplied impressions/reach on one observed row."""
     _, usable = field_state(rows, "frequency")
     reported = [(r, _num(r, "frequency")) for r in usable
                 if _num(r, "frequency") > 0]
@@ -703,49 +724,54 @@ def frequency(rows):
         return _result("frequency", value, ESTIMATED,
                        basis="mean_reported",
                        reasons=["mean of reported frequency"])
-    _, reach_rows = field_state(rows, "reach")
-    if len(reach_rows) == 1:
-        reach = _num(reach_rows[0], "reach")
-        impr = sum(_num(r, "impressions") for r in rows)
+    if len(rows) == 1 and not {"impressions", "reach"}.intersection(_missing_of(rows[0])):
+        reach = _num(rows[0], "reach")
+        impr = _num(rows[0], "impressions")
         if reach > 0:
             return _result("frequency", impr / reach, MEASURED,
                            basis="impressions_over_scope_reach",
                            numerator=impr, denominator=reach)
     return _result("frequency", None, NA,
-                   reasons=["no reported frequency and reach cannot be"
-                            " summed across rows"])
+                   reasons=["no reported frequency; fallback requires one row"
+                            " with supplied impressions and positive reach"])
 
 
 def engagement_rate(rows):
     """Pooled interactions over impressions, per platform definition.
 
-    Numerators pool first; rows missing every interaction field make
-    the metric unsupported rather than zero.
+    Numerator and denominator use the same rows: supplied impressions
+    and at least one interaction field. Partial interaction families are
+    retained as estimates, counting only the supplied interaction fields.
     """
     fields = ("likes", "comments", "shares", "saves")
-    states = [field_state(rows, f)[0] for f in fields]
-    if all(s == UNSUPPORTED for s in states):
+    prepared = [(row, _missing_of(row)) for row in rows]
+    have_interactions = [(row, missing) for row, missing in prepared
+                         if any(field not in missing for field in fields)]
+    if not have_interactions:
         return _result("engagement_rate", None, UNSUPPORTED,
                        reasons=["no interaction fields supplied"])
-    # Numerator rows carry at least one interaction field; denominator
-    # rows carry impressions. Partial rows are never dropped from the
-    # denominator just because one interaction field is missing.
-    have_any = [r for r in rows
-                if any(f not in _missing_of(r) for f in fields)]
-    have_impr = [r for r in rows
-                 if "impressions" not in _missing_of(r)]
-    num = sum(sum(_num(r, f) for f in fields) for r in have_any)
-    den = sum(_num(r, "impressions") for r in have_impr)
-    if den <= 0:
-        return _result("engagement_rate", None, NA,
-                       reasons=["no impressions"])
+    usable = [(row, missing) for row, missing in have_interactions
+              if "impressions" not in missing]
+    if not usable:
+        return _result("engagement_rate", None, UNSUPPORTED,
+                       reasons=["no rows supply both impressions and interaction fields"])
+    num = sum(_num(row, field) for row, missing in usable
+              for field in fields if field not in missing)
+    den = sum(_num(row, "impressions") for row, _ in usable)
     reasons = []
-    if len(have_any) < len(rows) or len(have_impr) < len(rows):
+    if len(usable) < len(prepared):
         reasons.append(
-            "pooled from %d interaction rows over %d impression rows;"
-            " rows missing every interaction field or impressions"
-            " are excluded" % (len(have_any), len(have_impr)))
-    state = MEASURED if all(s == MEASURED for s in states) else ESTIMATED
+            "%d of %d rows supply impressions and interaction fields;"
+            " remaining rows excluded" % (len(usable), len(prepared)))
+    partial = sum(any(field in missing for field in fields) for _, missing in usable)
+    if partial:
+        reasons.append(
+            "%d of %d matched rows omit some interaction fields;"
+            " only supplied interactions counted" % (partial, len(usable)))
+    if den <= 0:
+        return _result("engagement_rate", None, NA, numerator=num, denominator=den,
+                       reasons=reasons + ["no positive reported impressions in matched rows"])
+    state = ESTIMATED if reasons else MEASURED
     return _result("engagement_rate", num / den * 100.0, state,
                    basis="pooled_interactions", numerator=num,
                    denominator=den, reasons=reasons)

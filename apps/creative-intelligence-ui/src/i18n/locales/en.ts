@@ -1,5 +1,10 @@
+import { benchmarkReportingMessages } from "../benchmarkReporting";
+import { sourceCurrencyMessages } from "../sourceCurrency";
+
 /** English interface strings (source of truth for es/pl parity). */
 export const en = {
+  benchmarkReporting: benchmarkReportingMessages.en,
+  sourceCurrency: sourceCurrencyMessages.en,
   common: {
     save: "Save",
     saveChanges: "Save Changes",

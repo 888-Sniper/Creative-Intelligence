@@ -1,3 +1,7 @@
+import { pooledBenchmark, type BenchmarkMetadata } from "../components/benchmarkPooling";
+import { BenchmarkScopeNote } from "../components/BenchmarkScopeNote";
+import { SourceCurrencyNote } from "../components/SourceCurrencyNote";
+import { comparablePeriodCurrency, formatNativeMoney, sharedSourceCurrency, sourceMoneyKpi } from "../components/sourceCurrency";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "@/api/client";
@@ -8,6 +12,7 @@ import { useLocale } from "@/i18n";
 import { AnalyzeVideoSection, RecentUploadsSection, VideoUploadsProvider } from "@/components/VideoUploadCard";
 import { monthName } from "@/components/KpiTrend";
 import { GroupBars, RetentionCurve, TrendChart } from "@/components/charts";
+import { topPerformanceValue } from "@/components/performanceRanking";
 import { Icon } from "@/components/icons";
 import {
   CreativeThumb,
@@ -29,7 +34,6 @@ import {
   useCompareState,
   useDaily,
   useScopedApi,
-  type DayPoint,
 } from "@/components/product";
 
 interface CampaignTotals {
@@ -43,7 +47,7 @@ interface CampaignTotals {
   roas?: number | null;
 }
 
-interface BenchGroup {
+interface BenchGroup extends BenchmarkMetadata {
   spend: number;
   impressions: number;
   clicks: number;
@@ -94,24 +98,6 @@ function shortDay(iso: string, locale: string): string {
   return `${monthName(Number(m[2]), locale)} ${Number(m[3])}`;
 }
 
-function downsample(points: DayPoint[], max = 16): DayPoint[] {
-  if (points.length <= max) return points;
-  const size = Math.ceil(points.length / max);
-  const out: DayPoint[] = [];
-  for (let i = 0; i < points.length; i += size) {
-    const chunk = points.slice(i, i + size);
-    out.push({
-      date: chunk[0].date,
-      impressions: chunk.reduce((t, p) => t + num(p.impressions), 0),
-      clicks: chunk.reduce((t, p) => t + num(p.clicks), 0),
-      spend: chunk.reduce((t, p) => t + num(p.spend), 0),
-      conversions: chunk.reduce((t, p) => t + num(p.conversions), 0),
-      revenue: chunk.reduce((t, p) => t + num(p.revenue), 0),
-    });
-  }
-  return out;
-}
-
 function titleCase(value: string): string {
   return value.split("_").map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w)).join(" ");
 }
@@ -149,29 +135,15 @@ function benchValue(group: BenchGroup, metric: BenchMetric): number | null {
 }
 
 function baselineValue(groups: BenchGroup[], metric: BenchMetric): number | null {
-  const spend = groups.reduce((t, g) => t + num(g.spend), 0);
-  const impr = groups.reduce((t, g) => t + num(g.impressions), 0);
-  const clicks = groups.reduce((t, g) => t + num(g.clicks), 0);
-  const conv = groups.reduce((t, g) => t + num(g.conversions), 0);
-  const revenue = groups.reduce((t, g) => t + num(g.revenue), 0);
-  if (metric === "ctr") return impr ? (clicks / impr) * 100 : null;
-  if (metric === "roas") return spend ? revenue / spend : null;
-  if (metric === "cpa") return conv ? spend / conv : null;
-  return clicks ? spend / clicks : null;
+  const { value } = pooledBenchmark(groups, metric);
+  return value != null && metric === "ctr" ? value * 100 : value;
 }
 
-function formatBench(metric: BenchMetric, value: number | null, locale = "en"): string {
+function formatBench(metric: BenchMetric, value: number | null, locale: string, currency: string | null, unavailable: string): string {
   if (value == null || !Number.isFinite(value)) return "—";
   if (metric === "ctr") return fmtPct(value, 1, locale);
   if (metric === "roas") return fmtMult(value, locale);
-  try {
-    return new Intl.NumberFormat(locale, {
-      style: "currency", currency: "USD",
-      minimumFractionDigits: 2, maximumFractionDigits: 2,
-    }).format(value);
-  } catch {
-    return `$${value.toFixed(2)}`;
-  }
+  return formatNativeMoney(value, currency, locale, unavailable);
 }
 
 export function DashboardPage() {
@@ -332,7 +304,7 @@ export function DashboardPage() {
     ? t(`dashboard.greeting.${part}`, { name: firstName })
     : t(`dashboard.greeting.${part}Anon`);
 
-  const trend = useMemo(() => downsample(daily ?? []), [daily]);
+  const trend = useMemo(() => daily ?? [], [daily]);
   const leftLabel = kpiName(leftMetric);
   const rightLabel = kpiName(rightMetric);
   const trendSeries = [
@@ -349,9 +321,16 @@ export function DashboardPage() {
       .slice(0, 5);
   }, [platforms.data, benchMetric]);
   const platformBaseline = useMemo(
-    () => baselineValue(Object.values(platforms.data ?? {}), benchMetric),
+    () => pooledBenchmark(Object.values(platforms.data ?? {}), benchMetric),
     [platforms.data, benchMetric],
   );
+  const platformCurrency = useMemo(
+    () => sharedSourceCurrency(Object.values(platforms.data ?? {})),
+    [platforms.data],
+  );
+  const platformBaselineValue = platformBaseline.value == null ? null
+    : benchMetric === "ctr" ? platformBaseline.value * 100 : platformBaseline.value;
+  const platformTop = topPerformanceValue(platformGroups.map((group) => group.value), benchMetric);
 
   const topCreatives = useMemo(() => {
     const rows = creatives.data ?? [];
@@ -621,7 +600,9 @@ export function DashboardPage() {
   // a loaded nonempty scope with an uncomputable metric says Unavailable.
   const emptyScope = compare ? compare.current_n_ads === 0 : false;
   const kpi = (kind: KpiKind, value: number | null | undefined) => ({
-    display: compare ? kpiDisplay(kind, value, emptyScope, locale, unavailable) : "",
+    display: !compare ? "" : kind === "money"
+      ? sourceMoneyKpi(value, compare.currency_context?.current, emptyScope, locale, unavailable)
+      : kpiDisplay(kind, value, emptyScope, locale, unavailable),
     note: compare && kpiPlaceholderNote(kind, value, emptyScope) ? emptyNote : null,
   });
   const kpiConfigs = [
@@ -655,11 +636,8 @@ export function DashboardPage() {
         A hidden-yet-active scope is never silent: the chip below names
         it and clears it deliberately. */}
       <FilterPanel actions="none" showTeam={false} />
-      {wantedCurrency !== "USD" ? (
-        <p className="panel-sub" role="note" style={{ margin: "10px 0 0" }}>
-          {t("dashboard.currencyNote", { wanted: wantedCurrency })}
-        </p>
-      ) : null}
+      {compare ? <SourceCurrencyNote source={compare.currency_context?.current}
+        preferred={wantedCurrency} metric={t("dashboard.totalSpend")} t={t} /> : null}
       {filters.team ? (
         <div className="chip-row" style={{ margin: "10px 0 0" }}>
           <span className="chip-static">{t("dashboard.teamScope", { team: filters.team })}</span>
@@ -685,7 +663,7 @@ export function DashboardPage() {
                 icon={k.icon}
                 tint={k.tint}
                 metricLabel={kpiName(k.metric)}
-                compare={compare}
+                compare={k.metric === "spend" && !comparablePeriodCurrency(compare.currency_context) ? null : compare}
                 note={k.note}
               />
             </div>
@@ -744,18 +722,20 @@ export function DashboardPage() {
           )}
         >
           {platforms.data ? (
-            platformGroups.length ? (
+            platformGroups.length > 0 && (benchMetric === "cpa" || benchMetric === "cpc") && !platformCurrency ? (
+              <p role="status">{t("sourceCurrency.benchmark")}</p>
+            ) : platformGroups.length ? (
               <>
                 <GroupBars
                   height={205}
                   groups={platformGroups.map((g) => ({
                     label: platformLabel(g.key),
-                    yours: g.value ?? 0,
+                    yours: g.value,
                     bench: baseline === "Top Performer"
-                      ? Math.max(...platformGroups.map((x) => x.value ?? 0))
-                      : platformBaseline ?? 0,
+                      ? platformTop
+                      : platformBaselineValue,
                   }))}
-                  format={(v) => formatBench(benchMetric, v, locale)}
+                  format={(v) => formatBench(benchMetric, v, locale, platformCurrency, unavailable)}
                 />
                 <div className="legend">
                   <span><i style={{ background: "#0A9183", borderRadius: 2 }} />{t("dashboard.bench.yours")}</span>
@@ -764,6 +744,10 @@ export function DashboardPage() {
               </>
             ) : <EmptyState compact verbatim icon="bars" title={t("dashboard.bench.emptyTitle")} text={t("dashboard.bench.emptyBody")} />
           ) : <Skeleton height={205} />}
+          {platforms.data && (
+            <BenchmarkScopeNote active={baseline === "Scope Average"} result={platformBaseline}
+              metric={benchMetric} locale={locale} t={t} />
+          )}
         </Panel>
       </div>
       {/* Approved composition: Top Creatives and Retention sit side by

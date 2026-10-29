@@ -1,3 +1,4 @@
+import { hasComparableBenchmarkCurrency, pooledBenchmarkValue, type BenchmarkMetadata } from "../components/benchmarkPooling";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { api, ApiError, scopedPath } from "@/api/client";
@@ -36,7 +37,7 @@ import {
  * compare handoff, CSV export, detail drawer) and only changes the
  * presentation layer to the approved Campaigns reference. */
 
-interface CampaignRow {
+interface CampaignRow extends BenchmarkMetadata {
   spend: number; impressions: number; clicks: number; conversions: number;
   revenue: number; ctr: number | null; cpc: number | null; cpa: number | null; roas: number | null;
   campaigns: number;
@@ -227,9 +228,8 @@ export function CampaignsPage() {
   }, [campaigns.data, search]);
 
   const avgCtr = useMemo(() => {
-    const impr = rows.reduce((t, r) => t + num(r.impressions), 0);
-    const clicks = rows.reduce((t, r) => t + num(r.clicks), 0);
-    return impr ? (clicks / impr) * 100 : null;
+    const value = pooledBenchmarkValue(rows, "ctr");
+    return value == null ? null : value * 100;
   }, [rows]);
 
   const underperformers = useMemo(
@@ -426,13 +426,12 @@ export function CampaignsPage() {
     const impr = rows.reduce((s, r) => s + num(r.impressions), 0);
     const clicks = rows.reduce((s, r) => s + num(r.clicks), 0);
     const conv = rows.reduce((s, r) => s + num(r.conversions), 0);
-    const revenue = rows.reduce((s, r) => s + num(r.revenue), 0);
     switch (kpiKey) {
-      case "roas": return spend ? revenue / spend : null;
-      case "ctr": return impr ? clicks / impr : null;
-      case "cpa": return conv ? spend / conv : null;
-      case "cpc": return clicks ? spend / clicks : null;
-      case "spend": return rows.length ? spend / rows.length : null;
+      case "roas":
+      case "ctr":
+      case "cpa":
+      case "cpc": return pooledBenchmarkValue(rows, kpiKey);
+      case "spend": return rows.length && hasComparableBenchmarkCurrency(rows) ? spend / rows.length : null;
       case "impressions": return rows.length ? impr / rows.length : null;
       case "clicks": return rows.length ? clicks / rows.length : null;
       case "conversions": return rows.length ? conv / rows.length : null;

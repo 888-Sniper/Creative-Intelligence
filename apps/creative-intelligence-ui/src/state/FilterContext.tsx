@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useMemo, useState } from "react
 import type { ReactNode } from "react";
 import { useOptionalAuth } from "@/auth/AuthProvider";
 import { markCampaignStatusTouched } from "@/state/prefs";
+import { presetDateRange } from "./datePresets";
 
 export interface FilterValues {
   client: string;
@@ -78,10 +79,6 @@ interface FilterContextValue {
 
 const FilterContext = createContext<FilterContextValue | null>(null);
 
-function isoDate(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
-
 export function FilterProvider({ children }: { children: ReactNode }) {
   const [filters, setFilters] = useState<FilterValues>(EMPTY_FILTERS);
   const employeeId = useOptionalAuth()?.me?.employee?.id ?? "";
@@ -117,9 +114,9 @@ export function FilterProvider({ children }: { children: ReactNode }) {
   }, [employeeId]);
 
   const applyPresetDays = useCallback((days: number) => {
-    const to = new Date();
-    const from = new Date(to.getTime() - (days - 1) * 86400000);
-    setFilters((f) => ({ ...f, date: "", date_from: isoDate(from), date_to: isoDate(to) }));
+    const range = presetDateRange(days);
+    if (!range) return;
+    setFilters((f) => ({ ...f, date: "", ...range }));
   }, []);
 
   const scope = useMemo(() => scopeParams(filters), [filters]);

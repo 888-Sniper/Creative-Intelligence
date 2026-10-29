@@ -78,7 +78,12 @@ def classify(value, cohort_values, margin=MARGIN, higher_is_better=True):
 def _finding(rule_id, layer, creative_ids, signal, diagnosis,
              hypothesis, iteration, priority, confidence, observed,
              benchmarks, preserve, change, alternatives, limits,
-             metric_ids, scope, dataset_version, test_id=None):
+             metric_ids, scope, dataset_version, test_id=None, *,
+             polarity="context"):
+    """Record explicit strength/concern/context independently of priority.
+
+    Unspecified polarity is contextual, never an inferred adverse verdict.
+    """
     return {"finding_id": rule_id,
             "scope": scope,
             "dataset_version": dataset_version,
@@ -92,6 +97,7 @@ def _finding(rule_id, layer, creative_ids, signal, diagnosis,
             "alternative_explanations": list(alternatives),
             "recommended_iteration": iteration,
             "priority": priority,
+             "polarity": polarity,
             "confidence_level": confidence["level"],
             "confidence_reasons": confidence["reasons"],
             "element_to_preserve": preserve,
@@ -200,7 +206,7 @@ def _benchmarks(ctx, metric_ids, higher_map=None):
 
 RULE_SPECS = [
     # -- Funnel: stop -> hold -> depth -------------------------------------
-    {"id": "low_hook", "layer": "stop",
+    {"id": "low_hook", "layer": "stop", "polarity": "concern",
      "objectives": ("reach", "conversions", "any"), "match": "any",
      "bands": {"hook_rate_2s_impr": ["low"],
                "hook_rate_3s_impr": ["low"]},
@@ -219,7 +225,7 @@ RULE_SPECS = [
                       "captions-off viewing on silent openings"],
      "limitations": ["opening not yet classified — confirm"
                      " opening_delivery"]},
-    {"id": "hook_ok_body_weak", "layer": "hold",
+    {"id": "hook_ok_body_weak", "layer": "hold", "polarity": "concern",
      "objectives": ("reach", "conversions", "any"), "match": "all",
      "bands": {"hook_rate_3s_impr": ["high"],
                "quartile_25_impr": ["low"]},
@@ -237,7 +243,7 @@ RULE_SPECS = [
                       " mechanically",
                       "25% lands at different seconds per duration"],
      "limitations": ["check quartile denominator definition"]},
-    {"id": "mid_drop", "layer": "depth",
+    {"id": "mid_drop", "layer": "depth", "polarity": "concern",
      "objectives": ("reach", "conversions", "any"), "match": "all",
      "bands": {"quartile_25_impr": ["high"],
                "quartile_50_impr": ["low"]},
@@ -251,7 +257,7 @@ RULE_SPECS = [
      "change": "mid-creative pacing and repetition",
      "alternatives": ["duration differences shift what 50% means"],
      "limitations": ["compare same-duration cohorts here"]},
-    {"id": "weak_ending", "layer": "depth",
+    {"id": "weak_ending", "layer": "depth", "polarity": "concern",
      "objectives": ("reach", "conversions", "any"), "match": "all",
      "bands": {"quartile_50_impr": ["high"],
                "completion_impr": ["low"]},
@@ -267,7 +273,7 @@ RULE_SPECS = [
      "alternatives": ["long duration explains low completion mechanically"],
      "limitations": ["completion denominator: exposures vs retained"]},
     # -- Attention quality --------------------------------------------------
-    {"id": "hook_body_mismatch", "layer": "hold",
+    {"id": "hook_body_mismatch", "layer": "hold", "polarity": "concern",
      "objectives": ("reach", "conversions", "any"), "match": "all",
      "bands": {"hook_rate_2s_impr": ["high"],
                "awt_per_view": ["low"]},
@@ -280,7 +286,7 @@ RULE_SPECS = [
      "change": "body relevance to the hook promise",
      "alternatives": ["AWT basis mismatch across rows (see reasons)"],
      "limitations": ["AWT needs a stated per-view basis"]},
-    {"id": "narrow_appeal", "layer": "hold",
+    {"id": "narrow_appeal", "layer": "hold", "polarity": "context",
      "objectives": ("reach", "conversions", "any"), "match": "all",
      "bands": {"hook_rate_2s_impr": ["average"],
                "awt_per_view": ["high"]},
@@ -294,7 +300,7 @@ RULE_SPECS = [
      "change": "opening clarity",
      "alternatives": ["niche audience delivery, not creative breadth"],
      "limitations": ["small-cohort AWT is noisy"]},
-    {"id": "length_completion", "layer": "depth",
+    {"id": "length_completion", "layer": "depth", "polarity": "context",
      "objectives": ("reach", "conversions", "any"), "match": "all",
      "bands": {"completion_impr": ["low"], "awt_per_view": ["high"]},
      "signal": "low completion with good average watch time",
@@ -306,7 +312,7 @@ RULE_SPECS = [
      "change": "duration (cutdown)",
      "alternatives": ["quartile thresholds shift with duration"],
      "limitations": ["judge with seconds, not completion alone"]},
-    {"id": "short_completion", "layer": "depth",
+    {"id": "short_completion", "layer": "depth", "polarity": "context",
      "objectives": ("reach", "conversions", "any"), "match": "all",
      "bands": {"completion_impr": ["high"], "awt_per_view": ["low"]},
      "signal": "high completion with low average watch time",
@@ -320,7 +326,7 @@ RULE_SPECS = [
      "alternatives": ["looping playback inflates completions"],
      "limitations": ["completion and AWT answer different questions"]},
     # -- Cost / efficiency (lower-is-better flagged per metric) ------------
-    {"id": "costly_quality", "layer": "efficiency",
+    {"id": "costly_quality", "layer": "efficiency", "polarity": "concern",
      "objectives": ("reach", "conversions", "any"), "match": "all",
      "bands": {"vtr": ["high"], "cpcv": ["low"]},
      "higher": {"cpcv": False},
@@ -335,7 +341,7 @@ RULE_SPECS = [
      "change": "delivery conditions",
      "alternatives": ["auction competition in this window"],
      "limitations": ["CPCV needs compatible completed views"]},
-    {"id": "cheap_views_thin_attention", "layer": "efficiency",
+    {"id": "cheap_views_thin_attention", "layer": "efficiency", "polarity": "concern",
      "objectives": ("reach", "conversions", "any"), "match": "all",
      "bands": {"vtr": ["low"], "cpcv": ["high"]},
      "higher": {"cpcv": False},
@@ -349,7 +355,7 @@ RULE_SPECS = [
      "change": "attention quality (hook and hold)",
      "alternatives": ["view definition differs by placement"],
      "limitations": ["VTR denominator must be stated"]},
-    {"id": "costly_reach", "layer": "efficiency",
+    {"id": "costly_reach", "layer": "efficiency", "polarity": "concern",
      "objectives": ("reach", "any"), "match": "all",
      "bands": {"cpm": ["low"], "hook_rate_2s_impr": ["high"]},
      "higher": {"cpm": False},
@@ -363,7 +369,7 @@ RULE_SPECS = [
      "change": "audience and placement mix",
      "alternatives": ["seasonal auction pressure"],
      "limitations": ["single-currency scope required for CPM"]},
-    {"id": "cheap_no_hold", "layer": "efficiency",
+    {"id": "cheap_no_hold", "layer": "efficiency", "polarity": "concern",
      "objectives": ("reach", "any"), "match": "all",
      "bands": {"cpm": ["high"], "hook_rate_2s_impr": ["low"]},
      "higher": {"cpm": False},
@@ -377,7 +383,7 @@ RULE_SPECS = [
      "change": "opening, pace and clarity",
      "alternatives": ["low-quality placement mix"],
      "limitations": ["single-currency scope required for CPM"]},
-    {"id": "broad_unproven", "layer": "efficiency",
+    {"id": "broad_unproven", "layer": "efficiency", "polarity": "context",
      "objectives": ("reach", "any"), "match": "all",
      "bands": {"reach": ["high"], "frequency": ["low"]},
      "signal": "high reach with low frequency",
@@ -390,7 +396,7 @@ RULE_SPECS = [
      "alternatives": ["reach estimated by the platform, not counted"],
      "limitations": ["reach never sums across overlapping rows"]},
     # -- Engagement (attention x reaction) ----------------------------------
-    {"id": "watched_not_felt", "layer": "depth",
+    {"id": "watched_not_felt", "layer": "depth", "polarity": "context",
      "objectives": ("reach", "conversions", "any"), "match": "all",
      "bands": {"quartile_50_impr": ["high"],
                "engagement_rate": ["low"]},
@@ -404,7 +410,7 @@ RULE_SPECS = [
      "change": "reason to react (when objective-relevant)",
      "alternatives": ["engagement definitions differ by platform"],
      "limitations": ["engagement is secondary for awareness"]},
-    {"id": "spiky_reactions", "layer": "depth",
+    {"id": "spiky_reactions", "layer": "depth", "polarity": "concern",
      "objectives": ("reach", "conversions", "any"), "match": "all",
      "bands": {"quartile_50_impr": ["low"],
                "engagement_rate": ["high"]},
@@ -419,7 +425,7 @@ RULE_SPECS = [
      "alternatives": ["controversy drives comments without attention"],
      "limitations": ["sentiment data rarely available here"]},
     # -- Response (conversion objectives + hold/CTR, CTR/CVR) ---------------
-    {"id": "hold_no_click", "layer": "efficiency",
+    {"id": "hold_no_click", "layer": "efficiency", "polarity": "concern",
      "objectives": ("conversions", "any"), "match": "all",
      "bands": {"hold_rate": ["high"], "ctr_link": ["low"]},
      "signal": "high hold with low link CTR",
@@ -431,7 +437,7 @@ RULE_SPECS = [
      "change": "offer/benefit clarity and CTA",
      "alternatives": ["link CTR secondary on Reach briefs"],
      "limitations": ["hold_rate needs a stated numerator/denominator"]},
-    {"id": "click_no_convert", "layer": "efficiency",
+    {"id": "click_no_convert", "layer": "efficiency", "polarity": "concern",
      "objectives": ("conversions",), "match": "all",
      "bands": {"ctr_link": ["high"], "cvr": ["low"]},
      "signal": "high link CTR with low CVR",
@@ -446,7 +452,7 @@ RULE_SPECS = [
      "alternatives": ["attribution window mismatch",
                       "conversion event misdefined"],
      "limitations": ["needs conversion event + attribution stated"]},
-    {"id": "promising_undertested", "layer": "efficiency",
+    {"id": "promising_undertested", "layer": "efficiency", "polarity": "context",
      "objectives": ("conversions",), "match": "all",
      "bands": {"cpa": ["high"]},
      "higher": {"cpa": False},
@@ -526,7 +532,8 @@ def evaluate_spec(ctx, spec):
         _benchmarks(ctx, metric_ids, higher),
         spec["preserve"], spec["change"], spec["alternatives"],
         spec["limitations"], metric_ids, ctx.get("scope", {}),
-        ctx.get("dataset_version", ""))
+        ctx.get("dataset_version", ""),
+        polarity=spec.get("polarity", "context"))
 
 
 def evaluate_all(ctx, rules=None):
@@ -602,7 +609,8 @@ def rule_hook_hold_combo(ctx):
         ["audience mix differences between hook and hold cohorts"],
         ["hook and hold need stated, compatible definitions"],
         ["hook_rate_2s_impr", "hold_rate"], ctx.get("scope", {}),
-        ctx.get("dataset_version", ""))
+        ctx.get("dataset_version", ""),
+        polarity="strength" if (band_hook, band_hold) == ("high", "high") else "concern")
     return finding
 
 
@@ -643,7 +651,8 @@ def rule_quartile_completion_combo(ctx):
         "whichever quartile reads weak",
         ["duration mix across the cohort"], limits,
         ["quartile_25_impr", "completion_impr"], ctx.get("scope", {}),
-        ctx.get("dataset_version", ""))
+        ctx.get("dataset_version", ""),
+        polarity="strength" if (band25, bandc) == ("high", "high") else "concern")
 
 
 def rule_cost_combo(ctx):
@@ -682,11 +691,12 @@ def rule_cost_combo(ctx):
         "whichever cost side reads low", "whichever cost side reads high",
         ["auction dynamics in this window"],
         ["single-currency scope required"], ["cpm", "cpcv"],
-        ctx.get("scope", {}), ctx.get("dataset_version", ""))
+        ctx.get("scope", {}), ctx.get("dataset_version", ""),
+        polarity="strength" if (cost_cpm, cost_cpcv) == ("low", "low") else "concern")
 
 
 def _series_points(ctx):
-    """Date-ordered (frequency, vtr, spend, cpa) points with values."""
+    """Dated metric values retaining explicit money units and availability."""
     pts = []
     for point in ctx.get("series") or []:
         freq = (point.get("frequency") or {}).get("value")
@@ -695,7 +705,13 @@ def _series_points(ctx):
         cpa = cpa_raw.get("value") if _measured(cpa_raw) else None
         pts.append({"date": point.get("date", ""),
                     "frequency": freq, "vtr": vtr,
-                    "spend": point.get("spend", 0), "cpa": cpa})
+                    "spend": point.get("spend"), "cpa": cpa,
+                    "spend_state": point.get("spend_state"),
+                    "currency": point.get("currency"),
+                    "currencies": point.get("currencies"),
+                    "currency_known": point.get("currency_known"),
+                    "mixed_currency": point.get("mixed_currency"),
+                    "unknown_currency_contribution": point.get("unknown_currency_contribution")})
     return [p for p in pts if p["date"]]
 
 
@@ -748,7 +764,8 @@ def rule_fatigue(ctx):
              "seasonality or auction shifts"],
             ["needs the dated series; cross-section cannot show fatigue"],
             ["frequency", "vtr"], ctx.get("scope", {}),
-            ctx.get("dataset_version", ""))
+            ctx.get("dataset_version", ""),
+            polarity="concern")
     if freq_up and vtr_stable:
         return _finding(
             "fatigue_resilient", "efficiency", [ctx["creative_key"]],
@@ -771,7 +788,8 @@ def rule_fatigue(ctx):
             ["short window may miss later fatigue"],
             ["resilience is provisional until longer series exist"],
             ["frequency", "vtr"], ctx.get("scope", {}),
-            ctx.get("dataset_version", ""))
+            ctx.get("dataset_version", ""),
+            polarity="strength")
     return None
 
 
@@ -785,6 +803,12 @@ def rule_scale_deterioration(ctx):
     if len(pts) < 3:
         return None
     first, last = pts[0], pts[-1]
+    if any(point["spend"] is None or point["spend_state"] != metrics.MEASURED
+           or point["currency_known"] is not True or point["mixed_currency"]
+           or point["unknown_currency_contribution"] for point in (first, last)):
+        return None
+    if not first["currency"] or first["currency"] != last["currency"]:
+        return None
     spend_up = last["spend"] >= max(first["spend"], 1) * (1 + MARGIN)
     cpa_worse = (first["cpa"] is not None and last["cpa"] is not None
                  and first["cpa"] > 0
@@ -794,8 +818,8 @@ def rule_scale_deterioration(ctx):
                 and last["vtr"] <= first["vtr"] * (1 - MARGIN))
     if not spend_up or (not cpa_worse and not vtr_down):
         return None
-    signal = "spend %.0f → %.0f with %s deteriorating over %d points" % (
-        first["spend"], last["spend"],
+    signal = "spend %s %.0f → %.0f with %s deteriorating over %d points" % (
+        first["currency"], first["spend"], last["spend"],
         "CPA %.2f → %.2f" % (first["cpa"], last["cpa"]) if cpa_worse
         else "VTR %.1f%% → %.1f%%" % (first["vtr"], last["vtr"]),
         len(pts))
@@ -811,12 +835,14 @@ def rule_scale_deterioration(ctx):
                        ["cpa" if cpa_worse else "vtr"],
                        ["cpa" if cpa_worse else "vtr"]),
         {"spend_first": first["spend"], "spend_last": last["spend"],
-         "points": len(pts)},
+         "currency": first["currency"], "points": len(pts)},
         {}, "early efficient pocket", "audience breadth at scale",
         ["auction competition rising in the same window"],
-        ["series only; do not read scale from one snapshot"],
+        ["series only; do not read scale from one snapshot",
+         "endpoint spend fully reported in one shared native currency; no FX conversion"],
         ["cpa" if cpa_worse else "vtr"], ctx.get("scope", {}),
-        ctx.get("dataset_version", ""))
+        ctx.get("dataset_version", ""),
+        polarity="concern")
 
 
 def rule_brand_recall_gap(ctx):
@@ -853,7 +879,8 @@ def rule_brand_recall_gap(ctx):
         ["recall study methodology limits (see study reference)"],
         ["recall claim rests on %s only" % recall.get("study", "?")],
         ["quartile_50_impr"], ctx.get("scope", {}),
-        ctx.get("dataset_version", ""))
+        ctx.get("dataset_version", ""),
+        polarity="concern")
 
 
 def _first_span(ann, key):
@@ -927,7 +954,8 @@ def rule_drop_near_product(ctx):
         ["unrelated pacing dip at the same interval",
          "quartile-synthesized curves are coarse by construction"],
         ["interval resolution ±%ss; no exact-second claim" % resolution],
-        [], ctx.get("scope", {}), ctx.get("dataset_version", ""))
+        [], ctx.get("scope", {}), ctx.get("dataset_version", ""),
+        polarity="concern")
 
 
 def rule_drop_near_transition(ctx):
@@ -970,7 +998,8 @@ def rule_drop_near_transition(ctx):
         "pre-cut momentum", "transition continuity",
         ["coincidental pacing dip"],
         ["interval resolution ±%ss; no exact-second claim" % resolution],
-        [], ctx.get("scope", {}), ctx.get("dataset_version", ""))
+        [], ctx.get("scope", {}), ctx.get("dataset_version", ""),
+        polarity="concern")
 
 
 def rule_remix_hook_hold(ctx):
@@ -999,7 +1028,8 @@ def rule_remix_hook_hold(ctx):
         ["format labels are analyst-set; verify format_kind"],
         ["single-format read; compare against creator-led cohort"],
         ["hook_rate_2s_impr", "hold_rate"], ctx.get("scope", {}),
-        ctx.get("dataset_version", ""))
+        ctx.get("dataset_version", ""),
+        polarity="concern")
 
 
 SPECIAL_RULES = (rule_hook_hold_combo, rule_quartile_completion_combo,
@@ -1068,14 +1098,18 @@ def rule_format_comparison(summaries, rows_by_key, scope,
         groups.setdefault(group_of(summary), []).append(
             summary["creative_key"])
     pairs = [(["b_roll"], ["face_to_camera"], "b_roll_vs_face",
-              "Product demonstration may be effective in this cohort.",
-              "Test result/demo-first openings."),
+              ("Product demonstration may be effective in this cohort.",
+               "Test result/demo-first openings."),
+              ("Direct-to-camera execution may be effective in this cohort.",
+               "Test face-to-camera openings.")),
              (["face_to_camera", "creator_led"], ["graphics_remix"],
               "human_vs_graphics",
-              "Human-led execution may fit this cohort better.",
-              "Develop creator-led variants.")]
+              ("Human-led execution may fit this cohort better.",
+               "Develop creator-led variants."),
+              ("Graphics-led execution may fit this cohort better.",
+               "Develop graphics-led variants."))]
     findings = []
-    for left_names, right_names, rid, hypothesis, iteration in pairs:
+    for left_names, right_names, rid, left_advice, right_advice in pairs:
         left = [k for name in left_names for k in groups.get(name, [])]
         right = [k for name in right_names for k in groups.get(name, [])]
         if not left or not right:
@@ -1090,6 +1124,7 @@ def rule_format_comparison(summaries, rows_by_key, scope,
         if abs(diff_pp) < 1.0:
             continue  # no meaningful gap, no finding
         winner, loser = (left, right) if diff_pp > 0 else (right, left)
+        hypothesis, iteration = left_advice if diff_pp > 0 else right_advice
         small = len(winner) < MIN_COHORT_N or len(loser) < MIN_COHORT_N
         conf = {"level": "exploratory" if small else "medium",
                 "reasons": ["cohort groups n=%d vs n=%d%s" % (
@@ -1117,7 +1152,8 @@ def rule_format_comparison(summaries, rows_by_key, scope,
             ["exploratory below n=%d per group — do not present as"
              " proof" % MIN_COHORT_N] if small else
             ["observational; confirm with a controlled variant test"],
-            ["hook_rate_2s_impr"], scope, dataset_version))
+            ["hook_rate_2s_impr"], scope, dataset_version,
+            polarity="context"))
     return findings
 
 
@@ -1163,7 +1199,8 @@ def rule_duration_roles(summaries, scope, dataset_version):
         "each format in its role", "single-winner ranking",
         ["looping may inflate short completion"],
         ["pairwise illustration; cohort medians in the table"],
-        ["awt_per_view", "completion_impr"], scope, dataset_version)
+        ["awt_per_view", "completion_impr"], scope, dataset_version,
+        polarity="context")
 
 
 LAYERS = (("stop", "Does the opening capture attention?"),
@@ -1174,11 +1211,12 @@ LAYERS = (("stop", "Does the opening capture attention?"),
 
 
 def five_layer_summary(ctx, findings):
-    """Per-layer status for one creative: strength / concern / unknown.
+    """Per-layer status: strength / concern / mixed / unknown.
 
-    A layer reads "concern" when a medium+ confidence finding targets
-    it, "strength" when its key metric bands high with nothing against
-    it, else "unknown" (insufficient data is a verdict, not a gap).
+    Medium/high-confidence adverse findings support concern; positive
+    findings or favourable key metrics support strength. Both together
+    are mixed. Contextual, legacy unlabelled and low-confidence findings
+    cannot force either verdict. Confidence and priority are not polarity.
     """
     key_metrics = {"stop": ["hook_rate_2s_impr", "hook_rate_3s_impr"],
                    "hold": ["hold_rate", "quartile_25_impr"],
@@ -1190,9 +1228,11 @@ def five_layer_summary(ctx, findings):
     for layer, question in LAYERS:
         layer_findings = [f["finding_id"] for f in findings
                           if f.get("layer") == layer]
-        strong = [f for f in findings
-                  if f.get("layer") == layer
-                  and f.get("confidence_level") in ("high", "medium")]
+        supported = [f for f in findings
+                     if f.get("layer") == layer
+                     and f.get("confidence_level") in ("high", "medium")]
+        concerns = [f for f in supported if f.get("polarity") == "concern"]
+        positive = [f for f in supported if f.get("polarity") == "strength"]
         bands = []
         strengths = []
         for mid in key_metrics[layer]:
@@ -1209,9 +1249,12 @@ def five_layer_summary(ctx, findings):
                 bands.append((mid, band, round(value, 2)))
                 if direction != "neutral" and band == "high":
                     strengths.append(mid)
-        if strong:
+        has_strength = bool(positive or strengths)
+        if concerns and has_strength:
+            status = "mixed"
+        elif concerns:
             status = "concern"
-        elif strengths:
+        elif has_strength:
             status = "strength"
         elif bands or layer_findings:
             status = "mixed"

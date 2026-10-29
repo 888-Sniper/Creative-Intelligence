@@ -55,6 +55,7 @@ INPUT_COLUMNS = [
 INPUT_FIELD_COL = {field: col for col, field, _ in INPUT_COLUMNS}
 
 NA = '"n/a"'
+HOLD_DURATION_NA = '"n/a (25% before 3s)"'
 
 
 def _ratio_formula(num_ref, den_ref):
@@ -117,8 +118,8 @@ def metric_cell_formula(metric_id, row):
             formula = formula.replace("*100", "" if scale == 1 else "*1000")
         if metric_id == "hold_25_over_3s":
             dur = _input_ref("duration_s", row)
-            formula = ("IF(AND(%s<>\"\",%s<12),\"n/a (25%% before 3s)\",%s)"
-                       % (dur, dur, formula))
+            formula = ("IF(AND(%s<>\"\",%s<12),%s,%s)"
+                       % (dur, dur, HOLD_DURATION_NA, formula))
         return formula
     if metric_id == "awt_starts":
         watch, starts = _input_ref("watch_time_total_s", row), \
@@ -147,6 +148,10 @@ BENCHMARK_ROWS = [
     ("CPCV", "cpcv"),
     ("Cost per 1000 reached", "cost_per_1000_reached"),
 ]
+BENCHMARK_ROW_BY_METRIC = {
+    metric_id: FIRST_DATA_ROW + index
+    for index, (_, metric_id) in enumerate(BENCHMARK_ROWS) if metric_id
+}
 
 
 def _benchmark_formulas(metric_id, mcol):
@@ -175,8 +180,15 @@ def _benchmark_formulas(metric_id, mcol):
                                     LAST_DATA_ROW)
         # Mirror the engine: rows missing either side are excluded from
         # BOTH sums (missing is never a zero). Measured zeros stay in.
-        num_sum = "SUMIFS(%s,%s,\"<>\",%s,\"<>\")" % (nrng, nrng, drng)
-        den_sum = "SUMIFS(%s,%s,\"<>\",%s,\"<>\")" % (drng, nrng, drng)
+        criteria = ',%s,"<>",%s,"<>"' % (nrng, drng)
+        if metric_id == "hold_25_over_3s":
+            # Reuse per-creative availability for both pooled sums. Duration
+            # eligibility (including blank duration) stays in that formula.
+            criteria += ',Metrics!%s,"<>"' % rng
+            for unavailable in (NA, HOLD_DURATION_NA):
+                criteria += ',Metrics!%s,"<>"&%s' % (rng, unavailable)
+        num_sum = "SUMIFS(%s%s)" % (nrng, criteria)
+        den_sum = "SUMIFS(%s%s)" % (drng, criteria)
         pooled = ("IF(%s=0,\"n/a\",%s/%s%s)"
                   % (den_sum, num_sum, den_sum,
                      "" if scale == 1 else "*%d" % scale))
@@ -199,24 +211,25 @@ HYPOTHESIS_RULES = [
 
 
 def hypothesis_formula(rule_id, row):
-    # Benchmarks data rows start at FIRST_DATA_ROW in BENCHMARK_ROWS
-    # order: 2s hook -> row 6, hold -> row 8.
-    hook = "Metrics!B%d" % row
-    bench = "Benchmarks!B$%d" % FIRST_DATA_ROW
+    # Resolve each metric and its own benchmark from the sheet layout.
+    # Text, blank and error cells are insufficient data, not healthy signals.
     if rule_id == "low_hook":
-        return ("IF(OR(%s=\"n/a\",%s=\"n/a\"),\"insufficient data\","
+        hook = "Metrics!%s%d" % (METRIC_COL["hook_rate_2s_impr"], row)
+        bench = "Benchmarks!B$%d" % BENCHMARK_ROW_BY_METRIC["hook_rate_2s_impr"]
+        return ("IF(AND(ISNUMBER(%s),ISNUMBER(%s)),"
                 "IF(%s<%s*0.8,\"Candidate: LOW 2s retention — %s\","
-                "\"hook OK\"))"
+                "\"hook OK\"),\"insufficient data\")"
                 % (hook, bench, hook, bench,
                    "opening may not establish attention"))
     if rule_id == "weak_hold":
-        hold = "Metrics!D%d" % row
-        hook3 = "Metrics!C%d" % row
-        hold_bench = "Benchmarks!B$%d" % (FIRST_DATA_ROW + 2)
-        return ("IF(OR(%s=\"n/a\",%s=\"n/a\",%s=\"n/a\"),\"insufficient data\","
+        hold = "Metrics!%s%d" % (METRIC_COL["hold_25_over_3s"], row)
+        hook3 = "Metrics!%s%d" % (METRIC_COL["hook_rate_3s_impr"], row)
+        hold_bench = "Benchmarks!B$%d" % BENCHMARK_ROW_BY_METRIC["hold_25_over_3s"]
+        hook3_bench = "Benchmarks!B$%d" % BENCHMARK_ROW_BY_METRIC["hook_rate_3s_impr"]
+        return ("IF(AND(ISNUMBER(%s),ISNUMBER(%s),ISNUMBER(%s),ISNUMBER(%s)),"
                 "IF(AND(%s>=%s*0.8,%s<%s*0.8),\"high hook / weak hold — %s\","
-                "\"hold OK or hook first\"))"
-                % (hook3, hold, hold_bench, hook3, bench, hold,
+                "\"hold OK or hook first\"),\"insufficient data\")"
+                % (hook3, hold, hook3_bench, hold_bench, hook3, hook3_bench, hold,
                    hold_bench, "body may not develop the opening promise"))
     raise ValueError("unknown rule %s" % rule_id)
 

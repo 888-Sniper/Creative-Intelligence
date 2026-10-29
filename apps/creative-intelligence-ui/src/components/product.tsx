@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, scopedPath } from "@/api/client";
 import { scopeParams, useFilters } from "@/state/FilterContext";
+import { useScopedLoad } from "@/state/useScopedLoad";
 import { KpiTrend, monthName } from "@/components/KpiTrend";
 import type { KpiComparison, KpiPeriod } from "@/components/KpiTrend";
+import type { PeriodCurrencyContext } from "./sourceCurrency";
 import { Icon } from "@/components/icons";
 import { useLocale } from "@/i18n";
 
@@ -150,25 +152,18 @@ export interface CompareResp {
   current_n_ads?: number;
   previous_n_ads?: number;
   metrics: Record<string, CompareMetric>;
+  /** Optional for older responses; absence never establishes a denomination. */
+  currency_context?: PeriodCurrencyContext;
 }
 export function useCompareState(refreshKey = 0): {
   data: CompareResp | null; error: string; loading: boolean;
 } {
   const { filters } = useFilters();
-  const [data, setData] = useState<CompareResp | null>(null);
-  const [error, setError] = useState("");
-  useEffect(() => {
-    let live = true;
-    api<CompareResp>("GET", scopedPath("/api/kpis/compare", scopeParams(filters)))
-      .then((r) => {
-        if (!live) return;
-        setData(r);
-        setError("");
-      })
-      .catch((e) => live && setError(e instanceof Error ? e.message : String(e)));
-    return () => { live = false; };
-  }, [filters, refreshKey]);
-  return { data, error, loading: data === null && error === "" };
+  const load = useCallback(
+    () => api<CompareResp>("GET", scopedPath("/api/kpis/compare", scopeParams(filters))),
+    [filters],
+  );
+  return useScopedLoad(load, refreshKey);
 }
 
 export function useCompare(refreshKey = 0) {
@@ -208,19 +203,11 @@ export function scopeBody(scope: URLSearchParams): Record<string, string[]> {
 export function useScopedApi<T>(path: string, refreshKey = 0) {
   const { filters } = useFilters();
   const scopeKey = scopeParams(filters).toString();
-  const [data, setData] = useState<T | null>(null);
-  const [error, setError] = useState("");
-  useEffect(() => {
-    let live = true;
-    setData(null);
-    setError("");
-    api<T>("GET", scopedPath(path, new URLSearchParams(scopeKey)))
-      .then((r) => live && setData(r))
-      .catch((e) => live && setError(e instanceof Error ? e.message : String(e)));
-    return () => { live = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [path, scopeKey, refreshKey]);
-  return { data, error, loading: data === null && error === "" };
+  const load = useCallback(
+    () => api<T>("GET", scopedPath(path, new URLSearchParams(scopeKey))),
+    [path, scopeKey],
+  );
+  return useScopedLoad(load, refreshKey);
 }
 
 export function platformLabel(value: string | null | undefined): string {

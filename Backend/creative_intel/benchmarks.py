@@ -6,6 +6,11 @@ import re
 from .analyst_metrics import METRICS as _METRIC_DEFS
 from .analyst_metrics import UNSUPPORTED as _FIELD_UNSUPPORTED
 from .analyst_metrics import field_state as _field_state
+from .currency_scope import currency_breakdown as currency_breakdown
+from .currency_scope import money_scope
+from .metric_availability import reported_common_kpi_details as _reported_common_kpi_details
+from .metric_availability import reported_roas_details as _reported_roas_details
+from .period_metrics import manual_period_deltas
 
 GROUPABLE = ("platform", "campaign", "hook_type", "creator_vs_branded",
              "edit_style", "format", "vertical")
@@ -16,36 +21,6 @@ def _weight(rows, metric):
     if spend <= 0:
         return 0.0
     return sum(r["spend"] * r[metric] for r in rows) / spend
-
-
-def currency_breakdown(rows):
-    """Distinct non-blank currency codes pooled in one scope.
-
-    Codes are upper-cased so "usd" and "USD" compare equal. An empty
-    list means no row recorded a currency — not "all the same".
-    """
-    out = set()
-    for r in rows or []:
-        code = str((r or {}).get("currency") or "").strip().upper()
-        if code:
-            out.add(code)
-    return sorted(out)
-
-
-def money_scope(rows):
-    """Currency comparability for one pooled scope (A14).
-
-    Money sums stay arithmetic totals, but ratios carrying currency
-    units (CPM/CPC/CPA/ROAS) are only meaningful single-currency: a
-    mixed scope reports them as None with this metadata instead of a
-    blended number. No FX conversion exists anywhere in the app, so
-    none is attempted — mixed scopes stay separable via
-    by_currency() below.
-    """
-    currencies = currency_breakdown(rows)
-    return {"currency": currencies[0] if len(currencies) == 1 else None,
-            "currencies": currencies,
-            "mixed_currency": len(currencies) > 1}
 
 
 def by_currency(rows):
@@ -73,17 +48,10 @@ def matched_roas(rows):
     spend's share of total spend (None when total spend is 0). Never
     divides reported revenue by unreported spend, and never treats
     missing revenue as reported zero — a scope with no reported rows
-    yields (None, 0.0).
+    yields no value, with zero coverage when total spend is positive.
     """
-    rows = list(rows or [])
-    total = sum((r or {}).get("spend", 0) or 0 for r in rows)
-    reported = [r for r in rows if (r or {}).get("revenue_reported")]
-    rep_spend = sum((r or {}).get("spend", 0) or 0 for r in reported)
-    revenue = sum((r or {}).get("revenue", 0) or 0 for r in reported)
-    coverage = (rep_spend / total) if total > 0 else None
-    if rep_spend <= 0:
-        return None, coverage
-    return round(revenue / rep_spend, 4), coverage
+    value, coverage, _ = _reported_roas_details(rows)
+    return value, coverage
 
 
 def pooled_registry_ratio(rows, metric_id, impressions=None):
@@ -120,9 +88,11 @@ def pooled_registry_ratio(rows, metric_id, impressions=None):
 def summarize(rows):
     """Spend-weighted roll-up of ad rows sharing one group key.
 
-    Extended keys (clicks, conversions, video_views, cpm, vtr, roas)
-    are additive: every pre-existing key keeps its exact meaning so
-    older consumers and tests are unaffected.
+    Raw totals retain their legacy numeric API. CTR and cost ratios
+    use matched reporting populations; metric_coverage records the
+    reporting and total row counts for those ratios. metric_components
+    preserves the unrounded reporting populations for downstream pooling;
+    money components still require the scope's currency comparability.
     """
     spend = sum(r["spend"] for r in rows)
     impr = sum(r["impressions"] for r in rows)
@@ -132,7 +102,8 @@ def summarize(rows):
     revenue = sum(r.get("revenue", 0) or 0 for r in rows)
     scope = money_scope(rows)
     mixed = scope["mixed_currency"]
-    roas, roas_coverage = matched_roas(rows)
+    roas, roas_coverage, roas_components = _reported_roas_details(rows)
+    ratios, coverage, components = _reported_common_kpi_details(rows)
     return {
         "n_ads": len(rows),
         "spend": round(spend, 2),
@@ -146,12 +117,14 @@ def summarize(rows):
         "currency": scope["currency"],
         "currencies": scope["currencies"],
         "mixed_currency": mixed,
+        "currency_known": scope["currency_known"],
+        "unknown_currency_contribution": scope["unknown_currency_contribution"],
         "by_currency": by_currency(rows),
-        "ctr": round(clicks / impr, 4) if impr else None,
-        "cpc": (None if mixed
-                else (round(spend / clicks, 2) if clicks else None)),
-        "cpm": (None if mixed
-                else (round(spend / impr * 1000, 2) if impr else None)),
+        "ctr": ratios["ctr"],
+        "cpc": None if mixed else ratios["cpc"],
+        "cpm": None if mixed else ratios["cpm"],
+        "metric_coverage": coverage,
+        "metric_components": {**components, "roas": roas_components},
         # A15: "vtr" is the registry's completed-view rate
         # (views_100 / impressions); the legacy plays-based number
         # survives under its honest name "view_rate". Both come from
@@ -159,8 +132,7 @@ def summarize(rows):
         "vtr": pooled_registry_ratio(rows, "vtr"),
         "view_rate": pooled_registry_ratio(rows, "view_rate"),
         "conv_rate_weighted": round(_weight(rows, "conv_rate"), 4),
-        "cpa": (None if mixed
-                else (round(spend / conv, 2) if conv else None)),
+        "cpa": None if mixed else ratios["cpa"],
         # A14: ROAS over the reporting sub-population only, with
         # coverage; None on mixed scopes like every money ratio.
         "roas": None if mixed else roas,
@@ -409,7 +381,8 @@ def kpis_for_rows(rows):
     views = sum(r.get("video_views", 0) or 0 for r in rows)
     scope = money_scope(rows)
     mixed = scope["mixed_currency"]
-    roas, roas_coverage = matched_roas(rows)
+    roas, roas_coverage, roas_components = _reported_roas_details(rows)
+    ratios, coverage, components = _reported_common_kpi_details(rows)
     return {
         "n_ads": len(rows),
         "spend": round(spend, 2),
@@ -422,16 +395,17 @@ def kpis_for_rows(rows):
         "currency": scope["currency"],
         "currencies": scope["currencies"],
         "mixed_currency": mixed,
+        "currency_known": scope["currency_known"],
+        "unknown_currency_contribution": scope["unknown_currency_contribution"],
         "by_currency": by_currency(rows),
-        "cpm": (None if mixed
-                else (round(spend / impr * 1000, 2) if impr else None)),
+        "cpm": None if mixed else ratios["cpm"],
         "vtr": pooled_registry_ratio(rows, "vtr"),
         "view_rate": pooled_registry_ratio(rows, "view_rate"),
-        "ctr": round(clicks / impr, 4) if impr else None,
-        "cpc": (None if mixed
-                else (round(spend / clicks, 2) if clicks else None)),
-        "cpa": (None if mixed
-                else (round(spend / conv, 2) if conv else None)),
+        "ctr": ratios["ctr"],
+        "cpc": None if mixed else ratios["cpc"],
+        "cpa": None if mixed else ratios["cpa"],
+        "metric_coverage": coverage,
+        "metric_components": {**components, "roas": roas_components},
         "roas": None if mixed else roas,
         "roas_coverage": roas_coverage,
     }
@@ -458,6 +432,9 @@ def describe_bands(values, weights):
     excluded from the bands and counted as n_missing: they must never
     crash the sort/arithmetic and must never be silently treated
     as zero.
+
+    A weighted mean needs positive total weight; otherwise it is None
+    with a reason, while valid unweighted percentiles remain available.
     """
     pairs = [(v, w) for v, w in zip(values or [], weights or [])
              if v is not None and w is not None]
@@ -473,15 +450,19 @@ def describe_bands(values, weights):
             "n": 0,
             "n_missing": len(list(values or [])),
             "mean_weighted": None,
+            "mean_weighted_reason": "no_usable_pairs",
             "p25": None,
             "median": None,
             "p75": None,
         }
-    mean = sum(v * w for v, w in pairs) / total if total > 0 else 0.0
+    mean = sum(v * w for v, w in pairs) / total if total > 0 else None
     return {
         "n": len(vals),
         "n_missing": len(list(values or [])) - len(vals),
-        "mean_weighted": round(mean, 4),
+        "mean_weighted": round(mean, 4) if mean is not None else None,
+        "mean_weighted_reason": (None if total > 0 else
+                                 "zero_total_weight" if total == 0 else
+                                 "non_positive_total_weight"),
         "p25": round(_percentile(ordered, 25), 4),
         "median": round(_percentile(ordered, 50), 4),
         "p75": round(_percentile(ordered, 75), 4),
@@ -876,7 +857,9 @@ def compare_periods(conn, a_from, a_to, b_from, b_to, filters=None,
     Both windows read the identical scope plus their own date range,
     so "August vs September for Beauty/TikTok in Spain" compares
     like with like. delta holds B-minus-A per metric (None when
-    either side is uncomputable). Ranges are inclusive YYYY-MM-DD;
+    either side is uncomputable or monetary units are incomparable).
+    delta_reasons explains unavailable monetary comparisons without changing
+    the native side values. Ranges are inclusive YYYY-MM-DD;
     a start after its end raises instead of silently returning
     empty.
     """
@@ -898,13 +881,9 @@ def compare_periods(conn, a_from, a_to, b_from, b_to, filters=None,
 
     side_a = _window(a_from, a_to, label_a)
     side_b = _window(b_from, b_to, label_b)
-    delta = {}
-    for metric in ("spend", "impressions", "clicks", "conversions",
-                   "cpm", "vtr", "view_rate", "ctr", "cpc", "cpa", "roas"):
-        va, vb = side_a["kpis"][metric], side_b["kpis"][metric]
-        delta[metric] = (round(vb - va, 4) if va is not None
-                         and vb is not None else None)
+    delta, delta_reasons = manual_period_deltas(side_a["kpis"], side_b["kpis"])
     return {"a": side_a, "b": side_b, "delta": delta,
+            "delta_reasons": delta_reasons,
             "scope": scope.describe()}
 
 
@@ -914,17 +893,11 @@ def _fmt_elements(values) -> str:
     return ", ".join(items) if items else "(none)"
 
 
-def _compact_money(value) -> str:
-    """Compact spend for why-text ($53.3K, not $53364.56)."""
-    try:
-        v = float(value)
-    except (TypeError, ValueError):
-        return str(value)
-    for unit, factor in (("M", 1_000_000.0), ("K", 1_000.0)):
-        if abs(v) >= factor:
-            text = f"{v / factor:.1f}".rstrip("0").rstrip(".")
-            return f"${text}{unit}"
-    return f"${v:.2f}"
+def _compact_money(value, currency) -> str:
+    """Compact native spend with an explicit denomination; no FX conversion."""
+    from .native_money import compact_money
+
+    return compact_money(value, currency)
 
 
 def compare_campaigns(conn, campaigns=None, rank_by="cpa", filters=None):
@@ -940,12 +913,20 @@ def compare_campaigns(conn, campaigns=None, rank_by="cpa", filters=None):
     and the UI must read "Insufficient data / no winner" instead
     of crowning an arbitrary campaign.
     """
+    from .creative_comparison import (
+        campaign_spend_note,
+        unavailable_campaign_cost_comparison,
+    )
+
     if rank_by not in KPI_KEYS:
         raise ValueError("rank_by must be one of %s" % sorted(KPI_KEYS))
     scope = resolve_scope(conn, filters)
     per = campaign_kpis(conn, campaigns, filters=scope.normalized())
     if len(per) < 1:
         raise ValueError("no campaigns match %r" % (campaigns,))
+    unavailable = unavailable_campaign_cost_comparison(per, rank_by)
+    if unavailable is not None:
+        return {**unavailable, "scope": scope.describe()}
     higher = KPI_DIRECTIONS[rank_by] == "higher"
 
     def _rank_key(name):
@@ -992,13 +973,12 @@ def compare_campaigns(conn, campaigns=None, rank_by="cpa", filters=None):
                         label, top, _fmt_elements(only_top or a),
                         bottom, _fmt_elements(only_bottom or b)))
             why["details"][key] = {"top": a, "bottom": b}
-        st, sb = per[top]["spend"], per[bottom]["spend"]
-        if st != sb:
-            bigger = top if st > sb else bottom
-            why["differences"].append(
-                "Scale differs: %s spent %s vs %s %s (%s carries more weight)"
-                % (top, _compact_money(st), bottom, _compact_money(sb), bigger))
-            why["details"]["spend"] = {"top": st, "bottom": sb}
+        spend_note, spend_details = campaign_spend_note(
+            top, bottom, per[top], per[bottom], _compact_money)
+        if spend_note:
+            why["differences"].append(spend_note)
+        if spend_details is not None:
+            why["details"]["spend"] = spend_details
         if not why["differences"]:
             why["differences"].append(
                 "same elements on every axis: gap is execution/scale, not mix")
@@ -1835,10 +1815,11 @@ def _display_platform(value):
     return _DISPLAY_PLATFORMS.get(lowered, str(value).strip().title())
 
 
+# Humanize categorical codes only; identifiers and free-form CTA text stay exact.
 _SLUG_FIELDS = frozenset({
-    "creative", "creative_key", "role", "hook", "hook_type",
+    "role", "hook", "hook_type",
     "hook_modality", "format", "creator_vs_branded", "edit_style",
-    "cta", "structure", "platform", "source"})
+    "structure", "platform", "source"})
 
 
 def _display_slug(value):

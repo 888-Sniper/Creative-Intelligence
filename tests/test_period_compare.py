@@ -213,8 +213,13 @@ class CompareKpisTest(unittest.TestCase):
         self.assertEqual(conv["state"], "new")
         self.assertIsNone(conv["percent_change"])
         # CPA previous is unmeasurable (no conversions) while current
-        # is: also "new", never infinite.
-        self.assertEqual(got["metrics"]["cpa"]["state"], "new")
+        # is measurable: unavailable comparison, never a zero baseline
+        # or infinity. The measured current CPA itself is retained.
+        cpa = got["metrics"]["cpa"]
+        self.assertIsNone(cpa["previous"])
+        self.assertIsNotNone(cpa["current"])
+        self.assertEqual(cpa["state"], "none")
+        self.assertIsNone(cpa["percent_change"])
 
     def test_both_zero_is_no_comparison(self):
         csv = HDR + _row("S", "a", 0, 0, 0, 0, 0, "meta", "2023-12-26")

@@ -38,8 +38,19 @@ class NativeCostComparisonTests(unittest.TestCase):
         self.assertIsNone(comparison.cost_comparison_reason(per.values(), "cpa"))
         self.assertEqual(comparison.rank_creatives(["A", "B"], per, "cpa", higher=False)[1], "B")
 
-    def test_unknown_denominations_cannot_produce_a_cost_winner(self):
+    def test_wholly_unspecified_explicit_scopes_keep_legacy_cost_winner(self):
         per = {"A": aggregate(None, cpa=10), "B": aggregate(None, cpa=8)}
+        self.assertIsNone(comparison.cost_comparison_reason(per.values(), "cpa"))
+        self.assertEqual(comparison.rank_creatives(["A", "B"], per, "cpa", higher=False),
+                         (["B", "A"], "B"))
+
+    def test_absent_currency_metadata_cannot_produce_a_cost_winner(self):
+        per = {"A": {"cpa": 10}, "B": {"cpa": 8}}
+        self.assertIsNotNone(comparison.cost_comparison_reason(per.values(), "cpa"))
+        self.assertEqual(comparison.rank_creatives(["A", "B"], per, "cpa", higher=False)[1], None)
+
+    def test_known_plus_unspecified_cannot_produce_a_cost_winner(self):
+        per = {"A": aggregate("GBP", cpa=10), "B": aggregate(None, cpa=8)}
         self.assertEqual(comparison.rank_creatives(["A", "B"], per, "cpa", higher=False)[1], None)
 
     def test_legacy_producer_without_currency_known_can_supply_explicit_currency(self):
@@ -155,9 +166,14 @@ class MetricExplanationTests(unittest.TestCase):
         self.assertIn("B leads on CTR (2 vs A 1)", notes)
         self.assertIn("B leads on ROAS (2 vs A 1)", notes)
 
-    def test_single_unknown_cost_value_gets_an_unavailability_explanation(self):
+    def test_single_legacy_unspecified_cost_value_needs_no_unavailability_note(self):
         notes = comparison.multi_metric_notes(["A", "B"], {"A": aggregate(None, cpa=8), "B": {}})
-        self.assertEqual(notes, [comparison.cost_comparison_reason([aggregate(None, cpa=8)], "cpa")])
+        self.assertEqual(notes, [])
+
+    def test_known_plus_unspecified_cost_values_get_an_unavailability_explanation(self):
+        per = {"A": aggregate("GBP", cpa=8), "B": aggregate(None, cpa=10)}
+        notes = comparison.multi_metric_notes(["A", "B"], per)
+        self.assertEqual(notes, [comparison.cost_comparison_reason(per.values(), "cpa")])
 
 
 class PrimaryWinnerTests(unittest.TestCase):
@@ -233,8 +249,12 @@ class CampaignComparisonAvailabilityTests(unittest.TestCase):
         per = {"UK 1": aggregate(cpa=10), "UK 2": aggregate(cpa=8)}
         self.assertIsNone(comparison.unavailable_campaign_cost_comparison(per, "cpa"))
 
-    def test_campaign_unknown_currency_cannot_acquire_a_default_denomination(self):
+    def test_campaign_wholly_unspecified_scopes_continue_the_existing_comparison(self):
         per = {"A": aggregate(None, cpa=10), "B": aggregate(None, cpa=8)}
+        self.assertIsNone(comparison.unavailable_campaign_cost_comparison(per, "cpa"))
+
+    def test_campaign_known_plus_unspecified_cannot_acquire_a_default_denomination(self):
+        per = {"A": aggregate("GBP", cpa=10), "B": aggregate(None, cpa=8)}
         result = comparison.unavailable_campaign_cost_comparison(per, "cpa")
         self.assertIsNone(result["winner"])
         self.assertIn("unknown", result["why"]["differences"][0])

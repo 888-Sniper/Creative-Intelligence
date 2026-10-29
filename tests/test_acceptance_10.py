@@ -1002,14 +1002,16 @@ class MultiCompareTest(unittest.TestCase):
         self.conn.close()
 
     def _datas(self, keys):
+        from creative_intel import currency_scope
         out = {}
         for key in keys:
             rows = [dict(zip(
                 ["spend", "impressions", "clicks", "conversions",
-                 "video_views", "revenue"],
+                 "video_views", "revenue", "currency"],
                 r)) for r in self.conn.execute(
                 "SELECT spend, impressions, clicks, conversions,"
-                " video_views, revenue FROM ads WHERE creative_key=?",
+                " video_views, revenue, currency FROM ads"
+                " WHERE creative_key=?",
                 (key,)).fetchall()]
             spend = sum(r["spend"] for r in rows)
             conv = sum(r["conversions"] for r in rows)
@@ -1019,7 +1021,8 @@ class MultiCompareTest(unittest.TestCase):
                 "spend": spend, "conversions": conv,
                 "cpa": round(spend / conv, 2) if conv else None,
                 "ctr": round(clicks / impr, 4) if impr else None,
-                "annotation": None}
+                "annotation": None,
+                **currency_scope.money_scope(rows)}
         return out
 
     def test_n_way_names_per_metric_leaders(self):
@@ -1056,8 +1059,10 @@ class MultiCompareTest(unittest.TestCase):
         self.assertIn("differences", pair["why"])
 
     def test_rank_creatives_follows_direction(self):
-        per = {"x": {"cpa": 10.0, "ctr": 0.01, "roas": None},
-               "y": {"cpa": 5.0, "ctr": 0.03, "roas": None},
+        per = {"x": {"cpa": 10.0, "ctr": 0.01, "roas": None,
+                     "currency": "USD"},
+               "y": {"cpa": 5.0, "ctr": 0.03, "roas": None,
+                     "currency": "USD"},
                "z": {"cpa": None, "ctr": None, "roas": None}}
         ranking, winner = server._rank_creatives(["x", "y", "z"], per, "cpa")
         self.assertEqual((ranking, winner), (["y", "x", "z"], "y"))

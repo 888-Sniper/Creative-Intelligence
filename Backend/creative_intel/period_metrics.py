@@ -62,15 +62,29 @@ def period_currency_context(cur_pooled, prev_pooled):
             "same_known_currency": cur_code is not None and cur_code == prev_code}
 
 
+def _explicitly_unspecified(snapshot):
+    """True for producer scopes that explicitly declare no currency."""
+    currency = snapshot["currency"]
+    return (snapshot["currencies"] == []
+            and snapshot["mixed_currency"] is False
+            and (currency is None
+                 or (isinstance(currency, str) and not currency.strip())))
+
+
 def manual_period_deltas(a_kpis, b_kpis):
-    """B-minus-A deltas, requiring matching known units for native money.
+    """B-minus-A deltas, requiring comparable units for native money.
 
     Preserve each side's native values and dimensionless/count arithmetic.
-    ROAS is dimensionless once measured within a side. This manual contract
-    does not change the automatic comparison's legacy unspecified-unit policy.
+    ROAS is dimensionless once measured within a side. Matching known units
+    compare directly; two explicitly unspecified producer scopes keep the
+    legacy arithmetic without inventing a denomination. Absent metadata,
+    known-plus-unknown mixes and different known units stay unavailable.
     Reasons are stable codes for localized consumer explanations; no FX occurs.
     """
-    same_currency = period_currency_context(b_kpis, a_kpis)["same_known_currency"]
+    context = period_currency_context(b_kpis, a_kpis)
+    same_currency = context["same_known_currency"] or (
+        _explicitly_unspecified(context["current"])
+        and _explicitly_unspecified(context["previous"]))
     delta, reasons = {}, {}
     for metric in MANUAL_PERIOD_METRICS:
         va, vb = a_kpis.get(metric), b_kpis.get(metric)

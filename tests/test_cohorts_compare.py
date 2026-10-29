@@ -521,10 +521,12 @@ class CreativeCompareParityTest(unittest.TestCase):
                   "hook": {"start_s": 0.0, "end_s": 3.0, "confidence": 0.9}}}
         da = {"spend": 100.0, "impressions": 10000, "clicks": 200,
               "conversions": 10, "cpa": 10.0, "ctr": 0.02, "vtr": 0.3,
-              "cpc": 0.5, "cpm": 10.0, "roas": 2.0, "annotation": aa}
+              "cpc": 0.5, "cpm": 10.0, "roas": 2.0, "annotation": aa,
+              "currency": "USD", "currencies": ["USD"]}
         db = {"spend": 100.0, "impressions": 10000, "clicks": 100,
               "conversions": 5, "cpa": 20.0, "ctr": 0.01, "vtr": 0.2,
-              "cpc": 1.0, "cpm": 10.0, "roas": 1.0, "annotation": ab}
+              "cpc": 1.0, "cpm": 10.0, "roas": 1.0, "annotation": ab,
+              "currency": "USD", "currencies": ["USD"]}
         why = server._creative_why("cka", "ckb", da, db)
         text = " ".join(why["differences"])
         self.assertEqual(why["top"], "cka")

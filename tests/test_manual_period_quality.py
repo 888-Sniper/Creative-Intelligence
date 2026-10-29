@@ -47,8 +47,10 @@ class ManualPeriodQualityTests(unittest.TestCase):
         a = {**kpis(), "currency": " gbp ", "currencies": ["gBp"]}
         self.assertEqual(period.manual_period_deltas(a, kpis(value=20))[0]["spend"], 10)
 
-    def test_two_unknown_units_do_not_establish_comparability(self):
-        self.assert_money_unavailable(kpis(None), kpis(None, 20))
+    def test_two_wholly_unspecified_units_keep_legacy_deltas(self):
+        delta, reasons = period.manual_period_deltas(kpis(None), kpis(None, 20))
+        self.assertEqual(delta["spend"], 10)
+        self.assertEqual(reasons, {})
 
     def test_known_and_unknown_units_are_not_comparable_in_either_order(self):
         for a, b in [(kpis(), kpis(None)), (kpis(None), kpis())]:
@@ -109,6 +111,8 @@ class ManualPeriodQualityTests(unittest.TestCase):
         self.assertEqual(delta["roas"], 1.25)
         self.assertNotIn("roas", reasons)
 
-    def test_automatic_legacy_unknown_unit_policy_is_unchanged(self):
+    def test_legacy_unknown_unit_policy_is_shared_by_automatic_and_manual(self):
         self.assertTrue(period._money_comparable(kpis(None), kpis(None)))
-        self.assert_money_unavailable(kpis(None), kpis(None))
+        delta, reasons = period.manual_period_deltas(kpis(None), kpis(None, 20))
+        self.assertEqual(delta["spend"], 10)
+        self.assertEqual(reasons, {})

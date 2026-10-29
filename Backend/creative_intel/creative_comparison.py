@@ -19,11 +19,26 @@ def cost_comparison_reason(groups, metric):
     These are aggregate metadata records, not raw spend rows. Older producers
     may omit currency_known; an explicit currency plus consistent metadata
     still establishes its unit. An explicit false flag does not.
+
+    Wholly unspecified explicit scopes (every valued aggregate declares no
+    currency) keep legacy arithmetic, matching currency_scope: comparability
+    is allowed without inventing a denomination. Absent metadata entirely,
+    known-plus-unknown mixes and multiple known units stay unavailable.
     """
     if metric not in MONETARY_METRICS:
         return None
     reason = ("%s comparison unavailable: amounts have different or unknown"
               " currencies." % metric.upper())
+    valued = [group for group in groups if group.get(metric) is not None]
+    if valued and all(
+            not isinstance(group.get("currency"), str)
+            or not group.get("currency").strip()
+            for group in valued) and all(
+            isinstance(group.get("currencies"), (list, tuple))
+            and not group.get("currencies")
+            and not group.get("mixed_currency")
+            for group in valued):
+        return None
     currencies = set()
     for group in groups:
         if group.get(metric) is None:
@@ -105,8 +120,8 @@ def campaign_spend_note(top_name, bottom_name, top, bottom, formatter):
         return None, None
     bigger = top_name if number_top > number_bottom else bottom_name
     note = ("Scale differs: %s spent %s vs %s %s (%s has higher native spend)"
-            % (top_name, formatter(spend_top, top["currency"]),
-               bottom_name, formatter(spend_bottom, bottom["currency"]), bigger))
+            % (top_name, formatter(spend_top, top.get("currency")),
+               bottom_name, formatter(spend_bottom, bottom.get("currency")), bigger))
     return note, {"top": spend_top, "bottom": spend_bottom}
 
 

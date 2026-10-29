@@ -19,7 +19,7 @@ GROUPABLE = ("platform", "campaign", "hook_type", "creator_vs_branded",
 def _weight(rows, metric):
     spend = sum(r["spend"] for r in rows)
     if spend <= 0:
-        return 0.0
+        return None
     return sum(r["spend"] * r[metric] for r in rows) / spend
 
 
@@ -94,6 +94,7 @@ def summarize(rows):
     preserves the unrounded reporting populations for downstream pooling;
     money components still require the scope's currency comparability.
     """
+    weighted_conv = _weight(rows, "conv_rate")
     spend = sum(r["spend"] for r in rows)
     impr = sum(r["impressions"] for r in rows)
     clicks = sum(r["clicks"] for r in rows)
@@ -131,7 +132,8 @@ def summarize(rows):
         # pooled_registry_ratio over analyst_metrics.METRICS.
         "vtr": pooled_registry_ratio(rows, "vtr"),
         "view_rate": pooled_registry_ratio(rows, "view_rate"),
-        "conv_rate_weighted": round(_weight(rows, "conv_rate"), 4),
+        "conv_rate_weighted": (round(weighted_conv, 4)
+                               if weighted_conv is not None else None),
         "cpa": None if mixed else ratios["cpa"],
         # A14: ROAS over the reporting sub-population only, with
         # coverage; None on mixed scopes like every money ratio.

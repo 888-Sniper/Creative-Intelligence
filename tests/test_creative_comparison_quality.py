@@ -63,7 +63,7 @@ class NativeCostComparisonTests(unittest.TestCase):
                 self.assertIsNotNone(comparison.cost_comparison_reason([aggregate(cpa=10), invalid], "cpa"))
 
     def test_inconsistent_declared_currencies_are_not_treated_as_known(self):
-        for declared in (["EUR"], ["GBP", "EUR"], [None], "GBP"):
+        for declared in (["EUR"], ["GBP", "EUR"], [None], "GBP", []):
             with self.subTest(declared=declared):
                 self.assertIsNotNone(comparison.cost_comparison_reason(
                     [aggregate(cpa=8, currencies=declared)], "cpa"))

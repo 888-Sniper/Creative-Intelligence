@@ -532,11 +532,13 @@ def build_analyst_report(analysis, lang="en", sections=None,
                    tuple(str(cid) for cid in (cand.get("creative_ids") or ())))
             findings_by_identity.setdefault(key, []).append((owner, cand))
     plans = []
+    omitted_plans = 0
     for rec in recommendations[:3]:
         key = (rec.get("finding_id"),
                tuple(str(cid) for cid in (rec.get("creative_ids") or ())))
         matches = findings_by_identity.get(key) or []
         if len(matches) != 1:
+            omitted_plans += 1
             continue
         owner, finding = matches[0]
         plans.append(analyst.test_plan_for_finding(
@@ -577,6 +579,15 @@ def build_analyst_report(analysis, lang="en", sections=None,
                "", rec_text or "-", ""]
     if "tests" in wanted:
         test_text, _plans = render_tests(plans, lang, limit=3)
+        if omitted_plans:
+            omitted_note = (
+                "- Pominięto %d plan(y) testów: nie udało się jednoznacznie"
+                " dopasować wyniku źródłowego." % omitted_plans
+                if lang == "pl" else
+                "- %d test plan(s) omitted: source finding could not be"
+                " uniquely matched." % omitted_plans)
+            test_text = ((test_text + "\n" + omitted_note)
+                         if test_text else omitted_note)
         md += ["## %s" % ("Testy (maks. 3)" if lang == "pl"
                           else "Tests (max 3)"),
                "", test_text or "-", ""]

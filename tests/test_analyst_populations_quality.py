@@ -320,6 +320,15 @@ class CostPerReachAvailabilityQualityTests(unittest.TestCase):
         self.assertIsNone(result["value"])
         self.assertEqual(result["state"], metrics.NA)
 
+    def test_one_reach_row_cannot_price_a_multi_row_scope(self):
+        result = metrics.cost_per_1000_reached([
+            observation(spend=50, reach=200, currency="GBP"),
+            observation(spend=50, missing=["reach"], currency="GBP"),
+        ])
+        self.assertIsNone(result["value"])
+        self.assertEqual(result["state"], metrics.NA)
+        self.assertIn("row", " ".join(result["reasons"]))
+
     def test_empty_scope_remains_unsupported(self):
         result = metrics.cost_per_1000_reached([])
         self.assertIsNone(result["value"])

@@ -90,7 +90,8 @@ def manual_period_deltas(a_kpis, b_kpis):
         va, vb = a_kpis.get(metric), b_kpis.get(metric)
         if metric in MANUAL_MONEY_METRICS and not same_currency:
             delta[metric] = None
-            reasons[metric] = "incomparable_currency"
+            if va is not None and vb is not None:
+                reasons[metric] = "incomparable_currency"
         else:
             delta[metric] = round(vb - va, 4) if va is not None and vb is not None else None
     return delta, reasons

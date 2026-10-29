@@ -52,7 +52,7 @@ def cost_comparison_reason(groups, metric):
             return reason
         declared = group.get("currencies")
         if declared is not None:
-            if not isinstance(declared, (list, tuple)):
+            if not isinstance(declared, (list, tuple)) or not declared:
                 return reason
             if any(not isinstance(item, str) or item.strip().upper() != code
                    for item in declared):

@@ -74,7 +74,12 @@ class ManualPeriodQualityTests(unittest.TestCase):
         self.assertEqual(delta["impressions"], 10)
 
     def test_missing_metadata_never_invents_a_currency(self):
-        self.assert_money_unavailable({"spend": 10}, {"spend": 20})
+        delta, reasons = period.manual_period_deltas(
+            {"spend": 10}, {"spend": 20})
+        self.assertEqual({metric: delta[metric] for metric in MONEY},
+                         dict.fromkeys(MONEY))
+        # Only spend was supplied; absent money values carry no reason.
+        self.assertEqual(reasons, {"spend": "incomparable_currency"})
 
     def test_inconsistent_metadata_never_establishes_matching_units(self):
         for change in ({"currency_known": False}, {"mixed_currency": True},
@@ -88,6 +93,13 @@ class ManualPeriodQualityTests(unittest.TestCase):
             delta, reasons = period.manual_period_deltas(a, b)
             self.assertIsNone(delta["cpa"])
             self.assertEqual(reasons, {})
+
+    def test_missing_money_value_is_not_blamed_on_currency(self):
+        delta, reasons = period.manual_period_deltas(
+            {**kpis("GBP"), "cpa": None}, kpis("EUR"))
+        self.assertIsNone(delta["cpa"])
+        self.assertNotIn("cpa", reasons)
+        self.assertEqual(reasons["spend"], "incomparable_currency")
 
     def test_reported_zero_is_preserved_with_matching_units(self):
         delta, reasons = period.manual_period_deltas(kpis(value=0), kpis(value=0))

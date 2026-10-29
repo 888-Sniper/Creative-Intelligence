@@ -692,6 +692,11 @@ def cost_per_1000_reached(rows):
         return _result("cost_per_1000_reached", None, NA,
                        reasons=["mixed currencies %s need a conversion"
                                 " policy" % _currencies(rows)])
+    if len(rows) > 1:
+        return _result("cost_per_1000_reached", None, NA,
+                       reasons=["unique reach on one row cannot price a "
+                                "%d-row scope; supply scope-level reach or "
+                                "narrow to one creative/day" % len(rows)])
     return _result("cost_per_1000_reached", spend / reach * 1000.0,
                    MEASURED, basis="single_scope_reach",
                    numerator=spend, denominator=reach)

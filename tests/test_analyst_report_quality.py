@@ -96,6 +96,22 @@ class AnalystReportIdentityTests(unittest.TestCase):
         md = _tests_markdown(analysis)
         self.assertNotIn("Hypothesis First", md)
         self.assertNotIn("Hypothesis Second", md)
+        self.assertIn("omitted", md)
+
+    def test_multi_and_empty_creative_ids_resolve_by_exact_identity(self):
+        multi = _finding("shared_rule", "creative-a", "Hypothesis Multi",
+                         "Iteration Multi")
+        multi["creative_ids"] = ["creative-a", "creative-b"]
+        empty = _finding("solo_rule", "creative-b", "Hypothesis Empty",
+                         "Iteration Empty")
+        empty["creative_ids"] = []
+        analysis = _analysis([
+            _creative("creative-a", [multi]),
+            _creative("creative-b", [empty]),
+        ])
+        md = _tests_markdown(analysis)
+        self.assertIn("creative-a → Iteration Multi", md)
+        self.assertIn("creative-b → Iteration Empty", md)
 
     def test_priority_order_and_three_plan_cap_preserved(self):
         analysis = _analysis([

@@ -68,6 +68,24 @@ class SummarizeTotalsTest(unittest.TestCase):
         self.assertIsNone(got["roas"])
         self.assertEqual(got["revenue"], 0.0)
 
+    def test_zero_spend_weighted_rate_is_unavailable_not_zero(self):
+        rows = [
+            {"spend": 0.0, "impressions": 1000, "clicks": 10,
+             "conversions": 1, "video_views": 0, "views_100": 0,
+             "revenue": 0.0, "revenue_reported": True,
+             "currency": "GBP", "missing_json": "[]",
+             "conv_rate": 0.1, "creative_key": "a"},
+            {"spend": 0.0, "impressions": 1000, "clicks": 10,
+             "conversions": 1, "video_views": 0, "views_100": 0,
+             "revenue": 0.0, "revenue_reported": True,
+             "currency": "GBP", "missing_json": "[]",
+             "conv_rate": 0.2, "creative_key": "b"},
+        ]
+        self.assertIsNone(benchmarks.summarize(rows)["conv_rate_weighted"])
+        rows[0]["spend"], rows[1]["spend"] = 100.0, 300.0
+        self.assertEqual(
+            benchmarks.summarize(rows)["conv_rate_weighted"], 0.175)
+
     def test_uncomputable_never_wins_ranking(self):
         conn = sqlite3.connect(":memory:")
         try:

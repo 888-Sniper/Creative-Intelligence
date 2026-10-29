@@ -186,23 +186,27 @@ def daily_series(conn, filters=None, days=30):
         day = str(r.get("date") or "")
         if not day:
             continue
-        agg = by_day.setdefault(day, {"impressions": 0, "clicks": 0,
-                                      "spend": 0.0, "conversions": 0,
-                                      "revenue": 0.0})
-        agg["impressions"] += int(r.get("impressions") or 0)
-        agg["clicks"] += int(r.get("clicks") or 0)
-        agg["spend"] += float(r.get("spend") or 0)
-        agg["conversions"] += float(r.get("conversions") or 0)
-        agg["revenue"] += float(r.get("revenue") or 0)
+        by_day.setdefault(day, []).append(r)
     out = []
     for day in sorted(by_day)[-days:]:
-        agg = by_day[day]
-        out.append({"date": day,
-                    "impressions": agg["impressions"],
-                    "clicks": agg["clicks"],
-                    "spend": round(agg["spend"], 2),
-                    "conversions": agg["conversions"],
-                    "revenue": round(agg["revenue"], 2)})
+        day_rows = by_day[day]
+        kpis = kpis_for_rows(day_rows)
+        out.append({
+            "date": day,
+            "impressions": sum(int(r.get("impressions") or 0) for r in day_rows),
+            "clicks": sum(int(r.get("clicks") or 0) for r in day_rows),
+            "spend": round(sum(float(r.get("spend") or 0) for r in day_rows), 2),
+            "conversions": sum(float(r.get("conversions") or 0) for r in day_rows),
+            "revenue": round(sum(float(r.get("revenue") or 0) for r in day_rows), 2),
+            # Canonical matched-population ratios for this day; raw
+            # totals above keep their legacy meaning. Money ratios are
+            # None on mixed-currency days via kpis_for_rows.
+            "cpa": kpis["cpa"], "cpm": kpis["cpm"], "roas": kpis["roas"],
+            "roas_coverage": kpis["roas_coverage"],
+            "currency": kpis["currency"], "currencies": kpis["currencies"],
+            "mixed_currency": kpis["mixed_currency"],
+            "currency_known": kpis["currency_known"],
+        })
     return {"days": out}
 
 
@@ -799,8 +803,16 @@ def benchmark_filtered(conn, filters=None, metric="cpa"):
     filt = normalize_filters(filters)
     rows = [r for r in all_rows(conn) if match_filters(r, filt)]
     projects = sorted({project_of(r) for r in rows if project_of(r)})
-    stats = describe_bands([_row_metric(r, metric) for r in rows],
-                           [r.get("spend", 0) or 0 for r in rows])
+    mixed = money_scope(rows)["mixed_currency"]
+    if metric in ("cpa", "cpm", "cpc", "spend") and mixed:
+        # Native amounts in unlike units have no comparable bands.
+        stats = describe_bands([], [])
+    else:
+        # Spend weights in unlike units cannot weight even dimensionless
+        # bands; percentiles remain, the weighted mean is unavailable.
+        weights = ([0 for _r in rows] if mixed else
+                   [r.get("spend", 0) or 0 for r in rows])
+        stats = describe_bands([_row_metric(r, metric) for r in rows], weights)
     stats["projects"] = len(projects)
     status = ("ok" if stats["n"] >= MIN_ADS and stats["projects"] >= MIN_PROJECTS
               else "insufficient")

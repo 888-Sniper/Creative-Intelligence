@@ -589,6 +589,10 @@ def answer(conn, question, llm=None, scope=None, owner=None,
             _rate_id = "vtr" if _rate_label == "VTR" else "view_rate"
 
         def _group_metric(group):
+            if metric in ("cpa", "roas") or metric not in ("cpa", "ctr", "roas", "vtr"):
+                from creative_intel import currency_scope as _currency_scope
+                if _currency_scope.money_scope(group)["mixed_currency"]:
+                    return None
             spend = sum(x["spend"] for x in group)
             impr = sum(x["impressions"] for x in group)
             clicks = sum(x["clicks"] for x in group)
@@ -629,8 +633,12 @@ def answer(conn, question, llm=None, scope=None, owner=None,
             shown = ", ".join(_group_label(k) for k in leaders)
             if metric is None:
                 spend = sum(x["spend"] for x in group)
-                parts.append("Top %s by spend is %s at $%s."
-                             % (_lname, shown, f"{spend:,.2f}"))
+                from creative_intel import currency_scope as _qa_scope
+                from creative_intel import native_money as _qa_money
+                _spend_label = _qa_money.compact_money(
+                    spend, _qa_scope.money_scope(group)["currency"])
+                parts.append("Top %s by spend is %s at %s."
+                             % (_lname, shown, _spend_label))
             elif len(leaders) > 1:
                 if len(leaders) == 2:
                     shown = "%s and %s" % (_group_label(leaders[0]),
@@ -638,8 +646,16 @@ def answer(conn, question, llm=None, scope=None, owner=None,
                 parts.append("Top %ss by %s are tied: %s at %s."
                              % (_lname, _metric_name, shown, top_disp))
             else:
-                parts.append("Top %s by %s is %s at %s."
-                             % (_lname, _metric_name, shown, top_disp))
+                coverage_note = ""
+                if metric == "roas":
+                    from creative_intel import metric_availability as _qa_avail
+                    _val, _cov, _det = _qa_avail.reported_roas_details(group)
+                    if _cov is not None and _cov < 1:
+                        coverage_note = (" (revenue-reporting spend coverage %d%%)"
+                                         % round(_cov * 100))
+                parts.append("Top %s by %s is %s at %s%s."
+                             % (_lname, _metric_name, shown, top_disp,
+                                coverage_note))
             cite("Uploaded CSV")
         key = leaders[0] if ranked else None
         from creative_intel import creative as _creative_mod

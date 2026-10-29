@@ -188,12 +188,11 @@ class AskAnswerLevelTest(unittest.TestCase):
         conn.executemany(
             "INSERT INTO ads (platform, campaign, ad_name, creative_key,"
             " spend, impressions, clicks, conversions, revenue,"
-            " revenue_reported, date)"
-            " VALUES (?,?,?,?,?,10000,200,10,?,?,?)",
-            [(platform, campaign, key, key, spend, revenue, reported,
-              "2026-08-01")
-             for platform, campaign, key, spend, revenue, reported
-             in rows])
+            " revenue_reported, currency, date)"
+            " VALUES (?,?,?,?,?,10000,200,10,?,?,?,?)",
+            [(row[0], row[1], row[2], row[2], row[3], row[4], row[5],
+              row[6] if len(row) > 6 else "", "2026-08-01")
+             for row in rows])
         return conn
 
     def test_platform_question_ranks_platforms(self):
@@ -259,6 +258,29 @@ class AskAnswerLevelTest(unittest.TestCase):
             got = qa.answer(conn, "Which platform has the best ROAS?")
             self.assertIn("no ROAS winner", got["answer"])
             self.assertNotIn("Top platform by ROAS is", got["answer"])
+        finally:
+            conn.close()
+
+    def test_roas_partial_winner_labels_coverage(self):
+        conn = self._conn_rows([
+            ("meta", "A", "k1", 100, 200, 1),
+            ("meta", "A", "k2", 100, 0, 0),
+            ("tiktok", "B", "k3", 100, 150, 1)])
+        try:
+            got = qa.answer(conn, "Which platform has the best ROAS?")
+            self.assertIn("coverage 50%", got["answer"])
+        finally:
+            conn.close()
+
+    def test_roas_mixed_currency_group_has_no_winner(self):
+        conn = self._conn_rows([
+            ("meta", "A", "k1", 100, 400, 1, "GBP"),
+            ("meta", "A", "k2", 100, 400, 1, "EUR"),
+            ("tiktok", "B", "k3", 100, 150, 1, "GBP")])
+        try:
+            got = qa.answer(conn, "Which platform has the best ROAS?")
+            self.assertIn("Top platform by ROAS is TikTok at 1.5x",
+                          got["answer"])
         finally:
             conn.close()
 

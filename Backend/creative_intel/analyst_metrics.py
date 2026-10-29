@@ -666,8 +666,8 @@ def cpm(rows):
 def cost_per_1000_reached(rows):
     """Spend over valid unique reach for the same scope only.
 
-    Reach is never summed across overlapping rows: multi-row scopes
-    return unavailable unless a single row carries the scope reach.
+    Reach is never summed across overlapping rows: only a single-row
+    scope is measurable; multi-row scopes return unavailable.
     """
     state, usable = field_state(rows, "reach")
     if state == UNSUPPORTED:

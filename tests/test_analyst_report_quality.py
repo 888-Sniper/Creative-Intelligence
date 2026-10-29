@@ -113,6 +113,18 @@ class AnalystReportIdentityTests(unittest.TestCase):
         self.assertIn("creative-a → Iteration Multi", md)
         self.assertIn("creative-b → Iteration Empty", md)
 
+    def test_polish_omitted_note_and_divergent_owner_control(self):
+        ambiguous = _analysis([_creative("creative-a", [
+            _finding("shared_rule", "creative-a", "Hypothesis First", "I1"),
+            _finding("shared_rule", "creative-a", "Hypothesis Second", "I2"),
+        ])])
+        self.assertIn("Pominięto", _tests_markdown(ambiguous, lang="pl"))
+        housed = _finding("solo_rule", "creative-b", "Hypothesis Housed",
+                          "Iteration Housed")
+        housed["creative_ids"] = ["listed-other"]
+        md = _tests_markdown(_analysis([_creative("creative-a", [housed])]))
+        self.assertIn("creative-a → Iteration Housed", md)
+
     def test_priority_order_and_three_plan_cap_preserved(self):
         analysis = _analysis([
             _creative("creative-a", [_finding(

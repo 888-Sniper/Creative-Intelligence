@@ -523,15 +523,24 @@ def build_analyst_report(analysis, lang="en", sections=None,
     wanted = [s for s in (sections or list(REPORT_SECTIONS))
               if s in REPORT_SECTIONS] or list(REPORT_SECTIONS)
     recommendations = analyst.recommendations_from_findings(analysis)
+    # Rule IDs repeat across creatives; identity needs creative_ids too.
+    findings_by_identity = {}
+    for creative in analysis.get("creatives", []):
+        owner = creative.get("creative_key", "")
+        for cand in creative.get("findings", []):
+            key = (cand.get("finding_id"),
+                   tuple(str(cid) for cid in (cand.get("creative_ids") or ())))
+            findings_by_identity.setdefault(key, []).append((owner, cand))
     plans = []
     for rec in recommendations[:3]:
-        finding = None
-        for creative in analysis.get("creatives", []):
-            for cand in creative.get("findings", []):
-                if cand.get("finding_id") == rec.get("finding_id"):
-                    finding = cand
-        if finding is not None:
-            plans.append(analyst.test_plan_for_finding(finding, analysis))
+        key = (rec.get("finding_id"),
+               tuple(str(cid) for cid in (rec.get("creative_ids") or ())))
+        matches = findings_by_identity.get(key) or []
+        if len(matches) != 1:
+            continue
+        owner, finding = matches[0]
+        plans.append(analyst.test_plan_for_finding(
+            finding, analysis, control_key=owner or None))
     title = ("Raport Foap Analyst" if lang == "pl" else "Foap Analyst report")
     md = ["# %s" % title, "",
           "%s: %s | %s: %s | %s: %s" % (

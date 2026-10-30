@@ -23,6 +23,22 @@ export function knownSourceCurrency(source: SourceCurrency | null | undefined): 
     ? code : null;
 }
 
+/** A consistent code can label an amount when the known-flag is absent.
+ * An explicit false, a mix, or an unknown contribution cannot. */
+export function displayCurrency(source: SourceCurrency | null | undefined): string | null {
+  const known = knownSourceCurrency(source);
+  if (known) return known;
+  if (!source || source.mixed_currency || source.unknown_currency_contribution
+    || source.currency_known === false) return null;
+  const code = typeof source.currency === "string" ? source.currency.trim().toUpperCase() : "";
+  if (!code) return null;
+  const declared = source.currencies;
+  if (declared == null) return code;
+  return Array.isArray(declared) && declared.length > 0
+    && declared.every((item) => typeof item === "string" && item.trim().toUpperCase() === code)
+    ? code : null;
+}
+
 export function sharedSourceCurrency(
   groups: readonly (SourceCurrency & { n_ads?: number })[],
 ): string | null {

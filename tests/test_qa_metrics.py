@@ -221,8 +221,9 @@ class BackendTiktokTest(unittest.TestCase):
         self.assertNotIn("hook-b", out["answer"])
         self.assertIn("creator", out["answer"])
         self.assertIn("branded", out["answer"])
-        self.assertIn("CPA $10.00", out["answer"])
-        self.assertIn("CPA $20.00", out["answer"])
+        self.assertIn("CPA 10.00 (currency unknown)", out["answer"])
+        self.assertIn("CPA 20.00 (currency unknown)", out["answer"])
+        self.assertNotIn("$", out["answer"])
         conn.close()
 
     def test_no_tiktok_rows_says_so(self):

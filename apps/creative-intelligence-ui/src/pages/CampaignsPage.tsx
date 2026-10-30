@@ -9,6 +9,7 @@ import { useLocale } from "@/i18n";
 import { Icon } from "@/components/icons";
 import { LoadingButton } from "@/components/LoadingButton";
 import { SampleCampaignDelete } from "@/components/SampleDelete";
+import { formatNativeMoney, knownSourceCurrency, sharedSourceCurrency } from "@/components/sourceCurrency";
 import { GroupBars, TrendChart } from "@/components/charts";
 import {
   DateRangeField,
@@ -22,7 +23,6 @@ import {
   Skeleton,
   fmtCell,
   fmtCompact,
-  fmtMoney,
   fmtMult,
   fmtPct,
   kpiDisplay,
@@ -39,8 +39,9 @@ import {
  * presentation layer to the approved Campaigns reference. */
 
 interface CampaignRow extends BenchmarkMetadata {
-  spend: number; impressions: number; clicks: number; conversions: number;
-  revenue: number; ctr: number | null; cpc: number | null; cpa: number | null; roas: number | null;
+  spend: number | null; impressions: number | null; clicks: number | null;
+  conversions: number | null; revenue: number | null;
+  ctr: number | null; cpc: number | null; cpa: number | null; roas: number | null;
   campaigns: number;
 }
 
@@ -81,6 +82,10 @@ const PLATFORM_METRICS = [
 function num(v: unknown): number {
   const n = Number(v ?? 0);
   return Number.isFinite(n) ? n : 0;
+}
+
+function measured(v: unknown): number | null {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
 function rate(cur: number, base: number): number | null {
@@ -227,7 +232,14 @@ export function CampaignsPage() {
     const q = search.trim().toLowerCase();
     return list
       .filter((r) => (!q || r.name.toLowerCase().includes(q)))
-      .sort((a, b) => num(b.spend) - num(a.spend));
+      .sort((a, b) => {
+        const left = measured(a.spend);
+        const right = measured(b.spend);
+        if (left == null && right == null) return 0;
+        if (left == null) return 1;
+        if (right == null) return -1;
+        return right - left;
+      });
   }, [campaigns.data, search]);
 
   const avgCtr = useMemo(() => {
@@ -242,16 +254,22 @@ export function CampaignsPage() {
 
   const platGroups = useMemo(() => {
     const list = Object.entries(benchPlatform.data ?? {}).map(([key, g]) => ({ key, ...g }));
+    const shared = sharedSourceCurrency(list);
     const val = (g: BenchSummary) =>
-      platMetric === "spend" ? num(g.spend) : platMetric === "impressions" ? num(g.impressions) : num(g.clicks);
-    const total = list.reduce((t, g) => t + val(g), 0);
-    const avg = platMetric === "spend" && !hasComparableBenchmarkCurrency(list)
-      ? null
-      : list.length ? total / list.length : 0;
-    return list
-      .sort((a, b) => val(b) - val(a))
+      platMetric === "spend" ? measured(g.spend)
+        : platMetric === "impressions" ? measured(g.impressions) : measured(g.clicks);
+    const plotted = list.filter((g) => val(g) != null);
+    const total = plotted.reduce((t, g) => t + (val(g) ?? 0), 0);
+    const comparable = platMetric !== "spend" || shared != null;
+    const avg = !comparable ? null : plotted.length ? total / plotted.length : 0;
+    return plotted
+      .sort((a, b) => (val(b) ?? 0) - (val(a) ?? 0))
       .slice(0, 6)
-      .map((g) => ({ label: platformLabel(g.key), yours: val(g), bench: avg }));
+      .map((g) => ({
+        label: platformLabel(g.key),
+        yours: comparable ? val(g) : null,
+        bench: comparable ? avg : null,
+      }));
   }, [benchPlatform.data, platMetric]);
 
   const rail = useMemo(() => {
@@ -659,7 +677,9 @@ export function CampaignsPage() {
                   <GroupBars
                     height={200}
                     groups={platGroups}
-                    format={(v) => platMetric === "spend" ? fmtMoney(v, locale) : fmtCompact(v, locale)}
+                    format={(v) => platMetric === "spend"
+                      ? formatNativeMoney(v, sharedSourceCurrency(Object.values(benchPlatform.data ?? {})), locale, unavailable, { digits: 0 })
+                      : fmtCompact(v, locale)}
                   />
                 ) : <EmptyState compact verbatim icon="bars" title={t("campaigns.noPlatformTitle")} text={t("campaigns.noPlatformBody")} />
               ) : <Skeleton height={200} />}
@@ -724,10 +744,10 @@ export function CampaignsPage() {
                               })()}
                             </span>
                           ) : "—"}</td>
-                          <td className="num">{fmtCompact(num(r.impressions), locale)}</td>
-                          <td className="num">{fmtCompact(num(r.clicks), locale)}</td>
+                          <td className="num">{fmtCell(r.impressions, (n) => fmtCompact(n, locale), unavailable)}</td>
+                          <td className="num">{fmtCell(r.clicks, (n) => fmtCompact(n, locale), unavailable)}</td>
                           <td className="num">{fmtCell(r.ctr, (n) => fmtPct(n * 100, 1, locale))}</td>
-                          <td className="num">{fmtMoney(num(r.spend), locale)}</td>
+                          <td className="num">{formatNativeMoney(measured(r.spend), knownSourceCurrency(r), locale, unavailable, { digits: 2 })}</td>
                           <td className="num">{fmtCell(r.roas, (n) => fmtMult(n, locale))}</td>
                           <td className="num">{fmtBench(benchFor(r))}</td>
                           <td>
@@ -761,9 +781,9 @@ export function CampaignsPage() {
               {details[expanded] ? (
                 <>
                   <div className="detail-grid">
-                    <div><span>{kpiName("impressions")}</span><strong>{fmtCompact(num(details[expanded]?.totals.impressions), locale)}</strong></div>
-                    <div><span>{kpiName("clicks")}</span><strong>{fmtCompact(num(details[expanded]?.totals.clicks), locale)}</strong></div>
-                    <div><span>{kpiName("spend")}</span><strong>{fmtMoney(num(details[expanded]?.totals.spend), locale)}</strong></div>
+                    <div><span>{kpiName("impressions")}</span><strong>{fmtCell(details[expanded]?.totals.impressions, (n) => fmtCompact(n, locale), unavailable)}</strong></div>
+                    <div><span>{kpiName("clicks")}</span><strong>{fmtCell(details[expanded]?.totals.clicks, (n) => fmtCompact(n, locale), unavailable)}</strong></div>
+                    <div><span>{kpiName("spend")}</span><strong>{formatNativeMoney(measured(details[expanded]?.totals.spend), knownSourceCurrency(details[expanded]?.totals), locale, unavailable, { digits: 2 })}</strong></div>
                     <div><span>{kpiName("roas")}</span><strong>{fmtCell(details[expanded]?.totals.roas, (n) => fmtMult(n, locale))}</strong></div>
                     <div><span>{kpiName("ctr")}</span><strong>{fmtCell(details[expanded]?.totals.ctr, (n) => fmtPct(n * 100, 1, locale))}</strong></div>
                     <div><span>{kpiName("conversions")}</span><strong>{fmtCompact(num(details[expanded]?.totals.conversions), locale)}</strong></div>

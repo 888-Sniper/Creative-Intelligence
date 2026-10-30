@@ -99,7 +99,8 @@ class GroundedQATest(unittest.TestCase):
     def test_answer_cites_uploaded_csv_first(self):
         conn = seeded_db()
         out = qa.answer(conn, "What is total spend?")
-        self.assertIn("$400.00", out["answer"])
+        self.assertIn("400.00 (currency unknown)", out["answer"])
+        self.assertNotIn("$", out["answer"])
         self.assertEqual(out["sources"][0], "Uploaded CSV")
         self.assertIsNotNone(out["review_id"])
         conn.close()

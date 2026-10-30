@@ -16,9 +16,17 @@ const comparePayload = {
   },
 };
 
+const usd = {
+  currency: "USD",
+  currencies: ["USD"],
+  currency_known: true,
+  mixed_currency: false,
+  unknown_currency_contribution: false,
+};
+
 const campaigns = {
-  Alpha: { spend: 120.5, impressions: 1000, clicks: 20, conversions: 8, revenue: 168, ctr: 0.02, cpc: 6.0, cpa: 15.06, roas: 1.4, campaigns: 1 },
-  Beta: { spend: 40, impressions: 500, clicks: 10, conversions: 2, revenue: 40, ctr: 0.02, cpc: 4.0, cpa: 20.0, roas: 1.0, campaigns: 1 },
+  Alpha: { spend: 120.5, impressions: 1000, clicks: 20, conversions: 8, revenue: 168, ctr: 0.02, cpc: 6.0, cpa: 15.06, roas: 1.4, campaigns: 1, ...usd },
+  Beta: { spend: 40, impressions: 500, clicks: 10, conversions: 2, revenue: 40, ctr: 0.02, cpc: 4.0, cpa: 20.0, roas: 1.0, campaigns: 1, ...usd },
 };
 
 const detail = {
@@ -66,7 +74,7 @@ describe("CampaignsPage", () => {
     });
     expect(screen.getAllByText("Alpha").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Beta").length).toBeGreaterThan(0);
-    expect(screen.getByText("$121")).toBeDefined();
+    expect(screen.getByText((_, node) => (node?.textContent ?? "").replace(/\u00a0/g, " ") === "USD 120.50")).toBeDefined();
     expect(screen.getByRole("button", { name: "Apply Filters" })).toBeDefined();
     expect(screen.getByLabelText("Search Campaigns")).toBeDefined();
     expect(screen.getByText("Total Campaigns")).toBeDefined();

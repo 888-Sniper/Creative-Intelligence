@@ -117,17 +117,19 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
         return `${(v * 100).toFixed(digits)}%`;
       }
     };
-    const fmtMoney = (n: number, currency = "USD") => {
+    const fmtMoney = (n: number, currency?: string) => {
       const v = Number(n);
-      if (!Number.isFinite(v)) return "—";
+      const code = typeof currency === "string" ? currency.trim().toUpperCase() : "";
+      if (!Number.isFinite(v) || !code) return "—";
       try {
         return new Intl.NumberFormat(locale, {
           style: "currency",
-          currency,
+          currency: code,
+          currencyDisplay: "code",
           maximumFractionDigits: 0,
         }).format(v);
       } catch {
-        return `$${v.toFixed(0)}`;
+        return `${code} ${v.toFixed(0)}`;
       }
     };
     return { lang, locale, timezone, setLang, setTimezone, t, tp, fmtDate, fmtNum, fmtPct, fmtMoney };
@@ -209,15 +211,17 @@ const FALLBACK: Locale = {
     if (!Number.isFinite(v)) return "—";
     return `${(v * 100).toFixed(digits)}%`;
   },
-  fmtMoney: (n, currency = "USD") => {
+  fmtMoney: (n, currency) => {
     const v = Number(n);
-    if (!Number.isFinite(v)) return "—";
+    const code = typeof currency === "string" ? currency.trim().toUpperCase() : "";
+    if (!Number.isFinite(v) || !code) return "—";
     try {
       return new Intl.NumberFormat("en-US", {
-        style: "currency", currency, maximumFractionDigits: 0,
+        style: "currency", currency: code, currencyDisplay: "code",
+        maximumFractionDigits: 0,
       }).format(v);
     } catch {
-      return `$${v.toFixed(0)}`;
+      return `${code} ${v.toFixed(0)}`;
     }
   },
 };

@@ -4,7 +4,7 @@ import { scopeParams, useFilters } from "@/state/FilterContext";
 import { useScopedLoad } from "@/state/useScopedLoad";
 import { KpiTrend, monthName } from "@/components/KpiTrend";
 import type { KpiComparison, KpiPeriod } from "@/components/KpiTrend";
-import type { PeriodCurrencyContext } from "./sourceCurrency";
+import { formatNativeMoney, type PeriodCurrencyContext } from "./sourceCurrency";
 import { Icon } from "@/components/icons";
 import { useLocale } from "@/i18n";
 
@@ -34,27 +34,11 @@ export function fmtCompact(n: number, locale = "en"): string {
   }
   return `${Math.round(n)}`;
 }
-export function fmtMoney(n: number, locale = "en"): string {
-  const abs = Math.abs(n);
-  if (abs >= 1_000) {
-    try {
-      return new Intl.NumberFormat(locale, {
-        style: "currency", currency: "USD",
-        notation: "compact",
-        minimumFractionDigits: 1, maximumFractionDigits: 1,
-      }).format(n);
-    } catch {
-      if (abs >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
-      return `$${(n / 1_000).toFixed(1)}K`;
-    }
-  }
-  try {
-    return new Intl.NumberFormat(locale, {
-      style: "currency", currency: "USD", maximumFractionDigits: 0,
-    }).format(n);
-  } catch {
-    return `$${n.toFixed(0)}`;
-  }
+export function fmtMoney(n: number, locale = "en", currency?: string | null): string {
+  return formatNativeMoney(n, currency, locale, KPI_UNAVAILABLE, {
+    compact: Math.abs(n) >= 1_000,
+    digits: Math.abs(n) >= 1_000 ? 1 : 0,
+  });
 }
 export function fmtMult(n: number, locale = "en"): string {
   try {
@@ -84,27 +68,27 @@ export const EMPTY_KPI_NOTE = "No data yet; displayed zero is a placeholder.";
 export function kpiDisplay(
   kind: KpiKind, value: number | null | undefined, empty: boolean,
   locale = "en", unavailable: string = KPI_UNAVAILABLE,
+  currency?: string | null,
 ): string {
+  if (kind === "money") {
+    const placeholder = empty && (value == null || !Number.isFinite(value));
+    const amount = placeholder ? 0 : value;
+    return formatNativeMoney(amount, currency, locale, unavailable, {
+      compact: !placeholder && typeof amount === "number" && Math.abs(amount) >= 1_000,
+      digits: placeholder || typeof amount !== "number" || Math.abs(amount) < 1_000 ? (placeholder ? 2 : 0) : 1,
+    });
+  }
   if (value == null || !Number.isFinite(value)) {
     if (!empty) return unavailable;
     // Empty-scope zero placeholders render through the UI locale.
     switch (kind) {
-      case "money":
-        try {
-          return new Intl.NumberFormat(locale, {
-            style: "currency", currency: "USD",
-            minimumFractionDigits: 2, maximumFractionDigits: 2,
-          }).format(0);
-        } catch {
-          return "$0.00";
-        }
       case "mult": return fmtMult(0, locale);
       case "pct": return fmtPct(0, 1, locale);
       case "count": return fmtCompact(0, locale);
+      default: return unavailable;
     }
   }
   switch (kind) {
-    case "money": return fmtMoney(value, locale);
     case "mult": return fmtMult(value, locale);
     case "pct": return fmtPct(value, 1, locale);
     case "count": return fmtCompact(value, locale);

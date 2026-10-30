@@ -14,6 +14,10 @@ import {
   plural,
 } from "@/components/product";
 
+function plain(text: string): string {
+  return text.replace(/\u00a0/g, " ");
+}
+
 describe("plural", () => {
   it("uses the singular form for exactly one", () => {
     expect(plural(1, "Campaign")).toBe("1 Campaign");
@@ -61,8 +65,9 @@ describe("formatDuration", () => {
 
 describe("kpiDisplay", () => {
   it("shows formatted zero placeholders for an empty loaded scope", () => {
-    expect(kpiDisplay("money", null, true)).toBe("$0.00");
-    expect(kpiDisplay("money", undefined, true)).toBe("$0.00");
+    expect(kpiDisplay("money", null, true)).toBe(KPI_UNAVAILABLE);
+    expect(kpiDisplay("money", undefined, true)).toBe(KPI_UNAVAILABLE);
+    expect(plain(kpiDisplay("money", null, true, "en", KPI_UNAVAILABLE, "USD"))).toBe("USD 0.00");
     expect(kpiDisplay("mult", null, true)).toBe("0.0x");
     expect(kpiDisplay("count", null, true)).toBe("0");
     expect(kpiDisplay("pct", null, true)).toBe("0.0%");
@@ -76,7 +81,11 @@ describe("kpiDisplay", () => {
   });
 
   it("formats real values with the shared conventions", () => {
-    expect(kpiDisplay("money", 2500, false)).toBe("$2.5K");
+    expect(kpiDisplay("money", 2500, false)).toBe(KPI_UNAVAILABLE);
+    const usd = plain(kpiDisplay("money", 2500, false, "en", KPI_UNAVAILABLE, "USD"));
+    expect(usd).toContain("USD");
+    expect(usd).toContain("2.5");
+    expect(usd).not.toContain("$");
     expect(kpiDisplay("mult", 2.345, false)).toBe("2.3x");
     expect(kpiDisplay("count", 1500, false)).toBe("1.5K");
     expect(kpiDisplay("pct", 12.345, false)).toBe("12.3%");
@@ -110,11 +119,13 @@ describe("locale-aware numbers (\u00a79)", () => {
     // Regression lock: whole thousands keep their one decimal.
     expect(fmtCompact(25000, "en")).toBe("25.0K");
     expect(fmtCompact(2000000, "en")).toBe("2.0M");
-    expect(fmtMoney(2500, "en")).toBe("$2.5K");
-    expect(fmtMoney(999, "en")).toBe("$999");
+    expect(fmtMoney(2500, "en")).toBe(KPI_UNAVAILABLE);
+    expect(plain(fmtMoney(2500, "en", "USD"))).toContain("USD");
+    expect(plain(fmtMoney(2500, "en", "USD"))).not.toContain("$");
+    expect(plain(fmtMoney(999, "en", "USD"))).toBe("USD 999");
     expect(fmtMult(2.345, "en")).toBe("2.3x");
     expect(fmtPct(12.345, 1, "en")).toBe("12.3%");
-    expect(kpiDisplay("money", null, true, "en")).toBe("$0.00");
+    expect(kpiDisplay("money", null, true, "en")).toBe(KPI_UNAVAILABLE);
     expect(kpiDisplay("mult", null, true, "en")).toBe("0.0x");
   });
 

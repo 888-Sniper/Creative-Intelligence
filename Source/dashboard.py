@@ -48,19 +48,38 @@ def _badge(cpa, bench_mean):
     return f'<span class="badge {cls}">{label}</span>'
 
 
+def _num(value, places=2):
+    if value is None:
+        return "unavailable"
+    return f"{value:.{places}f}"
+
+
+def _badge_for(cpa, bench_mean):
+    if cpa is None or bench_mean is None:
+        return '<span class="badge">no benchmark</span>'
+    return _badge(cpa, bench_mean)
+
+
 def render(rows, joined, cohort_desc):
     totals = kpi_totals(rows)
     bench = cohort_benchmark(rows, "cpa")
     mean = bench["stats"]["mean_weighted"]
     digest = dataset_hash(rows)
+    def _cpa_order(row):
+        cpa = row.get("cpa", 0)
+        if cpa is None:
+            return (1, 0.0)
+        return (0, cpa)
+
     cards = []
-    for row in sorted(joined, key=lambda r: r.get("cpa", 0)):
+    for row in sorted(joined, key=_cpa_order):
+        cpa = row.get("cpa", 0)
         cards.append(
             f'<div class="card"><div class="thumb">{_t(row["creative_id"])}'
             f'<br>{row.get("duration_s", 0):.0f}s · {_t(row.get("hook_type", ""))}'
-            f'</div><div class="kpis">CPA {row.get("cpa", 0):.2f} · '
-            f'Spend {row.get("spend", 0):.0f} '
-            f'{_badge(row.get("cpa", 0), mean)}</div>'
+            f'</div><div class="kpis">CPA {_num(cpa)} · '
+            f'Spend {_num(row.get("spend", 0), 0)} '
+            f'{_badge_for(cpa, mean)}</div>'
             f'<div class="meta">{_t(row.get("creator_vs_branded", ""))} · '
             f'product {_t(row.get("product_first_visible_s", 0))}s · '
             f'{_t(row.get("cta", ""))}</div></div>')
@@ -69,9 +88,9 @@ def render(rows, joined, cohort_desc):
         compare.append(
             f'<tr><td>{_t(row["creative_id"])}</td>'
             f'<td>{_t(row["platform"])}</td>'
-            f'<td>{row.get("spend", 0):.0f}</td>'
-            f'<td>{row.get("cpa", 0):.2f}</td>'
-            f'<td>{row.get("roas", 0):.2f}</td></tr>')
+            f'<td>{_num(row.get("spend", 0), 0)}</td>'
+            f'<td>{_num(row.get("cpa", 0))}</td>'
+            f'<td>{_num(row.get("roas", 0))}</td></tr>')
     return f"""<!DOCTYPE html>
 <html lang="en" data-theme="light">
 <head>
@@ -111,7 +130,7 @@ button {{ background: var(--surface); color: var(--text);
 <div class="kpi">Spend {totals['spend']:.2f}</div>
 <div class="kpi">CPA {totals['cpa']:.2f}</div>
 <div class="kpi">ROAS {totals['roas']:.2f}</div>
-<div class="kpi">Benchmark CPA {mean:.2f} ({bench['status']})</div>
+<div class="kpi">Benchmark CPA {_num(mean)} ({bench['status']})</div>
 </div>
 <h2 style="padding:0 24px">Creatives</h2>
 <div class="grid">

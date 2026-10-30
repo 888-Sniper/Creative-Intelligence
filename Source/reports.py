@@ -38,6 +38,8 @@ def kpi_totals(rows):
 
 
 def _fmt(value, places=2):
+    if value is None:
+        return "unavailable"
     return f"{value:.{places}f}"
 
 
@@ -45,10 +47,16 @@ def one_pager(rows, joined, cohort, cohort_desc, benchmark_metric="cpa"):
     """Build a Markdown executive summary for one cohort."""
     totals = kpi_totals(rows)
     bench = cohort_benchmark(rows, benchmark_metric)
-    card = ("above benchmark" if totals.get(benchmark_metric, 0)
-            <= bench["stats"]["mean_weighted"]
-            else "below benchmark") if bench["status"] == "ok" \
-        else "no benchmark (insufficient data)"
+    mean = bench["stats"]["mean_weighted"]
+    measured = totals.get(benchmark_metric, 0)
+    if bench["status"] != "ok":
+        card = "no benchmark (insufficient data)"
+    elif mean is None or measured is None:
+        card = "no benchmark (weighted mean unavailable)"
+    elif measured <= mean:
+        card = "above benchmark"
+    else:
+        card = "below benchmark"
     best = rank_creatives(rows, "cpa")[:3]
     worst = rank_creatives(rows, "cpa")[-1:]
     recs = recommend(joined)

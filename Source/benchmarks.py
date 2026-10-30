@@ -11,10 +11,17 @@ MIN_PROJECTS = 3
 
 
 def spend_weighted_mean(values, weights):
-    total = sum(weights)
+    """Spend-weighted mean. None when no positive weight remains.
+
+    Missing values are left out. A genuine zero with positive weight
+    stays zero. An empty or zero-weight pool is unavailable, not 0.
+    """
+    pairs = [(v, w) for v, w in zip(values, weights)
+             if v is not None and w is not None]
+    total = sum(w for _v, w in pairs)
     if total <= 0:
-        return 0.0
-    return sum(v * w for v, w in zip(values, weights)) / total
+        return None
+    return sum(v * w for v, w in pairs) / total
 
 
 def _percentile(sorted_vals, pct):
@@ -30,7 +37,8 @@ def _percentile(sorted_vals, pct):
 
 
 def describe(values, weights):
-    ordered = sorted(values)
+    # None is unavailable, not a measured zero, so it stays out of the band.
+    ordered = sorted(value for value in values if value is not None)
     return {
         "n": len(values),
         "mean_weighted": spend_weighted_mean(values, weights),
@@ -93,8 +101,17 @@ def rank_creatives(rows, metric, higher_is_better=False, min_spend=0):
     for row in rows:
         eligible = (row.get("spend", 0) or 0) >= min_spend
         scored.append((row.get(metric, 0), row, eligible))
-    # Sort by metric direction first (lower CPA first, higher ROAS first),
-    # then stable-sort eligible rows above the min-spend threshold.
-    scored.sort(key=lambda t: t[0], reverse=higher_is_better)
-    scored.sort(key=lambda t: 0 if t[2] else 1)
+
+    def _rank_key(item):
+        value, _row, eligible = item
+        # Missing metrics sort after every measured value, never as zero.
+        if value is None:
+            metric_key = (1, 0.0)
+        elif higher_is_better:
+            metric_key = (0, -value)
+        else:
+            metric_key = (0, value)
+        return (0 if eligible else 1, metric_key)
+
+    scored.sort(key=_rank_key)
     return [row for _, row, _ in scored]

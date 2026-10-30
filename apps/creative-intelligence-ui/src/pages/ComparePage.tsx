@@ -7,6 +7,7 @@ import { LoadingButton } from "@/components/LoadingButton";
 import { useLocale } from "@/i18n";
 import { TrendChart } from "@/components/charts";
 import { PeriodComparisonTable, type PeriodResponse } from "@/components/PeriodComparisonTable";
+import { displayCurrency, formatNativeMoney, type SourceCurrency } from "@/components/sourceCurrency";
 import { dailyMetricValue } from "@/components/compareDaily";
 import { compareSelectionNames } from "@/components/compareSelection";
 import {
@@ -18,7 +19,7 @@ import {
   Skeleton,
   fmtCompact,
   fmtCell,
-  fmtMoney,
+  KPI_UNAVAILABLE,
   platformLabel,
   useScopedApi,
 } from "@/components/product";
@@ -30,7 +31,7 @@ interface CompareAnnotation {
   status?: string | null;
 }
 
-interface CreativeSide {
+interface CreativeSide extends SourceCurrency {
   spend?: number | null;
   impressions?: number | null;
   clicks?: number | null;
@@ -74,8 +75,17 @@ interface CompareResponse {
   [key: string]: unknown;
 }
 
+interface CampaignKpiRow extends SourceCurrency {
+  cpm?: number | null;
+  ctr?: number | null;
+  vtr?: number | null;
+  cpa?: number | null;
+  roas?: number | null;
+  spend?: number | null;
+}
+
 interface CampaignCompareResponse {
-  kpis: Record<string, Record<string, number | null>>;
+  kpis: Record<string, CampaignKpiRow>;
   ranking: string[];
   winner?: string | null;
   rank_by?: string;
@@ -129,9 +139,14 @@ function fmtPct(v: number | null | undefined): string {
   return fmtCell(v, (n) => `${(n > 1 ? n : n * 100).toFixed(1)}%`);
 }
 
-function fmtCard(kpi: (typeof CARD_KPIS)[number], v: number | null | undefined): string {
+function fmtCard(
+  kpi: (typeof CARD_KPIS)[number], v: number | null | undefined,
+  currency?: string | null, locale = "en",
+): string {
   return fmtCell(v, (n) => {
-    if (kpi === "cpm" || kpi === "cpa") return fmtMoney(n);
+    if (kpi === "cpm" || kpi === "cpa") {
+      return formatNativeMoney(n, currency, locale, KPI_UNAVAILABLE, { digits: 2 });
+    }
     if (kpi === "roas") return `${n.toFixed(1)}x`;
     return `${(n > 1 ? n : n * 100).toFixed(1)}%`;
   });
@@ -154,10 +169,10 @@ function sideOf(data: CompareResponse, key: string): CreativeSide {
 }
 
 export function GroupedBars({ series, metric }: {
-  series: Array<{ label: string; color: string; values: Record<string, number | null> }>;
+  series: Array<{ label: string; color: string; currency?: string | null; values: Record<string, number | null> }>;
   metric: string;
 }) {
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
   const kpiName = (k: string): string => {
     if (k === "vtr") return t("compare.vtrCompleted");
     if (k === "view_rate") return t("compare.playRate");
@@ -178,7 +193,10 @@ export function GroupedBars({ series, metric }: {
   const slot = (W - PL - 8) / n;
   const bw = Math.min(72, slot * 0.55);
   const y = (v: number) => PT + (H - PT - PB) * (1 - Math.min(Math.max(v, 0), max) / max);
-  const tick = (f: number) => fmtCard(kpi as (typeof CARD_KPIS)[number], max * f);
+  const money = kpi === "cpm" || kpi === "cpa";
+  const codes = series.map((item) => item.currency ?? null);
+  const shared = codes.length > 0 && codes.every((code) => code && code === codes[0]) ? codes[0] : null;
+  const tick = (f: number) => fmtCard(kpi as (typeof CARD_KPIS)[number], max * f, money ? shared : null, locale);
   const short = (label: string) => {
     const room = Math.max(4, Math.floor(slot / 7.5));
     return label.length > room ? `${label.slice(0, room - 1)}…` : label;
@@ -205,7 +223,7 @@ export function GroupedBars({ series, metric }: {
                 <rect x={x} y={y(v)} width={bw} height={Math.max(2, y(0) - y(v))}
                   rx={4} fill={s.color} />
                 <text x={x + bw / 2} y={y(v) - 6} textAnchor="middle" fontSize={11} fontWeight={700} fill="#33475F">
-                  {fmtCard(kpi as (typeof CARD_KPIS)[number], v)}
+                  {fmtCard(kpi as (typeof CARD_KPIS)[number], v, money ? s.currency : null, locale)}
                 </text>
               </>
             )}
@@ -226,6 +244,7 @@ interface ItemView {
   meta: string;
   thumbSeed: string;
   duration: number | null;
+  currency: string | null;
   values: Record<string, number | null>;
 }
 
@@ -496,6 +515,7 @@ export function ComparePage() {
           meta: `${platformLabel(rep?.platform)} · ${dates.length ? `${dates[0].slice(5)} – ${dates[dates.length - 1].slice(5)}` : "Last 30 Days"}`,
           thumbSeed: rep?.creative_key ?? name,
           duration: rep?.annotation?.duration_s ?? rep?.duration_s ?? null,
+          currency: displayCurrency(k),
           values: { cpm: k.cpm ?? null, ctr: k.ctr ?? null, vtr: k.vtr ?? null, cpa: k.cpa ?? null, roas: k.roas ?? null },
         };
       });
@@ -511,6 +531,7 @@ export function ComparePage() {
         meta: `${platformLabel(meta?.platform)} · ${meta?.format ?? "Video"}`,
         thumbSeed: key,
         duration: meta?.annotation?.duration_s ?? meta?.duration_s ?? null,
+        currency: displayCurrency(d),
         values: { cpm: d.cpm ?? null, ctr: d.ctr ?? null, vtr: d.vtr ?? null, cpa: d.cpa ?? null, roas: d.roas ?? null },
       };
     });
@@ -667,6 +688,7 @@ export function ComparePage() {
   const barSeries = items.map((item, i) => ({
     label: item.title,
     color: COLORS[i % COLORS.length],
+    currency: item.currency,
     values: item.values,
   }));
 
@@ -747,7 +769,7 @@ export function ComparePage() {
                     {CARD_KPIS.map((k) => (
                       <tr key={k}>
                         <th scope="row" style={{ border: 0, padding: "3px 0", textTransform: "none", letterSpacing: 0 }}>{kpiName(k)}</th>
-                        <td className="num" style={{ border: 0, padding: "3px 0", fontWeight: 700 }}>{fmtCard(k, item.values[k])}</td>
+                        <td className="num" style={{ border: 0, padding: "3px 0", fontWeight: 700 }}>{fmtCard(k, item.values[k], item.currency, locale)}</td>
                       </tr>
                     ))}
                   </tbody>

@@ -1,14 +1,15 @@
 """Spend-weighted benchmarks over the canonical ads dataset."""
 
-import json
 import re
 
 from .analyst_metrics import METRICS as _METRIC_DEFS
 from .analyst_metrics import UNSUPPORTED as _FIELD_UNSUPPORTED
 from .analyst_metrics import field_state as _field_state
+from .creative_comparison import cost_comparison_reason as _cost_comparison_reason
 from .currency_scope import currency_breakdown as currency_breakdown
 from .currency_scope import money_scope
 from .metric_availability import reported_common_kpi_details as _reported_common_kpi_details
+from .metric_availability import reported_raw_totals as _reported_raw_totals
 from .metric_availability import reported_roas_details as _reported_roas_details
 from .period_metrics import manual_period_deltas
 
@@ -17,10 +18,19 @@ GROUPABLE = ("platform", "campaign", "hook_type", "creator_vs_branded",
 
 
 def _weight(rows, metric):
-    spend = sum(r["spend"] for r in rows)
-    if spend <= 0:
+    """Spend-weighted mean. None spend or metric values add no weight."""
+    total = 0.0
+    weighted = 0.0
+    for row in rows:
+        spend = row.get("spend")
+        value = row.get(metric)
+        if spend is None or value is None:
+            continue
+        total += spend
+        weighted += spend * value
+    if total <= 0:
         return None
-    return sum(r["spend"] * r[metric] for r in rows) / spend
+    return weighted / total
 
 
 def by_currency(rows):
@@ -85,34 +95,39 @@ def pooled_registry_ratio(rows, metric_id, impressions=None):
     return round(num / impressions, 4)
 
 
+def _finite_total(value, places=None):
+    """Round a supplied total. None stays None so an unsupplied field is not zero."""
+    if value is None:
+        return None
+    number = float(value)
+    return round(number, places) if places is not None else number
+
+
 def summarize(rows):
     """Spend-weighted roll-up of ad rows sharing one group key.
 
-    Raw totals retain their legacy numeric API. CTR and cost ratios
-    use matched reporting populations; metric_coverage records the
-    reporting and total row counts for those ratios. metric_components
-    preserves the unrounded reporting populations for downstream pooling;
-    money components still require the scope's currency comparability.
+    Raw totals are None when no row supplied that field. A supplied zero
+    stays zero, and rows from before missing-data tracking keep their
+    stored numbers. CTR and cost ratios use matched reporting populations;
+    metric_coverage records the reporting and total row counts for those
+    ratios. metric_components preserves the unrounded reporting populations
+    for downstream pooling; money components still require the scope's
+    currency comparability.
     """
     weighted_conv = _weight(rows, "conv_rate")
-    spend = sum(r["spend"] for r in rows)
-    impr = sum(r["impressions"] for r in rows)
-    clicks = sum(r["clicks"] for r in rows)
-    conv = sum(r["conversions"] for r in rows)
-    views = sum(r.get("video_views", 0) or 0 for r in rows)
-    revenue = sum(r.get("revenue", 0) or 0 for r in rows)
+    raw = _reported_raw_totals(rows)
     scope = money_scope(rows)
     mixed = scope["mixed_currency"]
     roas, roas_coverage, roas_components = _reported_roas_details(rows)
     ratios, coverage, components = _reported_common_kpi_details(rows)
     return {
         "n_ads": len(rows),
-        "spend": round(spend, 2),
-        "impressions": impr,
-        "clicks": clicks,
-        "conversions": conv,
-        "video_views": views,
-        "revenue": round(revenue, 2),
+        "spend": _finite_total(raw["spend"], 2),
+        "impressions": raw["impressions"],
+        "clicks": raw["clicks"],
+        "conversions": raw["conversions"],
+        "video_views": raw["video_views"],
+        "revenue": _finite_total(raw["revenue"], 2),
         # A14: currency comparability travels with every pooled
         # payload; money ratios go None on mixed scopes.
         "currency": scope["currency"],
@@ -379,23 +394,24 @@ def project_of(row):
 
 
 def kpis_for_rows(rows):
-    """Aggregate KPIs over ad rows (spend-weighted where it matters)."""
-    spend = sum(r.get("spend", 0) or 0 for r in rows)
-    impr = sum(r.get("impressions", 0) or 0 for r in rows)
-    clicks = sum(r.get("clicks", 0) or 0 for r in rows)
-    conv = sum(r.get("conversions", 0) or 0 for r in rows)
-    views = sum(r.get("video_views", 0) or 0 for r in rows)
+    """Aggregate KPIs over ad rows (spend-weighted where it matters).
+
+    Raw totals follow reported_raw_totals: None when the field was never
+    supplied, a real zero when a row supplied zero, and the stored number
+    when the row has no missing-data marker.
+    """
+    raw = _reported_raw_totals(rows)
     scope = money_scope(rows)
     mixed = scope["mixed_currency"]
     roas, roas_coverage, roas_components = _reported_roas_details(rows)
     ratios, coverage, components = _reported_common_kpi_details(rows)
     return {
         "n_ads": len(rows),
-        "spend": round(spend, 2),
-        "impressions": impr,
-        "clicks": clicks,
-        "conversions": conv,
-        "video_views": views,
+        "spend": _finite_total(raw["spend"], 2),
+        "impressions": raw["impressions"],
+        "clicks": raw["clicks"],
+        "conversions": raw["conversions"],
+        "video_views": raw["video_views"],
         # A14: same currency metadata + mixed-scope money gating as
         # summarize(); A15: registry-backed vtr/view_rate split.
         "currency": scope["currency"],
@@ -1179,9 +1195,14 @@ def _report_extras(conn, names, strict_human=False, scope=None,
     per_campaign = {}
     hook_spend, hook_conv = {}, {}
     strict_nulled = 0
+    currency_blocked = False
     for name in names:
         rows = _creative_rows(conn, name, scope=scope, owner=owner,
                               admin=admin)
+        rank_rows = rows
+        if not _money_comparable(rows, rank_by):
+            rank_rows = []
+            currency_blocked = True
 
         def _rank(pool):
             def _key(r):
@@ -1197,11 +1218,11 @@ def _report_extras(conn, names, strict_human=False, scope=None,
             return (ranked[0],
                     ranked[-1] if len(ranked) > 1 else None)
 
-        best, worst = _rank(rows)
+        best, worst = _rank(rank_rows)
         if strict_human:
             # Verified-only contention: unverified hook/format labels
             # must not enter an official strict report.
-            vbest, vworst = _rank([r for r in rows if r["verified"]])
+            vbest, vworst = _rank([r for r in rank_rows if r["verified"]])
             strict_nulled += ((best is not None and vbest is None) +
                               (worst is not None and vworst is None))
             best, worst = vbest, vworst
@@ -1215,14 +1236,16 @@ def _report_extras(conn, names, strict_human=False, scope=None,
             hook_conv[r["hook_type"]] = hook_conv.get(r["hook_type"], 0) + (
                 r["conversions"] or 0)
     learnings = []
-    if hook_spend:
+    creative_rows = [r for name in names for r in per_campaign[name]["creatives"]]
+    if hook_spend and _label_currency(creative_rows) is not False:
         top_hook = max(hook_spend, key=lambda h: hook_spend[h])
         conv = hook_conv.get(top_hook, 0)
-        hooked = [r for name in names for r in per_campaign[name]["creatives"]
-                  if r["hook_type"] == top_hook]
+        hooked = [r for r in creative_rows if r["hook_type"] == top_hook]
+        hook_amount = _native_amount(
+            hook_spend[top_hook], _label_currency(hooked))
         learnings.append((
-            "%s hooks carry the most spend ($%s%s)." % (
-                top_hook, f"{hook_spend[top_hook]:,.2f}",
+            "%s hooks carry the most spend (%s%s)." % (
+                top_hook, hook_amount,
                 ", %s conversions" % conv if conv else ", no conversions yet"),
             all(r["verified"] for r in hooked) if hooked else True))
     unannotated = sum(1 for name in names for r in per_campaign[name]["creatives"]
@@ -1266,15 +1289,17 @@ def _report_extras(conn, names, strict_human=False, scope=None,
     scoped_rows = [r for name in names
                    for r in per_campaign[name]["creatives"]]
     scoped_spend = sum(r["spend"] for r in scoped_rows)
-    if hook_spend:
+    scope_currency = _label_currency(scoped_rows)
+    if hook_spend and scope_currency is not False:
         top_hook = max(hook_spend, key=lambda h: hook_spend[h])
         if top_hook != "unannotated":
             conv = hook_conv.get(top_hook, 0)
             briefs.append((
-                "TEST — Brief more '%s' hooks: they carry $%s of $%s "
+                "TEST — Brief more '%s' hooks: they carry %s of %s "
                 "scoped spend%s." % (
-                    top_hook, f"{hook_spend[top_hook]:,.2f}",
-                    f"{scoped_spend:,.2f}",
+                    top_hook,
+                    _native_amount(hook_spend[top_hook], scope_currency),
+                    _native_amount(scoped_spend, scope_currency),
                     ", %s conversions" % conv if conv else ""),
                 _label_verified("hook_type", top_hook)))
     mode_spend, mode_conv = {}, {}
@@ -1286,14 +1311,19 @@ def _report_extras(conn, names, strict_human=False, scope=None,
         mode_conv[mode] = mode_conv.get(mode, 0) + (r["conversions"] or 0)
     mode_cpa = {m: mode_spend[m] / mode_conv[m]
                 for m in mode_spend if mode_conv.get(m)}
-    if len(mode_cpa) >= 2:
+    mode_rows = [r for r in scoped_rows
+                 if r["creator_vs_branded"] != "unannotated"]
+    if len(mode_cpa) >= 2 and _money_comparable(mode_rows, "cpa"):
         winner = min(mode_cpa, key=lambda m: mode_cpa[m])
-        rest = ", ".join("%s $%.2f" % (m, mode_cpa[m])
+        mode_currency = _label_currency(mode_rows)
+        shown_currency = None if mode_currency is False else mode_currency
+        rest = ", ".join("%s %s" % (m, _native_amount(mode_cpa[m], shown_currency))
                          for m in sorted(mode_cpa) if m != winner)
         briefs.append((
-            "TEST — %s formats lead on CPA ($%.2f vs %s); brief the next "
+            "TEST — %s formats lead on CPA (%s vs %s); brief the next "
             "concepts %s-led against the current control." % (
-                winner, mode_cpa[winner], rest, winner),
+                winner, _native_amount(mode_cpa[winner], shown_currency),
+                rest, winner),
             _label_verified("creator_vs_branded", winner)))
     buckets = {"<=15s": [0, 0, 0], "15-30s": [0, 0, 0], ">30s": [0, 0, 0]}
     for r in scoped_rows:
@@ -1306,14 +1336,17 @@ def _report_extras(conn, names, strict_human=False, scope=None,
         buckets[bucket][0] += r["spend"]
         buckets[bucket][1] += r["conversions"] or 0
     timed = {b: (v[0] / v[1]) for b, v in buckets.items() if v[1] > 0}
-    if len(timed) >= 2:
+    timed_rows = [r for r in scoped_rows if (r["duration_s"] or 0) > 0]
+    if len(timed) >= 2 and _money_comparable(timed_rows, "cpa"):
         winner = min(timed, key=lambda b: timed[b])
+        length_currency = _label_currency(timed_rows)
+        shown_currency = None if length_currency is False else length_currency
         briefs.append((
-            "TEST — Brief %s concepts: that length wins on CPA ($%.2f) at "
-            "$%s spend." % (winner, timed[winner],
-                             f"{buckets[winner][0]:,.2f}"),
-            _brief_verified([r["creative_key"] for r in scoped_rows
-                             if (r["duration_s"] or 0) > 0])))
+            "TEST — Brief %s concepts: that length wins on CPA (%s) at "
+            "%s spend." % (winner,
+                           _native_amount(timed[winner], shown_currency),
+                           _native_amount(buckets[winner][0], shown_currency)),
+            _brief_verified([r["creative_key"] for r in timed_rows])))
     cta_starts = []
     for key, (a, _v) in ann_by_key.items():
         cta = a.get("cta")
@@ -1360,24 +1393,45 @@ def _report_extras(conn, names, strict_human=False, scope=None,
         if style == "unannotated":
             continue
         style_spend[style] = style_spend.get(style, 0) + r["spend"]
-    if style_spend:
+    style_rows = [r for r in scoped_rows if r["edit_style"] != "unannotated"]
+    style_currency = _label_currency(style_rows)
+    if style_spend and style_currency is not False:
         winner = max(style_spend, key=lambda s: style_spend[s])
         briefs.append((
-            "TEST — '%s' edits carry $%s scoped spend; brief a %s variant "
+            "TEST — '%s' edits carry %s scoped spend; brief a %s variant "
             "of the current winner." % (
-                winner, f"{style_spend[winner]:,.2f}", winner),
+                winner, _native_amount(style_spend[winner], style_currency),
+                winner),
             _label_verified("edit_style", winner)))
     recommendations = []
-    money = rank_by in ("cpm", "cpc", "cpa")
-    sym = "$" if money else ""
 
-    def _show_rank(value):
-        return "n/a" if value is None else "%s%s" % (sym, value)
+    def _show_rank(row):
+        if not isinstance(row, dict) or row.get(rank_by) is None:
+            return "n/a"
+        if rank_by in ("cpm", "cpc", "cpa"):
+            return _native_amount(row[rank_by], _record_currency(row))
+        return str(row[rank_by])
 
     contenders = [(n, per_campaign[n]["best"]) for n in names
                   if per_campaign[n]["best"] and
                   per_campaign[n]["best"][rank_by] is not None]
-    if contenders:
+    blocked_note = ("%s comparison unavailable: amounts have different or "
+                    "unknown currencies." % rank_by.upper())
+    noted_block = False
+
+    def _note_block():
+        nonlocal noted_block
+        if noted_block:
+            return
+        recommendations.append((blocked_note, True))
+        noted_block = True
+
+    if currency_blocked:
+        _note_block()
+    if contenders and not _money_comparable(
+            [row for _name, row in contenders], rank_by):
+        _note_block()
+    elif contenders:
         pick = (max if higher else min)
         top = pick(contenders, key=lambda kv: kv[1][rank_by])
         recommendations.append((
@@ -1385,7 +1439,7 @@ def _report_extras(conn, names, strict_human=False, scope=None,
             "%s at %s (%s)." % (
                 top[0],
                 "highest" if higher else "lowest", rank_by.upper(),
-                _show_rank(top[1][rank_by]), top[1]["creative_key"]),
+                _show_rank(top[1]), top[1]["creative_key"]),
             bool(top[1]["verified"])))
         bottom = (min if higher else max)(
             contenders, key=lambda kv: kv[1][rank_by])
@@ -1395,7 +1449,7 @@ def _report_extras(conn, names, strict_human=False, scope=None,
                 "adding spend — compare its hook/format against %s "
                 "(heuristic)." % (
                     bottom[0], rank_by.upper(),
-                    _show_rank(bottom[1][rank_by]), top[0]),
+                    _show_rank(bottom[1]), top[0]),
                 bool(bottom[1]["verified"] and top[1]["verified"])))
     # Territory layer: which markets lead, lag, or need more data.
     # Rankings only admit markets past sample-size thresholds; thin
@@ -1447,26 +1501,33 @@ def _report_extras(conn, names, strict_human=False, scope=None,
                           and cell["conv"] >= MIN_MARKET_CONV)})
     ranked_markets = [m for m in markets
                       if m["qualified"] and m["cpa"] is not None]
-    if ranked_markets:
+    if ranked_markets and _money_comparable(ranked_markets, "cpa"):
         leader = min(ranked_markets, key=lambda m: m["cpa"])
         recommendations.append((
-            "MARKET — %s leads territories on CPA ($%s at $%s spend, %d "
+            "MARKET — %s leads territories on CPA (%s at %s spend, %d "
             "creatives)." % (
-                leader["market"], leader["cpa"], leader["spend"],
+                leader["market"],
+                _native_amount(leader["cpa"], _record_currency(leader)),
+                _market_amount(leader, "spend"),
                 leader["n_creatives"]),
             True))
         laggard = max(ranked_markets, key=lambda m: m["cpa"])
         if laggard["market"] != leader["market"]:
             recommendations.append((
-                "MARKET — %s underperforms on CPA ($%s); diagnose "
+                "MARKET — %s underperforms on CPA (%s); diagnose "
                 "hook/format fit there before scaling spend." % (
-                    laggard["market"], laggard["cpa"]),
+                    laggard["market"],
+                    _native_amount(laggard["cpa"], _record_currency(laggard))),
                 True))
+    elif ranked_markets:
+        recommendations.append((
+            "MARKET — CPA comparison unavailable: amounts have different "
+            "or unknown currencies.", True))
     thin = [m for m in markets if not m["qualified"] and m["spend"] > 0]
     for m in thin:
         recommendations.append((
-            "MARKET — %s has only $%s spend: too early to judge, keep "
-            "testing." % (m["market"], m["spend"]),
+            "MARKET — %s has only %s spend: too early to judge, keep "
+            "testing." % (m["market"], _market_amount(m, "spend")),
             True))
     recommendations.extend(briefs)
     if not recommendations:
@@ -1479,7 +1540,79 @@ def _report_extras(conn, names, strict_human=False, scope=None,
             "recommendations": [t for t, _v in recommendations],
             "recommendations_verified": [v for _t, v in recommendations],
             "markets": markets,
-            "strict_nulled": strict_nulled}
+            "strict_nulled": strict_nulled,
+            "currency_blocked": currency_blocked}
+
+
+_MONEY_METRICS = ("cpm", "cpc", "cpa", "spend")
+
+
+def _native_amount(value, currency):
+    """Native amount for prose. None is n/a. No assumed dollar sign."""
+    if value is None:
+        return "n/a"
+    return _compact_money(value, currency)
+
+
+def _record_currency(record):
+    """Single explicit code, or None when the unit is mixed or unknown."""
+    if not isinstance(record, dict):
+        return None
+    if (record.get("mixed_currency") or record.get("unknown_currency_contribution")
+            or record.get("currency_known") is False):
+        return None
+    raw = record.get("currency")
+    code = raw.strip().upper() if isinstance(raw, str) else ""
+    declared = record.get("currencies")
+    if isinstance(declared, (list, tuple)):
+        codes = []
+        for item in declared:
+            if not isinstance(item, str) or not item.strip():
+                return None
+            codes.append(item.strip().upper())
+        if len(set(codes)) != 1:
+            return None
+        if code and codes[0] != code:
+            return None
+        return codes[0]
+    return code or None
+
+
+def _label_currency(records):
+    """Shared label code, None for a legacy unknown unit, or False when mixed."""
+    records = [record for record in (records or []) if isinstance(record, dict)]
+    if not records:
+        return None
+    if any(record.get("mixed_currency") for record in records):
+        return False
+    if not _money_comparable(records, "spend"):
+        return False
+    codes = {_record_currency(record) for record in records}
+    if len(codes) == 1:
+        return codes.pop()
+    return False
+
+
+def _market_amount(market, field):
+    """One market cell. A mixed market is unavailable, not an unknown unit."""
+    if market.get("mixed_currency"):
+        return "unavailable"
+    value = market.get(field)
+    if value is None:
+        return "n/a"
+    return _native_amount(value, _record_currency(market))
+
+
+def _money_comparable(records, metric):
+    """True when a metric is not money, or the records share a comparable unit.
+
+    Legacy wholly unspecified scopes stay comparable. Their labels still
+    say the currency is unknown. Known-plus-unknown and mixed units do not
+    rank.
+    """
+    if metric not in _MONEY_METRICS:
+        return True
+    return _cost_comparison_reason(list(records or []), metric) is None
 
 
 def _show(value):
@@ -1496,13 +1629,17 @@ def _csv_cell(value):
     return text
 
 
-def _reco_fmt(rank_by, value):
-    """Measured KPI values for recommendation prose: money with $,
-    ROAS with x, VTR/CTR as percent — uncomputable reads n/a."""
+def _reco_fmt(rank_by, value, currency=None):
+    """Measured KPI values for recommendation prose.
+
+    Money uses the row's own code, or an unknown-currency label when
+    the legacy scope never named a unit. ROAS keeps x. Rates stay
+    percents. Uncomputable reads n/a.
+    """
     if value is None:
         return "n/a"
     if rank_by in ("cpm", "cpc", "cpa"):
-        return "$%s" % value
+        return _native_amount(value, currency)
     if rank_by == "roas":
         return "%sx" % value
     return "%.2f%%" % (100.0 * value)
@@ -1616,7 +1753,8 @@ def campaign_recommendations(conn, campaign, scope=None, rank_by="cpa",
                 worked.append(_bullet(
                     "Winner %s (%s %s): %s." % (
                         key, rank_by.upper(),
-                        _reco_fmt(rank_by, best[rank_by]),
+                        _reco_fmt(rank_by, best[rank_by],
+                                  _record_currency(best)),
                         ", ".join(traits)), best["verified"]))
             early = best["product_first_visible_s"]
             if early is not None:
@@ -1633,6 +1771,10 @@ def campaign_recommendations(conn, campaign, scope=None, rank_by="cpa",
             if best["cta"]:
                 worked.append(_bullet(
                     "Winner CTA: %s." % best["cta"], best["verified"]))
+        elif extras.get("currency_blocked"):
+            worked.append(_bullet(
+                "%s comparison unavailable: amounts have different or "
+                "unknown currencies." % rank_by.upper()))
         else:
             worked.append(_bullet(
                 "No %s values to rank yet — collect delivery data before "
@@ -1651,6 +1793,10 @@ def campaign_recommendations(conn, campaign, scope=None, rank_by="cpa",
     if not rows:
         gaps.append(_bullet(
             "No creatives in scope — nothing to contrast yet."))
+    elif extras.get("currency_blocked"):
+        gaps.append(_bullet(
+            "%s comparison unavailable: amounts have different or "
+            "unknown currencies." % rank_by.upper()))
     elif (worst is None or best is None
             or worst["creative_key"] == best["creative_key"]):
         gaps.append(_bullet(
@@ -1705,8 +1851,12 @@ def campaign_recommendations(conn, campaign, scope=None, rank_by="cpa",
             "Scale: %s — %s %s at %s across %d scoped creative%s "
             "(heuristic)." % (
                 best["creative_key"], lead_word, rank_by.upper(),
-                _reco_fmt(rank_by, best[rank_by]), n,
-                "" if n == 1 else "s"), best["verified"]))
+                _reco_fmt(rank_by, best[rank_by], _record_currency(best)),
+                n, "" if n == 1 else "s"), best["verified"]))
+    elif extras.get("currency_blocked"):
+        scale.append(_bullet(
+            "%s comparison unavailable: amounts have different or "
+            "unknown currencies." % rank_by.upper()))
     else:
         scale.append(_bullet(
             "Not enough data to recommend scaling yet — no %s values in "
@@ -1715,7 +1865,11 @@ def campaign_recommendations(conn, campaign, scope=None, rank_by="cpa",
 
     # --- Test next: a concrete concept from observed winner traits.
     tests = []
-    if best is None:
+    if extras.get("currency_blocked"):
+        tests.append(_bullet(
+            "%s comparison unavailable: amounts have different or "
+            "unknown currencies." % rank_by.upper()))
+    elif best is None:
         tests.append(_bullet(
             "Not enough data to brief the next concept yet."))
     else:
@@ -1752,7 +1906,11 @@ def campaign_recommendations(conn, campaign, scope=None, rank_by="cpa",
 
     # --- Stop / watch: the trailer plus KPI-blind creatives.
     stops = []
-    if not rows:
+    if extras.get("currency_blocked"):
+        stops.append(_bullet(
+            "%s comparison unavailable: amounts have different or "
+            "unknown currencies." % rank_by.upper()))
+    elif not rows:
         stops.append(_bullet("No creatives in scope — nothing to hold."))
     else:
         ranked = [r for r in rows if r[rank_by] is not None]
@@ -1763,9 +1921,11 @@ def campaign_recommendations(conn, campaign, scope=None, rank_by="cpa",
                 "Avoid scaling %s yet: %s %s vs winner %s (%s) — improve "
                 "it or collect more conversion data first (heuristic)."
                 % (worst["creative_key"], rank_by.upper(),
-                   _reco_fmt(rank_by, worst[rank_by]),
+                   _reco_fmt(rank_by, worst[rank_by],
+                             _record_currency(worst)),
                    best["creative_key"],
-                   _reco_fmt(rank_by, best[rank_by])),
+                   _reco_fmt(rank_by, best[rank_by],
+                             _record_currency(best))),
                 worst["verified"] and best["verified"]))
         blind = [r["creative_key"] for r in rows if r[rank_by] is None]
         for key in blind:
@@ -1781,10 +1941,18 @@ def campaign_recommendations(conn, campaign, scope=None, rank_by="cpa",
     # --- Benchmark gap: campaign aggregate vs scoped peer median.
     gaps_bench = []
     peers = benchmark(conn, "campaign", scoped.resolve(conn).normalized())
-    own = (peers.get(campaign) or {}).get(rank_by)
-    peer_vals = sorted(v[rank_by] for name, v in peers.items()
-                       if name != campaign and v[rank_by] is not None)
-    if own is None:
+    own_row = peers.get(campaign) or {}
+    own = own_row.get(rank_by)
+    peer_rows = [v for name, v in peers.items()
+                 if name != campaign and v.get(rank_by) is not None]
+    peer_vals = sorted(v[rank_by] for v in peer_rows)
+    money_rank = rank_by in ("cpm", "cpc", "cpa")
+    compared = [v for v in peers.values() if v.get(rank_by) is not None]
+    if money_rank and compared and not _money_comparable(compared, rank_by):
+        gaps_bench.append(_bullet(
+            "%s comparison unavailable: amounts have different or "
+            "unknown currencies." % rank_by.upper()))
+    elif own is None:
         gaps_bench.append(_bullet(
             "No scoped %s for this campaign yet — collect delivery data "
             "before benchmarking it." % rank_by.upper()))
@@ -1794,20 +1962,24 @@ def campaign_recommendations(conn, campaign, scope=None, rank_by="cpa",
     else:
         import statistics
         median = statistics.median(peer_vals)
+        peer_currency = _record_currency(own_row)
         if (own < median and not higher) or (own > median and higher):
             gaps_bench.append(_bullet(
                 "Ahead of the scoped peer median %s (%s vs %s across %d "
                 "peer campaign%s) — defend it." % (
-                    rank_by.upper(), _reco_fmt(rank_by, own),
-                    _reco_fmt(rank_by, median), len(peer_vals),
+                    rank_by.upper(),
+                    _reco_fmt(rank_by, own, peer_currency),
+                    _reco_fmt(rank_by, median, peer_currency),
+                    len(peer_vals),
                     "" if len(peer_vals) == 1 else "s")))
         else:
             gaps_bench.append(_bullet(
                 "To beat the scoped peer median %s (%s), this campaign "
                 "needs %s → %s." % (
-                    rank_by.upper(), _reco_fmt(rank_by, median),
-                    _reco_fmt(rank_by, own),
-                    _reco_fmt(rank_by, median))))
+                    rank_by.upper(),
+                    _reco_fmt(rank_by, median, peer_currency),
+                    _reco_fmt(rank_by, own, peer_currency),
+                    _reco_fmt(rank_by, median, peer_currency))))
     sections.append({"key": "benchmark_gap", "title": "Benchmark gap",
                      "bullets": gaps_bench})
 
@@ -1964,9 +2136,10 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
         first = next(iter(bench.values()))
         if isinstance(first, dict) and "cpa" in first:
             for group, vals in bench.items():
-                lines.append("- %s: CPA $%s, CTR %s, spend $%s"
-                             % (group, _show(vals.get("cpa")),
-                                _show(vals.get("ctr")), vals.get("spend")))
+                lines.append("- %s: CPA %s, CTR %s, spend %s"
+                             % (group, _market_amount(vals, "cpa"),
+                                _show(vals.get("ctr")),
+                                _market_amount(vals, "spend")))
         else:
             lines.append("- cohort: %s" % bench)
     else:
@@ -1975,10 +2148,12 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
     extras = _report_extras(conn, names, strict_human=strict,
                             scope=scope, rank_by=rank_by, owner=owner,
                             admin=admin)
-    rank_sym = "$" if rank_by in ("cpm", "cpc", "cpa") else ""
-
-    def _show_rank(value):
-        return "n/a" if value is None else "%s%s" % (rank_sym, value)
+    def _show_rank(row):
+        if not isinstance(row, dict) or row.get(rank_by) is None:
+            return "n/a"
+        if rank_by in ("cpm", "cpc", "cpa"):
+            return _native_amount(row.get(rank_by), _record_currency(row))
+        return str(row.get(rank_by))
     unverified_excluded = 0
     if strict:
         # HUMAN-VERIFIED parity: insights resting on unverified
@@ -2007,12 +2182,12 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
         if best:
             lines.append("- %s best: %s (%s %s, %s / %s)" % (
                 name, best["creative_key"], comp["rank_by"].upper(),
-                _show_rank(best[comp["rank_by"]]),
+                _show_rank(best),
                 best["hook_type"], best["creator_vs_branded"]))
         if worst:
             lines.append("- %s watch: %s (%s %s, %s / %s)" % (
                 name, worst["creative_key"], comp["rank_by"].upper(),
-                _show_rank(worst[comp["rank_by"]]),
+                _show_rank(worst),
                 worst["hook_type"], worst["creator_vs_branded"]))
     lines += ["", "## Creative learnings", ""]
     lines += ["- %s" % line for line in extras["learnings"]] or ["- —"]
@@ -2020,9 +2195,9 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
         lines += ["", "## Markets (scoped)", "",
                   "Market | Spend | Conversions | CPA | ROAS | Creatives | Verdict"]
         for m in extras["markets"]:
-            lines.append("%s | $%s | %s | %s | %s | %d | %s" % (
-                m["market"], m["spend"], m["conversions"],
-                ("$%s" % m["cpa"]) if m["cpa"] is not None else "n/a",
+            lines.append("%s | %s | %s | %s | %s | %d | %s" % (
+                m["market"], _market_amount(m, "spend"), m["conversions"],
+                _market_amount(m, "cpa"),
                 m["roas"] if m["roas"] is not None else "n/a",
                 m["n_creatives"],
                 "ranked" if m["qualified"] else "too early to judge"))
@@ -2072,12 +2247,12 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
                 if best:
                     bullets.append("Best creative: %s (%s %s, %s / %s)" % (
                         best["creative_key"], comp["rank_by"].upper(),
-                        _show_rank(best[comp["rank_by"]]),
+                        _show_rank(best),
                         best["hook_type"], best["creator_vs_branded"]))
                 if worst:
                     bullets.append("Watch: %s (%s %s, %s / %s)" % (
                         worst["creative_key"], comp["rank_by"].upper(),
-                        _show_rank(worst[comp["rank_by"]]),
+                        _show_rank(worst),
                         worst["hook_type"], worst["creator_vs_branded"]))
                 slides.append({"title": name, "bullets": bullets})
             why_title = ("Why %s Leads" % comp["why"]["top"]
@@ -2092,9 +2267,10 @@ def build_report(conn, campaigns=None, kpis=("cpa", "ctr"), benchmark_sel=None,
                 if isinstance(first, dict) and "cpa" in first:
                     for group, vals in bench.items():
                         bench_bullets.append(
-                            "%s: CPA $%s, CTR %s, spend $%s" % (
-                                group, _show(vals.get("cpa")),
-                                _show(vals.get("ctr")), vals.get("spend")))
+                            "%s: CPA %s, CTR %s, spend %s" % (
+                                group, _market_amount(vals, "cpa"),
+                                _show(vals.get("ctr")),
+                                _market_amount(vals, "spend")))
                 else:
                     bench_bullets.append("Cohort: %s" % str(bench)[:300])
             else:

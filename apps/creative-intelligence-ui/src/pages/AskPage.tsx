@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { api, ApiError } from "@/api/client";
 import { useFilters } from "@/state/FilterContext";
 import { useLocale } from "@/i18n";
+import { comparablePeriodCurrency } from "@/components/sourceCurrency";
 import { Icon } from "@/components/icons";
 import { LoadingButton } from "@/components/LoadingButton";
 import { TrendChart } from "@/components/charts";
@@ -216,9 +217,10 @@ export function AskPage() {
     { label: t("ask.avgCpa"), metric: "cpa", kind: "money", value: compare.metrics.cpa?.current },
     { label: t("dashboard.averageRoas"), metric: "roas", kind: "mult", value: compare.metrics.roas?.current },
   ] : [];
+  const moneyCode = comparablePeriodCurrency(compare?.currency_context);
   const kpis = kpiDefs.map((k) => ({
     ...k,
-    display: kpiDisplay(k.kind, k.value, emptyScope, locale, unavailable),
+    display: kpiDisplay(k.kind, k.value, emptyScope, locale, unavailable, k.kind === "money" ? moneyCode : undefined),
     note: kpiPlaceholderNote(k.kind, k.value, emptyScope) ? emptyNote : null,
   }));
 

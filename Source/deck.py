@@ -17,6 +17,12 @@ def _t(value):
     return html.escape(str(value), quote=True)
 
 
+def _cpa(value):
+    if value is None:
+        return "unavailable"
+    return f"{value:.2f}"
+
+
 def slides(rows, joined, cohort_desc):
     """Return an ordered list of (title, body_html) slide tuples."""
     totals = kpi_totals(rows)
@@ -24,9 +30,15 @@ def slides(rows, joined, cohort_desc):
     best = rank_creatives(rows, "cpa")[:3]
     worst = rank_creatives(rows, "cpa")[-1:]
     recs = recommend(joined)
-    card = ("above benchmark" if totals["cpa"]
-            <= bench["stats"]["mean_weighted"] else "below benchmark") \
-        if bench["status"] == "ok" else "no benchmark yet"
+    mean = bench["stats"]["mean_weighted"]
+    if bench["status"] != "ok" or mean is None or totals.get("cpa") is None:
+        card = "no benchmark yet" if bench["status"] != "ok" else \
+            "no benchmark (weighted mean unavailable)"
+    elif totals["cpa"] <= mean:
+        card = "above benchmark"
+    else:
+        card = "below benchmark"
+    mean_text = "unavailable" if mean is None else f"{mean:.2f}"
     deck = [
         ("Performance summary",
          f"<p>Spend {totals['spend']:.2f} · CPA {totals['cpa']:.2f} · "
@@ -34,13 +46,13 @@ def slides(rows, joined, cohort_desc):
         ("Best creatives",
          "<ul>" + "".join(
              f"<li>{_t(r['creative_id'])} ({_t(r['platform'])}): CPA "
-             f"{r.get('cpa', 0):.2f}</li>" for r in best) + "</ul>"),
+             f"{_cpa(r.get('cpa', 0))}</li>" for r in best) + "</ul>"),
         ("Watch list",
          "<ul>" + "".join(
-             f"<li>{_t(r['creative_id'])}: CPA {r.get('cpa', 0):.2f} — "
+             f"<li>{_t(r['creative_id'])}: CPA {_cpa(r.get('cpa', 0))} — "
              f"review before scaling.</li>" for r in worst) + "</ul>"),
         ("Benchmarks",
-         f"<p>Cohort CPA mean {bench['stats']['mean_weighted']:.2f}, "
+         f"<p>Cohort CPA mean {mean_text}, "
          f"median {bench['stats']['median']:.2f} "
          f"({bench['stats']['creatives']} creatives, "
          f"{bench['stats']['projects']} projects).</p>"),

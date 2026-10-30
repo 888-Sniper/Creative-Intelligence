@@ -208,7 +208,7 @@ class Gate1ScopeParityTest(unittest.TestCase):
 
     def test_ask_scoped(self):
         out = qa.answer(self.conn, "What is total spend?", scope=SPAIN)
-        self.assertIn("$150.00", out["answer"])
+        self.assertIn("150.00 (currency unknown)", out["answer"])
         self.assertNotIn("CampB", out["answer"])
         self.assertEqual(out["scope"], SPAIN.describe())
 
@@ -392,7 +392,7 @@ class Gate6AskParityTest(unittest.TestCase):
 
     def test_spend_scoped(self):
         text = self._ask("What is total spend?", SPAIN)
-        self.assertIn("$150.00", text)
+        self.assertIn("150.00 (currency unknown)", text)
 
     def test_early_product_vtr(self):
         text = self._ask("Does early product appearance improve VTR?",
@@ -1263,7 +1263,7 @@ class ReportKpiAwarenessTest(unittest.TestCase):
                 if line.startswith("- CampX best:")]
         self.assertEqual(len(best), 1)
         self.assertIn("cpa-champ", best[0])
-        self.assertIn("(CPA $10.0,", best[0])
+        self.assertIn("(CPA 10.00 (currency unknown),", best[0])
         self.assertNotIn("ROAS", best[0])
 
     def test_deck_best_names_rank_metric(self):

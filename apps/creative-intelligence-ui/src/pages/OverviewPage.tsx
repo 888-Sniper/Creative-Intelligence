@@ -5,15 +5,17 @@ import { useFilters } from "@/state/FilterContext";
 import { SyncJobs } from "@/components/SyncJobs";
 import { KpiTrend } from "@/components/KpiTrend";
 import type { KpiComparison, KpiPeriod } from "@/components/KpiTrend";
+import { pooledBenchmark, type BenchmarkMetadata } from "@/components/benchmarkPooling";
+import { formatNativeMoney, sharedSourceCurrency } from "@/components/sourceCurrency";
+import { useLocale } from "@/i18n";
 
-interface CampaignAggregate {
-  n_ads?: number;
-  spend?: number;
-  impressions?: number;
-  clicks?: number;
-  conversions?: number;
-  video_views?: number;
-  revenue?: number;
+interface CampaignAggregate extends BenchmarkMetadata {
+  spend?: number | null;
+  impressions?: number | null;
+  clicks?: number | null;
+  conversions?: number | null;
+  video_views?: number | null;
+  revenue?: number | null;
   cpa?: number | null;
 }
 
@@ -76,45 +78,73 @@ function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-/** Dataset summary over GET /api/campaigns, mirroring the legacy kpis(). */
-function buildKpiCards(campaigns: CampaignsResponse): KpiCard[] {
+function sumReported(
+  groups: CampaignAggregate[],
+  key: "spend" | "impressions" | "clicks" | "conversions" | "video_views" | "revenue",
+): number | null {
+  let total = 0;
+  let any = false;
+  for (const group of groups) {
+    const value = group[key];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      total += value;
+      any = true;
+    }
+  }
+  return any ? total : null;
+}
+
+/** Dataset summary over GET /api/campaigns. Ratios use reporting components. */
+function buildKpiCards(campaigns: CampaignsResponse, locale = "en-US"): KpiCard[] {
   const groups = Object.values(campaigns);
-  const tot = (k: "spend" | "impressions" | "clicks" | "conversions" | "video_views" | "revenue") =>
-    groups.reduce((t, g) => t + (Number(g[k]) || 0), 0);
-  const spend = tot("spend");
-  const impr = tot("impressions");
-  const clicks = tot("clicks");
-  const conv = tot("conversions");
-  const views = tot("video_views");
-  const rev = tot("revenue");
-  const cpm = impr ? (spend / impr) * 1000 : 0;
-  const vtr = impr ? views / impr : 0;
-  const ctr = impr ? clicks / impr : 0;
-  const cpa = conv ? spend / conv : 0;
-  const roas = spend ? rev / spend : 0;
+  const spend = sumReported(groups, "spend");
+  const impr = sumReported(groups, "impressions");
+  const views = sumReported(groups, "video_views");
+  const code = sharedSourceCurrency(groups);
+  const money = (value: number | null) => formatNativeMoney(value, code, locale, "—", { digits: 2 });
+  const cpm = pooledBenchmark(groups, "cpm");
+  const ctr = pooledBenchmark(groups, "ctr");
+  const cpa = pooledBenchmark(groups, "cpa");
+  const roas = pooledBenchmark(groups, "roas");
   const cpas = groups.map((g) => g.cpa).filter((v): v is number => typeof v === "number" && v > 0);
-  const best = cpas.length ? Math.min(...cpas) : null;
+  const best = cpas.length && code ? Math.min(...cpas) : null;
   const scope = `Across ${groups.length} Campaign${groups.length === 1 ? "" : "s"}`;
+  const roasShare = roas.coverage?.kind === "spend" ? roas.coverage.share : null;
+  const play = impr != null && impr > 0 && views != null ? views / impr : null;
   return [
-    { value: "$" + spend.toFixed(2), label: "Spend", context: scope, metricId: "spend" },
-    { value: impr ? impr.toLocaleString("en-US") : "—", label: "Impressions", context: impr ? scope : "No Impressions Yet", metricId: "impressions" },
-    { value: impr ? "$" + cpm.toFixed(2) : "—", label: "CPM", context: impr ? scope : "No Impressions Yet", metricId: "cpm" },
+    { value: money(spend), label: "Spend", context: spend == null ? "No Spend Reported" : scope, metricId: "spend" },
+    { value: impr ? impr.toLocaleString(locale) : "—", label: "Impressions", context: impr ? scope : "No Impressions Yet", metricId: "impressions" },
+    { value: cpm.value == null ? "—" : money(cpm.value), label: "CPM", context: cpm.value == null ? "No Impressions Yet" : scope, metricId: "cpm" },
     {
-      value: impr ? ((vtr * 100).toFixed(1) + "%") : "—",
+      value: play == null ? "—" : ((play * 100).toFixed(1) + "%"),
       label: "Play Rate",
       context: impr ? (views ? scope : "No Video Views Yet") : "No Impressions Yet",
       metricId: "view_rate",
     },
-    { value: impr ? ((ctr * 100).toFixed(2) + "%") : "—", label: "CTR", context: impr ? scope : "No Impressions Yet", metricId: "ctr" },
-    { value: conv ? "$" + cpa.toFixed(2) : "—", label: "CPA", context: conv ? "Blended " + scope : "No Conversions Yet", metricId: "cpa" },
     {
-      value: spend && rev ? roas.toFixed(2) + "x" : "—",
+      value: ctr.value == null ? "—" : ((ctr.value * 100).toFixed(2) + "%"),
+      label: "CTR",
+      context: ctr.value == null ? "No Impressions Yet" : scope,
+      metricId: "ctr",
+    },
+    {
+      value: cpa.value == null ? "—" : money(cpa.value),
+      label: "CPA",
+      context: cpa.value == null ? "No Conversions Yet" : "Blended " + scope,
+      metricId: "cpa",
+    },
+    {
+      value: roas.value == null ? "—" : roas.value.toFixed(2) + "x",
       label: "ROAS",
-      context: spend && rev ? "Blended " + scope : "No Revenue Yet",
+      context: roas.value == null
+        ? "No Revenue Yet"
+        : (roasShare != null && roasShare < 1
+          ? `Revenue-reporting spend coverage ${Math.round(roasShare * 100)}%`
+          : "Blended " + scope),
       metricId: "roas",
     },
     {
-      value: best != null ? "$" + best.toFixed(2) : "—",
+      value: best != null ? money(best) : "—",
       label: "Best CPA",
       context: best != null ? "Lowest Single Campaign" : "No Conversions Yet",
       metricId: null,
@@ -160,6 +190,7 @@ function readFileB64(file: File): Promise<string> {
  *  scheduled-sync status + run, and provider health (legacy v-main parity). */
 export function OverviewPage() {
   const { scope } = useFilters();
+  const { locale } = useLocale();
   const [campaigns, setCampaigns] = useState<CampaignsResponse | null>(null);
   const [kpiError, setKpiError] = useState("");
   const [platform, setPlatform] = useState("meta");
@@ -284,7 +315,7 @@ export function OverviewPage() {
   } else {
     kpiContent = (
       <div className="kpi-grid">
-        {buildKpiCards(campaigns).map((c) => {
+        {buildKpiCards(campaigns, locale).map((c) => {
           const comp = c.metricId ? compare?.metrics[c.metricId] ?? null : null;
           return (
             <div className="kpi-card" key={c.label}>

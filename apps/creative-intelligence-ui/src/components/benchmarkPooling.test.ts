@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  hasComparableBenchmarkCurrency, pooledBenchmark, pooledBenchmarkValue,
+  hasComparableBenchmarkCurrency, pooledBenchmark, pooledBenchmarkValue, reportingRoasGroup,
   type BenchmarkMetadata, type MetricComponent, type PooledBenchmarkMetric,
 } from "./benchmarkPooling";
 
@@ -242,5 +242,38 @@ describe("baseline explanations and coverage", () => {
   it("reports inconsistent components as invalid rather than as zero", () => {
     expect(pooledBenchmark([group("ctr", Infinity, 100)], "ctr").reason).toBe("invalid");
     expect(pooledBenchmark([group("roas", 100, -1)], "roas").reason).toBe("invalid");
+  });
+});
+
+describe("creative payload ROAS reconstruction", () => {
+  it("uses revenue-reporting spend as the denominator and keeps coverage", () => {
+    const reported = reportingRoasGroup({
+      spend: 100, roas: 2, roas_coverage: 1, currency: "USD", currencies: ["USD"], currency_known: true,
+    });
+    const silent = reportingRoasGroup({
+      spend: 900, roas: null, roas_coverage: 0, currency: "USD", currencies: ["USD"], currency_known: true,
+    });
+    const pooled = pooledBenchmark([reported, silent], "roas");
+    expect(pooled.value).toBe(2);
+    expect(pooled.coverage).toMatchObject({ kind: "spend", share: 0.1 });
+  });
+
+  it("stays unavailable when coverage was not supplied", () => {
+    const row = reportingRoasGroup({ spend: 100, roas: 2, currency: "USD" });
+    expect(pooledBenchmark([row], "roas").reason).toBe("metadata");
+  });
+
+  it("does not invent a unit when currency metadata is absent and spend is positive", () => {
+    const row = reportingRoasGroup({ spend: 100, roas: 2, roas_coverage: 1 });
+    expect(row.unknown_currency_contribution).toBe(true);
+    expect(pooledBenchmark([row], "roas").reason).toBe("currency");
+  });
+
+  it("treats a consistent code as known when the flag itself is absent", () => {
+    const row = reportingRoasGroup({
+      spend: 100, roas: 2, roas_coverage: 1, currency: "eur", currencies: ["EUR"],
+    });
+    expect(row.currency_known).toBe(true);
+    expect(pooledBenchmark([row], "roas").value).toBe(2);
   });
 });

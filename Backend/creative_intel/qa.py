@@ -209,9 +209,31 @@ def _rate_json(group):
             "numerator": num, "denominator": den}
 
 
-def _show_metric(metric, value):
+def _qa_currency(rows):
+    """Known unit for a display label. Mixed or unknown stays unlabeled."""
+    from .currency_scope import money_scope
+    scope = money_scope(rows)
+    if scope["mixed_currency"] or not scope["currency_known"]:
+        return None
+    return scope["currency"]
+
+
+def _qa_amount(value, rows):
+    """Native amount. A mixed pool is unavailable, never a dollar sign."""
+    from .currency_scope import money_scope
+    from .native_money import compact_money
+    if value is None:
+        return "n/a"
+    scope = money_scope(rows)
+    if scope["mixed_currency"]:
+        return "unavailable"
+    return compact_money(value, scope["currency"] if scope["currency_known"] else None)
+
+
+def _show_metric(metric, value, currency=None):
     if metric in ("cpa",):
-        return "$%.2f" % value
+        from .native_money import compact_money
+        return compact_money(value, currency)
     if metric in ("ctr", "vtr"):
         return "%.2f%%" % (value * 100.0)
     if metric == "roas":
@@ -577,11 +599,11 @@ def answer(conn, question, llm=None, scope=None, owner=None,
     if any(w in q for w in ("spend", "cost", "budget")):
         total = sum(r["spend"] for r in rows)
         top_spend = max(rows, key=lambda r: r["spend"])
-        parts.append("Total spend across %d uploaded rows is $%s. Top spend "
-                     "row is %r at $%s."
-                     % (len(rows), f"{total:,.2f}",
+        parts.append("Total spend across %d uploaded rows is %s. Top spend "
+                     "row is %r at %s."
+                     % (len(rows), _qa_amount(total, rows),
                         top_spend["creative_key"],
-                        f"{top_spend['spend']:,.2f}"))
+                        _qa_amount(top_spend["spend"], [top_spend])))
         cite("Uploaded CSV")
     if any(w in q for w in ("ctr", "click")):
         impr = sum(r["impressions"] for r in rows)
@@ -602,14 +624,15 @@ def answer(conn, question, llm=None, scope=None, owner=None,
         value, spend, conv = _cpa(rows)
         top_conv = max(rows, key=lambda r: r["conversions"])
         if conv:
-            parts.append("Blended CPA is $%.2f across %s conversions. Top "
+            parts.append("Blended CPA is %s across %s conversions. Top "
                          "conversions row is %r at %s."
-                         % (value, conv, top_conv["creative_key"],
+                         % (_qa_amount(value, rows), conv,
+                            top_conv["creative_key"],
                             top_conv["conversions"]))
         else:
             parts.append("No conversions yet, so there is no CPA to report "
-                         "($%s spend). Top conversions row is %r at %s."
-                         % (f"{spend:,.2f}", top_conv["creative_key"],
+                         "(%s spend). Top conversions row is %r at %s."
+                         % (_qa_amount(spend, rows), top_conv["creative_key"],
                             top_conv["conversions"]))
         cite("Benchmark Derived")
         cite("Uploaded CSV")
@@ -692,7 +715,8 @@ def answer(conn, question, llm=None, scope=None, owner=None,
             # Ties are judged on the DISPLAYED value: anything the UI
             # prints identically shares the lead, so the winner sentence
             # can never crown a leader the takeaways call tied.
-            disp = {k: _show_metric(metric, v) for k, v in ordered}
+            disp = {k: _show_metric(metric, v, _qa_currency(by_key[k]))
+                    for k, v in ordered}
             top_disp = disp[ordered[0][0]]
             leaders = [k for k, _v in ordered if disp[k] == top_disp]
             group = by_key[leaders[0]]
@@ -709,8 +733,17 @@ def answer(conn, question, llm=None, scope=None, owner=None,
                 if len(leaders) == 2:
                     shown = "%s and %s" % (_group_label(leaders[0]),
                                            _group_label(leaders[1]))
-                parts.append("Top %ss by %s are tied: %s at %s."
-                             % (_lname, _metric_name, shown, top_disp))
+                coverage_note = ""
+                if metric == "roas":
+                    from creative_intel import metric_availability as _qa_avail
+                    pooled = [row for leader in leaders for row in by_key[leader]]
+                    _val, _cov, _det = _qa_avail.reported_roas_details(pooled)
+                    if _cov is not None and _cov < 1:
+                        coverage_note = (" (revenue-reporting spend coverage %d%%)"
+                                         % round(_cov * 100))
+                parts.append("Top %ss by %s are tied: %s at %s%s."
+                             % (_lname, _metric_name, shown, top_disp,
+                                coverage_note))
             else:
                 coverage_note = ""
                 if metric == "roas":
@@ -820,10 +853,10 @@ def answer(conn, question, llm=None, scope=None, owner=None,
                 group = groups[mode]
                 value, spend, conv = _cpa(group)
                 keys = sorted({x["creative_key"] for x in group})
-                cpa_text = "unavailable" if value is None else "$%.2f" % value
-                bits.append("%s: %d creatives (%s) at $%.2f spend, CPA %s"
+                cpa_text = "unavailable" if value is None else _qa_amount(value, group)
+                bits.append("%s: %d creatives (%s) at %s spend, CPA %s"
                             % (mode, len(keys), ", ".join(keys),
-                               spend, cpa_text))
+                               _qa_amount(spend, group), cpa_text))
             parts.append("TikTok formats — " + "; ".join(bits) + ".")
             cite("Uploaded CSV")
             if any(k != "(unannotated)" for k in groups):
@@ -838,7 +871,8 @@ def answer(conn, question, llm=None, scope=None, owner=None,
         return pack
 
     def _money(value):
-        return ("$%s" % f"{value:,.2f}") if value is not None else "n/a"
+        from .native_money import compact_money
+        return compact_money(value, None) if value is not None else "n/a"
 
     if any(w in q for w in ("style", "editing", "talking head", "ugc",
                             "montage", "cinematic", "testimonial")):
@@ -1002,7 +1036,7 @@ def answer(conn, question, llm=None, scope=None, owner=None,
             def _side(keys):
                 group = [r for r in rows if r["creative_key"] in keys]
                 score = _group_score(group, metric)
-                shown = (_show_metric(metric, score)
+                shown = (_show_metric(metric, score, _qa_currency(group))
                          if score is not None else "unavailable")
                 return "%s (%d of %d creatives) at %s" % (
                     ", ".join(keys), len(keys), n_keys, shown)
@@ -1062,8 +1096,8 @@ def answer(conn, question, llm=None, scope=None, owner=None,
                      "styles, video length, CTA, funnel, markets, verticals, "
                      "top-vs-bottom, retention, structure, or brand timing — "
                      "all from uploaded rows. The "
-                     "dataset holds %d uploaded rows at $%s total spend."
-                     % (len(rows), f"{spend:,.2f}"))
+                     "dataset holds %d uploaded rows at %s total spend."
+                     % (len(rows), _qa_amount(spend, rows)))
         cite("Uploaded CSV")
 
     ordered = sorted(set(cites), key=SOURCE_PRIORITY.index)

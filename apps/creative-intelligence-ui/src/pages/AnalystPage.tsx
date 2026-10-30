@@ -1,4 +1,4 @@
-import { pooledBenchmark, type BenchmarkMetadata } from "../components/benchmarkPooling";
+import { pooledBenchmark, reportingRoasGroup, type BenchmarkMetadata } from "../components/benchmarkPooling";
 import { BenchmarkScopeNote } from "../components/BenchmarkScopeNote";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, apiBlob } from "@/api/client";
@@ -102,6 +102,12 @@ interface BenchGroup extends BenchmarkMetadata {
   cpc: number | null;
   cpa: number | null;
   roas: number | null;
+  roas_coverage?: number | null;
+  currency?: string | null;
+  currencies?: string[] | null;
+  mixed_currency?: boolean | null;
+  currency_known?: boolean | null;
+  unknown_currency_contribution?: boolean | null;
 }
 
 interface CreativeMetrics {
@@ -115,6 +121,12 @@ interface CreativeMetrics {
   cpc?: number | null;
   cpa?: number | null;
   roas?: number | null;
+  roas_coverage?: number | null;
+  currency?: string | null;
+  currencies?: string[] | null;
+  mixed_currency?: boolean | null;
+  currency_known?: boolean | null;
+  unknown_currency_contribution?: boolean | null;
 }
 
 interface CreativeAnn {
@@ -237,7 +249,7 @@ function LabeledBars({ rows, format, color = "#0A9183" }: {
 
 /** Compact bars (CTR) + line (ROAS) combo for video-length bands. */
 function LengthCombo({ rows }: {
-  rows: Array<{ label: string; ctr: number; roas: number | null }>;
+  rows: Array<{ label: string; ctr: number; roas: number | null; coverageShare?: number | null }>;
 }) {
   const { t, fmtNum, locale } = useLocale();
   const dec1 = (v: number): string =>
@@ -252,9 +264,12 @@ function LengthCombo({ rows }: {
   const iw = w - padL - 12;
   const ih = h - padT - padB;
   const slot = iw / Math.max(1, rows.length);
-  const pts = rows.map((r, i) => {
-    const x = padL + slot * i + slot / 2;
-    const y = padT + ih - ((r.roas ?? 0) / maxRoas) * ih;
+  const plotted = rows.flatMap((r, i) => (
+    r.roas != null && Number.isFinite(r.roas) ? [{ roas: r.roas, i, label: r.label }] : []
+  ));
+  const pts = plotted.map((point) => {
+    const x = padL + slot * point.i + slot / 2;
+    const y = padT + ih - (point.roas / maxRoas) * ih;
     return `${x.toFixed(1)},${y.toFixed(1)}`;
   });
   return (
@@ -292,24 +307,31 @@ function LengthCombo({ rows }: {
             </g>
           );
         })}
-        {rows.some((r) => r.roas != null) && pts.length > 1 ? (
-          <>
-            <polyline points={pts.join(" ")} fill="none" stroke="#E8833A"
-              strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-            {rows.map((r, i) => {
-              const [x, y] = pts[i].split(",").map(Number);
-              return r.roas == null ? null : (
-                <circle key={r.label} cx={x} cy={y} r="4.5" fill="#E8833A"
-                  stroke="var(--shell-card)" strokeWidth="2" />
-              );
-            })}
-          </>
+        {pts.length > 1 ? (
+          <polyline points={pts.join(" ")} fill="none" stroke="#E8833A"
+            strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
         ) : null}
+        {plotted.map((point, index) => {
+          const [x, y] = pts[index].split(",").map(Number);
+          return (
+            <circle key={point.label} cx={x} cy={y} r="4.5" fill="#E8833A"
+              stroke="var(--shell-card)" strokeWidth="2" />
+          );
+        })}
       </svg>
       <div className="legend" aria-hidden="true">
         <span><i style={{ background: "#0A9183" }} />{t("filters.kpis.ctr")}</span>
         <span><i style={{ background: "#E8833A" }} />{t("filters.kpis.roas")}</span>
       </div>
+      {rows.some((r) => r.coverageShare != null && r.coverageShare < 1) ? (
+        <p className="panel-sub">
+          {rows.filter((r) => r.coverageShare != null && r.coverageShare < 1)
+            .map((r) => t("analyst.lenCoverage", {
+              label: r.label,
+              pct: String(Math.round((r.coverageShare ?? 0) * 100)),
+            })).join("; ")}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -758,27 +780,40 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
   }, [plats.data]);
 
   const lengthRows = useMemo(() => {
+    const add = (current: number | null, value: unknown): number | null => {
+      const amount = typeof value === "number" ? value : Number(value);
+      if (!Number.isFinite(amount)) return current;
+      return (current ?? 0) + amount;
+    };
     const buckets = [
       { label: t("creatives.lengthShort"), test: (s: number) => s < 15 },
       { label: t("creatives.lengthSweet"), test: (s: number) => s >= 15 && s <= 30 },
       { label: t("creatives.lengthLong"), test: (s: number) => s > 30 },
-    ].map((b) => ({ ...b, clicks: 0, impr: 0, spend: 0, revenue: 0 }));
+    ].map((b) => ({
+      ...b,
+      clicks: null as number | null,
+      impr: null as number | null,
+      groups: [] as BenchmarkMetadata[],
+    }));
     for (const c of creatives.data ?? []) {
-      const seconds = num(c.annotation?.duration_s ?? c.duration_s);
-      if (!seconds) continue;
+      const seconds = Number(c.annotation?.duration_s ?? c.duration_s);
+      if (!Number.isFinite(seconds) || seconds <= 0) continue;
       const bucket = buckets.find((b) => b.test(seconds));
       if (!bucket) continue;
-      bucket.clicks += num(c.metrics?.clicks);
-      bucket.impr += num(c.metrics?.impressions);
-      bucket.spend += num(c.metrics?.spend);
-      bucket.revenue += num(c.metrics?.revenue);
+      bucket.clicks = add(bucket.clicks, c.metrics?.clicks);
+      bucket.impr = add(bucket.impr, c.metrics?.impressions);
+      bucket.groups.push(reportingRoasGroup(c.metrics));
     }
-    return buckets.map((b) => ({
-      label: b.label,
-      ctr: b.impr ? (b.clicks / b.impr) * 100 : null,
-      roas: b.spend ? b.revenue / b.spend : null,
-      impr: b.impr,
-    }));
+    return buckets.map((b) => {
+      const pooled = pooledBenchmark(b.groups, "roas");
+      return {
+        label: b.label,
+        ctr: b.impr != null && b.impr > 0 && b.clicks != null ? (b.clicks / b.impr) * 100 : null,
+        roas: pooled.value,
+        coverageShare: pooled.coverage?.kind === "spend" ? pooled.coverage.share : null,
+        impr: b.impr,
+      };
+    });
   }, [creatives.data, t]);
 
   const brandRows = useMemo(() => {
@@ -1398,7 +1433,7 @@ export function AnalystPage({ accountKey = "" }: { accountKey?: string }) {
         <Panel title={t("analyst.lenPanel")} sub={t("analyst.lenSub")}>
           {creatives.data === null ? <Skeleton height={200} /> : lengthRows.some((r) => r.ctr != null) ? (
             <LengthCombo rows={lengthRows.map((r) => ({
-              label: r.label, ctr: r.ctr ?? 0, roas: r.roas,
+              label: r.label, ctr: r.ctr ?? 0, roas: r.roas, coverageShare: r.coverageShare,
             }))} />
           ) : <EmptyState lift text={t("analyst.noDuration")} />}
         </Panel>

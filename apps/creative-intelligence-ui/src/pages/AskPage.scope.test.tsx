@@ -23,11 +23,19 @@ function SetCampaign() {
 function compareBody(url: string) {
   const campaign = new URL(url, "http://local").searchParams.get("campaign");
   const spend = campaign === "Brand B" ? 222 : 111;
+  const known = {
+    currency: "USD",
+    currencies: ["USD"],
+    currency_known: true,
+    mixed_currency: false,
+    unknown_currency_contribution: false,
+  };
   return {
     current_period: null,
     previous_period: null,
     comparison: null,
     current_n_ads: 3,
+    currency_context: { current: known, previous: known, same_known_currency: true },
     metrics: {
       spend: { current: spend },
       conversions: { current: 1 },
@@ -53,6 +61,12 @@ function installFetch(ask: (url: string, init: RequestInit | undefined, n: numbe
     return Response.json({});
   }) as unknown as typeof fetch;
   return () => asks;
+}
+
+function showsSpend(amount: string) {
+  const pattern = new RegExp(`USD[\\s\\u00a0]*${amount}`);
+  return (_content: string, node: Element | null) =>
+    node?.classList.contains("kpi-value") === true && pattern.test(node.textContent ?? "");
 }
 
 function renderAsk() {
@@ -98,7 +112,7 @@ describe("AskPage answer scope", () => {
     renderAsk();
     fireEvent.click(screen.getByRole("button", { name: "Ask" }));
     expect(await screen.findByText("ANSWER-A")).toBeDefined();
-    expect(screen.getByText(/\$111/)).toBeDefined();
+    expect(screen.getByText(showsSpend("111"))).toBeDefined();
     expect(screen.queryByText("Ask Failed.")).toBeNull();
   });
 
@@ -122,7 +136,7 @@ describe("AskPage answer scope", () => {
     await waitFor(() => {
       expect(screen.queryByText("ANSWER-A")).toBeNull();
     });
-    expect(screen.queryByText(/\$222/)).toBeNull();
+    expect(screen.queryByText(showsSpend("222"))).toBeNull();
     expect(screen.getByText("Ask a Question to Begin")).toBeDefined();
   });
 
@@ -143,10 +157,10 @@ describe("AskPage answer scope", () => {
     await waitFor(() => {
       expect(screen.queryByText("ANSWER-A")).toBeNull();
     });
-    expect(screen.queryByText(/\$222/)).toBeNull();
+    expect(screen.queryByText(showsSpend("222"))).toBeNull();
     resolveSecond(Response.json({ answer: "ANSWER-B", sources: [], scope: "Brand B" }));
     expect(await screen.findByText("ANSWER-B")).toBeDefined();
     expect(screen.queryByText("ANSWER-A")).toBeNull();
-    expect(screen.getByText(/\$222/)).toBeDefined();
+    expect(screen.getByText(showsSpend("222"))).toBeDefined();
   });
 });

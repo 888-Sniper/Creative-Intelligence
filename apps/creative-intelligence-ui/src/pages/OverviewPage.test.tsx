@@ -3,6 +3,14 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { FilterProvider } from "@/state/FilterContext";
 import { OverviewPage } from "@/pages/OverviewPage";
 
+const usd = {
+  currency: "USD",
+  currencies: ["USD"],
+  currency_known: true,
+  mixed_currency: false,
+  unknown_currency_contribution: false,
+};
+
 const campaignData = {
   "Spring Sale": {
     n_ads: 4,
@@ -13,6 +21,13 @@ const campaignData = {
     video_views: 3000,
     revenue: 400,
     cpa: 12.05,
+    ...usd,
+    metric_components: {
+      ctr: { numerator: 250, denominator: 10000, reporting_rows: 4, total_rows: 4 },
+      cpm: { numerator: 120.5, denominator: 10000, reporting_rows: 4, total_rows: 4 },
+      cpa: { numerator: 120.5, denominator: 10, reporting_rows: 4, total_rows: 4 },
+      roas: { numerator: 400, denominator: 120.5, reporting_rows: 4, total_rows: 4, total_spend: 120.5 },
+    },
   },
   "Winter Push": {
     n_ads: 2,
@@ -23,8 +38,37 @@ const campaignData = {
     video_views: 1000,
     revenue: 100,
     cpa: 15.9,
+    ...usd,
+    metric_components: {
+      ctr: { numerator: 100, denominator: 5000, reporting_rows: 2, total_rows: 2 },
+      cpm: { numerator: 79.5, denominator: 5000, reporting_rows: 2, total_rows: 2 },
+      cpa: { numerator: 79.5, denominator: 5, reporting_rows: 2, total_rows: 2 },
+      roas: { numerator: 100, denominator: 79.5, reporting_rows: 2, total_rows: 2, total_spend: 79.5 },
+    },
   },
 };
+
+const partialRoasData = {
+  "Spring Sale": {
+    n_ads: 2,
+    spend: 1000,
+    impressions: 1000,
+    clicks: 10,
+    conversions: 10,
+    video_views: 100,
+    revenue: 200,
+    cpa: 10,
+    ...usd,
+    metric_components: {
+      roas: { numerator: 200, denominator: 100, reporting_rows: 1, total_rows: 2, total_spend: 1000 },
+    },
+  },
+};
+
+function showsAmount(amount: string) {
+  return (_content: string, node: Element | null) =>
+    (node?.textContent ?? "").replace(/\u00a0/g, " ") === amount;
+}
 
 const syncData = {
   sources: {
@@ -112,11 +156,11 @@ describe("OverviewPage", () => {
       screen.getByText("Your creative performance at a glance."),
     ).toBeDefined();
     await waitFor(() => {
-      expect(screen.getByText("$200.00")).toBeDefined();
+      expect(screen.getByText(showsAmount("USD 200.00"))).toBeDefined();
     });
     expect(screen.getAllByText("Across 2 Campaigns").length).toBeGreaterThan(0);
     expect(screen.getByText("Best CPA")).toBeDefined();
-    expect(screen.getByText("$12.05")).toBeDefined();
+    expect(screen.getByText(showsAmount("USD 12.05"))).toBeDefined();
     expect(screen.getByText("15,000")).toBeDefined();
     expect(screen.getByText("Meta: OK @ 2026-09-01 (2 New, 1 Updated)", { exact: false })).toBeDefined();
     expect(screen.getByText("Scheduled Jobs: Meta.", { exact: false })).toBeDefined();
@@ -167,7 +211,7 @@ describe("OverviewPage", () => {
     });
     renderPage();
     await waitFor(() => {
-      expect(screen.getByText("$200.00")).toBeDefined();
+      expect(screen.getByText(showsAmount("USD 200.00"))).toBeDefined();
     });
     expect(screen.queryByRole("button", { name: "Explain Comparison Period" })).toBeNull();
   });
@@ -188,7 +232,7 @@ describe("OverviewPage", () => {
     expect(screen.getByText("—")).toBeDefined();
     resolveCampaigns(campaignData);
     await waitFor(() => {
-      expect(screen.getByText("$200.00")).toBeDefined();
+      expect(screen.getByText(showsAmount("USD 200.00"))).toBeDefined();
     });
   });
 
@@ -209,7 +253,7 @@ describe("OverviewPage", () => {
     mockDefault();
     renderPage();
     await waitFor(() => {
-      expect(screen.getByText("$200.00")).toBeDefined();
+      expect(screen.getByText(showsAmount("USD 200.00"))).toBeDefined();
     });
     fireEvent.change(screen.getByPlaceholderText("Paste CSV export text here"), {
       target: { value: "campaign,spend\nSpring Sale,10" },
@@ -227,7 +271,7 @@ describe("OverviewPage", () => {
     mockDefault();
     renderPage();
     await waitFor(() => {
-      expect(screen.getByText("$200.00")).toBeDefined();
+      expect(screen.getByText(showsAmount("USD 200.00"))).toBeDefined();
     });
     fireEvent.click(screen.getByRole("button", { name: "Sync Meta Now" }));
     await waitFor(() => {
@@ -236,6 +280,24 @@ describe("OverviewPage", () => {
     const run = seen.find((c) => c.url === "/api/sync/run");
     expect(run?.method).toBe("POST");
     expect(run?.body).toEqual({ source: "meta" });
+  });
+
+  it("keeps partial revenue-reporting spend out of the ROAS denominator", async () => {
+    mockFetch((url) => {
+      if (url.startsWith("/api/campaigns")) return Response.json(partialRoasData);
+      if (url.startsWith("/api/kpis/compare")) {
+        return Response.json({ current_period: null, previous_period: null, comparison: null, metrics: {} });
+      }
+      if (url === "/api/sync/status") return Response.json({ sources: {}, jobs: [] });
+      if (url === "/api/providers/status") return Response.json(statusData);
+      return Response.json({ error: "unexpected " + url }, { status: 500 });
+    });
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("2.00x")).toBeDefined();
+    });
+    expect(screen.getByText("Revenue-reporting spend coverage 10%")).toBeDefined();
+    expect(screen.queryByText("0.20x")).toBeNull();
   });
 
   it("shows the server fixture command instead of inventing rows", async () => {

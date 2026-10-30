@@ -3,8 +3,8 @@ import { render } from "@testing-library/react";
 import { GroupedBars } from "./ComparePage";
 
 const SERIES = [
-  { label: "Alpha Campaign", color: "#2F6FBE", values: { ctr: 0.022, cpa: 11.4, roas: 3.6 } },
-  { label: "Beta Campaign", color: "#0E9F6E", values: { ctr: 0.015, cpa: 9.1, roas: 4.2 } },
+  { label: "Alpha Campaign", color: "#2F6FBE", currency: "USD", values: { ctr: 0.022, cpa: 11.4, roas: 3.6 } },
+  { label: "Beta Campaign", color: "#0E9F6E", currency: "USD", values: { ctr: 0.015, cpa: 9.1, roas: 4.2 } },
 ];
 
 describe("GroupedBars single-metric scale", () => {
@@ -25,7 +25,8 @@ describe("GroupedBars single-metric scale", () => {
 
   it("labels ticks and bars in the selected metric's unit", () => {
     const { container } = render(<GroupedBars series={SERIES} metric="cpa" />);
-    expect(container.textContent).toContain("$");
+    expect(container.textContent).toContain("USD");
+    expect(container.textContent).not.toContain("$");
     expect(container.textContent).not.toContain("%");
     const roas = render(<GroupedBars series={SERIES} metric="roas" />);
     expect(roas.container.textContent).toContain("x");
@@ -35,14 +36,14 @@ describe("GroupedBars single-metric scale", () => {
     // CPM/CPA money, CTR/VTR percent, ROAS multiplier: each metric
     // gets its own scale, so no bar can escape the plot area.
     const full = [
-      { label: "Alpha Campaign", color: "#2F6FBE", values: { cpm: 8.4, ctr: 0.022, vtr: 0.31, cpa: 11.4, roas: 3.6 } },
-      { label: "Beta Campaign", color: "#0E9F6E", values: { cpm: 6.1, ctr: 0.015, vtr: 0.27, cpa: 9.1, roas: 4.2 } },
+      { label: "Alpha Campaign", color: "#2F6FBE", currency: "USD", values: { cpm: 8.4, ctr: 0.022, vtr: 0.31, cpa: 11.4, roas: 3.6 } },
+      { label: "Beta Campaign", color: "#0E9F6E", currency: "USD", values: { cpm: 6.1, ctr: 0.015, vtr: 0.27, cpa: 9.1, roas: 4.2 } },
     ];
     const units: Array<[string, string, string[]]> = [
-      ["cpm", "$", ["%"]],
+      ["cpm", "USD", ["%", "$"]],
       ["ctr", "%", ["$", "x"]],
       ["vtr", "%", ["$", "x"]],
-      ["cpa", "$", ["%"]],
+      ["cpa", "USD", ["%", "$"]],
       ["roas", "x", ["$", "%"]],
     ];
     for (const [metric, unit, banned] of units) {

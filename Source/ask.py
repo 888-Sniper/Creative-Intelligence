@@ -20,9 +20,17 @@ def _scope(joined, platform=None, funnel=None):
     return rows
 
 
+def _cpa_order(row):
+    """Measured CPA first. None stays last and never compares as zero."""
+    cpa = row.get("cpa", 0)
+    if cpa is None:
+        return (1, 0.0)
+    return (0, cpa)
+
+
 def _cites(rows, limit=3):
     seen, out = set(), []
-    for row in sorted(rows, key=lambda r: r.get("cpa", 0)):
+    for row in sorted(rows, key=_cpa_order):
         cid = row.get("creative_id")
         if cid and cid not in seen:
             seen.add(cid)
@@ -78,9 +86,11 @@ def answer(question, rows, joined):
         hooks = best_by_element(joined, "hook_type")
         top = hooks[0]
         evidence = [r for r in joined if r.get("hook_type") == top["value"]]
+        cpa = top["cpa"]
+        shown = "unavailable" if cpa is None else f"{cpa:.2f}"
         return {"grounded": True, "citations": _cites(evidence),
                 "answer": f"{top['value'].title()} hooks lead with weighted "
-                          f"CPA {top['cpa']:.2f} across {top['n']} creatives."}
+                          f"CPA {shown} across {top['n']} creatives."}
 
     if ("vtr" in q or "view-through" in q or "view through" in q
             or (("early" in q or "earlier" in q or "timing" in q)
@@ -121,13 +131,18 @@ def answer(question, rows, joined):
             present, missing = ((creators, "branded") if creators
                                 else (branded, "creator"))
             cpa = weighted_cpa(present)
+            cpa_text = "unavailable" if cpa is None else f"{cpa:.2f}"
             return {"grounded": True, "citations": _cites(tik),
                     "answer": f"TikTok runs {len(tik)} verified creatives, "
                               f"all {present[0]['creator_vs_branded']}-led "
                               f"({', '.join(_ids(present))}) at weighted CPA "
-                              f"{cpa:.2f}; no verified {missing} TikTok "
+                              f"{cpa_text}; no verified {missing} TikTok "
                               f"creatives to compare yet."}
         ccpa, bcpa = weighted_cpa(creators), weighted_cpa(branded)
+        if ccpa is None or bcpa is None:
+            return {"grounded": True, "citations": _cites(tik),
+                    "answer": "TikTok creator and branded weighted CPA "
+                              "comparison is unavailable."}
         winner = "Creator" if ccpa <= bcpa else "Branded"
         return {"grounded": True, "citations": _cites(tik),
                 "answer": f"{winner} wins on TikTok: creator "
@@ -141,15 +156,19 @@ def answer(question, rows, joined):
         if not lower:
             return {"grounded": False, "citations": [],
                     "answer": "No lower-funnel creatives in the data yet."}
-        best = min(lower, key=lambda r: r.get("cpa", 0))
+        best = min(lower, key=_cpa_order)
+        best_cpa = best.get("cpa", 0)
+        if best_cpa is None:
+            return {"grounded": True, "citations": _cites(lower),
+                    "answer": "Lower funnel weighted CPA is unavailable."}
         return {"grounded": True, "citations": _cites(lower),
                 "answer": f"Lower funnel runs on {len(lower)} creatives; best "
                           f"is {best['creative_id']} at CPA "
-                          f"{best.get('cpa', 0):.2f}. Creator-led shorts with "
+                          f"{best_cpa:.2f}. Creator-led shorts with "
                           f"early product appearance dominate the top."}
 
     if "top" in q and "bottom" in q or ("20%" in q) or ("20 percent" in q):
-        ordered = sorted(joined, key=lambda r: r.get("cpa", 0))
+        ordered = sorted(joined, key=_cpa_order)
         cut = max(1, len(ordered) // 5)
         top, bottom = ordered[:cut], ordered[-cut:]
         top_hooks = {r.get("hook_type") for r in top}
@@ -167,6 +186,9 @@ def answer(question, rows, joined):
         short, long = _length_split(joined)
         sc = weighted_cpa(short) if short else 0.0
         lc = weighted_cpa(long) if long else 0.0
+        if sc is None or lc is None:
+            return {"grounded": True, "citations": _cites(short + long),
+                    "answer": "Video-length weighted CPA is unavailable."}
         winner = f"under {SHORT_S}s" if sc <= lc else f"{SHORT_S}s+"
         return {"grounded": True, "citations": _cites(short + long),
                 "answer": f"Videos {winner} win: short CPA {sc:.2f} "
@@ -178,9 +200,10 @@ def answer(question, rows, joined):
         creators = [r for r in short if r.get("creator_vs_branded")
                     == "creator"]
         cpa = weighted_cpa(creators) if creators else 0.0
+        cpa_text = "unavailable" if cpa is None else f"{cpa:.2f}"
         return {"grounded": True, "citations": _cites(creators or short),
                 "answer": f"Scale creator-led shorts under {SHORT_S}s "
-                          f"(weighted CPA {cpa:.2f}): brief 3 variations with "
+                          f"(weighted CPA {cpa_text}): brief 3 variations with "
                           f"the product before second 3 and a Shop now CTA."}
 
     return {"grounded": False, "citations": [],

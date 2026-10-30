@@ -77,11 +77,11 @@ class CampaignRecoTest(unittest.TestCase):
                     self.assertIn("verified", bullet)
             scale = secs["scale"]["bullets"][0]
             self.assertIn("win-cpa", scale["text"])
-            self.assertIn("$2.0", scale["text"])
+            self.assertIn("2.00 (currency unknown)", scale["text"])
             self.assertTrue(scale["verified"])
             stop = secs["stop_watch"]["bullets"][0]
             self.assertIn("lose-cpa", stop["text"])
-            self.assertIn("$50.0", stop["text"])
+            self.assertIn("50.00 (currency unknown)", stop["text"])
             worked = " ".join(b["text"]
                               for b in secs["what_worked"]["bullets"])
             self.assertIn("demo_open", worked)
@@ -95,7 +95,7 @@ class CampaignRecoTest(unittest.TestCase):
             self.assertIn("CTA around 8", nxt)
             gap = secs["benchmark_gap"]["bullets"][0]["text"]
             self.assertIn("peer median", gap)
-            self.assertIn("$20.0", gap)
+            self.assertIn("20.00 (currency unknown)", gap)
         finally:
             conn.close()
 
@@ -195,7 +195,7 @@ class CampaignRecoTest(unittest.TestCase):
             # (cpc-b at $5.00): the ranking is CPC-led, not CPA-led.
             scale = secs["scale"]["bullets"][0]["text"]
             self.assertIn("cpc-a", scale)
-            self.assertIn("$1.0", scale)
+            self.assertIn("1.00 (currency unknown)", scale)
         finally:
             conn.close()
 

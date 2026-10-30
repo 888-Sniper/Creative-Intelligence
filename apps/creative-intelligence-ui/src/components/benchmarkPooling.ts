@@ -12,10 +12,10 @@ export interface MetricComponent {
 export interface BenchmarkMetadata {
   n_ads?: number;
   currency?: string | null;
-  currencies?: string[];
-  currency_known?: boolean;
-  mixed_currency?: boolean;
-  unknown_currency_contribution?: boolean;
+  currencies?: readonly string[] | null;
+  currency_known?: boolean | null;
+  mixed_currency?: boolean | null;
+  unknown_currency_contribution?: boolean | null;
   metric_components?: Partial<Record<PooledBenchmarkMetric, MetricComponent | null>>;
 }
 
@@ -107,6 +107,61 @@ export function pooledBenchmark(
   const value = numerator / denominator * (metric === "cpm" ? 1000 : 1);
   return Number.isFinite(value) && Number.isFinite(denominator)
     ? { value, reason: null, coverage } : unavailable("invalid", coverage);
+}
+
+export interface CreativeRoasInput {
+  spend?: number | null;
+  roas?: number | null;
+  roas_coverage?: number | null;
+  currency?: string | null;
+  currencies?: readonly string[] | null;
+  mixed_currency?: boolean | null;
+  currency_known?: boolean | null;
+  unknown_currency_contribution?: boolean | null;
+}
+
+/** Rebuild one creative's ROAS components from the fields the list payload already sends.
+ * Coverage is required. Revenue divided by total spend is not a fallback.
+ * A consistent currency code counts as known when the flag itself is absent.
+ */
+export function reportingRoasGroup(source: CreativeRoasInput | null | undefined): BenchmarkMetadata {
+  const row = source ?? {};
+  const spend = typeof row.spend === "number" && Number.isFinite(row.spend) ? row.spend : null;
+  const coverage = typeof row.roas_coverage === "number" && Number.isFinite(row.roas_coverage)
+    ? row.roas_coverage : null;
+  const roas = typeof row.roas === "number" && Number.isFinite(row.roas) ? row.roas : null;
+  const code = typeof row.currency === "string" ? row.currency.trim().toUpperCase() : "";
+  const declared = Array.isArray(row.currencies)
+    ? row.currencies.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+      .map((item) => item.trim().toUpperCase())
+    : null;
+  const mixed = row.mixed_currency === true || (declared != null && new Set(declared).size > 1);
+  const consistent = Boolean(code) && !mixed
+    && (declared == null || (declared.length > 0 && declared.every((item) => item === code)));
+  const known = row.currency_known === true || (row.currency_known !== false && consistent);
+  const unknownContribution = row.unknown_currency_contribution === true
+    || (!known && spend != null && spend > 0);
+  let component: MetricComponent | null = null;
+  if (coverage != null && spend != null && spend >= 0 && coverage >= 0 && coverage <= 1) {
+    const reportedSpend = coverage * spend;
+    const reporting = roas != null && reportedSpend > 0 ? 1 : 0;
+    component = {
+      numerator: reporting && roas != null ? roas * reportedSpend : 0,
+      denominator: reporting ? reportedSpend : 0,
+      reporting_rows: reporting,
+      total_rows: 1,
+      total_spend: spend,
+    };
+  }
+  return {
+    n_ads: spend != null && spend > 0 ? 1 : 0,
+    currency: code || null,
+    currencies: declared ?? (code ? [code] : []),
+    currency_known: known,
+    mixed_currency: mixed,
+    unknown_currency_contribution: unknownContribution,
+    metric_components: component ? { roas: component } : {},
+  };
 }
 
 /** Compatibility wrapper for consumers that only need the numeric baseline. */

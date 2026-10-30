@@ -120,13 +120,23 @@ def early_vs_late(joined, field="product_first_visible_s",
 
 
 def best_by_element(joined, element):
-    """Spend-weighted CPA per distinct element value, best first."""
+    """Spend-weighted CPA per distinct element value, best first.
+
+    An unavailable weighted CPA sorts last and is not treated as zero.
+    """
     groups = {}
     for row in joined:
         groups.setdefault(row.get(element), []).append(row)
     ranked = [(weighted_cpa(rows), value, len(rows))
               for value, rows in groups.items()]
-    ranked.sort()
+
+    def _order(item):
+        cpa, value, _n = item
+        if cpa is None:
+            return (1, 0.0, str(value))
+        return (0, cpa, str(value))
+
+    ranked.sort(key=_order)
     return [{"value": v, "cpa": c, "n": n} for c, v, n in ranked]
 
 
@@ -134,23 +144,28 @@ def recommend(joined):
     """Specific next-step recommendations grounded in the joined data."""
     out = []
     hooks = best_by_element(joined, "hook_type")
-    if hooks:
+    if hooks and hooks[0]["cpa"] is not None:
         out.append(f"Best hook type is {hooks[0]['value']} "
                    f"(weighted CPA {hooks[0]['cpa']:.2f} across "
                    f"{hooks[0]['n']} creatives). Brief more of these first.")
     timing = early_vs_late(joined)
+    early_cpa = timing["early_cpa"]
+    late_cpa = timing["late_cpa"]
     if timing["early_n"] and timing["late_n"]:
-        if timing["early_cpa"] < timing["late_cpa"]:
+        if early_cpa is None or late_cpa is None:
+            out.append("Weighted CPA is unavailable for this "
+                       "product-timing split.")
+        elif early_cpa < late_cpa:
             out.append(f"Showing the product before second "
                        f"{timing['threshold_s']:.0f} wins "
-                       f"({timing['early_cpa']:.2f} vs "
-                       f"{timing['late_cpa']:.2f} CPA). Test 3 more "
+                       f"({early_cpa:.2f} vs "
+                       f"{late_cpa:.2f} CPA). Test 3 more "
                        f"variations with the product in the first 3 seconds.")
         else:
             out.append("Late product appearance wins in this set; "
                        "retest with a larger cohort before briefing.")
     ctas = best_by_element(joined, "cta")
-    if ctas:
+    if ctas and ctas[0]["cpa"] is not None:
         out.append(f"Best CTA is {ctas[0]['value']} "
                    f"(weighted CPA {ctas[0]['cpa']:.2f}). "
                    f"Standardise on it for the next test round.")

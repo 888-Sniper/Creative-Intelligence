@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Icon } from "@/components/icons";
 import { useLocale } from "@/i18n";
+import { comparablePeriodCurrency } from "@/components/sourceCurrency";
 import { LoadingButton } from "@/components/LoadingButton";
 import {
   CreativeThumb,
@@ -263,6 +264,7 @@ export function WorkbookPage() {
     if (!compare) return [];
     const m = compare.metrics;
     const empty = compare.current_n_ads === 0;
+    const moneyCode = comparablePeriodCurrency(compare.currency_context);
     const ratioPct = (v: number | null | undefined): string => {
       if (v == null) return empty ? fmtPct(0, 1, locale) : unavailable;
       return fmtPct(v * 100, 1, locale);
@@ -280,8 +282,8 @@ export function WorkbookPage() {
           return fmtPct((conv / cl) * 100, 1, locale);
         }
         case "ROAS": return kpiDisplay("mult", m.roas?.current, empty, locale, unavailable);
-        case "CPA": return kpiDisplay("money", m.cpa?.current, empty, locale, unavailable);
-        case "Spend": return kpiDisplay("money", m.spend?.current, empty, locale, unavailable);
+        case "CPA": return kpiDisplay("money", m.cpa?.current, empty, locale, unavailable, moneyCode);
+        case "Spend": return kpiDisplay("money", m.spend?.current, empty, locale, unavailable, moneyCode);
         case "Conversions": return kpiDisplay("count", m.conversions?.current, empty, locale, unavailable);
         default: return unavailable;
       }

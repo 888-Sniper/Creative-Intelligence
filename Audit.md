@@ -1,4 +1,4 @@
-# Creative Intelligence — audit of the checkpoint-037 incremental push
+# Creative Intelligence — audit of the checkpoint-038 incremental push
 
 You are the second, independent reviewer. Find what is still missing, wrong,
 or unsafe below. Assume every claim is unproven until you have opened the
@@ -10,7 +10,7 @@ not complete the audit or the remediation: most groups remain open below.
 
 - Repository: https://github.com/888-Sniper/Creative-Intelligence
 - Original audited pin / parent: `1342bb48ef59c45981c716c77d12898ae029daba`
-- Code under review: `f41ade4ad4accccd34374fd5f897729522eedb76`.
+- Code under review: `9731d23cedeb1bda01ffd5b0a601c608b0df3868`.
   Commits after that code head on this push touch only this `Audit.md`.
   Review the code regardless of branch head. After `git fetch`, confirm
   with `git rev-parse origin/main`.
@@ -23,7 +23,7 @@ not complete the audit or the remediation: most groups remain open below.
   `7bce053a8c4ec85befe80644764d114c31afe15b` (QI176 slice),
   `06d163daaab3ce15c8ef7cc78e8f9839d3348b2e` (QI124/QI126),
   `8305af3fa1ab2561da9bff20c9f95b9c34eaa8f1` (Mac re-audit fixes),
-  `c0eaf8afb41894658b4e22413bc77bf6eff1dff0` (verifier nits), then checkpoint-032 commits `432ab38` (daily/filtered/QA), `0772b15` (Compare/Campaigns), `2f3e98b` (QI270 tests), `e3af84b` (032 re-audit crash/cross-currency fixes), `c020e60` (Audit.md only), `ccfe325` (QI-004 comma campaign names and QI-195 Ask scope), `99ddf02` (Audit.md only), `e9d4f0a` (QI-006 daily-series failures and QI-009 panel failures), `b35d549` (Audit.md only), `d7b4c5e` (QI043 compare-option failures and QI045 filter metadata), `92edef8` (Audit.md only), `b690c69` (QI-001, QI035, QI036, QI037, QI038, QI172, QI173 with QI259, QI178, QI263, QI315), `b0c61bc` (Audit.md only). This push's code commit is `f41ade4` (QI016, QI017, QI057, and QI028 pending verification; QI150 and QI176 still partial). Previous main was `b0c61bc`.
+  `c0eaf8afb41894658b4e22413bc77bf6eff1dff0` (verifier nits), then checkpoint-032 commits `432ab38` (daily/filtered/QA), `0772b15` (Compare/Campaigns), `2f3e98b` (QI270 tests), `e3af84b` (032 re-audit crash/cross-currency fixes), `c020e60` (Audit.md only), `ccfe325` (QI-004 comma campaign names and QI-195 Ask scope), `99ddf02` (Audit.md only), `e9d4f0a` (QI-006 daily-series failures and QI-009 panel failures), `b35d549` (Audit.md only), `d7b4c5e` (QI043 compare-option failures and QI045 filter metadata), `92edef8` (Audit.md only), `b690c69` (QI-001, QI035, QI036, QI037, QI038, QI172, QI173 with QI259, QI178, QI263, QI315), `b0c61bc` (Audit.md only), `f41ade4` (QI016, QI017, QI057, and QI028 pending verification; QI150 and QI176 were still partial), `9b36783` (Audit.md only). This push's code commit is `9731d23` (QI150 and QI176 pending verification). Previous main was `9b36783`.
 - Render auto-deploys from `main`. Deployment of this push was not
   verified when this file was written. Do not treat live-site state as
   a source defect.
@@ -32,19 +32,19 @@ Confirm with both ends named (never a one-revision diff):
 
 ```
 git fetch origin
-git diff --stat b0c61bc2f19c9a41bbddec2ab0c608122b5955f8 origin/main
-git diff b0c61bc2f19c9a41bbddec2ab0c608122b5955f8 origin/main
-git diff --stat b0c61bc2f19c9a41bbddec2ab0c608122b5955f8 f41ade4ad4accccd34374fd5f897729522eedb76
-git diff --stat f41ade4ad4accccd34374fd5f897729522eedb76 origin/main
+git diff --stat 9b36783f0dcebc9daf410ab6b1ad13b198b857f8 origin/main
+git diff 9b36783f0dcebc9daf410ab6b1ad13b198b857f8 origin/main
+git diff --stat 9b36783f0dcebc9daf410ab6b1ad13b198b857f8 9731d23cedeb1bda01ffd5b0a601c608b0df3868
+git diff --stat 9731d23cedeb1bda01ffd5b0a601c608b0df3868 origin/main
 git rev-parse origin/main
 git status  # stop only if dirty, or origin/main differs from GitHub main
 ```
 
 The commit under review is `origin/main` after fetch. Previous main is
-`b0c61bc2f19c9a41bbddec2ab0c608122b5955f8`. The first diff is the whole
+`9b36783f0dcebc9daf410ab6b1ad13b198b857f8`. The first diff is the whole
 push: the code below plus this file. The code slice
-`b0c61bc`..`f41ade4` is 32 files, 1194 insertions, 358 deletions.
-`f41ade4`..`origin/main` is this file only. If yours disagrees, stop
+`9b36783`..`9731d23` is 2 files, 394 insertions, 79 deletions.
+`9731d23`..`origin/main` is this file only. If yours disagrees, stop
 and say so. A behind checkout or
 no local `main` branch is not a reason to stop. Read files at the reviewed
 commit; if a line moved, follow the symbol. Original audit scope was
@@ -81,21 +81,109 @@ consolidations: QI303→QI-011, QI259→QI173, QI270→QI269, QI280→QI189,
 QI308→QI307, QI095→QI016, QI101→QI060, QI228→QI251, QI302→QI312).
 Groups are not unique runtime-reproduced bugs. Kinds: 193 defects,
 36 conditional risks, 45 test gaps, 52 improvements. Severity: 0 critical,
-37 high, 193 medium, 96 low. Status at this push: 52 implemented pending
-your verification, 2 partial, 272 untouched. Nothing below erases an
+37 high, 193 medium, 96 low. Status at this push: 54 implemented pending
+your verification, 0 partial, 272 untouched. Nothing below erases an
 unresolved finding, and implemented does not mean verified by you.
 
 ## This push
 
-Parent `b0c61bc2f19c9a41bbddec2ab0c608122b5955f8`. Code
-`f41ade4ad4accccd34374fd5f897729522eedb76`. Four groups are
-implemented pending your verification. They are not verified.
-QI150 and QI176 stay partial. The only remainder on those two is
-`qa._fact_pack`, which this push does not edit. QI095 stays inside
-QI016. No other group was started. QI044 stays untouched. QI047
-was not started.
+Parent `9b36783f0dcebc9daf410ab6b1ad13b198b857f8`. Code
+`9731d23cedeb1bda01ffd5b0a601c608b0df3868`. QI150 and QI176 move
+from partial to implemented pending your verification. They are not
+verified. No other group was started. QI016, QI017, QI028, and
+QI057 stay pending on the parent `f41ade4` and were not re-edited.
+The notes for those four below are parent behavior, not this diff.
+QI044 stays untouched. QI047 was not started. QI095 stays inside
+QI016.
 
-QI016, high, defect, with QI095. Overview stays. Its KPI cards use
+QI150, high, defect. Fact-pack money now uses one currency policy.
+`_money_fields` (`qa.py` lines 237–257) publishes spend and CPA only
+when `money_scope` is not mixed. A wholly unspecified blank-currency
+pool stays numeric, and `currency_known` is false. A multi-currency
+pool, and a known currency plus an unknown contribution, set spend
+and CPA to None. No denomination is invented.
+
+`_fact_pack` starts at line 274. The owner-scoped annotation call at
+line 284 stays. Do not demand that call or the annotation field
+reads that follow it. Ordinary totals, group KPIs, spend order, and
+cost quintiles changed. Totals (lines 453–457) spread `_money_fields`
+for the whole row set and set `spend_ranking` to `unavailable` when
+the pool is mixed. CTR stays a rate. The pack has no ROAS field.
+
+`_by_spend` (lines 290–296) orders campaigns, hooks, styles, formats,
+funnel, verticals, and markets by summed spend only when the pool is
+not mixed. A mixed pool uses stable name order. A single-currency
+group still publishes its own spend, CPA, and currency code. A mixed
+group publishes spend and CPA as None.
+
+Cost quintiles (lines 412–435) are empty, and `ranking` is
+`unavailable`, when the pool is mixed. A cheaper foreign CPA is not
+listed. A comparable pool still ranks a lower CPA first.
+
+`_quintile_split` (lines 181–184) returns no top or bottom when the
+metric is not CTR or VTR and the row set is mixed. CTR and VTR still
+rank across currencies. A same-currency CPA split still puts the
+lower CPA first.
+
+The spend sentence in `answer` (lines 623–639) does not name a top
+spend row when the pool is mixed. The total is `unavailable`, and
+the sentence says `No spend ranking is available across currencies.`
+A wholly unspecified pool still names the larger row and labels the
+amount `currency unknown`.
+
+`_money` (lines 904–912) prints `unavailable` for a mixed fact-pack
+group, `CODE amount` when that group's currency is known, and
+`amount (currency unknown)` when it is not. Style, timing, hook,
+length, CTA, funnel, market, and vertical sentences pass the group
+into `_money`.
+
+The checkpoint-037 gates outside this function stay. Report extras,
+recommendations, markets, peer pools, and creative comparison still
+refuse mixed currency. Legacy `currencies=[]` still ranks and is
+labelled currency unknown. `export_gate.py` still prints `CPA $`
+and was not edited.
+
+Confirm with `tests/test_checkpoint_038_partials.py`:
+`test_mixed_fact_pack_does_not_add_or_rank_native_money`,
+`test_blank_currency_fact_pack_still_ranks`,
+`test_one_currency_fact_pack_keeps_its_code_and_cost_rank`,
+`test_known_plus_unknown_fact_pack_is_unavailable`,
+`test_gbp_cpa_does_not_rank_ahead_of_or_behind_eur_cpa`,
+`test_mixed_spend_question_names_no_top_row`,
+`test_blank_spend_question_still_names_the_larger_row`, and
+`test_ctr_split_still_ranks_across_currencies`. Also the
+mixed-currency and legacy-peer cases in
+`tests/test_checkpoint_037_partials.py`, and
+`tests/test_campaign_reco.py`. A GBP CPA of 10 must not be ranked
+against a EUR CPA of 8.
+
+QI176, high, defect. ROAS rankings use revenue-reporting rows and
+the same currency policy. The cross-group winner gate (lines
+728–733) now includes ROAS, matching the per-group gate at line 705.
+Two single-currency groups in different currencies produce
+`no ROAS winner`. A group that is itself mixed still drops out, so
+one remaining single-currency group can still win. That case is
+`test_roas_mixed_currency_group_has_no_winner` in
+`tests/test_ask_llm.py`.
+
+`reported_roas_details` is unchanged. Reported revenue 200 on spend
+100, plus unreported spend 100, stays ROAS 2.0 with coverage 50%,
+not 1.0. A group with no reported revenue does not rank as a
+measured 0.0x. A reported zero stays a genuine zero. The fact pack
+does not add a ROAS field and does not divide unreported revenue by
+spend. Tied and single winners still append
+` (revenue-reporting spend coverage N%)` when coverage is below 1
+(lines 768–788). Coverage of 1 adds no note.
+
+`_quintile_split` on ROAS leaves an unreported row out. Confirm with
+`test_cross_currency_roas_has_no_winner`,
+`test_reported_roas_keeps_matched_value_and_coverage`,
+`test_unreported_revenue_does_not_win_a_roas_split`, and
+`test_cross_currency_cpa_split_names_no_cost_winner` in
+`tests/test_checkpoint_038_partials.py`, plus the ROAS cases in
+`tests/test_ask_llm.py`.
+
+QI016, high, defect, with QI095. Parent behavior, not this diff. Overview stays. Its KPI cards use
 `pooledBenchmark` on the campaign groups (`OverviewPage.tsx`
 `buildKpiCards`, around lines 98–152). ROAS context says
 `Revenue-reporting spend coverage N%` when that share is below 1.
@@ -188,32 +276,6 @@ changed. Confirm with `Source/self_check.py` (97/97) and
 `test_zero_weight_mean_is_unavailable` in
 `tests/test_checkpoint_037_partials.py`.
 
-QI150, high, defect, still partial. `_report_extras` sets
-`currency_blocked` and ranks an empty pool when
-`_money_comparable` is false (`benchmarks.py`, around lines
-1198–1205 and 1606–1615). Best, worst, hook spend, style spend,
-markets, and the cross-campaign scale/stop lines use that gate.
-Labels go through `_native_amount` and `_compact_money`: no `$`.
-A wholly unspecified legacy pool (`currencies=[]`, not mixed) still
-ranks and is labelled `amount (currency unknown)`. Peer median in
-`campaign_recommendations` (around lines 1941–1954) says
-`comparison unavailable` across USD and EUR. The known-currency
-boundary from `58251b1` stays. `_fact_pack` (starts around line 247
-in `qa.py`, immediately after `_show_metric`) was not edited. That
-function is the only remainder. Do not demand its body. Confirm
-with `tests/test_checkpoint_037_partials.py` mixed-currency and
-legacy-peer cases, plus `tests/test_campaign_reco.py`.
-
-QI176, high, defect, still partial. A tied ROAS winner appends
-` (revenue-reporting spend coverage N%)` when pooled coverage is
-not None and below 1 (`qa.py`, around lines 736–746). Coverage of
-1 does not add the note. The single-winner coverage block (around
-lines 747–757) was already present and stays. A full-coverage GBP
-tie does not contain the word `coverage`, and the spend sentence
-contains `GBP` and not `$`. `_fact_pack` was not edited. That
-function is the only remainder. Confirm with the tied-ROAS cases
-in `tests/test_checkpoint_037_partials.py`.
-
 QI043 and QI045 stay pending from `d7b4c5e` and were not re-edited.
 The ten groups from `b690c69` stay pending and were not re-opened.
 `BackendTiktokTest` no longer expects `CPA $10.00` or `CPA $20.00`.
@@ -221,7 +283,7 @@ Those sentences now say `CPA 10.00 (currency unknown)` and
 `CPA 20.00 (currency unknown)` when the fixture has no currency.
 
 
-## Claims to falsify — implemented pending verification (52; QI016, QI017, QI028, and QI057 above are this push, prior 48 already on main)
+## Claims to falsify — implemented pending verification (54; QI150 and QI176 above are this push, prior 52 already on main)
 
 For checkpoint-030 groups, the Mac tree commit is the import commit
 `1ba11ab…` (historical batch commit in parentheses). Benefit is the
@@ -643,28 +705,37 @@ finding's intended benefit; verify the code actually delivers it.
 
 ## Newly completed in this increment (verify these first)
 
-QI016, QI017, QI028, and QI057 are pending your verification. They are
-not verified. The checkpoint-032 notes below were already on main.
-This push edits the four groups named above and the two partials in
-the next section. It does not re-open QI043 or QI045.
+QI150 and QI176 are pending your verification. They are not verified.
+QI016, QI017, QI028, and QI057 were already pending on the parent and
+were not re-edited. This push does not re-open QI043 or QI045.
 
-- QI016 (`f41ade4`): length-band and Overview ROAS use the
+- QI150 (`9731d23`): fact-pack totals and cost quintiles are
+  unavailable when native money is mixed or known-plus-unknown.
+  Spend order is name order in that case. A blank-currency pool
+  still ranks and is labelled currency unknown. A single-currency
+  group keeps its own spend, CPA, and code.
+- QI176 (`9731d23`): a ROAS winner across two currencies is
+  withheld. Reported revenue 200 on spend 100 plus unreported spend
+  100 stays 2.0x with 50% coverage. Unreported revenue does not win
+  a ROAS split. The fact pack does not add a ROAS field.
+- QI016 (`f41ade4`, parent): length-band and Overview ROAS use the
   revenue-reporting population and name coverage below 1. Overview
   stays. Reconstruction from rounded creative ROAS can drift slightly.
-- QI017 (`f41ade4`): formatters and spend-band copy no longer invent
-  `$` or USD. Unknown legacy amounts say currency unknown.
-- QI057 (`f41ade4`): unreported raw spend and revenue stay null.
-  A supplied zero stays zero. Legacy rows without a missing marker
-  keep the stored number, and a stored None without that marker is 0.
-- QI028 (`f41ade4`): a zero-weight or missing weighted mean is
-  unavailable in the Source report, dashboard, deck, and ask copy.
+- QI017 (`f41ade4`, parent): formatters and spend-band copy no longer
+  invent `$` or USD. Unknown legacy amounts say currency unknown.
+- QI057 (`f41ade4`, parent): unreported raw spend and revenue stay
+  null. A supplied zero stays zero. Legacy rows without a missing
+  marker keep the stored number, and a stored None without that
+  marker is 0.
+- QI028 (`f41ade4`, parent): a zero-weight or missing weighted mean
+  is unavailable in the Source report, dashboard, deck, and ask copy.
 - QI060 (0772b15): Campaigns spend bench gated on comparable currency;
   rail ROAS pooled from reporting components. Prior Dashboard/Analyst
   baselines already on main. Tests: CampaignsPage suite + full UI.
 - QI269/QI270 (2f3e98b): annotation associations asserted both orders and
   N-way in tests/test_why_associations_quality.py atop ordering fixes.
 
-## Partly done — do not ship these claims as complete (2; QI016/QI017/QI028/QI057/QI060/QI269 entries below are completion records)
+## Partly done — none remain (QI150 and QI176 are pending verification, not partial; earlier entries below are completion records)
 
 ### QI016 — UI ROAS recomputation loses the revenue-reporting population (COMPLETED 037)
 
@@ -701,19 +772,19 @@ the next section. It does not re-open QI043 or QI045.
 - Remaining: none. Campaigns platform spend bench now gated on comparable currency and rail ROAS pooled from reporting components (0772b15); full UI suite passes.
 - Status: implemented pending verification (not verified).
 
-### QI150 — Cost comparisons and recommendation pools mix native currency units (PARTIAL)
+### QI150 — Cost comparisons and recommendation pools mix native currency units (COMPLETED 038)
 
 - Findings: QI150; severity high; kind defect. Files: Backend/ci_backend/actions.py; Backend/creative_intel/benchmarks.py; Backend/creative_intel/qa.py.
 - Original locations: Backend/creative_intel/benchmarks.py:819-820; Backend/creative_intel/benchmarks.py:958-958; Backend/creative_intel/benchmarks.py:977-977; Backend/creative_intel/benchmarks.py:1218-1218. Benefit: Apply one comparable-currency policy to unit-bearing rankings and recommendations.
-- Remaining: report extras, campaign recommendations, markets, and peer pools are gated (`f41ade4`). Legacy `currencies=[]` still ranks and is labelled currency unknown. The only remainder is `qa._fact_pack`, which was not edited.
-- Status: partial. Verify done slices; report `_fact_pack` as the remainder, not as a new defect unless this push made it worse.
+- Remaining: none in the ordinary metric paths named in This push. Report extras, recommendations, markets, and peer pools were already gated (`f41ade4`). `_fact_pack` totals, spend order, and cost quintiles now follow the same policy (`9731d23`). The annotation call inside `_fact_pack` was not edited. Legacy `currencies=[]` still ranks and is labelled currency unknown. `export_gate.py` still prints `CPA $` and was outside this edit.
+- Status: implemented pending verification (not verified).
 
-### QI176 — QA ROAS rankings ignore revenue-reporting coverage (PARTIAL)
+### QI176 — QA ROAS rankings ignore revenue-reporting coverage (COMPLETED 038)
 
 - Findings: QI176; severity high; kind defect. Files: Backend/creative_intel/qa.py; tests/test_ask_llm.py.
 - Original locations: Backend/creative_intel/qa.py:596-596; Backend/creative_intel/qa.py:601-602; tests/test_ask_llm.py:184-186. Benefit: Use matched ROAS with explicit reported fixtures and unavailable handling.
-- Remaining: tied ROAS winners now name revenue-reporting spend coverage when it is below 1 (`f41ade4`). Full coverage adds no note. The only remainder is `qa._fact_pack`, which was not edited.
-- Status: partial. Verify done slices; report `_fact_pack` as the remainder, not as a new defect unless this push made it worse.
+- Remaining: none in the winner path or the fact-pack currency policy. Tied and single ROAS winners name revenue-reporting spend coverage when it is below 1. A cross-currency ROAS ranking is withheld (`9731d23`). The fact pack does not invent a ROAS field. Fixtures that expect a measured ROAS set `revenue_reported`.
+- Status: implemented pending verification (not verified).
 
 ### QI269 — Comparison explanations reverse the paired values when the second creative leads (COMPLETED 032)
 
@@ -761,10 +832,12 @@ still true, do not re-report them as undisclosed:
   (15 checkpoint-030 quality files), UI 316 passed, TypeScript 45 entries pass.
   Historical cloud checkpoint-030 counts were Python 332, UI 316, TS 45.
 - Full Python baseline (pristine): 913 passed, 5 failed, 1 skipped (919).
-  Full Python at code head `f41ade4`: 1,328 passed, 4 failed, 1 skipped,
-  193 subtests, 713.99s. Ruff on the edited Python files was clean.
-  The new module is `tests/test_checkpoint_037_partials.py`.
-  `tests/test_checkpoint_036_highs.py` remains in that suite.
+  Full Python at code head `9731d23`: 1,340 passed, 4 failed, 1 skipped,
+  193 subtests, 504.04s. Ruff on `Backend/creative_intel/qa.py` and
+  `tests/test_checkpoint_038_partials.py` was clean.
+  The new module is `tests/test_checkpoint_038_partials.py` (12 tests).
+  `tests/test_checkpoint_037_partials.py` and
+  `tests/test_checkpoint_036_highs.py` remain in that suite.
   The 338-test scoped subset above also passes inside this full suite;
   newer QI323/QI176/XLSX quality tests are full-suite only and included.
   Failures are only pre-existing `0012` vs `0013`: three
@@ -779,37 +852,27 @@ still true, do not re-report them as undisclosed:
   `tests/test_deploy.py` line 134).
   The skip is `tests/test_acceptance_10.py` (needs a no-ffmpeg host).
   193 subtests passed.
-- UI at this code head: `npm run typecheck` passed. `npm run build`
-  passed. Local assets: `index-BRxF0Jzd.js` (971,307 bytes) and
-  `index-C5G5cbmt.css` (72,151 bytes). The CSS hash matches the
-  previous build. Focused UI tests after the type fix: 82 passed
-  (`product.test.ts`, `benchmarkPooling.test.ts`,
-  `OverviewPage.test.tsx`, `CampaignsPage.test.tsx`,
-  `CompareChart.test.tsx`, `AskPage.scope.test.tsx`). An earlier full
-  vitest, before the final type-only edits, was 694 passed and 2
-  failed, both in `SettingsPage.test.tsx` (initial density at the
-  assertion near line 916, and theme after Reset Defaults near line
-  985). That file passed 56/56 alone. `SettingsPage.tsx` was not
-  edited. The signed-in app was not opened. The server was not started.
-- `Source/self_check.py` at this code head: 97/97, run before the
-  UI-only type fix. Python was not changed after that run or after
-  the full pytest. `product.py` still has the same 20 ruff findings
-  as at `92edef8`. No tracked CI config exists; exact-commit CI is
-  unavailable, not passed. No live browser, live provider, or native
-  Excel check was run. Deployment of this push was not verified when
-  this file was written.
+- UI was not edited. Typecheck and the Vite build were not re-run.
+  The served asset from the parent build may stay
+  `index-BRxF0Jzd.js`. A filename match does not prove this Python
+  process is live. The signed-in app was not opened. The server was
+  not started.
+- `Source/self_check.py` was not re-run. This push does not edit
+  Source. `product.py` still has the same 20 ruff findings as at
+  `92edef8` and was not lint-fixed. No tracked CI config exists;
+  exact-commit CI is unavailable, not passed. No live browser, live
+  provider, or native Excel check was run. Deployment of this push
+  was not verified when this file was written.
 
 ## Still open (272 untouched groups — summary)
 
-Untouched alone: 0 high, 177 medium, 95 low. With the 2 partials
-(both high): 2 high, 177 medium, 95 low remaining. Remaining
-is 274 (272 untouched + 2 partial). Remaining by kind including
-partials: 145 defects, 33 conditional risks, 45 test gaps,
-51 improvements. Conditional risks are hypotheses to validate, not bugs to
-blindly fix. QI016, QI017, QI028, and QI057 are pending verification,
-not untouched. The high partials that remain are QI150 and QI176.
-Both remain only because `qa._fact_pack` was not edited. There is
-no medium partial.
+Untouched alone: 0 high, 177 medium, 95 low. No group is partial.
+Remaining is 272. Remaining by kind: 143 defects, 33 conditional
+risks, 45 test gaps, 51 improvements. Conditional risks are
+hypotheses to validate, not bugs to blindly fix. QI150 and QI176
+are pending verification, not untouched. QI016, QI017, QI028, and
+QI057 stay pending verification from the parent. There is no high
+partial and no medium partial.
 B9 inactive-prototype groups (28) need retain/retire decisions; B10 fallback
 (14) stays separate. Full per-group status is in the appendix. The complete
 finding evidence lives in the preserved handoff register; this file does
@@ -823,8 +886,11 @@ here: QI047. Do not retry deferred owners wholesale.
 1. Verify target/diff above; confirm `Audit.md`-only commits after code head.
 2. For each implemented group, trace producer → helper → consumer and read
    its regression tests; try the finding's triggering conditions on paper.
-3. For partials, confirm each remaining consumer still shows old behavior.
-4. Spot-check untouched highs still exist at cited symbols (follow symbols).
+3. There is no partial group. Confirm `_fact_pack` no longer adds or
+   ranks mixed native money, and that a cross-currency ROAS question
+   names no winner.
+4. There is no untouched high. Spot-check an untouched medium at its
+   cited symbol if you open one (follow the symbol).
 5. Reconcile counts: appendix rows = 326; finding IDs across rows = 335.
 
 ## Appendix — all 326 groups at this push
@@ -976,7 +1042,7 @@ here: QI047. Do not retry deferred owners wholesale.
 | QI147 | QI147 | medium | defect | NOT_IMPLEMENTED | Campaign-axis resolution changes matching to case-sensitive |
 | QI148 | QI148 | medium | defect | NOT_IMPLEMENTED | Sample-only scope descriptions say All Data |
 | QI149 | QI149 | low | conditional_risk | NOT_IMPLEMENTED | Spend-bound validation accepts non-finite numeric values |
-| QI150 | QI150 | high | defect | PARTIALLY_IMPLEMENTED | Cost comparisons and recommendation pools mix native currency units |
+| QI150 | QI150 | high | defect | LOCALLY_IMPLEMENTED_INTEGRATION_PENDING | Cost comparisons and recommendation pools mix native currency units |
 | QI151 | QI151 | medium | defect | NOT_IMPLEMENTED | PowerPoint reports omit their analytical and benchmark scope |
 | QI152 | QI152 | low | improvement | NOT_IMPLEMENTED | The earliest-span helper is duplicated inside report generation |
 | QI153 | QI153 | medium | defect | NOT_IMPLEMENTED | The prototype hook answer crashes on an empty verified population |
@@ -1002,7 +1068,7 @@ here: QI047. Do not retry deferred owners wholesale.
 | QI173 | QI173,QI259 | high | defect | LOCALLY_IMPLEMENTED_INTEGRATION_PENDING | QA renders unavailable CTR and format CPA as measured zeroes |
 | QI174 | QI174 | medium | defect | NOT_IMPLEMENTED | QA structure summaries count ad rows as creatives |
 | QI175 | QI175 | medium | defect | NOT_IMPLEMENTED | Backend QA substitutes TikTok for other format questions |
-| QI176 | QI176 | high | defect | PARTIALLY_IMPLEMENTED | QA ROAS rankings ignore revenue-reporting coverage |
+| QI176 | QI176 | high | defect | LOCALLY_IMPLEMENTED_INTEGRATION_PENDING | QA ROAS rankings ignore revenue-reporting coverage |
 | QI177 | QI177 | medium | defect | NOT_IMPLEMENTED | A named platform overrides the creative or campaign answer level |
 | QI178 | QI178 | high | defect | LOCALLY_IMPLEMENTED_INTEGRATION_PENDING | QA top-versus-bottom groups ignore the requested ranking metric |
 | QI179 | QI179 | medium | defect | NOT_IMPLEMENTED | The legacy canonical normalizer discards native currency values |
@@ -1160,5 +1226,5 @@ here: QI047. Do not retry deferred owners wholesale.
 
 Status key: LOCALLY_IMPLEMENTED_INTEGRATION_PENDING = implemented pending
 verification above; PARTIALLY_IMPLEMENTED = partial; NOT_IMPLEMENTED =
-untouched. QI016, QI017, QI028, and QI057 are pending verification. QI150 and QI176 stay partial. Original pin for every row:
+untouched. QI150 and QI176 are pending verification. QI016, QI017, QI028, and QI057 stay pending from the parent. No group is partial. Original pin for every row:
 `1342bb48ef59c45981c716c77d12898ae029daba`.

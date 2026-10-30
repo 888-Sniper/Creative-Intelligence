@@ -105,14 +105,55 @@ sqlite3 "<data>/creative_intel.db" ".backup '$BACKUP/creative_intel.db'"
 
 ## Restore
 
+Stop every writer first, including the server. Do not copy onto the
+live database, and do not delete the live media directory, until a
+staged copy of both has been checked.
+
+The selected backup directory must exist and must not be empty. It
+must contain a readable `creative_intel.db`. It must also contain a
+readable `media` directory. An intentionally empty `media` directory
+is valid. A missing or unreadable database, or a missing or unreadable
+`media` directory, stops the restore before any live path changes.
+
 ```sh
-# 1. Stop the server.
-# 2. Restore the database and media from a backup stamp:
-cp "$BACKUP/creative_intel.db" "<data>/creative_intel.db"
-rm -rf "<data>/media"
-cp -r "$BACKUP/media" "<data>/media"
-# 3. Restart the server and confirm /readiness returns {"ready": true}.
+# Preconditions: writers are stopped, BACKUP is the selected stamp,
+# and <data> is the live data directory. This block only stages.
+test -n "$BACKUP" && test -d "$BACKUP"
+test -s "$BACKUP/creative_intel.db" && test -r "$BACKUP/creative_intel.db"
+test -d "$BACKUP/media" && test -r "$BACKUP/media"
+mkdir -p "<data>/.restore-staging"
+rm -rf "<data>/.restore-staging/creative_intel.db" "<data>/.restore-staging/media"
+cp "$BACKUP/creative_intel.db" "<data>/.restore-staging/creative_intel.db"
+cp -r "$BACKUP/media" "<data>/.restore-staging/media"
+test -s "<data>/.restore-staging/creative_intel.db"
+test -d "<data>/.restore-staging/media"
 ```
+
+Keep the current database and the current media directory as rollback
+copies, then switch the staged pair into place. If either switch fails,
+put both rollback copies back before starting the server again. Remove
+the rollback copies only after the restored pair is in place and
+`/readiness` returns `{"ready": true}`.
+
+```sh
+mkdir -p "<data>/.restore-rollback"
+rm -rf "<data>/.restore-rollback/creative_intel.db" "<data>/.restore-rollback/media"
+cp "<data>/creative_intel.db" "<data>/.restore-rollback/creative_intel.db"
+cp -r "<data>/media" "<data>/.restore-rollback/media"
+cp "<data>/.restore-staging/creative_intel.db" "<data>/creative_intel.db" \
+  && cp -r "<data>/.restore-staging/media" "<data>/media.new" \
+  && rm -rf "<data>/media" \
+  && mv "<data>/media.new" "<data>/media"
+# If that chain stops early, put both rollback copies back:
+# cp "<data>/.restore-rollback/creative_intel.db" "<data>/creative_intel.db"
+# rm -rf "<data>/media"
+# cp -r "<data>/.restore-rollback/media" "<data>/media"
+```
+
+Restart the server and confirm `/readiness` returns `{"ready": true}`.
+Only then remove `<data>/.restore-rollback` and `<data>/.restore-staging`.
+This procedure is documentation. Do not run it against a live host
+from a review.
 
 ## Before migrations
 

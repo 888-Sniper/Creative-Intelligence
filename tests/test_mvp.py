@@ -121,8 +121,10 @@ class GroundedQATest(unittest.TestCase):
             "Campaign,Ad Name,Creative Name,Amount Spent,Impressions,"
             "Link Clicks,Conversions\nC9,A9,hook-z,10,0,3,0\n", "meta"))
         out = qa.answer(conn, "What is the CTR?")
-        # 3 clicks / 0 impressions must not render as 300.00%.
-        self.assertIn("0.00%", out["answer"])
+        # 3 clicks / 0 impressions is not a rate. It must not render
+        # as 0.00% or as 300.00%.
+        self.assertIn("unavailable", out["answer"])
+        self.assertNotIn("0.00%", out["answer"])
         self.assertNotIn("300.00%", out["answer"])
         conn.close()
 

@@ -57,15 +57,18 @@ def synthesize_from_quartiles(conn):
         except ValueError:
             missing = set()
         agg = by_key.setdefault(
-            key, {"impr": 0, "q": [0, 0, 0, 0], "seen": [0, 0, 0, 0]})
-        agg["impr"] += row.get("impressions") or 0
+            key, {"impr": 0, "q": [0, 0, 0, 0], "seen": [0, 0, 0, 0],
+                  "impr_q": [0, 0, 0, 0]})
+        impr = row.get("impressions") or 0
+        agg["impr"] += impr
         for i, col in enumerate(("views_25", "views_50", "views_75",
                                  "views_100")):
             # A blank quartile cell is missing, never a measured zero:
-            # only rows that actually report the quartile feed its sum.
+            # its impressions stay out of that point's denominator.
             if col not in missing:
                 agg["q"][i] += row.get(col) or 0
                 agg["seen"][i] += 1
+                agg["impr_q"][i] += impr
     done = 0
     for key, agg in sorted(by_key.items()):
         # Stale synthetic points go even when there is nothing to
@@ -87,19 +90,22 @@ def synthesize_from_quartiles(conn):
                 except (TypeError, ValueError):
                     duration = 0
         duration = float(duration) if duration else 30.0
-        pts = [(0.0, 100.0)]
-        for frac, views, n in zip((0.25, 0.5, 0.75, 1.0), agg["q"],
-                                  agg["seen"]):
+        total = agg["impr"]
+        pts = [(0.0, 100.0, 1.0 if total else None)]
+        for frac, views, n, den in zip(
+                (0.25, 0.5, 0.75, 1.0), agg["q"], agg["seen"],
+                agg["impr_q"]):
             # Quartiles no row reported contribute no point: a 0%
             # crash-and-recovery mid-curve is a data gap, not a drop.
-            if not n:
+            if not n or den <= 0:
                 continue
             pts.append((round(frac * duration, 2),
-                        round(min(100.0, views * 100.0 / agg["impr"]), 2)))
+                        round(min(100.0, views * 100.0 / den), 2),
+                        round(den / total, 4) if total else None))
         conn.executemany(
             "INSERT INTO retention (creative_key, t_sec, retention_pct,"
-            " source) VALUES (?, ?, ?, ?)",
-            [(key, t, p, SYNTH_SOURCE) for t, p in pts])
+            " source, coverage) VALUES (?, ?, ?, ?, ?)",
+            [(key, t, p, SYNTH_SOURCE, cov) for t, p, cov in pts])
         done += 1
     return done
 

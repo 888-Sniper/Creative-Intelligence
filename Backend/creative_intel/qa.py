@@ -98,7 +98,9 @@ def _product_start(ann):
 def _cpa(group):
     spend = sum(r["spend"] for r in group)
     conv = sum(r["conversions"] for r in group)
-    return (spend / conv) if conv else 0.0, spend, conv
+    if not conv:
+        return None, spend, conv
+    return (spend / conv), spend, conv
 
 
 def _view_rate(group):
@@ -123,6 +125,72 @@ def _view_rate(group):
             continue
         return label, round(num / den, 4), num, den
     return "play rate", None, 0, 0
+
+
+def _question_metric(question):
+    """The one ranking metric named by a question, or None for spend."""
+    q = question or ""
+    if any(w in q for w in ("cpa", "conversion", "result")):
+        return "cpa"
+    if any(w in q for w in ("ctr", "click")):
+        return "ctr"
+    if "roas" in q:
+        return "roas"
+    if any(w in q for w in ("vtr", "view-through", "view through",
+                            "view rate", "completion")):
+        return "vtr"
+    return None
+
+
+def _group_score(group, metric):
+    """One comparable score, or None when the metric is unavailable.
+
+    CPA is lower-better. CTR, ROAS and view rate are higher-better.
+    None means the unnamed spend fallback.
+    """
+    if metric in ("cpa", "roas") or metric not in ("cpa", "ctr", "roas", "vtr"):
+        from creative_intel import currency_scope as _currency_scope
+        if _currency_scope.money_scope(group)["mixed_currency"]:
+            return None
+    spend = sum(x["spend"] for x in group)
+    impr = sum(x["impressions"] for x in group)
+    clicks = sum(x["clicks"] for x in group)
+    conv = sum(x["conversions"] for x in group)
+    if metric == "cpa":
+        return (spend / conv) if conv else None
+    if metric == "ctr":
+        return (clicks / impr) if impr else None
+    if metric == "roas":
+        from creative_intel import metric_availability as _availability
+        value, _coverage, _details = (
+            _availability.reported_roas_details(group))
+        return value
+    if metric == "vtr":
+        return _view_rate(group)[1]
+    return spend
+
+
+def _quintile_split(rows, metric):
+    """Top and bottom keys under one metric. Unavailable keys are left out."""
+    by_key = {}
+    for row in rows:
+        key = row.get("creative_key") or ""
+        if not key:
+            continue
+        by_key.setdefault(key, []).append(row)
+    scored = []
+    for key, group in by_key.items():
+        value = _group_score(group, metric)
+        if value is None:
+            continue
+        scored.append((key, value))
+    scored.sort(key=lambda item: item[1], reverse=metric not in ("cpa",))
+    if len(scored) < 2:
+        return [], [], len(by_key)
+    width = max(1, len(scored) // 5)
+    top = [key for key, _value in scored[:width]]
+    bottom = [key for key, _value in scored[-width:] if key not in top]
+    return top, bottom, len(by_key)
 
 
 def _pct(value):
@@ -526,7 +594,7 @@ def answer(conn, question, llm=None, scope=None, owner=None,
                             top_reach["creative_key"],
                             top_reach["impressions"]))
         else:
-            parts.append("Blended CTR is 0.00%% (%d clicks on zero "
+            parts.append("Blended CTR is unavailable (%d clicks on zero "
                          "impressions — no rate to report)." % clicks)
         cite("Benchmark Derived")
         cite("Uploaded CSV")
@@ -568,16 +636,7 @@ def answer(conn, question, llm=None, scope=None, owner=None,
             by_key.setdefault(r[_level] or "(unattributed)", []).append(r)
         # A named metric picks the ranking; bare "best/top/winner"
         # falls back to spend, labelled as such.
-        metric = None
-        if any(w in q for w in ("cpa", "conversion", "result")):
-            metric = "cpa"
-        elif any(w in q for w in ("ctr", "click")):
-            metric = "ctr"
-        elif "roas" in q:
-            metric = "roas"
-        elif any(w in q for w in ("vtr", "view-through", "view through",
-                                  "view rate", "completion")):
-            metric = "vtr"
+        metric = _question_metric(q)
 
         # A15: one rate id per scope for fair ranking — VTR when
         # the scope measured completions, else the explicit play rate.
@@ -708,19 +767,27 @@ def answer(conn, question, llm=None, scope=None, owner=None,
             # were measured, play rate elsewhere; never mixed blindly.
             elab, ev, evv, evi = _view_rate(early)
             llab, lv, lvv, lvi = _view_rate(late)
-            if ev is None or lv is None:
-                verdict = "unclear"
+            early_names = ", ".join(sorted({x["creative_key"] for x in early}))
+            late_names = ", ".join(sorted({x["creative_key"] for x in late}))
+            if elab != llab and ev is not None and lv is not None:
+                parts.append(
+                    "Unclear: early product appearance is measured as %s "
+                    "and late as %s, so the rates are not comparable "
+                    "(%s vs %s)."
+                    % (elab, llab, early_names, late_names))
             else:
-                verdict = "yes" if ev > lv else "no"
-            parts.append(
-                "%s: early product appearance holds %s %s (%d %s / "
-                "%d impr across %s) vs late %s %s (%d %s / %d impr "
-                "across %s)."
-                % (verdict.title(), elab, _pct(ev), evv,
-                   _rate_noun(elab), evi,
-                   ", ".join(sorted({x["creative_key"] for x in early})),
-                   llab, _pct(lv), lvv, _rate_noun(llab), lvi,
-                   ", ".join(sorted({x["creative_key"] for x in late}))))
+                if ev is None or lv is None:
+                    verdict = "unclear"
+                else:
+                    verdict = "yes" if ev > lv else "no"
+                parts.append(
+                    "%s: early product appearance holds %s %s (%d %s / "
+                    "%d impr across %s) vs late %s %s (%d %s / %d impr "
+                    "across %s)."
+                    % (verdict.title(), elab, _pct(ev), evv,
+                       _rate_noun(elab), evi, early_names,
+                       llab, _pct(lv), lvv, _rate_noun(llab), lvi,
+                       late_names))
             cite("Uploaded CSV")
             cite("Annotation")
             cite("Benchmark Derived")
@@ -753,9 +820,10 @@ def answer(conn, question, llm=None, scope=None, owner=None,
                 group = groups[mode]
                 value, spend, conv = _cpa(group)
                 keys = sorted({x["creative_key"] for x in group})
-                bits.append("%s: %d creatives (%s) at $%.2f spend, CPA $%.2f"
+                cpa_text = "unavailable" if value is None else "$%.2f" % value
+                bits.append("%s: %d creatives (%s) at $%.2f spend, CPA %s"
                             % (mode, len(keys), ", ".join(keys),
-                               spend, value))
+                               spend, cpa_text))
             parts.append("TikTok formats — " + "; ".join(bits) + ".")
             cite("Uploaded CSV")
             if any(k != "(unannotated)" for k in groups):
@@ -922,8 +990,10 @@ def answer(conn, question, llm=None, scope=None, owner=None,
             cite("Benchmark Derived")
     if any(w in q for w in ("top vs", "top versus", "bottom", "quintile",
                             "best vs", "worst", "winners", "losers")):
-        quint = scoped_pack()["quintiles"]
-        top, bottom = quint["top_20_pct"], quint["bottom_20_pct"]
+        metric = _question_metric(q)
+        label = _view_rate(rows)[0] if metric == "vtr" else (
+            (metric or "spend").upper())
+        top, bottom, n_keys = _quintile_split(rows, metric)
         if not top:
             parts.append("Not enough ranked creatives in scope for a "
                          "top-vs-bottom split.")
@@ -931,14 +1001,14 @@ def answer(conn, question, llm=None, scope=None, owner=None,
         else:
             def _side(keys):
                 group = [r for r in rows if r["creative_key"] in keys]
-                spend = sum(x["spend"] for x in group)
-                conv = sum(x["conversions"] for x in group)
-                return "%s at %s spend, CPA %s" % (
-                    ", ".join(keys), _money(spend),
-                    _money(spend / conv if conv else None))
-            line = "Top 20%% in scope: %s." % _side(top)
+                score = _group_score(group, metric)
+                shown = (_show_metric(metric, score)
+                         if score is not None else "unavailable")
+                return "%s (%d of %d creatives) at %s" % (
+                    ", ".join(keys), len(keys), n_keys, shown)
+            line = "Top 20%% by %s: %s." % (label, _side(top))
             if bottom:
-                line += " Bottom 20%% in scope: %s." % _side(bottom)
+                line += " Bottom 20%% by %s: %s." % (label, _side(bottom))
             parts.append(line)
             cite("Uploaded CSV")
             cite("Benchmark Derived")

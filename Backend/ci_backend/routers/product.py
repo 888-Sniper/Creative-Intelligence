@@ -2436,15 +2436,16 @@ async def draft_review(draft_id: str, request: Request,
         # The approval binds the exact inputs the analysis ran on:
         # re-bind live inputs and require the frozen snapshot to
         # still hold.
+        stored_snap = block.get("snapshot") or {}
+        from creative_intel import review_bind
         try:
-            live = video_analysis_mod.bind_snapshot(conn, did)
+            live = video_analysis_mod.bind_snapshot(
+                conn, did,
+                video_only=review_bind.stored_video_only(stored_snap))
         except video_analysis_mod.AnalysisUnavailable as exc:
             raise HTTPException(status_code=409, detail={
                 "error": "Inputs changed since this analysis ran: %s" % exc})
-        stored_snap = block.get("snapshot") or {}
-        for snap_key in ("video_id", "media_id", "video_sha256",
-                         "dataset_version", "match_confirmed_at",
-                         "client", "campaign"):
+        for snap_key in review_bind.SNAPSHOT_KEYS:
             if (live.get(snap_key) or "") \
                     != (stored_snap.get(snap_key) or ""):
                 raise HTTPException(status_code=409, detail={

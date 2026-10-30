@@ -55,87 +55,91 @@ CANONICAL_FIELDS = ("platform", "campaign", "adset", "ad_name",
                     "format", "message_class", "promotion", "placement",
                     "audience")
 
+# Alias order is the precedence. The first entry is the canonical
+# header. A later entry is a fallback. "link clicks" stays last on
+# clicks so a dedicated Link Clicks column belongs to link_clicks;
+# it fills clicks only when the report has no Clicks column.
 _ALIASES = {
-    "platform": {"platform"},
-    "campaign": {"campaign", "campaign name", "kampania"},
-    "adset": {"ad set", "adset", "ad set name", "adgroup", "ad group",
-              "grupa reklam", "zestaw reklam"},
-    "ad_name": {"ad", "ad name", "reklama", "nazwa reklamy"},
-    "creative_key": {"creative", "creative key", "creative name",
-                     "video name", "kreacja", "nazwa kreacji"},
-    "spend": {"spend", "amount spent", "cost", "spend (usd)",
-              "wydatek", "wydatki", "koszt", "kwota wydana"},
-    "impressions": {"impressions", "impr.", "wyswietlenia"},
-    "clicks": {"clicks", "link clicks", "klikniecia"},
-    "conversions": {"conversions", "results", "purchases", "konwersje"},
-    "video_views": {"video views", "video plays", "views", "odtworzenia",
-                    "odtworzenia wideo"},
-    "views_25": {"25% views", "video watches at 25%", "views_25"},
-    "views_50": {"50% views", "video watches at 50%", "views_50"},
-    "views_75": {"75% views", "video watches at 75%", "views_75"},
-    "views_100": {"100% views", "completions", "video watches at 100%", "views_100"},
-    "client": {"client", "client name", "account", "account name",
-               "advertiser", "klient"},
-    "project": {"project", "project name"},
-    "team": {"team", "team name", "zespol", "zespół"},
-    "vertical": {"vertical", "industry", "category"},
-    "market": {"market", "market name", "country", "region", "geo",
-               "rynek", "kraj"},
-    "objective": {"objective", "campaign objective", "optimization goal",
-                  "optimisation goal", "cel", "cel kampanii"},
-    "funnel_stage": {"funnel stage", "funnel_stage", "funnel", "stage"},
-    "date": {"date", "day", "reporting date", "report date", "data",
-             "dzien"},
-    "revenue": {"revenue", "purchase value", "purchase conversion value",
+    "platform": ("platform",),
+    "campaign": ("campaign", "campaign name", "kampania"),
+    "adset": ("ad set", "adset", "ad set name", "adgroup", "ad group",
+              "grupa reklam", "zestaw reklam"),
+    "ad_name": ("ad", "ad name", "reklama", "nazwa reklamy"),
+    "creative_key": ("creative", "creative key", "creative name",
+                     "video name", "kreacja", "nazwa kreacji"),
+    "spend": ("spend", "amount spent", "cost", "spend (usd)",
+              "wydatek", "wydatki", "koszt", "kwota wydana"),
+    "impressions": ("impressions", "impr.", "wyswietlenia"),
+    "clicks": ("clicks", "klikniecia", "link clicks"),
+    "conversions": ("conversions", "results", "purchases", "konwersje"),
+    "video_views": ("video views", "video plays", "views", "odtworzenia",
+                    "odtworzenia wideo"),
+    "views_25": ("25% views", "video watches at 25%", "views_25"),
+    "views_50": ("50% views", "video watches at 50%", "views_50"),
+    "views_75": ("75% views", "video watches at 75%", "views_75"),
+    "views_100": ("100% views", "completions", "video watches at 100%", "views_100"),
+    "client": ("client", "client name", "account", "account name",
+               "advertiser", "klient"),
+    "project": ("project", "project name"),
+    "team": ("team", "team name", "zespol", "zespół"),
+    "vertical": ("vertical", "industry", "category"),
+    "market": ("market", "market name", "country", "region", "geo",
+               "rynek", "kraj"),
+    "objective": ("objective", "campaign objective", "optimization goal",
+                  "optimisation goal", "cel", "cel kampanii"),
+    "funnel_stage": ("funnel stage", "funnel_stage", "funnel", "stage"),
+    "date": ("date", "day", "reporting date", "report date", "data",
+             "dzien"),
+    "revenue": ("revenue", "purchase value", "purchase conversion value",
                 "conversion value", "total revenue", "total purchase value",
-                "shop revenue", "przychod", "wartosc konwersji"},
-    "currency": {"currency", "waluta"},
-    "account_id": {"account id", "account_id", "ad account", "advertiser id"},
-    "campaign_id": {"campaign id", "campaign_id", "id kampanii"},
-    "ad_id": {"ad id", "ad_id", "id reklamy"},
-    "reach": {"reach", "unique reach", "zasieg"},
-    "frequency": {"frequency", "avg frequency", "czestotliwosc"},
-    "video_starts": {"video starts", "starts", "video plays (start)",
+                "shop revenue", "przychod", "wartosc konwersji"),
+    "currency": ("currency", "waluta"),
+    "account_id": ("account id", "account_id", "ad account", "advertiser id"),
+    "campaign_id": ("campaign id", "campaign_id", "id kampanii"),
+    "ad_id": ("ad id", "ad_id", "id reklamy"),
+    "reach": ("reach", "unique reach", "zasieg"),
+    "frequency": ("frequency", "avg frequency", "czestotliwosc"),
+    "video_starts": ("video starts", "starts", "video plays (start)",
                      "rozpoczecia", "starty wideo",
-                     "odtworzenia (rozpoczecie)"},
-    "views_2s": {"2s views", "2-second views", "2 second views",
+                     "odtworzenia (rozpoczecie)"),
+    "views_2s": ("2s views", "2-second views", "2 second views",
                  "wyswietlenia 2s", "wyswietlenia 2 s", "odtworzenia 2 s",
-                 "odslony 2 s", "odslony 2s", "2s video views"},
-    "views_3s": {"3s views", "3-second views", "3 second views",
+                 "odslony 2 s", "odslony 2s", "2s video views"),
+    "views_3s": ("3s views", "3-second views", "3 second views",
                  "wyswietlenia 3s", "wyswietlenia 3 s", "odtworzenia 3 s",
-                 "odslony 3 s", "odslony 3s", "3s video views"},
-    "views_6s": {"6s views", "6-second views", "6 second views",
+                 "odslony 3 s", "odslony 3s", "3s video views"),
+    "views_6s": ("6s views", "6-second views", "6 second views",
                  "wyswietlenia 6s", "wyswietlenia 6 s", "odtworzenia 6 s",
-                 "odslony 6 s", "odslony 6s", "6s video views"},
-    "watch_time_total_s": {"watch time", "total watch time",
+                 "odslony 6 s", "odslony 6s", "6s video views"),
+    "watch_time_total_s": ("watch time", "total watch time",
                            "total watch time (s)", "czas ogladania",
-                           "calkowity czas ogladania"},
-    "watch_time_basis": {"watch time basis", "podstawa czasu ogladania"},
-    "avg_watch_per_view_s": {"avg watch time", "average watch time",
+                           "calkowity czas ogladania"),
+    "watch_time_basis": ("watch time basis", "podstawa czasu ogladania"),
+    "avg_watch_per_view_s": ("avg watch time", "average watch time",
                              "average play time per video view",
                              "sr czas ogladania",
-                             "sredni czas odtworzenia"},
-    "avg_watch_per_user_s": {"average play time per user",
+                             "sredni czas odtworzenia"),
+    "avg_watch_per_user_s": ("average play time per user",
                              "avg watch per user",
-                             "sr czas na uzytkownika"},
-    "link_clicks": {"link clicks", "destination clicks", "outbound clicks",
-                    "klikniecia linku", "klikniecia w link"},
-    "conversion_event": {"conversion event", "conversion name",
-                         "zdarzenie konwersji"},
-    "attribution": {"attribution", "attribution window", "atrybucja"},
-    "likes": {"likes", "polubienia"},
-    "comments": {"comments", "komentarze"},
-    "shares": {"shares", "udostepnienia"},
-    "saves": {"saves", "zapisania"},
-    "creator": {"creator", "tworca", "autor"},
-    "concept": {"concept", "angle", "koncept", "koncepcja"},
-    "format": {"creative format", "format kreacji"},
-    "message_class": {"message", "message class", "message type",
+                             "sr czas na uzytkownika"),
+    "link_clicks": ("link clicks", "destination clicks", "outbound clicks",
+                    "klikniecia linku", "klikniecia w link"),
+    "conversion_event": ("conversion event", "conversion name",
+                         "zdarzenie konwersji"),
+    "attribution": ("attribution", "attribution window", "atrybucja"),
+    "likes": ("likes", "polubienia"),
+    "comments": ("comments", "komentarze"),
+    "shares": ("shares", "udostepnienia"),
+    "saves": ("saves", "zapisania"),
+    "creator": ("creator", "tworca", "autor"),
+    "concept": ("concept", "angle", "koncept", "koncepcja"),
+    "format": ("creative format", "format kreacji"),
+    "message_class": ("message", "message class", "message type",
                       "rodzaj przekazu", "typ komunikatu",
-                      "klasa przekazu"},
-    "promotion": {"promotion", "promocja", "promo"},
-    "placement": {"placement", "umiejscowienie"},
-    "audience": {"audience", "odbiorcy", "grupa docelowa"},
+                      "klasa przekazu"),
+    "promotion": ("promotion", "promocja", "promo"),
+    "placement": ("placement", "umiejscowienie"),
+    "audience": ("audience", "odbiorcy", "grupa docelowa"),
 }
 
 _NUMERIC = {"spend": float, "impressions": int, "clicks": int,
@@ -301,6 +305,80 @@ def _to_date(raw):
     return text
 
 
+def _map_headers(fieldnames):
+    """Pick one column per field in declared alias order.
+
+    A header that is another field's canonical alias is reserved for
+    that field. This field may still use it when no earlier alias is
+    present, which keeps a Link Clicks-only export on clicks. Two
+    in-field columns are a recorded ambiguity; the earlier alias is
+    the one that is stored.
+    """
+    normed = {}
+    duplicates = []
+    for col in fieldnames or []:
+        if not str(col).strip():
+            continue
+        key = _norm(str(col))
+        if key in normed:
+            duplicates.append(str(col))
+        else:
+            normed[key] = col
+    reserved = {}
+    for field, aliases in _ALIASES.items():
+        if aliases and aliases[0] in normed:
+            reserved[aliases[0]] = field
+    col_map = {}
+    ambiguous = []
+    if duplicates:
+        ambiguous.append({"field": "", "reason": "duplicate headers",
+                          "columns": duplicates})
+    for field, aliases in _ALIASES.items():
+        present = [(idx, normed[alias]) for idx, alias in enumerate(aliases)
+                   if alias in normed]
+        if not present:
+            continue
+        usable = []
+        for idx, col in present:
+            owner = reserved.get(_norm(str(col)))
+            if owner is not None and owner != field and idx > 0:
+                continue
+            usable.append((idx, col))
+        if not usable and all(idx > 0 for idx, _col in present):
+            usable = [present[0]]
+        if not usable:
+            continue
+        _idx, chosen = usable[0]
+        col_map[field] = chosen
+        extras = [col for idx, col in usable if col != chosen]
+        if extras:
+            ambiguous.append({
+                "field": field,
+                "chosen": str(chosen),
+                "also": [str(col) for col in extras],
+            })
+    return col_map, ambiguous
+
+
+def _header_conflict(raw, ambiguous):
+    """Reason when two accepted columns for one field disagree."""
+    for item in ambiguous:
+        field = item.get("field") or ""
+        chosen = item.get("chosen")
+        if not field or not chosen:
+            continue
+        base = str(raw.get(chosen, "") or "").strip()
+        rivals = []
+        for col in item.get("also") or []:
+            other = str(raw.get(col, "") or "").strip()
+            if base and other and base != other:
+                rivals.append(str(col))
+        if rivals:
+            return "ambiguous %s: %s vs %s" % (
+                field, chosen, ", ".join(rivals))
+    return ""
+
+
 def _rows_from_dicts(fieldnames, dicts, platform, source, locale="en"):
     """Shared strict pipeline: header aliases, quarantine, key fallback.
 
@@ -310,21 +388,16 @@ def _rows_from_dicts(fieldnames, dicts, platform, source, locale="en"):
     meta carries locale, the header mapping and unmapped columns.
     """
     rows, quarantined = [], []
-    col_map = {}
-    normed = {_norm(str(col)): col for col in (fieldnames or [])}
-    for field, aliases in _ALIASES.items():
-        for alias in aliases:
-            for head, col in normed.items():
-                if head == alias and field not in col_map:
-                    col_map[field] = col
-                    break
-            if field in col_map:
-                break
+    col_map, ambiguous = _map_headers(fieldnames)
     mapped_cols = set(col_map.values())
     unmapped = [str(c) for c in (fieldnames or [])
                 if str(c).strip() and c not in mapped_cols]
     for lineno, raw in enumerate(dicts, start=2):
         if not any(str(v or "").strip() for v in raw.values()):
+            continue
+        conflict = _header_conflict(raw, ambiguous)
+        if conflict:
+            quarantined.append({"source_row": lineno, "reason": conflict})
             continue
         row = {"platform": platform, "source": source}
         missing = []
@@ -352,9 +425,7 @@ def _rows_from_dicts(fieldnames, dicts, platform, source, locale="en"):
                     bad = "%s %s" % (field, exc)
                     break
                 if field == "revenue":
-                    row["revenue_reported"] = bool(
-                        field in col_map and
-                        str(raw_val).strip() not in ("", "-", "n/a"))
+                    row["revenue_reported"] = not blank
             elif field == "date":
                 row[field] = _to_date(raw_val)
             else:
@@ -371,7 +442,8 @@ def _rows_from_dicts(fieldnames, dicts, platform, source, locale="en"):
         rows.append(row)
     meta = {"locale": locale,
             "mapping": {field: col_map[field] for field in sorted(col_map)},
-            "unmapped": unmapped}
+            "unmapped": unmapped,
+            "ambiguous": ambiguous}
     return rows, quarantined, meta
 
 
@@ -531,7 +603,7 @@ def _insert_sql():
     return "INSERT INTO ads (%s) VALUES (%s)" % (cols, vals)
 
 
-def _store_tail(conn, rows):
+def _store_tail(conn, rows, *, commit=True):
     for row in rows:
         conn.execute(
             "INSERT OR IGNORE INTO creatives (creative_key, platform, name)"
@@ -539,13 +611,14 @@ def _store_tail(conn, rows):
             (row["creative_key"], row["platform"], row["ad_name"]))
     from creative_intel import retention as retention_mod
     retention_mod.synthesize_from_quartiles(conn)
-    conn.commit()
+    if commit:
+        conn.commit()
 
 
-def insert_rows(conn, rows):
+def insert_rows(conn, rows, *, commit=True):
     normalised = _normalise(rows)
     conn.executemany(_insert_sql(), normalised)
-    _store_tail(conn, normalised)
+    _store_tail(conn, normalised, commit=commit)
     return len(normalised)
 
 
@@ -561,7 +634,7 @@ UPSERT_VALUE_COLUMNS = tuple(
                    "campaign_id", "ad_id"))
 
 
-def upsert_rows(conn, rows):
+def upsert_rows(conn, rows, *, commit=True):
     """Dedup-aware store for every product import surface.
 
     Rows matching an existing fact on the sync key update that row's
@@ -593,12 +666,12 @@ def upsert_rows(conn, rows):
                 update_sql,
                 tuple(row[col] for col in UPSERT_VALUE_COLUMNS) + key_vals)
             updated += 1
-    _store_tail(conn, normalised)
+    _store_tail(conn, normalised, commit=commit)
     return {"inserted": inserted, "updated": updated}
 
 
 def record_import(conn, meta, platform, source="upload", filename="",
-                  imported_by="", counts=None):
+                  imported_by="", counts=None, *, commit=True):
     """Persist import provenance; stamp + return an import id.
 
     The id links every stored ads row (import_id) to its original
@@ -621,7 +694,8 @@ def record_import(conn, meta, platform, source="upload", filename="",
          counts.get("imported", 0), counts.get("quarantined", 0),
          imported_by,
          _dt.datetime.now(_dt.timezone.utc).isoformat()))
-    conn.commit()
+    if commit:
+        conn.commit()
     return import_id
 
 
@@ -670,20 +744,25 @@ def import_xlsx_report(conn, blob, platform, source="upload", filename="",
         headers, dicts, platform, source, locale)
     meta["sheet"] = names[index]
     counts = {"imported": 0, "quarantined": len(quarantined)}
-    import_id = record_import(conn, meta, platform, source, filename,
-                              imported_by, counts)
-    for row in rows:
-        row["import_id"] = import_id
-    stored = upsert_rows(conn, rows)
-    counts["imported"] = stored["inserted"] + stored["updated"]
-    conn.execute("UPDATE analyst_imports SET rows_imported=?,"
-                 " rows_quarantined=? WHERE id=?",
-                 (counts["imported"], counts["quarantined"], import_id))
-    conn.commit()
+    try:
+        import_id = record_import(conn, meta, platform, source, filename,
+                                  imported_by, counts, commit=False)
+        for row in rows:
+            row["import_id"] = import_id
+        stored = upsert_rows(conn, rows, commit=False)
+        counts["imported"] = stored["inserted"] + stored["updated"]
+        conn.execute("UPDATE analyst_imports SET rows_imported=?,"
+                     " rows_quarantined=? WHERE id=?",
+                     (counts["imported"], counts["quarantined"], import_id))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     return {"import_id": import_id, "inserted": stored["inserted"],
             "updated": stored["updated"], "quarantined": len(quarantined),
             "quarantine": quarantined, "locale": meta["locale"],
             "mapping": meta["mapping"], "unmapped": meta["unmapped"],
+            "ambiguous": meta.get("ambiguous") or [],
             "sheet": names[index], "sheets": names}
 
 
@@ -706,17 +785,22 @@ def import_report(conn, csv_text, platform, source="upload", filename="",
     rows, quarantined, meta = parse_csv_report_ex(
         csv_text, platform, source)
     counts = {"imported": 0, "quarantined": len(quarantined)}
-    import_id = record_import(conn, meta, platform, source, filename,
-                              imported_by, counts)
-    for row in rows:
-        row["import_id"] = import_id
-    stored = upsert_rows(conn, rows)
-    counts["imported"] = stored["inserted"] + stored["updated"]
-    conn.execute("UPDATE analyst_imports SET rows_imported=?,"
-                 " rows_quarantined=? WHERE id=?",
-                 (counts["imported"], counts["quarantined"], import_id))
-    conn.commit()
+    try:
+        import_id = record_import(conn, meta, platform, source, filename,
+                                  imported_by, counts, commit=False)
+        for row in rows:
+            row["import_id"] = import_id
+        stored = upsert_rows(conn, rows, commit=False)
+        counts["imported"] = stored["inserted"] + stored["updated"]
+        conn.execute("UPDATE analyst_imports SET rows_imported=?,"
+                     " rows_quarantined=? WHERE id=?",
+                     (counts["imported"], counts["quarantined"], import_id))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     return {"import_id": import_id, "inserted": stored["inserted"],
             "updated": stored["updated"], "quarantined": len(quarantined),
             "quarantine": quarantined, "locale": meta["locale"],
-            "mapping": meta["mapping"], "unmapped": meta["unmapped"]}
+            "mapping": meta["mapping"], "unmapped": meta["unmapped"],
+            "ambiguous": meta.get("ambiguous") or []}

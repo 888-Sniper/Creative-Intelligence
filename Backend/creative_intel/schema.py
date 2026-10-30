@@ -647,6 +647,8 @@ def migrate(conn):
     if "source" not in retention_cols:
         conn.execute("ALTER TABLE retention ADD COLUMN"
                      " source TEXT NOT NULL DEFAULT 'manual'")
+    if "coverage" not in retention_cols:
+        conn.execute("ALTER TABLE retention ADD COLUMN coverage REAL")
     conn.execute(
         "CREATE TABLE IF NOT EXISTS employees ("
         "id TEXT PRIMARY KEY, workos_user_id TEXT DEFAULT NULL,"

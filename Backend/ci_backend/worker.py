@@ -123,6 +123,27 @@ def run_once(db_path, settings, media_dir=None):
         conn.close()
 
 
+def recovery_due(deadline, now, interval):
+    """Whether a monotonic clock has reached the next lease scan.
+
+    A fresh deadline is one interval ahead. Calling this does not
+    touch a queue, a worker process, or a lease.
+    """
+    step = max(float(interval or 0.0), 0.0)
+    if deadline is None or now >= deadline:
+        return True, now + step
+    return False, deadline
+
+
+def recover_expired_leases(db_path):
+    """Requeue running jobs whose leases have already expired."""
+    conn = _connect(db_path)
+    try:
+        return jobs.requeue_interrupted(conn)
+    finally:
+        conn.close()
+
+
 def daemon(db_path, settings, poll=5.0, stop=None):
     """Run the claim-and-dispatch loop until stop is set. Lets a host
     process (e.g. the web app on single-service deploys) run the
@@ -140,7 +161,18 @@ def daemon(db_path, settings, poll=5.0, stop=None):
         revived = 0
     if revived:
         print("requeued %d interrupted job(s)" % revived, flush=True)
+    next_recovery = time.monotonic() + max(float(poll or 0.0), 0.0)
     while not halt.is_set():
+        try:
+            due, next_recovery = recovery_due(
+                next_recovery, time.monotonic(), poll)
+            if due:
+                revived_now = recover_expired_leases(db_path)
+                if revived_now:
+                    print("requeued %d interrupted job(s)" % revived_now,
+                          flush=True)
+        except Exception as exc:  # noqa: BLE001 - requeue must not kill the loop
+            print("worker requeue error: %s" % exc, flush=True)
         try:
             did_work = run_once(db_path, settings)
         except Exception as exc:  # noqa: BLE001 - worker must not die
@@ -172,7 +204,18 @@ def main() -> None:
         print("requeued %d interrupted job(s)" % revived, flush=True)
 
     print("worker up on %s (poll %.1fs)" % (db_path, args.poll), flush=True)
+    next_recovery = time.monotonic() + max(float(args.poll or 0.0), 0.0)
     while True:
+        try:
+            due, next_recovery = recovery_due(
+                next_recovery, time.monotonic(), args.poll)
+            if due:
+                revived_now = recover_expired_leases(db_path)
+                if revived_now:
+                    print("requeued %d interrupted job(s)" % revived_now,
+                          flush=True)
+        except Exception as exc:  # noqa: BLE001 - requeue must not kill the loop
+            print("worker requeue error: %s" % exc, flush=True)
         try:
             did_work = run_once(db_path, settings)
         except Exception as exc:  # noqa: BLE001 - worker must not die

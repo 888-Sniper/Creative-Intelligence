@@ -781,7 +781,7 @@ def all_rows(conn):
 
 
 def _row_metric(row, metric):
-    if metric in ("cpm", "vtr", "view_rate", "ctr", "cpa", "roas"):
+    if metric in ("cpm", "vtr", "view_rate", "ctr", "cpc", "cpa", "roas"):
         return kpis_for_rows([row])[metric]
     if metric not in row:
         raise ValueError("unknown metric %r (try %s)" % (metric, sorted(KPI_KEYS)))
@@ -807,6 +807,8 @@ def benchmark_filtered(conn, filters=None, metric="cpa"):
     if metric in ("cpa", "cpm", "cpc", "spend") and mixed:
         # Native amounts in unlike units have no comparable bands.
         stats = describe_bands([], [])
+        stats["n_missing"] = len(rows)
+        stats["reasons"] = ["mixed currencies: native money bands withheld"]
     else:
         # Spend weights in unlike units cannot weight even dimensionless
         # bands; percentiles remain, the weighted mean is unavailable.

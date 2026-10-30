@@ -612,12 +612,19 @@ def answer(conn, question, llm=None, scope=None, owner=None,
 
         ranked = [(k, _group_metric(g)) for k, g in by_key.items()]
         ranked = [(k, v) for k, v in ranked if v is not None]
+        if metric == "cpa" or metric not in ("cpa", "ctr", "roas", "vtr"):
+            from creative_intel import currency_scope as _rank_scope
+            _ranked_rows = [x for k, _v in ranked for x in by_key[k]]
+            if ranked and _rank_scope.money_scope(
+                    _ranked_rows)["mixed_currency"]:
+                ranked = []
         _metric_name = _rate_label if metric == "vtr" else (
             metric.upper() if metric else "")
-        if metric is not None and not ranked:
+        if not ranked:
+            _empty_name = _metric_name or "spend"
             parts.append("No %s has a computable %s, so there is "
-                         "no %s winner to name." % (_lname, _metric_name,
-                                                    _metric_name))
+                         "no %s winner to name." % (_lname, _empty_name,
+                                                    _empty_name))
             cite("Uploaded CSV")
         else:
             reverse = metric not in ("cpa",)

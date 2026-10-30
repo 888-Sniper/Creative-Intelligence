@@ -86,6 +86,30 @@ class BenchmarkFilteredQualityTests(unittest.TestCase):
         finally:
             conn.close()
 
+    def test_mixed_currency_money_bands_name_the_reason(self):
+        conn = _conn([
+            ("k1", 100, 10, 200, 1, "GBP", "2026-08-01"),
+            ("k2", 100, 5, 300, 1, "EUR", "2026-08-01"),
+        ])
+        try:
+            got = benchmarks.benchmark_filtered(conn, metric="cpa")
+            self.assertIn("mixed currencies", " ".join(got["stats"]["reasons"]))
+            self.assertEqual(got["stats"]["n_missing"], 2)
+        finally:
+            conn.close()
+
+    def test_single_currency_cpc_bands_are_canonical(self):
+        conn = _conn([
+            ("k1", 100, 10, 200, 1, "GBP", "2026-08-01"),
+            ("k2", 300, 15, 300, 1, "GBP", "2026-08-01"),
+        ])
+        try:
+            got = benchmarks.benchmark_filtered(conn, metric="cpc")
+            self.assertEqual(got["stats"]["n"], 2)
+            self.assertIsNotNone(got["stats"]["median"])
+        finally:
+            conn.close()
+
     def test_single_currency_money_bands_unchanged(self):
         conn = _conn([
             ("k1", 100, 10, 200, 1, "GBP", "2026-08-01"),

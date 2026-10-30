@@ -284,6 +284,39 @@ class AskAnswerLevelTest(unittest.TestCase):
         finally:
             conn.close()
 
+    def test_all_mixed_spend_ranking_has_no_winner_not_a_crash(self):
+        conn = self._conn_rows([
+            ("meta", "A", "k1", 100, 200, 1, "GBP"),
+            ("meta", "A", "k2", 100, 200, 1, "EUR"),
+            ("tiktok", "B", "k3", 100, 200, 1, "GBP"),
+            ("tiktok", "B", "k4", 100, 200, 1, "EUR")])
+        try:
+            got = qa.answer(conn, "Which platform is best?")
+            self.assertIn("no spend winner", got["answer"])
+        finally:
+            conn.close()
+
+    def test_spend_winner_uses_native_currency_label(self):
+        conn = self._conn_rows([
+            ("meta", "A", "k1", 300, 200, 1, "GBP"),
+            ("tiktok", "B", "k3", 100, 150, 1, "GBP")])
+        try:
+            got = qa.answer(conn, "Which platform is best?")
+            self.assertIn("Top platform by spend is Meta at GBP", got["answer"])
+        finally:
+            conn.close()
+
+    def test_cpa_across_currencies_has_no_winner(self):
+        conn = self._conn_rows([
+            ("meta", "A", "k1", 100, 200, 1, "GBP"),
+            ("tiktok", "B", "k3", 100, 150, 1, "EUR")])
+        try:
+            got = qa.answer(conn, "Which platform has the best CPA?")
+            self.assertIn("no CPA winner", got["answer"])
+            self.assertNotIn("Top platform by CPA is", got["answer"])
+        finally:
+            conn.close()
+
     def test_roas_reported_zero_stays_measurable(self):
         conn = self._conn_rows([
             ("meta", "A", "k1", 100, 0, 1),

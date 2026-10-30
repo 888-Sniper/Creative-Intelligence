@@ -104,6 +104,24 @@ describe("CreativesPage", () => {
     expect(screen.getByText("Next Tests")).toBeDefined();
   });
 
+  it("settles the creatives panels when the library fails and compare succeeds", async () => {
+    window.fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.startsWith("/api/kpis/compare")) return Response.json(comparePayload);
+      if (url.startsWith("/api/creatives")) return Response.json({ error: "creatives down" }, { status: 503 });
+      if (url.startsWith("/api/retention/curve")) return Response.json({ points: [] });
+      return Response.json({});
+    }) as unknown as typeof fetch;
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getAllByText("creatives down").length).toBeGreaterThan(0);
+    });
+    expect(screen.queryByText("No creatives yet")).toBeNull();
+    expect(screen.queryByText("No learnings yet")).toBeNull();
+    expect(screen.queryByText("No Recommendations Yet")).toBeNull();
+    expect(screen.getAllByRole("button", { name: "Retry" }).length).toBeGreaterThan(0);
+  });
+
   it("shows skeletons while loading", () => {
     window.fetch = vi.fn(
       () => new Promise<Response>(() => {}),
@@ -118,10 +136,9 @@ describe("CreativesPage", () => {
     ) as unknown as typeof fetch;
     renderPage();
     await waitFor(() => {
-      /* Both scoped sections report their own failure (KPI strip reads
-       * compare state, the table reads creatives) instead of hanging on
-       * skeletons when the backend is down. */
-      expect(screen.getAllByText("boom")).toHaveLength(2);
+      /* KPI strip, top cards, the table, learnings and next tests each
+       * report the failure instead of hanging on a skeleton. */
+      expect(screen.getAllByText("boom")).toHaveLength(5);
     });
   });
 

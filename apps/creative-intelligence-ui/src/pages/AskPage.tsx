@@ -15,6 +15,7 @@ import {
   KpiKind,
   kpiDisplay,
   kpiPlaceholderNote,
+  LoadError,
   scopeBody,
   useCampaignMeta,
   useCompareState,
@@ -117,8 +118,11 @@ export function AskPage() {
   const autoRan = useRef(false);
 
   const { data: compare, error: compareError } = useCompareState();
-  const daily = useDaily(90);
-  const platforms = useScopedApi<Record<string, BenchGroup>>("/api/benchmarks?group_by=platform");
+  const [dailyTry, setDailyTry] = useState(0);
+  const [platformTry, setPlatformTry] = useState(0);
+  const dailyState = useDaily(90, dailyTry);
+  const daily = dailyState.data;
+  const platforms = useScopedApi<Record<string, BenchGroup>>("/api/benchmarks?group_by=platform", platformTry);
   const hooks = useScopedApi<Record<string, BenchGroup>>("/api/benchmarks?group_by=hook_type");
   /* The opening sample auto-runs in DEMO workspaces only: a normal
    * production visit must never POST /api/ask on its own. */
@@ -283,7 +287,9 @@ export function AskPage() {
                     <EmptyState text={compareError} />
                   ) : <Skeleton height={118} />}
                   <Panel title={t("ask.trendTitle")}>
-                    {daily ? (
+                    {dailyState.error ? (
+                      <LoadError message={dailyState.error} retryLabel={t("common.retry")} onRetry={() => setDailyTry((n) => n + 1)} />
+                    ) : daily ? (
                       <TrendChart
                         series={[{ label: t("filters.kpis.revenue"), color: "var(--glyph-teal)", soft: "#E5F5F2", points: roi.values }]}
                         labels={roi.labels}
@@ -297,7 +303,9 @@ export function AskPage() {
                       {answer.review_id ? <p className="panel-sub">{t("ask.reviewSaved", { id: answer.review_id })}</p> : null}
                     </Panel>
                     <Panel title={t("ask.extraContextTitle")}>
-                      {platforms.data ? (
+                      {platforms.error ? (
+                        <LoadError message={platforms.error} retryLabel={t("common.retry")} onRetry={() => setPlatformTry((n) => n + 1)} />
+                      ) : platforms.data ? (
                         <p className="panel-sub">
                           {Object.entries(platforms.data).map(([k, g]) =>
                             g.roas == null ? "—" : t("ask.platformRoas", {

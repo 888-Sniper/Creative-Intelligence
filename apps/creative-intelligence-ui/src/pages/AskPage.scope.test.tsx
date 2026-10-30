@@ -69,6 +69,30 @@ function renderAsk() {
 }
 
 describe("AskPage answer scope", () => {
+  it("shows a retryable platform failure in the context panel after an answer", async () => {
+    window.fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.startsWith("/api/ask")) return Response.json({ answer: "ANSWER-A", sources: [], scope: "all" });
+      if (url.startsWith("/api/kpis/compare")) return Response.json(compareBody(url));
+      if (url.startsWith("/api/kpis/daily")) return Response.json({ error: "daily down" }, { status: 503 });
+      if (url.startsWith("/api/benchmarks") && url.includes("group_by=platform")) {
+        return Response.json({ error: "platforms down" }, { status: 503 });
+      }
+      if (url.startsWith("/api/benchmarks")) return Response.json({});
+      if (url.startsWith("/api/analyst/conversations")) return Response.json({ conversations: [] });
+      if (url.startsWith("/api/campaigns/meta")) return Response.json({ demo: false });
+      return Response.json({});
+    }) as unknown as typeof fetch;
+    renderAsk();
+    fireEvent.click(screen.getByRole("button", { name: "Ask" }));
+    await waitFor(() => {
+      expect(screen.getByText("ANSWER-A")).toBeDefined();
+    });
+    expect(screen.getByText("daily down")).toBeDefined();
+    expect(screen.getByText("platforms down")).toBeDefined();
+    expect(screen.getAllByRole("button", { name: "Retry" }).length).toBeGreaterThan(0);
+  });
+
   it("shows a same-scope answer and clears the busy state", async () => {
     installFetch(async () => Response.json({ answer: "ANSWER-A", sources: ["ads"], scope: "All data" }));
     renderAsk();

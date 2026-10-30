@@ -463,6 +463,13 @@ export function WorkbookPage() {
             {compare && creatives.data ? (
               <PreviewDoc name={name} today={today} modules={modules}
                 previewKpis={previewKpis} top={top} />
+            ) : (compareError || creatives.error) ? (
+              <EmptyState title={t("workbook.previewFailedTitle")} text={compareError || creatives.error}
+                action={(
+                  <button type="button" className="btn-outline" onClick={() => setPreviewTick((n) => n + 1)}>
+                    {t("workbook.retry")}
+                  </button>
+                )} />
             ) : <Skeleton height={280} />}
           </div>
         </div>

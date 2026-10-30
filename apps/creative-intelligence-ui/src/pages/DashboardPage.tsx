@@ -22,6 +22,7 @@ import {
   PageHeader,
   Panel,
   InsightList,
+  LoadError,
   Skeleton,
   compareDisplayed,
   fmtCompact,
@@ -181,7 +182,9 @@ export function DashboardPage() {
   const { data: compare, error: compareError } = useCompareState(applied);
   // 90 points so a saved "Last 90 Days" default covers 90 real
   // populated dates, not the 30 this page used to fetch.
-  const daily = useDaily(90, applied);
+  const dailyState = useDaily(90, applied);
+  const daily = dailyState.data;
+  const retryLoads = () => setApplied((n) => n + 1);
   const [rangeBooted, setRangeBooted] = useState(false);
   const campaigns = useScopedApi<Record<string, CampaignTotals>>("/api/campaigns", applied);
   const creatives = useScopedApi<CreativeRow[]>("/api/creatives", applied);
@@ -693,7 +696,9 @@ export function DashboardPage() {
             </div>
           )}
         >
-          {daily ? (
+          {dailyState.error ? (
+            <LoadError message={dailyState.error} retryLabel={t("common.retry")} onRetry={retryLoads} />
+          ) : daily ? (
             trend.length ? (
               <>
                 <TrendChart series={trendSeries} labels={trend.map((p) => shortDay(p.date, locale))} height={205} />
@@ -721,7 +726,9 @@ export function DashboardPage() {
             </div>
           )}
         >
-          {platforms.data ? (
+          {platforms.error ? (
+            <LoadError message={platforms.error} retryLabel={t("common.retry")} onRetry={retryLoads} />
+          ) : platforms.data ? (
             platformGroups.length > 0 && (benchMetric === "cpa" || benchMetric === "cpc") && !platformCurrency ? (
               <p role="status">{t("sourceCurrency.benchmark")}</p>
             ) : platformGroups.length ? (
@@ -758,7 +765,9 @@ export function DashboardPage() {
             title={t("dashboard.topCreatives.title")}
             action={<Link className="link-teal" to="/creatives">{t("dashboard.topCreatives.seeAll")}</Link>}
           >
-            {creatives.data ? (
+            {creatives.error ? (
+              <LoadError message={creatives.error} retryLabel={t("common.retry")} onRetry={retryLoads} />
+            ) : creatives.data ? (
               topCreatives.length ? (
                 <div className="tbl-wrap">
                   <table className="tbl dash-table">
@@ -869,21 +878,27 @@ export function DashboardPage() {
               </div>
             ) : null}
             {tab === "hooks" ? (
-              hooks.loading ? (
+              hooks.error ? (
+                <LoadError message={hooks.error} retryLabel={t("common.retry")} onRetry={retryLoads} />
+              ) : hooks.loading ? (
                 <Skeleton height={190} />
               ) : hookCompare.length ? (
                 <GroupBars height={190} groups={hookCompare} format={(v) => fmtPct(v, 1, locale)} />
               ) : <EmptyState compact verbatim icon="spark" title={t("dashboard.retention.hookEmptyTitle")} text={t("dashboard.retention.hookEmptyBody")} />
             ) : null}
             {tab === "length" ? (
-              creatives.loading ? (
+              creatives.error ? (
+                <LoadError message={creatives.error} retryLabel={t("common.retry")} onRetry={retryLoads} />
+              ) : creatives.loading ? (
                 <Skeleton height={190} />
               ) : lengthCompare.length ? (
                 <GroupBars height={190} groups={lengthCompare} format={(v) => fmtPct(v, 1, locale)} />
               ) : <EmptyState compact verbatim icon="play" title={t("dashboard.retention.durationEmptyTitle")} text={t("dashboard.retention.durationEmptyBody")} />
             ) : null}
             {tab === "format" ? (
-              creatives.loading ? (
+              creatives.error ? (
+                <LoadError message={creatives.error} retryLabel={t("common.retry")} onRetry={retryLoads} />
+              ) : creatives.loading ? (
                 <Skeleton height={190} />
               ) : formatCompare.length ? (
                 <GroupBars height={190} groups={formatCompare} format={(v) => fmtPct(v, 1, locale)} />
@@ -896,7 +911,13 @@ export function DashboardPage() {
           title={t("dashboard.recommendations.title")}
           action={<Link className="link-teal" to="/insights">{t("dashboard.recommendations.seeAll")}</Link>}
         >
-          {campaigns.data && creatives.data && platforms.data ? (
+          {(campaigns.error || creatives.error || platforms.error) ? (
+            <LoadError
+              message={campaigns.error || creatives.error || platforms.error}
+              retryLabel={t("common.retry")}
+              onRetry={retryLoads}
+            />
+          ) : campaigns.data && creatives.data && platforms.data ? (
             rail.length ? (
               <InsightList items={rail.map((r) => ({ icon: r.icon, tint: r.tint, title: r.title, body: r.body, action: r.action, href: r.href }))} />
             ) : <EmptyState verbatim text={t("dashboard.recommendations.emptyBody")} />

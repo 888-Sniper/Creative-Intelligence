@@ -72,6 +72,28 @@ describe("CampaignsPage", () => {
     expect(screen.getByText("Total Campaigns")).toBeDefined();
   });
 
+  it("shows a platform failure without hiding a successful campaign list", async () => {
+    window.fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/api/benchmarks") && url.includes("group_by=platform")) {
+        return Response.json({ error: "platforms down" }, { status: 503 });
+      }
+      if (url.startsWith("/api/campaigns/meta")) return Response.json({ campaigns: [] });
+      if (url.startsWith("/api/kpis/compare")) return Response.json(comparePayload);
+      if (url.startsWith("/api/kpis/daily")) return Response.json({ days: [] });
+      if (url.startsWith("/api/benchmarks")) return Response.json({});
+      if (url.startsWith("/api/campaigns")) return Response.json(campaigns);
+      return Response.json({});
+    }) as unknown as typeof fetch;
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getAllByText("platforms down").length).toBeGreaterThan(0);
+    });
+    expect(screen.getByText("All Campaigns (2)")).toBeDefined();
+    expect(screen.queryByText("No Platform Data")).toBeNull();
+    expect(screen.getAllByRole("button", { name: "Retry" }).length).toBeGreaterThan(0);
+  });
+
   it("shows skeletons while loading", () => {
     window.fetch = vi.fn(
       () => new Promise<Response>(() => {}),

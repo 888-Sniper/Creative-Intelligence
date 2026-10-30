@@ -175,17 +175,14 @@ export interface DayPoint {
 }
 export function useDaily(days = 30, refreshKey = 0) {
   const { filters } = useFilters();
-  const [points, setPoints] = useState<DayPoint[] | null>(null);
-  useEffect(() => {
-    let live = true;
-    const scope = scopeParams(filters);
+  const scopeKey = scopeParams(filters).toString();
+  const load = useCallback(() => {
+    const scope = new URLSearchParams(scopeKey);
     scope.set("days", String(days));
-    api<{ days: DayPoint[] }>("GET", scopedPath("/api/kpis/daily", scope))
-      .then((r) => live && setPoints(r.days))
-      .catch(() => live && setPoints([]));
-    return () => { live = false; };
-  }, [filters, days, refreshKey]);
-  return points;
+    return api<{ days: DayPoint[] }>("GET", scopedPath("/api/kpis/daily", scope))
+      .then((r) => (Array.isArray(r.days) ? r.days : []));
+  }, [scopeKey, days]);
+  return useScopedLoad(load, refreshKey);
 }
 
 export function scopeBody(scope: URLSearchParams): Record<string, string[]> {
@@ -1084,6 +1081,23 @@ export function EmployeeAvatar({ url, name, email, size }: {
     >
       {avatarInitials(name, email)}
     </span>
+  );
+}
+
+/** A settled fetch failure, with a retry that does not remount the page. */
+export function LoadError({ message, retryLabel, onRetry }: {
+  message: string; retryLabel: string; onRetry: () => void;
+}) {
+  return (
+    <EmptyState
+      verbatim
+      text={message}
+      action={(
+        <button type="button" className="btn-outline" onClick={onRetry}>
+          {retryLabel}
+        </button>
+      )}
+    />
   );
 }
 

@@ -134,4 +134,50 @@ describe("DashboardPage precision pass", () => {
     expect(screen.queryByText("Key Takeaways")).toBeNull();
     expect(screen.queryByText("No takeaways in the current scope yet.")).toBeNull();
   });
+
+  it("shows a retryable daily failure instead of the empty trend", async () => {
+    const fetchMock = mockFetch();
+    fetchMock.mockImplementation(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.startsWith("/api/kpis/daily") && url.includes("days=90")) {
+        return Response.json({ error: "daily down" }, { status: 503 });
+      }
+      if (url.startsWith("/api/kpis/compare")) return Response.json(comparePayload);
+      if (url.startsWith("/api/kpis/daily")) return Response.json({ days: dayPoints() });
+      if (url.startsWith("/api/campaigns")) return Response.json({});
+      if (url.startsWith("/api/creatives")) return Response.json([]);
+      if (url.startsWith("/api/benchmarks")) return Response.json({});
+      if (url.startsWith("/api/retention/curve")) return Response.json({ points: [] });
+      return Response.json({});
+    });
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("daily down")).toBeDefined();
+      expect(screen.getByRole("button", { name: "Retry" })).toBeDefined();
+    });
+    expect(screen.queryByText("No Trend Data")).toBeNull();
+  });
+
+  it("shows a retryable platform failure instead of an endless benchmark shimmer", async () => {
+    const fetchMock = mockFetch();
+    fetchMock.mockImplementation(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/api/benchmarks") && url.includes("group_by=platform")) {
+        return Response.json({ error: "platforms down" }, { status: 503 });
+      }
+      if (url.startsWith("/api/kpis/compare")) return Response.json(comparePayload);
+      if (url.startsWith("/api/kpis/daily")) return Response.json({ days: dayPoints() });
+      if (url.startsWith("/api/campaigns")) return Response.json({});
+      if (url.startsWith("/api/creatives")) return Response.json([]);
+      if (url.startsWith("/api/benchmarks")) return Response.json({});
+      if (url.startsWith("/api/retention/curve")) return Response.json({ points: [] });
+      return Response.json({});
+    });
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getAllByText("platforms down").length).toBeGreaterThan(0);
+      expect(screen.getAllByRole("button", { name: "Retry" }).length).toBeGreaterThan(0);
+    });
+    expect(screen.queryByText("No Benchmarks In Scope")).toBeNull();
+  });
 });

@@ -17,6 +17,7 @@ import {
   InsightList,
   KpiCard,
   PageHeader,
+  LoadError,
   Panel,
   Skeleton,
   fmtCell,
@@ -150,7 +151,9 @@ export function CampaignsPage() {
 
   const { data: compare, error: compareError } = useCompareState(applied);
   const [, setFocus] = useState<CompareLike | null>(null);
-  const daily = useDaily(90, applied);
+  const dailyState = useDaily(90, applied);
+  const daily = dailyState.data;
+  const retryLoads = () => setApplied((n) => n + 1);
   const campaigns = useScopedApi<Record<string, CampaignRow>>("/api/campaigns", applied);
   const benchPlatform = useScopedApi<Record<string, BenchSummary>>("/api/benchmarks?group_by=platform", applied);
   const benchHook = useScopedApi<Record<string, BenchSummary>>("/api/benchmarks?group_by=hook_type", applied);
@@ -627,7 +630,9 @@ export function CampaignsPage() {
           )}
           <div className="cols-2">
             <Panel title={t("campaigns.trendsTitle")}>
-              {daily ? (
+              {dailyState.error ? (
+                <LoadError message={dailyState.error} retryLabel={t("common.retry")} onRetry={retryLoads} />
+              ) : daily ? (
                 <TrendChart
                   height={200}
                   series={[
@@ -647,7 +652,9 @@ export function CampaignsPage() {
                 </select>
               )}
             >
-              {benchPlatform.data ? (
+              {benchPlatform.error ? (
+                <LoadError message={benchPlatform.error} retryLabel={t("common.retry")} onRetry={retryLoads} />
+              ) : benchPlatform.data ? (
                 platGroups.length ? (
                   <GroupBars
                     height={200}
@@ -800,7 +807,13 @@ export function CampaignsPage() {
           title={t("campaigns.recommendations")}
           action={<Link className="link-teal" to="/insights">{t("campaigns.seeAll")}</Link>}
         >
-          {campaigns.data && benchPlatform.data ? (
+          {(campaigns.error || benchPlatform.error) ? (
+            <LoadError
+              message={campaigns.error || benchPlatform.error}
+              retryLabel={t("common.retry")}
+              onRetry={retryLoads}
+            />
+          ) : campaigns.data && benchPlatform.data ? (
             rail.length ? (
               <InsightList items={rail.map((r) => ({ icon: r.icon, tint: r.tint, title: r.title, body: r.body, action: r.action, href: r.href }))} />
             ) : <EmptyState compact verbatim icon="spark" title={t("campaigns.noRecsTitle")} text={t("campaigns.noRecsBody")} />

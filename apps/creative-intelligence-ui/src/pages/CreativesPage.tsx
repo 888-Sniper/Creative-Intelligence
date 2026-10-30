@@ -11,6 +11,7 @@ import {
   EmptyState,
   FilterPanel,
   KpiCard,
+  LoadError,
   PageHeader,
   Panel,
   Skeleton,
@@ -474,7 +475,11 @@ export function CreativesPage() {
       {banner ? <p className="panel-sub" role="status" style={{ margin: "12px 0 0" }}>{banner}</p> : null}
       <div className="main-rail" style={{ marginTop: 12 }}>
         <div className="rail-stack">
-          {creatives.data && (length === "all" ? compare : true) ? (
+          {(creatives.error || (length === "all" && compareError)) ? (
+            <div className="panel">
+              <LoadError message={creatives.error || compareError} retryLabel={t("common.retry")} onRetry={() => setApplied((n) => n + 1)} />
+            </div>
+          ) : creatives.data && (length === "all" ? compare : true) ? (
             <>
               {length !== "all" ? (
                 <p className="panel-sub" style={{ margin: "0 0 8px" }}>
@@ -514,8 +519,6 @@ export function CreativesPage() {
                 )}
               </div>
             </>
-          ) : compareError ? (
-            <div className="panel"><EmptyState text={compareError} /></div>
           ) : (
             <div className="kpi-grid">
               {[0, 1, 2, 3].map((i) => <Skeleton key={i} height={118} />)}
@@ -552,6 +555,8 @@ export function CreativesPage() {
                   })}
                 </div>
               ) : <EmptyState icon="creatives" title={t("creatives.noTopTitle")} text={t("creatives.noTopBody")} />
+            ) : creatives.error ? (
+              <LoadError message={creatives.error} retryLabel={t("common.retry")} onRetry={() => setApplied((n) => n + 1)} />
             ) : <Skeleton height={190} />}
           </Panel>
           <Panel
@@ -681,7 +686,7 @@ export function CreativesPage() {
                 )
               ) : <EmptyState compact icon="creatives" title={t("creatives.noMatchTitle")} text={t("creatives.noMatchBody")} />
             ) : creatives.error ? (
-              <EmptyState text={creatives.error} />
+              <LoadError message={creatives.error} retryLabel={t("common.retry")} onRetry={() => setApplied((n) => n + 1)} />
             ) : <Skeleton height={220} />}
           </Panel>
           {expandedKey && rows.find((r) => r.creative_key === expandedKey) ? (
@@ -710,6 +715,8 @@ export function CreativesPage() {
                   ))}
                 </div>
               ) : <EmptyState compact icon="spark" title={t("creatives.noLearningsTitle")} text={t("creatives.noLearningsBody")} />
+            ) : creatives.error ? (
+              <LoadError message={creatives.error} retryLabel={t("common.retry")} onRetry={() => setApplied((n) => n + 1)} />
             ) : <Skeleton height={220} />}
           </Panel>
           {/* With zero creatives in the scoped group there is no
@@ -731,6 +738,8 @@ export function CreativesPage() {
                   ))}
                 </div>
               ) : <EmptyState compact icon="target" title={t("creatives.noTestsTitle")} text={t("creatives.noTestsBody")} />
+            ) : creatives.error ? (
+              <LoadError message={creatives.error} retryLabel={t("common.retry")} onRetry={() => setApplied((n) => n + 1)} />
             ) : <Skeleton height={220} />}
           </Panel>
         </div>

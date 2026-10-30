@@ -1,4 +1,4 @@
-# Creative Intelligence — audit of the checkpoint-033 incremental push
+# Creative Intelligence — audit of the checkpoint-034 incremental push
 
 You are the second, independent reviewer. Find what is still missing, wrong,
 or unsafe below. Assume every claim is unproven until you have opened the
@@ -10,7 +10,7 @@ not complete the audit or the remediation: most groups remain open below.
 
 - Repository: https://github.com/888-Sniper/Creative-Intelligence
 - Original audited pin / parent: `1342bb48ef59c45981c716c77d12898ae029daba`
-- Code under review: `ccfe325587607b7a18ca1a8e81123471f153565a`.
+- Code under review: `e9d4f0a952996397946958893b82aaf53aea2f47`.
   Commits after that code head on this push touch only this `Audit.md`.
   Review the code regardless of branch head. After `git fetch`, confirm
   with `git rev-parse origin/main`.
@@ -23,7 +23,7 @@ not complete the audit or the remediation: most groups remain open below.
   `7bce053a8c4ec85befe80644764d114c31afe15b` (QI176 slice),
   `06d163daaab3ce15c8ef7cc78e8f9839d3348b2e` (QI124/QI126),
   `8305af3fa1ab2561da9bff20c9f95b9c34eaa8f1` (Mac re-audit fixes),
-  `c0eaf8afb41894658b4e22413bc77bf6eff1dff0` (verifier nits), then checkpoint-032 commits `432ab38` (daily/filtered/QA), `0772b15` (Compare/Campaigns), `2f3e98b` (QI270 tests), `e3af84b` (032 re-audit crash/cross-currency fixes), `c020e60` (Audit.md only). This push's code commit is `ccfe325` (QI-004 comma campaign names and QI-195 Ask scope). Previous main was `c020e60`.
+  `c0eaf8afb41894658b4e22413bc77bf6eff1dff0` (verifier nits), then checkpoint-032 commits `432ab38` (daily/filtered/QA), `0772b15` (Compare/Campaigns), `2f3e98b` (QI270 tests), `e3af84b` (032 re-audit crash/cross-currency fixes), `c020e60` (Audit.md only), `ccfe325` (QI-004 comma campaign names and QI-195 Ask scope), `99ddf02` (Audit.md only). This push's code commit is `e9d4f0a` (QI-006 daily-series failures and QI-009 panel failures). Previous main was `99ddf02`.
 - Render auto-deploys from `main`. Deployment of this push was not
   verified when this file was written. Do not treat live-site state as
   a source defect.
@@ -32,19 +32,19 @@ Confirm with both ends named (never a one-revision diff):
 
 ```
 git fetch origin
-git diff --stat c020e60e3ba4e6ea37e9ee98517048b535c405a5 origin/main
-git diff c020e60e3ba4e6ea37e9ee98517048b535c405a5 origin/main
-git diff --stat c020e60e3ba4e6ea37e9ee98517048b535c405a5 ccfe325587607b7a18ca1a8e81123471f153565a
-git diff --stat ccfe325587607b7a18ca1a8e81123471f153565a origin/main
+git diff --stat 99ddf022f63c28f320d1027b50c3c102904958ae origin/main
+git diff 99ddf022f63c28f320d1027b50c3c102904958ae origin/main
+git diff --stat 99ddf022f63c28f320d1027b50c3c102904958ae e9d4f0a952996397946958893b82aaf53aea2f47
+git diff --stat e9d4f0a952996397946958893b82aaf53aea2f47 origin/main
 git rev-parse origin/main
 git status  # stop only if dirty, or origin/main differs from GitHub main
 ```
 
 The commit under review is `origin/main` after fetch. Previous main is
-`c020e60e3ba4e6ea37e9ee98517048b535c405a5`. The first diff is the whole
+`99ddf022f63c28f320d1027b50c3c102904958ae`. The first diff is the whole
 push: the code below plus this file. The code slice
-`c020e60`..`ccfe325` is 12 files, 428 insertions, 18 deletions.
-`ccfe325`..`origin/main` is this file only. If yours disagrees, stop
+`99ddf02`..`e9d4f0a` is 12 files, 329 insertions, 34 deletions.
+`e9d4f0a`..`origin/main` is this file only. If yours disagrees, stop
 and say so. A behind checkout or
 no local `main` branch is not a reason to stop. Read files at the reviewed
 commit; if a line moved, follow the symbol. Original audit scope was
@@ -81,48 +81,51 @@ consolidations: QI303→QI-011, QI259→QI173, QI270→QI269, QI280→QI189,
 QI308→QI307, QI095→QI016, QI101→QI060, QI228→QI251, QI302→QI312).
 Groups are not unique runtime-reproduced bugs. Kinds: 193 defects,
 36 conditional risks, 45 test gaps, 52 improvements. Severity: 0 critical,
-37 high, 193 medium, 96 low. Status at this push: 34 implemented pending
-your verification, 6 partial, 286 untouched. Nothing below erases an
+37 high, 193 medium, 96 low. Status at this push: 36 implemented pending
+your verification, 6 partial, 284 untouched. Nothing below erases an
 unresolved finding, and implemented does not mean verified by you.
 
 ## This push
 
-Parent `c020e60e3ba4e6ea37e9ee98517048b535c405a5`. Code
-`ccfe325587607b7a18ca1a8e81123471f153565a`. These two groups are
+Parent `99ddf022f63c28f320d1027b50c3c102904958ae`. Code
+`e9d4f0a952996397946958893b82aaf53aea2f47`. These two groups are
 implemented pending your verification. They are not verified.
+QI-004 and QI195 stay pending from `ccfe325` and were not edited here.
 
-QI-004, high, defect. A campaign name that contains a comma stays one
-selection on a saved link, a compare request, and a JSON body.
-`compareSelectionQuery` writes one query key per name.
-`compareSelectionNames` reads repeated keys as exact names, and splits
-a single legacy value on the raw unencoded comma before decoding, so
-`campaigns=US%2C%20CA,Other` is `US, CA` and `Other`. `ComparePage`
-appends each name. `POST /api/compare/campaigns` passes
-`body.campaigns` into `expert2_compare_route` as `campaigns=` and does
-not join on commas (`product.py` around the compare post).
-`_selection_names` treats a list of more than one value as exact names.
-A single already-decoded value still uses the legacy comma split, so
-`Alpha,Beta` stays two names. A single decoded value `US, CA,Other`
-still cannot recover an encoded comma: the raw query is owned by the
-deferred GET handler (`product.py` `compare_campaigns`, original
-deferred range 775–1005), which this push does not edit. The page
-repairs that legacy link before it calls the API. Confirm with
-`tests/test_compare_campaign_names.py`, `compareSelection.test.ts`,
-the comma case in `savedViews.test.ts`, and the ComparePage test
-"requests a legacy comma link".
+QI-006, medium, defect. `useDaily` (`product.tsx` around line 176)
+returns the `useScopedLoad` result `{data, error, loading}`. A rejected
+`/api/kpis/daily` is `error`, and a successful `days: []` stays an
+empty array on `data`. A new filter scope clears the previous series
+before the next response. Dashboard (state around line 185, trend
+around line 699), Campaigns (around lines 154 and 633), and Ask
+(around lines 121–125 and 290) render `LoadError` before the chart or
+the empty copy. Ask retries through `dailyTry`, so the answer stays.
+The Dashboard basis fetch `GET /api/kpis/daily?days=180` (around lines
+215–222) still stores `[]` on failure. That fetch is outside this
+claim. Confirm with `useDaily.test.tsx` and the Dashboard test
+"shows a retryable daily failure instead of the empty trend".
 
-QI-195, high, defect. An Ask answer is not shown with KPI, trend, or
-benchmark context from a later filter. `AskPage` stores the request's
-`scope.toString()`. A different scope clears the answer in that render
-and increments `askGen`. A late response from an older generation does
-not call `setAnswer` and does not clear a newer request's busy flag.
-The answer panel renders only when `answerScopeKey === liveScope`.
-Confirm with `AskPage.scope.test.tsx`: same-scope success and failure
-settle; a finished answer disappears on a campaign change and is not
-shown with the new spend; a late first response is ignored and the
-second request can finish.
+QI-009, medium, defect. Named panels that branched on data alone now
+render a settled error, then loading, then a loaded empty or populated
+state. `LoadError` (`product.tsx` around line 1088) is `EmptyState`
+with `verbatim` and a `btn-outline` button. Callers pass the existing
+`common.retry` string. Dashboard covers the platform panel, top
+creatives, the hook, length, and format tabs, and the recommendation
+rail (`campaigns.error`, `creatives.error`, or `platforms.error`).
+Campaigns covers the platform panel and the recommendation rail
+(`campaigns.error` or `benchPlatform.error`). The Campaigns list error
+branch (around line 750) stays the existing `EmptyState` plus
+`common.retry`. Creatives covers the KPI strip, top cards, table,
+learnings, and next tests. The KPI strip also shows `compareError`
+when the length filter is `all`. Workbook fullscreen (around line 466)
+matches the inline preview: `workbook.previewFailedTitle` and
+`workbook.retry` via `setPreviewTick`. Ask shows `platforms.error` in
+the context panel and retries through `platformTry`. `en.ts` was not
+edited. The Ask review-saved line (`answer.review_id`, around line
+303) was not edited. USD formatters were not edited. Confirm with the
+new Dashboard, Campaigns, Creatives, Ask, and Workbook fetch tests.
 
-The other 32 implemented groups were not edited here. The six partials
+The other 34 implemented groups were not edited here. The six partials
 are unchanged: QI016 Analyst length-band wiring and the OverviewPage
 retain/retire decision, QI017 USD formatters and locale spend-band
 copy, QI028 mixed null-mean propagation, QI057 raw-total nullable API
@@ -130,11 +133,29 @@ migration, QI150 mixed report extras and peer pools, QI176 tied-winner
 labels and `_fact_pack`. QI035 and QI036 stay deferred on
 `ingest.py` 365–368.
 
-## Claims to falsify — implemented pending verification (34; QI-004 and QI195 are this push, prior 32 already on main)
+## Claims to falsify — implemented pending verification (36; QI-006 and QI-009 are this push, prior 34 already on main)
 
 For checkpoint-030 groups, the Mac tree commit is the import commit
 `1ba11ab…` (historical batch commit in parentheses). Benefit is the
 finding's intended benefit; verify the code actually delivers it.
+
+### QI-006 — Daily-series request failures are presented as an empty dataset
+
+- Findings: QI-006; severity medium; kind defect; workstream B2.
+- Original locations (pin `1342bb4`): `apps/creative-intelligence-ui/src/components/product.tsx` `useDaily` catch stored `[]`.
+- Files now: `apps/creative-intelligence-ui/src/components/product.tsx` (`useDaily`); `pages/DashboardPage.tsx`; `pages/CampaignsPage.tsx`; `pages/AskPage.tsx`.
+- Change (`e9d4f0a`): `useDaily` returns `{data, error, loading}`. Callers show the error before an empty series. A scope change hides the previous points. A successful empty array stays data.
+- Benefit to verify: A failed daily request is distinct from no rows, and a retry does not require reloading the page.
+- Status: implemented pending verification (not verified).
+
+### QI-009 — Several analytics and preview panels retain loading visuals after failed requests
+
+- Findings: QI-009; severity medium; kind defect; workstream B2.
+- Original locations (pin `1342bb4`): Dashboard, Campaigns, Creatives, Workbook fullscreen, and Ask platform context branched on data and otherwise kept a skeleton.
+- Files now: `product.tsx` (`LoadError`); `DashboardPage.tsx`; `CampaignsPage.tsx`; `CreativesPage.tsx`; `WorkbookPage.tsx`; `AskPage.tsx`.
+- Change (`e9d4f0a`): each named panel renders error, then loading, then loaded empty or populated. Retry bumps the existing refresh key, or Ask's own tick, or the workbook preview tick.
+- Benefit to verify: A failed prerequisite shows the API error and a Retry control. A successful empty response still uses the existing empty copy.
+- Status: implemented pending verification (not verified).
 
 ### QI-004 — Comma-delimited comparison selections cannot preserve campaign names containing commas
 
@@ -426,6 +447,9 @@ finding's intended benefit; verify the code actually delivers it.
 
 ## Newly completed in this increment (verify these first)
 
+Checkpoint 032 completions below were already on main. This push does
+not edit them. Verify QI-006 and QI-009 above first.
+
 - QI060 (0772b15): Campaigns spend bench gated on comparable currency;
   rail ROAS pooled from reporting components. Prior Dashboard/Analyst
   baselines already on main. Tests: CampaignsPage suite + full UI.
@@ -532,7 +556,7 @@ still true, do not re-report them as undisclosed:
   (15 checkpoint-030 quality files), UI 316 passed, TypeScript 45 entries pass.
   Historical cloud checkpoint-030 counts were Python 332, UI 316, TS 45.
 - Full Python baseline (pristine): 913 passed, 5 failed, 1 skipped (919).
-  Full Python at code head `ccfe325`: 1,289 passed, 4 failed, 1 skipped (1,294).
+  Full Python at code head `e9d4f0a`: 1,289 passed, 4 failed, 1 skipped (1,294), 413.11s. No Python file changed in this push.
   The 338-test scoped subset above also passes inside this full suite;
   newer QI323/QI176/XLSX quality tests are full-suite only and included.
   Failures are only pre-existing `0012` vs `0013`: three
@@ -545,23 +569,24 @@ still true, do not re-report them as undisclosed:
   (`tests/test_ci_migrations.py` three tests and `tests/test_deploy.py`).
   The skip is `tests/test_acceptance_10.py` (needs a no-ffmpeg host).
   193 subtests passed.
-- Full UI at code head: `tsc --noEmit` clean, then `vitest run` 677 passed
-  (61 files). `vite build` passed. Local asset `index-CSQ3HkiB.js`.
+- Full UI at code head: `tsc --noEmit` clean, then `vitest run` 686 passed
+  (63 files). `vite build` passed. Local assets `index-CSONA1JK.js`
+  (968,638 bytes) and `index-C5G5cbmt.css` (72,151 bytes).
   Package scripts are `typecheck`, `test`, and `build` in
   `apps/creative-intelligence-ui/package.json`.
-- `Source/self_check.py`: 97/97. Ruff `ruff check Backend tests Source`:
-  55 findings, none in `actions.py` or `tests/test_compare_campaign_names.py`.
-  `product.py` findings are pre-existing import order on lines this edit
-  did not change. No tracked CI config exists; exact-commit CI is
+- This push changes no Python file. `Source/self_check.py` and
+  `ruff check Backend tests Source` were not re-run. The last run, at
+  `ccfe325`, was 97/97 and 55 ruff findings, none in the files that
+  push edited. No tracked CI config exists; exact-commit CI is
   unavailable, not passed. No live browser, live provider, or native
   Excel check was run. Deployment of this push was not verified when
   this file was written.
 
-## Still open (286 untouched groups — summary)
+## Still open (284 untouched groups — summary)
 
-Untouched alone: 10 high, 181 medium, 95 low. With the 6 partials
-(5 high, 1 medium): 15 high, 182 medium, 95 low remaining. Remaining by kind
-including partials: 160 defects, 36 conditional risks, 45 test gaps,
+Untouched alone: 10 high, 179 medium, 95 low. With the 6 partials
+(5 high, 1 medium): 15 high, 180 medium, 95 low remaining. Remaining by kind
+including partials: 158 defects, 36 conditional risks, 45 test gaps,
 51 improvements. Conditional risks are hypotheses to validate, not bugs to
 blindly fix. Blocked highs still untouched: QI035/QI036 (mixed `_rows_from_dicts`,
 deferred `ingest.py:365-368`), QI172/QI173/QI178 (mixed `qa.answer`),
@@ -570,8 +595,9 @@ QI-001 (needs safe validation boundary), QI315 (documentation-only restore).
 B9 inactive-prototype groups (28) need retain/retire decisions; B10 fallback
 (14) stays separate. Full per-group status is in the appendix. The complete
 finding evidence lives in the preserved handoff register; this file does
-not replace it. QI-004 and QI195 are no longer untouched. Next fresh
-triage, not done here: QI-006 and QI-009. Do not retry deferred owners wholesale.
+not replace it. QI-006 and QI-009 are no longer untouched. QI014 and QI023
+are already implemented pending, so they were not redone. Next fresh
+triage, not done here: QI043 and QI044. Do not retry deferred owners wholesale.
 
 ## Independent recheck steps
 
@@ -591,10 +617,10 @@ triage, not done here: QI-006 and QI-009. Do not retry deferred owners wholesale
 | QI-003 | QI-003 | medium | defect | NOT_IMPLEMENTED | Tooltip positioning keeps the old responsive mode after crossing the breakpoint |
 | QI-004 | QI-004 | high | defect | LOCALLY_IMPLEMENTED_INTEGRATION_PENDING | Comma-delimited comparison selections cannot preserve campaign names containing commas |
 | QI-005 | QI-005 | high | defect | LOCALLY_IMPLEMENTED_INTEGRATION_PENDING | A failed KPI refresh leaves prior-scope values displayed as current |
-| QI-006 | QI-006 | medium | defect | NOT_IMPLEMENTED | Daily-series request failures are presented as an empty dataset |
+| QI-006 | QI-006 | medium | defect | LOCALLY_IMPLEMENTED_INTEGRATION_PENDING | Daily-series request failures are presented as an empty dataset |
 | QI-007 | QI-007 | high | defect | LOCALLY_IMPLEMENTED_INTEGRATION_PENDING | Top Performer benchmark uses the worst CPA/CPC value |
 | QI-008 | QI-008 | medium | defect | NOT_IMPLEMENTED | Translated metric labels prevent shared KPI comparisons from resolving |
-| QI-009 | QI-009 | medium | defect | NOT_IMPLEMENTED | Several analytics and preview panels retain loading visuals after failed requests |
+| QI-009 | QI-009 | medium | defect | LOCALLY_IMPLEMENTED_INTEGRATION_PENDING | Several analytics and preview panels retain loading visuals after failed requests |
 | QI-010 | QI-010 | medium | defect | NOT_IMPLEMENTED | InfoTip immediately closes on the first focus-then-click interaction |
 | QI-011 | QI-011,QI303 | low | improvement | NOT_IMPLEMENTED | OverflowMenu documentation promises a body portal that is not rendered |
 | QI-012 | QI-012 | medium | defect | NOT_IMPLEMENTED | Retention callout can label one sample while pointing at another |

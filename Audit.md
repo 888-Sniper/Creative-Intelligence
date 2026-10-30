@@ -1,4 +1,4 @@
-# Creative Intelligence — audit of the checkpoint-035 incremental push
+# Creative Intelligence — audit of the checkpoint-036 incremental push
 
 You are the second, independent reviewer. Find what is still missing, wrong,
 or unsafe below. Assume every claim is unproven until you have opened the
@@ -10,7 +10,7 @@ not complete the audit or the remediation: most groups remain open below.
 
 - Repository: https://github.com/888-Sniper/Creative-Intelligence
 - Original audited pin / parent: `1342bb48ef59c45981c716c77d12898ae029daba`
-- Code under review: `d7b4c5e2e0e98d50e56771c2525f5edd1590fa95`.
+- Code under review: `b690c69c2a8b64e69e192ad394818fbc10636724`.
   Commits after that code head on this push touch only this `Audit.md`.
   Review the code regardless of branch head. After `git fetch`, confirm
   with `git rev-parse origin/main`.
@@ -23,7 +23,7 @@ not complete the audit or the remediation: most groups remain open below.
   `7bce053a8c4ec85befe80644764d114c31afe15b` (QI176 slice),
   `06d163daaab3ce15c8ef7cc78e8f9839d3348b2e` (QI124/QI126),
   `8305af3fa1ab2561da9bff20c9f95b9c34eaa8f1` (Mac re-audit fixes),
-  `c0eaf8afb41894658b4e22413bc77bf6eff1dff0` (verifier nits), then checkpoint-032 commits `432ab38` (daily/filtered/QA), `0772b15` (Compare/Campaigns), `2f3e98b` (QI270 tests), `e3af84b` (032 re-audit crash/cross-currency fixes), `c020e60` (Audit.md only), `ccfe325` (QI-004 comma campaign names and QI-195 Ask scope), `99ddf02` (Audit.md only), `e9d4f0a` (QI-006 daily-series failures and QI-009 panel failures), `b35d549` (Audit.md only). This push's code commit is `d7b4c5e` (QI043 compare-option failures and QI045 filter metadata). Previous main was `b35d549`.
+  `c0eaf8afb41894658b4e22413bc77bf6eff1dff0` (verifier nits), then checkpoint-032 commits `432ab38` (daily/filtered/QA), `0772b15` (Compare/Campaigns), `2f3e98b` (QI270 tests), `e3af84b` (032 re-audit crash/cross-currency fixes), `c020e60` (Audit.md only), `ccfe325` (QI-004 comma campaign names and QI-195 Ask scope), `99ddf02` (Audit.md only), `e9d4f0a` (QI-006 daily-series failures and QI-009 panel failures), `b35d549` (Audit.md only), `d7b4c5e` (QI043 compare-option failures and QI045 filter metadata), `92edef8` (Audit.md only). This push's code commit is `b690c69` (QI-001, QI035, QI036, QI037, QI038, QI172, QI173 with QI259, QI178, QI263, QI315). Previous main was `92edef8`.
 - Render auto-deploys from `main`. Deployment of this push was not
   verified when this file was written. Do not treat live-site state as
   a source defect.
@@ -32,19 +32,19 @@ Confirm with both ends named (never a one-revision diff):
 
 ```
 git fetch origin
-git diff --stat b35d549fa5daca967f1708a3e7adefb091575dcd origin/main
-git diff b35d549fa5daca967f1708a3e7adefb091575dcd origin/main
-git diff --stat b35d549fa5daca967f1708a3e7adefb091575dcd d7b4c5e2e0e98d50e56771c2525f5edd1590fa95
-git diff --stat d7b4c5e2e0e98d50e56771c2525f5edd1590fa95 origin/main
+git diff --stat 92edef89686cdfe2a638a91d341c0ee27b756d71 origin/main
+git diff 92edef89686cdfe2a638a91d341c0ee27b756d71 origin/main
+git diff --stat 92edef89686cdfe2a638a91d341c0ee27b756d71 b690c69c2a8b64e69e192ad394818fbc10636724
+git diff --stat b690c69c2a8b64e69e192ad394818fbc10636724 origin/main
 git rev-parse origin/main
 git status  # stop only if dirty, or origin/main differs from GitHub main
 ```
 
 The commit under review is `origin/main` after fetch. Previous main is
-`b35d549fa5daca967f1708a3e7adefb091575dcd`. The first diff is the whole
+`92edef89686cdfe2a638a91d341c0ee27b756d71`. The first diff is the whole
 push: the code below plus this file. The code slice
-`b35d549`..`d7b4c5e` is 4 files, 141 insertions, 13 deletions.
-`d7b4c5e`..`origin/main` is this file only. If yours disagrees, stop
+`92edef8`..`b690c69` is 10 files, 993 insertions, 171 deletions.
+`b690c69`..`origin/main` is this file only. If yours disagrees, stop
 and say so. A behind checkout or
 no local `main` branch is not a reason to stop. Read files at the reviewed
 commit; if a line moved, follow the symbol. Original audit scope was
@@ -81,58 +81,228 @@ consolidations: QI303→QI-011, QI259→QI173, QI270→QI269, QI280→QI189,
 QI308→QI307, QI095→QI016, QI101→QI060, QI228→QI251, QI302→QI312).
 Groups are not unique runtime-reproduced bugs. Kinds: 193 defects,
 36 conditional risks, 45 test gaps, 52 improvements. Severity: 0 critical,
-37 high, 193 medium, 96 low. Status at this push: 38 implemented pending
-your verification, 6 partial, 282 untouched. Nothing below erases an
+37 high, 193 medium, 96 low. Status at this push: 48 implemented pending
+your verification, 6 partial, 272 untouched. Nothing below erases an
 unresolved finding, and implemented does not mean verified by you.
 
 ## This push
 
-Parent `b35d549fa5daca967f1708a3e7adefb091575dcd`. Code
-`d7b4c5e2e0e98d50e56771c2525f5edd1590fa95`. These two groups are
-implemented pending your verification. They are not verified.
-QI-006 and QI-009 stay pending from `e9d4f0a` and were not re-edited
-except where `product.tsx` gained the filter-metadata error.
+Parent `92edef89686cdfe2a638a91d341c0ee27b756d71`. Code
+`b690c69c2a8b64e69e192ad394818fbc10636724`. These ten groups are
+implemented pending your verification. They are not verified. QI259
+is the supporting test gap inside QI173, not a second group. No UI
+file changed. `en.ts` was not edited.
 
-QI043, medium, defect. Compare shows the active catalogue error with
-Retry before the select-two instruction and before the empty-catalogue
-copy. `ComparePage` `optionTry` is around line 275. The active mode's
-`useScopedApi` takes that key. The empty panel around line 894 renders
-`LoadError` when `optionState.error` is set. A successful empty
-catalogue still uses "No Campaigns Yet" or "No Creatives Yet". A
-successful one-option catalogue still uses the select-two instruction.
-Apply stays disabled until two items are picked. `en.ts` was not
-edited. Confirm with ComparePage tests "shows a retryable option
-failure", "recovers campaign options after a failed catalogue is
-retried", and "shows a creative option failure".
+QI-001, high, defect. A stored video-only snapshot rebinds with
+`video_only=True`. `review_bind.stored_video_only` is true only when
+the saved snapshot says so. `product.py` passes that flag into
+`bind_snapshot` (around line 2442) and compares `review_bind.SNAPSHOT_KEYS`,
+which includes `video_only`. `bind_snapshot` with `video_only=True`
+returns empty `records` and does not require a confirmed destination
+(`video_analysis.py` around lines 269–274). The default combined call
+still raises `AnalysisUnavailable` without that destination.
+`inputs_unchanged` treats a missing `video_only` as equal to false,
+and an explicit true as different from false. Do not call the review
+route. Confirm with `test_video_only_bind_needs_no_destination`,
+`test_video_only_flag_compares_without_treating_legacy_as_a_change`,
+and `test_review_rebind_passes_the_stored_video_only_flag`.
 
-QI045, medium, defect. `FilterPanel` reads `useCampaignMeta().error`
-and renders `LoadError` with `meta.refresh` in both the creative and
-the default panel (`metaError` around line 538, placed around lines
-569 and 628). The selects stay mounted, so a platform choice made
-before the failure is still selected after Retry. A successful empty
-`campaigns` list has no Retry. Confirm with `FilterPanel.test.tsx`
-"shows a metadata failure and keeps the current selection", "keeps an
-empty catalogue distinct from a metadata failure", and "shows a
-metadata failure on the creative filter panel".
+QI035, high, defect. `_ALIASES` values are ordered tuples. The first
+alias is canonical and reserved for that field. `clicks` keeps
+`link clicks` last (`ingest.py` around line 73), so a file with both
+Clicks and Link Clicks maps each to its own field, and a Link
+Clicks-only file still fills clicks. Two columns for one field with
+unequal non-blank values quarantine the row (`_header_conflict`,
+around line 363) with reason `ambiguous {field}`. Agreeing duplicates
+keep the earlier column and record the ambiguity. Duplicate raw
+headers are recorded as `duplicate headers`. Confirm with
+`test_both_click_columns_stay_on_their_fields`,
+`test_link_clicks_only_still_fills_clicks`,
+`test_disagreeing_spend_columns_are_quarantined`, and
+`test_agreeing_spend_columns_keep_the_first_and_record_ambiguity`.
 
-QI044 stays untouched. Saved scope is still one string per axis, and
-`applySavedView` still keeps the first stored value. That is a
-conditional risk about stored multi-value arrays the current controls
-do not create. It was not turned into a multi-select contract here.
+QI036, high, defect. A blank, `-`, `n/a`, `N/A`, or `brak` revenue
+cell sets `revenue_reported` false (`ingest.py` around lines 416 and
+428). A numeric zero stays reported. An unmapped revenue column stays
+unreported. `benchmarks.matched_roas` then uses only reported rows:
+100 spend with revenue 200 plus 900 spend with `brak` is ROAS 2.0
+at coverage 0.1. Confirm with
+`test_blank_revenue_markers_stay_unreported_and_zero_stays_reported`
+and `test_matched_roas_uses_only_reported_revenue`.
 
-The other 36 implemented groups were not the subject of this push. The six partials
-are unchanged: QI016 Analyst length-band wiring and the OverviewPage
-retain/retire decision, QI017 USD formatters and locale spend-band
-copy, QI028 mixed null-mean propagation, QI057 raw-total nullable API
-migration, QI150 mixed report extras and peer pools, QI176 tied-winner
-labels and `_fact_pack`. QI035 and QI036 stay deferred on
-`ingest.py` 365–368.
+QI037, high, conditional risk. `record_import` and `upsert_rows`
+take `commit=False` inside both `import_report` and
+`import_xlsx_report`. One count update and one commit follow. An
+exception rolls the facts and the provenance row back together
+(`ingest.py` `import_report` around lines 788–801). Confirm with
+`test_import_count_failure_rolls_back_facts_and_provenance` and
+`test_commit_false_rolls_back_and_default_upsert_commits`.
 
-## Claims to falsify — implemented pending verification (38; QI043 and QI045 are this push, prior 36 already on main)
+QI038, high, defect. Each quartile point divides by the impressions
+of rows that reported that quartile (`retention.py` `impr_q`, point
+loop around lines 94–108), and stores `coverage` as that exposure
+over total impressions. A measured zero stays 0. A wholly missing
+quartile adds no point. `schema.migrate` adds nullable `coverage`
+beside the existing source column (around lines 650–651) and does
+not add an Alembic revision. Confirm with
+`test_partial_quartile_uses_reporting_impressions_only`,
+`test_measured_zero_quartile_stays_zero`, and
+`test_wholly_missing_quartile_adds_no_point`. The older quartile
+curve tests in `test_acceptance_10.py` still expect 80% when the
+only row reports the quartile.
+
+QI172, high, defect. When the early and late product-timing groups
+use different rate labels and both rates exist, `qa.answer` says
+the rates are not comparable and does not emit a yes/no numeric
+verdict (`qa.py` around lines 772–777). Both-completion and
+both-play comparisons stay numeric. Confirm with
+`test_early_completions_and_late_plays_are_not_ranked` and
+`test_early_plays_and_late_completions_are_not_ranked`.
+`BackendVtrTest` still expects 36.7% vs 20.0% play rate and
+10.0% vs 6.7% VTR.
+
+QI173, high, defect, with QI259. `_cpa` returns no value when
+conversions are zero (`qa.py` around line 101). Format prose says
+`CPA unavailable` (around line 823). Zero impressions say
+`Blended CTR is unavailable` (around line 597) and do not say
+`0.00%` or `300.00%`. Positive impressions with zero clicks still
+say `0.00%`. Confirm with
+`test_zero_conversion_format_cpa_is_unavailable`,
+`test_zero_impression_ctr_is_unavailable_and_zero_clicks_stay_zero`,
+and `test_mvp.py` `test_ctr_zero_impressions_reports_zero_not_clicks`.
+`BackendTiktokTest` still expects `CPA $10.00` and `CPA $20.00`
+when conversions exist.
+
+QI178, high, defect. Top-versus-bottom groups rank by
+`_question_metric` (`qa.py` around lines 991–1014), not by the
+fact-pack CPA score. Lower CPA is better. Other rates are
+higher-better. Unnamed ranking uses spend. Fewer than two scored
+keys says there are not enough ranked creatives. Confirm with
+`test_top_and_bottom_follow_ctr_when_cpa_ranks_the_other_way`:
+creatives 10 and 9 lead CTR, and creatives 1 and 2 lead the low
+CPA that the question did not ask for. `test_acceptance_10.py`
+`test_top_vs_bottom` still expects `Top 20%` and `Bottom 20%`.
+
+QI263, high, conditional risk. `recovery_due` decides from a
+monotonic deadline whether the loop should scan. Both `daemon` and
+`main` call it and then `recover_expired_leases` (`worker.py`
+around lines 126–138, 164–175, and 207–218). A fresh lease stays
+running. An expired lease is requeued once the deadline is due.
+A call before the deadline does not scan. Do not start `daemon`
+or `main`. Confirm with
+`test_recovery_due_uses_the_monotonic_deadline`,
+`test_expired_lease_requeues_once_and_a_fresh_lease_stays`, and
+`test_both_loops_recheck_recovery_due`.
+
+QI315, high, conditional risk. `docs/BACKUP.md` Restore (around
+lines 106–156) requires a nonempty backup, a readable database,
+and a readable media directory, copies both into
+`<data>/.restore-staging`, checks the copies, keeps the current
+database and media as `<data>/.restore-rollback`, and only then
+switches the staged pair. The old order that copied the backup
+database onto the live database and then deleted live media is
+absent. This is documentation. Do not run it. Confirm with
+`test_restore_doc_stages_and_keeps_a_rollback_copy`.
+
+QI043 and QI045 stay pending from `d7b4c5e` and were not re-edited.
+QI044 stays untouched. The six partials are unchanged: QI016,
+QI017, QI028, QI057, QI150, and QI176.
+
+## Claims to falsify — implemented pending verification (48; the ten highs above are this push, prior 38 already on main)
 
 For checkpoint-030 groups, the Mac tree commit is the import commit
 `1ba11ab…` (historical batch commit in parentheses). Benefit is the
 finding's intended benefit; verify the code actually delivers it.
+
+### QI-001 — Video-only analysis cannot finish the normal review workflow
+
+- Findings: QI-001; severity high; kind defect.
+- Original locations (pin `1342bb4`): the review rebind required a combined-analysis destination.
+- Files now: `Backend/creative_intel/review_bind.py`; `Backend/ci_backend/routers/product.py` around line 2442; `Backend/creative_intel/video_analysis.py` `bind_snapshot` around lines 269–274.
+- Change (`b690c69`): a stored video-only snapshot rebinds in video-only mode. A missing flag still matches an older combined snapshot. An explicit mode change still fails the snapshot compare.
+- Benefit to verify: a video-only review can finish without a combined destination, and a mode or revision mismatch still refuses.
+- Status: implemented pending verification (not verified).
+
+### QI035 — Header aliases pick conflicting columns in unordered set order
+
+- Findings: QI035; severity high; kind defect.
+- Original locations (pin `1342bb4`): `_ALIASES` used sets, so the same header could land on more than one field.
+- Files now: `Backend/creative_intel/ingest.py` `_ALIASES` around line 73, `_map_headers` around line 308, `_header_conflict` around line 363.
+- Change (`b690c69`): alias order is the precedence. A canonical header is reserved. Disagreeing same-field columns quarantine the row.
+- Benefit to verify: conflicting report headers import deterministically, and disagreeing same-field columns are quarantined. A Link Clicks-only export still fills clicks.
+- Status: implemented pending verification (not verified).
+
+### QI036 — A missing revenue marker can be flagged as a reported zero
+
+- Findings: QI036; severity high; kind defect.
+- Original locations (pin `1342bb4`): blank revenue could be stored as a reported zero and enter ROAS.
+- Files now: `Backend/creative_intel/ingest.py` around lines 416 and 428; `benchmarks.matched_roas`.
+- Change (`b690c69`): blank markers and an unmapped revenue column set `revenue_reported` false. Numeric zero stays reported.
+- Benefit to verify: missing revenue stays out of ROAS, and a real zero stays reported.
+- Status: implemented pending verification (not verified).
+
+### QI037 — Import facts and provenance counts commit in separate transactions
+
+- Findings: QI037; severity high; kind conditional risk.
+- Original locations (pin `1342bb4`): `record_import` and the ads upsert committed before the count update.
+- Files now: `Backend/creative_intel/ingest.py` `import_report` around lines 788–801 and the matching xlsx path.
+- Change (`b690c69`): facts and the import row commit together. A failure on the count update rolls both back.
+- Benefit to verify: an import either commits facts and counts together or rolls back.
+- Status: implemented pending verification (not verified).
+
+### QI038 — Synthetic retention divides reported quartiles by unreported exposure
+
+- Findings: QI038; severity high; kind defect.
+- Original locations (pin `1342bb4`): quartile percent used every impression, including rows that did not report that quartile.
+- Files now: `Backend/creative_intel/retention.py` around lines 94–108; `Backend/creative_intel/schema.py` around lines 650–651.
+- Change (`b690c69`): the denominator is the impressions that reported the quartile. Coverage is stored. A missing quartile adds no point.
+- Benefit to verify: a partly reported quartile uses only the impressions that reported it, and coverage is stored.
+- Status: implemented pending verification (not verified).
+
+### QI172 — QA compares completion rate with play rate across different timing measures
+
+- Findings: QI172; severity high; kind defect.
+- Original locations (pin `1342bb4`): `qa.answer` compared early and late rates even when one side was completions and the other was plays.
+- Files now: `Backend/creative_intel/qa.py` around lines 772–777.
+- Change (`b690c69`): different labels with both rates present produce an incomparable sentence and no yes/no numeric verdict.
+- Benefit to verify: QA does not rank completion rate against play rate.
+- Status: implemented pending verification (not verified).
+
+### QI173 — QA renders unavailable CTR and format CPA as measured zeroes
+
+- Findings: QI173, QI259; severity high; kind defect. QI259 is the test gap for this formatter, not a separate group.
+- Original locations (pin `1342bb4`): zero impressions rendered CTR as 0.00%, and zero conversions rendered format CPA as $0.00.
+- Files now: `Backend/creative_intel/qa.py` `_cpa` around line 101, CTR text around line 597, format CPA around line 823; `tests/test_mvp.py`.
+- Change (`b690c69`): unavailable CTR and zero-conversion CPA say unavailable. A measured zero click rate on positive impressions stays 0.00%.
+- Benefit to verify: QA does not print unavailable CTR or zero-conversion CPA as a measured zero.
+- Status: implemented pending verification (not verified).
+
+### QI178 — QA top-versus-bottom groups ignore the requested ranking metric
+
+- Findings: QI178; severity high; kind defect.
+- Original locations (pin `1342bb4`): the top-versus-bottom block used the fact-pack CPA ranking.
+- Files now: `Backend/creative_intel/qa.py` around lines 991–1014. `_fact_pack` scoring was not changed.
+- Change (`b690c69`): the answer ranks those groups by the metric named in the question. Unnamed questions rank by spend.
+- Benefit to verify: top and bottom groups follow the metric the question named.
+- Status: implemented pending verification (not verified).
+
+### QI263 — A job whose lease expires after the worker starts is not recovered by the polling loop
+
+- Findings: QI263; severity high; kind conditional risk.
+- Original locations (pin `1342bb4`): lease recovery ran once at startup.
+- Files now: `Backend/ci_backend/worker.py` `recovery_due` around line 126, called from `daemon` and `main`.
+- Change (`b690c69`): each poll rechecks a monotonic deadline and requeues expired leases. A fresh lease is left running. The tests do not start the worker.
+- Benefit to verify: a polling worker rechecks expired leases without another process start and leaves fresh leases alone.
+- Status: implemented pending verification (not verified).
+
+### QI315 — A manual restore replaces current data before the replacement is validated
+
+- Findings: QI315; severity high; kind conditional risk.
+- Original locations (pin `1342bb4`): `docs/BACKUP.md` copied the backup onto the live database and then deleted live media.
+- Files now: `docs/BACKUP.md` Restore, around lines 106–156.
+- Change (`b690c69`): the guide stages and checks the replacement, keeps a rollback copy, and only then switches. It is documentation and was not executed.
+- Benefit to verify: the manual restore guide stages and keeps a rollback copy before replacing current data.
+- Status: implemented pending verification (not verified).
 
 ### QI043 — Failed comparison options become an impossible selection instruction
 
@@ -569,7 +739,9 @@ still true, do not re-report them as undisclosed:
   (15 checkpoint-030 quality files), UI 316 passed, TypeScript 45 entries pass.
   Historical cloud checkpoint-030 counts were Python 332, UI 316, TS 45.
 - Full Python baseline (pristine): 913 passed, 5 failed, 1 skipped (919).
-  Full Python at code head `d7b4c5e`: 1,289 passed, 4 failed, 1 skipped (1,294), 405.21s. No Python file changed in this push.
+  Full Python at code head `b690c69`: 1,319 passed, 4 failed, 1 skipped,
+  193 subtests, 352.08s. The new module is
+  `tests/test_checkpoint_036_highs.py` (30 passed on its own).
   The 338-test scoped subset above also passes inside this full suite;
   newer QI323/QI176/XLSX quality tests are full-suite only and included.
   Failures are only pre-existing `0012` vs `0013`: three
@@ -577,38 +749,41 @@ still true, do not re-report them as undisclosed:
   (`test_no_licensing_concepts` passes in the import tree layout; it is
   environmental (`.venv` walker), not fixed by this push. React-dist tests
   pass after the UI build; ffmpeg-host test skips.)
-  Commands: `.venv/bin/python -m pytest tests/ -q --tb=line -rs -p no:cacheprovider`.
+  Command, from the implementation worktree, using the main checkout
+  venv: `python -m pytest tests/ -q --tb=line`.
   The 4 failures are only the pre-existing `0012` vs `0013` mismatch
-  (`tests/test_ci_migrations.py` three tests and `tests/test_deploy.py`).
+  (`tests/test_ci_migrations.py` lines 37, 86, and 106, and
+  `tests/test_deploy.py` line 134).
   The skip is `tests/test_acceptance_10.py` (needs a no-ffmpeg host).
   193 subtests passed.
-- Full UI at code head: `tsc --noEmit` clean, then `vitest run` 691 passed
-  (63 files). `vite build` passed. Local assets `index-GrNu5x1A.js`
-  (968,779 bytes) and `index-C5G5cbmt.css` (72,151 bytes).
-  Package scripts are `typecheck`, `test`, and `build` in
-  `apps/creative-intelligence-ui/package.json`.
-- This push changes no Python file. `Source/self_check.py` and
-  `ruff check Backend tests Source` were not re-run. The last run, at
-  `ccfe325`, was 97/97 and 55 ruff findings, none in the files that
-  push edited. No tracked CI config exists; exact-commit CI is
+- This push changes no UI file. `tsc`, `vitest`, and `vite build` were
+  not re-run. The previous local build assets remain
+  `index-GrNu5x1A.js` (968,779 bytes) and `index-C5G5cbmt.css`
+  (72,151 bytes). The browser was not used.
+- `Source/self_check.py` at this code head: 97/97.
+  `ruff check` on `review_bind.py`, `ingest.py`, `qa.py`,
+  `retention.py`, `schema.py`, `worker.py`, `test_mvp.py`, and
+  `test_checkpoint_036_highs.py` was clean. `product.py` still has
+  the same 20 findings as at `92edef8`; none are in the edited
+  rebind window. No tracked CI config exists; exact-commit CI is
   unavailable, not passed. No live browser, live provider, or native
   Excel check was run. Deployment of this push was not verified when
   this file was written.
 
-## Still open (282 untouched groups — summary)
+## Still open (272 untouched groups — summary)
 
-Untouched alone: 10 high, 177 medium, 95 low. With the 6 partials
-(5 high, 1 medium): 15 high, 178 medium, 95 low remaining. Remaining by kind
-including partials: 156 defects, 36 conditional risks, 45 test gaps,
+Untouched alone: 0 high, 177 medium, 95 low. With the 6 partials
+(5 high, 1 medium): 5 high, 178 medium, 95 low remaining. Remaining
+is 278 (272 untouched + 6 partial). Remaining by kind including
+partials: 149 defects, 33 conditional risks, 45 test gaps,
 51 improvements. Conditional risks are hypotheses to validate, not bugs to
-blindly fix. Blocked highs still untouched: QI035/QI036 (mixed `_rows_from_dicts`,
-deferred `ingest.py:365-368`), QI172/QI173/QI178 (mixed `qa.answer`),
-QI038 (mixed retention owner), QI037/QI263 (mixed transaction/worker owners),
-QI-001 (needs safe validation boundary), QI315 (documentation-only restore).
+blindly fix. The ten highs in this push are pending verification, not
+untouched. The high partials that remain are QI016, QI017, QI057,
+QI150, and QI176. QI028 remains the medium partial.
 B9 inactive-prototype groups (28) need retain/retire decisions; B10 fallback
 (14) stays separate. Full per-group status is in the appendix. The complete
 finding evidence lives in the preserved handoff register; this file does
-not replace it. QI043 and QI045 are no longer untouched. QI044 stays
+not replace it. QI044 stays
 untouched: it is a conditional risk on stored multi-value filters, and the
 current scope model is one string per axis. Next fresh triage, not done
 here: QI047. Do not retry deferred owners wholesale.
@@ -626,7 +801,7 @@ here: QI047. Do not retry deferred owners wholesale.
 
 | Group | Findings | Sev | Kind | Status | Title |
 |---|---|---|---|---|---|
-| QI-001 | QI-001 | high | defect | NOT_IMPLEMENTED | Video-only analysis cannot complete the normal review workflow |
+| QI-001 | QI-001 | high | defect | LOCALLY_IMPLEMENTED_INTEGRATION_PENDING | Video-only analysis cannot complete the normal review workflow |
 | QI-002 | QI-002 | medium | defect | NOT_IMPLEMENTED | Repeated tooltip resize adjustments undo the previous collision correction |
 | QI-003 | QI-003 | medium | defect | NOT_IMPLEMENTED | Tooltip positioning keeps the old responsive mode after crossing the breakpoint |
 | QI-004 | QI-004 | high | defect | LOCALLY_IMPLEMENTED_INTEGRATION_PENDING | Comma-delimited comparison selections cannot preserve campaign names containing commas |
@@ -659,10 +834,10 @@ here: QI047. Do not retry deferred owners wholesale.
 | QI032 | QI032 | medium | defect | NOT_IMPLEMENTED | Charts expose only generic labels instead of their plotted data |
 | QI033 | QI033 | high | defect | LOCALLY_IMPLEMENTED_INTEGRATION_PENDING | Frequency fallback combines all impressions with one partial reach row |
 | QI034 | QI034 | high | defect | LOCALLY_IMPLEMENTED_INTEGRATION_PENDING | Engagement pools numerator and denominator from different populations |
-| QI035 | QI035 | high | defect | NOT_IMPLEMENTED | Header aliases choose conflicting columns in unordered set order |
-| QI036 | QI036 | high | defect | NOT_IMPLEMENTED | Missing revenue markers can be flagged as reported zero |
-| QI037 | QI037 | high | conditional_risk | NOT_IMPLEMENTED | Import facts and provenance counts commit in separate transactions |
-| QI038 | QI038 | high | defect | NOT_IMPLEMENTED | Synthetic retention divides reported quartiles by unreported exposure |
+| QI035 | QI035 | high | defect | LOCALLY_IMPLEMENTED_INTEGRATION_PENDING | Header aliases choose conflicting columns in unordered set order |
+| QI036 | QI036 | high | defect | LOCALLY_IMPLEMENTED_INTEGRATION_PENDING | Missing revenue markers can be flagged as reported zero |
+| QI037 | QI037 | high | conditional_risk | LOCALLY_IMPLEMENTED_INTEGRATION_PENDING | Import facts and provenance counts commit in separate transactions |
+| QI038 | QI038 | high | defect | LOCALLY_IMPLEMENTED_INTEGRATION_PENDING | Synthetic retention divides reported quartiles by unreported exposure |
 | QI039 | QI039 | medium | defect | NOT_IMPLEMENTED | Timed element labels ignore the requested moment for CTA and voiceover |
 | QI040 | QI040 | medium | defect | NOT_IMPLEMENTED | Percentage formatting guesses units from magnitude |
 | QI041 | QI041 | medium | defect | NOT_IMPLEMENTED | Suggested comparison tests skip genuine zero performance |
@@ -793,13 +968,13 @@ here: QI047. Do not retry deferred owners wholesale.
 | QI169 | QI169 | medium | defect | NOT_IMPLEMENTED | Unknown project identifiers count toward the prototype evidence minimum |
 | QI170 | QI170 | low | conditional_risk | NOT_IMPLEMENTED | The prototype one-pager reverses non-cost benchmark verdicts |
 | QI171 | QI171 | low | improvement | NOT_IMPLEMENTED | The prototype self-check leaves temporary artifacts and shares fixture filenames |
-| QI172 | QI172 | high | defect | NOT_IMPLEMENTED | QA compares completion rate with play rate when timing groups have different measures |
-| QI173 | QI173,QI259 | high | defect | NOT_IMPLEMENTED | QA renders unavailable CTR and format CPA as measured zeroes |
+| QI172 | QI172 | high | defect | LOCALLY_IMPLEMENTED_INTEGRATION_PENDING | QA compares completion rate with play rate when timing groups have different measures |
+| QI173 | QI173,QI259 | high | defect | LOCALLY_IMPLEMENTED_INTEGRATION_PENDING | QA renders unavailable CTR and format CPA as measured zeroes |
 | QI174 | QI174 | medium | defect | NOT_IMPLEMENTED | QA structure summaries count ad rows as creatives |
 | QI175 | QI175 | medium | defect | NOT_IMPLEMENTED | Backend QA substitutes TikTok for other format questions |
 | QI176 | QI176 | high | defect | PARTIALLY_IMPLEMENTED | QA ROAS rankings ignore revenue-reporting coverage |
 | QI177 | QI177 | medium | defect | NOT_IMPLEMENTED | A named platform overrides the creative or campaign answer level |
-| QI178 | QI178 | high | defect | NOT_IMPLEMENTED | QA top-versus-bottom groups ignore the requested ranking metric |
+| QI178 | QI178 | high | defect | LOCALLY_IMPLEMENTED_INTEGRATION_PENDING | QA top-versus-bottom groups ignore the requested ranking metric |
 | QI179 | QI179 | medium | defect | NOT_IMPLEMENTED | The legacy canonical normalizer discards native currency values |
 | QI180 | QI180 | medium | defect | NOT_IMPLEMENTED | QA treats unannotated creatives as confirmed to have no CTA |
 | QI181 | QI181 | medium | improvement | NOT_IMPLEMENTED | Every QA fact-pack topic incurs per-creative database round trips |
@@ -882,7 +1057,7 @@ here: QI047. Do not retry deferred owners wholesale.
 | QI260 | QI260 | medium | conditional_risk | NOT_IMPLEMENTED | Unreadable successful JSON responses become fabricated empty objects |
 | QI261 | QI261 | medium | conditional_risk | NOT_IMPLEMENTED | Binary downloads provide no application timeout or cancellation boundary |
 | QI262 | QI262 | low | test_gap | NOT_IMPLEMENTED | Empty-input tests can pass on a later transport failure |
-| QI263 | QI263 | high | conditional_risk | NOT_IMPLEMENTED | Jobs whose leases expire after worker startup are not recovered by the polling loop |
+| QI263 | QI263 | high | conditional_risk | LOCALLY_IMPLEMENTED_INTEGRATION_PENDING | Jobs whose leases expire after worker startup are not recovered by the polling loop |
 | QI264 | QI264 | medium | conditional_risk | NOT_IMPLEMENTED | Late progress callbacks can overwrite a replacement attempt's progress |
 | QI265 | QI265 | low | improvement | NOT_IMPLEMENTED | Job completion repeats the same return in both row-count branches |
 | QI266 | QI266 | low | improvement | NOT_IMPLEMENTED | The attempt-state test docstring contradicts its cancelled-state case |
@@ -929,7 +1104,7 @@ here: QI047. Do not retry deferred owners wholesale.
 | QI311 | QI311 | medium | conditional_risk | NOT_IMPLEMENTED | Dialog cards lack a vertical size and scrolling constraint |
 | QI313 | QI313 | medium | conditional_risk | NOT_IMPLEMENTED | The stale-catalog tooltip trigger is not keyboard focusable |
 | QI314 | QI314 | medium | conditional_risk | NOT_IMPLEMENTED | Filtering out the chosen model makes the controlled selector show no selection |
-| QI315 | QI315 | high | conditional_risk | NOT_IMPLEMENTED | Manual restore replaces current data before validating the replacement |
+| QI315 | QI315 | high | conditional_risk | LOCALLY_IMPLEMENTED_INTEGRATION_PENDING | Manual restore replaces current data before validating the replacement |
 | QI316 | QI316 | low | improvement | NOT_IMPLEMENTED | Monotonic refresh timer carries an ineffective persistence setting |
 | QI317 | QI317 | medium | test_gap | NOT_IMPLEMENTED | Migration regression test does not verify the claimed second-run no-op |
 | QI318 | QI318 | low | improvement | NOT_IMPLEMENTED | Render manifest retains the deprecated automatic-deploy field |
@@ -955,5 +1130,5 @@ here: QI047. Do not retry deferred owners wholesale.
 
 Status key: LOCALLY_IMPLEMENTED_INTEGRATION_PENDING = implemented pending
 verification above; PARTIALLY_IMPLEMENTED = partial; NOT_IMPLEMENTED =
-untouched (includes deferred/blocked QI035). Original pin for every row:
+untouched. The ten highs in this push are pending verification. Original pin for every row:
 `1342bb48ef59c45981c716c77d12898ae029daba`.

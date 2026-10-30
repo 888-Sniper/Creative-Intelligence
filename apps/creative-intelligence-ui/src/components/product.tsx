@@ -535,6 +535,9 @@ export function FilterPanel({ onApply, kpi = true, creative = false, trailing, a
   const creators = axisOptions(t, "creators", "filters.allCreatives", CREATOR_VALUES);
   const formats = axisOptions(t, "", "filters.allFormats", FORMAT_VALUES);
   const kpis = axisOptions(t, "kpis", "filters.allKpis", KPI_VALUES);
+  const metaError = meta.error ? (
+    <LoadError message={meta.error} retryLabel={t("common.retry")} onRetry={meta.refresh} />
+  ) : null;
   if (creative) {
     return (
       <section className="panel" aria-label={t("filters.section")}>
@@ -563,6 +566,7 @@ export function FilterPanel({ onApply, kpi = true, creative = false, trailing, a
           {trailing}
           <DateRangeField id="f-date" />
         </div>
+        {metaError}
         {actions === "panel" ? (
           <div className="filter-actions">
             <button type="button" className="btn-primary"
@@ -621,6 +625,7 @@ export function FilterPanel({ onApply, kpi = true, creative = false, trailing, a
         ) : <div />}
         <DateRangeField id="f-date" />
       </div>
+      {metaError}
       {actions === "panel" ? (
         <div className="filter-actions">
           <button type="button" className="btn-primary"

@@ -1,7 +1,7 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { FilterProvider } from "@/state/FilterContext";
-import { FilterPanel } from "@/components/product";
+import { __resetCampaignMetaCache, FilterPanel } from "@/components/product";
 
 function renderPanel(props?: { showTeam?: boolean; creative?: boolean }) {
   return render(
@@ -93,5 +93,73 @@ describe("FilterPanel", () => {
     expect(apply).toBeGreaterThanOrEqual(0);
     expect(reset).toBeGreaterThanOrEqual(0);
     expect(apply).toBeLessThan(reset);
+  });
+});
+
+describe("FilterPanel metadata failures", () => {
+  beforeEach(() => {
+    __resetCampaignMetaCache();
+  });
+
+  afterEach(() => {
+    cleanup();
+    __resetCampaignMetaCache();
+    vi.restoreAllMocks();
+  });
+
+  function metaRow(name: string) {
+    return {
+      name, client: "Acme", team: "Growth", platforms: ["meta"],
+      markets: ["US"], objectives: [], verticals: [], projects: ["Alpha"],
+      last_date: "", status: "Active",
+    };
+  }
+
+  it("shows a metadata failure and keeps the current selection", async () => {
+    let fail = true;
+    window.fetch = vi.fn(async () => {
+      if (fail) return Response.json({ error: "meta down" }, { status: 503 });
+      return Response.json({ campaigns: [metaRow("Spring")], demo: false });
+    }) as unknown as typeof fetch;
+    renderPanel();
+    fireEvent.change(screen.getByLabelText("Platform"), { target: { value: "meta" } });
+    await waitFor(() => {
+      expect(screen.getByText("meta down")).toBeDefined();
+      expect(screen.getByRole("button", { name: "Retry" })).toBeDefined();
+    });
+    expect((screen.getByLabelText("Platform") as HTMLSelectElement).value).toBe("meta");
+    fail = false;
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => {
+      const campaign = screen.getByLabelText("Campaign") as HTMLSelectElement;
+      expect([...campaign.options].map((o) => o.value)).toContain("Spring");
+    });
+    expect(screen.queryByText("meta down")).toBeNull();
+    expect((screen.getByLabelText("Platform") as HTMLSelectElement).value).toBe("meta");
+  });
+
+  it("keeps an empty catalogue distinct from a metadata failure", async () => {
+    window.fetch = vi.fn(async () =>
+      Response.json({ campaigns: [], demo: false }),
+    ) as unknown as typeof fetch;
+    renderPanel();
+    await waitFor(() => {
+      const campaign = screen.getByLabelText("Campaign") as HTMLSelectElement;
+      expect([...campaign.options].map((o) => o.value)).toEqual([""]);
+    });
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+    expect(screen.queryByText("meta down")).toBeNull();
+  });
+
+  it("shows a metadata failure on the creative filter panel", async () => {
+    window.fetch = vi.fn(async () =>
+      Response.json({ error: "meta down" }, { status: 503 }),
+    ) as unknown as typeof fetch;
+    renderPanel({ creative: true });
+    await waitFor(() => {
+      expect(screen.getByText("meta down")).toBeDefined();
+      expect(screen.getByRole("button", { name: "Retry" })).toBeDefined();
+    });
+    expect(screen.getByLabelText("Client")).toBeDefined();
   });
 });

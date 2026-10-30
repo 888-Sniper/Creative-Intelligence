@@ -12,6 +12,7 @@ import { compareSelectionNames } from "@/components/compareSelection";
 import {
   CreativeThumb,
   EmptyState,
+  LoadError,
   PageHeader,
   Panel,
   Skeleton,
@@ -271,8 +272,9 @@ export function ComparePage() {
       JSON.stringify([scope.toString(), aFrom, aTo, bFrom, bTo]),
     );
 
-  const campaignOptions = useScopedApi<Record<string, Record<string, number>>>("/api/campaigns");
-  const creativeOptions = useScopedApi<CreativeMeta[]>("/api/creatives");
+  const [optionTry, setOptionTry] = useState(0);
+  const campaignOptions = useScopedApi<Record<string, Record<string, number>>>("/api/campaigns", optionTry);
+  const creativeOptions = useScopedApi<CreativeMeta[]>("/api/creatives", optionTry);
   // A newer compare invalidates an older in-flight response, including
   // one started before the shared filters changed.
   const compareGen = useRef(0);
@@ -654,9 +656,8 @@ export function ComparePage() {
   /* Empty-state hierarchy (§4): "no data" only when the mode's option
    * request resolved cleanly with zero options — loading or failure
    * is an incomplete selection, never a verified zero. */
-  const modeOptionsResolved = mode === "campaigns"
-    ? !campaignOptions.loading && campaignOptions.error === ""
-    : !creativeOptions.loading && creativeOptions.error === "";
+  const optionState = mode === "campaigns" ? campaignOptions : creativeOptions;
+  const modeOptionsResolved = !optionState.loading && optionState.error === "";
   const modeEmpty = modeOptionsResolved && options.length === 0;
   const optionLabel = (v: string) => {
     if (mode === "campaigns") return v;
@@ -890,6 +891,13 @@ export function ComparePage() {
         </>
       ) : !loading ? (
         <Panel title={mode === "creatives" ? t("compare.emptyCreativeTitle") : t("compare.emptyCampaignTitle")} style={{ marginTop: 12 }}>
+          {optionState.error ? (
+            <LoadError
+              message={optionState.error}
+              retryLabel={t("common.retry")}
+              onRetry={() => setOptionTry((n) => n + 1)}
+            />
+          ) : (
           <EmptyState
             compact
             verbatim
@@ -901,6 +909,7 @@ export function ComparePage() {
               ? (mode === "creatives" ? t("compare.addCreativesHint") : t("compare.addCampaignsHint"))
               : (mode === "creatives" ? t("compare.select24creatives") : t("compare.select24campaigns"))}
           />
+          )}
         </Panel>
       ) : null}
       <details className="panel disclosure" style={{ marginTop: 12 }}>

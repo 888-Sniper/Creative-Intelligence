@@ -259,21 +259,67 @@ describe("ComparePage", () => {
     expect(screen.getByText("Performance Over Time")).toBeDefined();
   });
 
-  it("shows no pre-action alert when options fail: Apply stays disabled", async () => {
+  it("shows a retryable option failure instead of a selection instruction", async () => {
     window.fetch = vi.fn(async () =>
       Response.json({ error: "boom" }, { status: 500 }),
     ) as unknown as typeof fetch;
     renderPage();
     await waitFor(() => {
-      expect(screen.getByText("No Comparison Yet")).toBeDefined();
+      expect(screen.getByText("boom")).toBeDefined();
+      expect(screen.getByRole("button", { name: "Retry" })).toBeDefined();
     });
-    // A failed option request is not a verified zero: selection copy,
-    // not the no-data state.
-    expect(screen.getByText("Select two to four campaigns to compare.")).toBeDefined();
+    expect(screen.queryByText("Select two to four campaigns to compare.")).toBeNull();
+    expect(screen.queryByText("No Campaigns Yet")).toBeNull();
+    expect(screen.queryByText("Add campaigns to start comparing.")).toBeNull();
     // No standalone validation line before the user has done anything.
     expect(screen.queryByRole("alert")).toBeNull();
     const apply = screen.getByRole("button", { name: "Apply Comparison" }) as HTMLButtonElement;
     expect(apply.disabled).toBe(true);
+  });
+
+  it("recovers campaign options after a failed catalogue is retried", async () => {
+    let campaignsFail = true;
+    window.fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.startsWith("/api/campaigns")) {
+        if (campaignsFail) return Response.json({ error: "options down" }, { status: 503 });
+        return Response.json(campaignOptions);
+      }
+      if (url.startsWith("/api/creatives")) return Response.json(creativeOptions);
+      if (url.startsWith("/api/compare/campaigns")) return Response.json(campaignPayload);
+      return Response.json({ days: [], points: [] });
+    }) as unknown as typeof fetch;
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("options down")).toBeDefined();
+    });
+    campaignsFail = false;
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => {
+      expect(screen.getByText("Performance Over Time")).toBeDefined();
+    });
+    expect(screen.queryByText("options down")).toBeNull();
+  });
+
+  it("shows a creative option failure instead of the creative selection instruction", async () => {
+    window.fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.startsWith("/api/creatives")) return Response.json({ error: "creatives down" }, { status: 503 });
+      if (url.startsWith("/api/campaigns")) return Response.json(campaignOptions);
+      if (url.startsWith("/api/compare/campaigns")) return Response.json(campaignPayload);
+      return Response.json({ days: [], points: [] });
+    }) as unknown as typeof fetch;
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByLabelText("Compare By")).toBeDefined();
+    });
+    fireEvent.change(screen.getByLabelText("Compare By"), { target: { value: "creatives" } });
+    await waitFor(() => {
+      expect(screen.getByText("creatives down")).toBeDefined();
+      expect(screen.getByRole("button", { name: "Retry" })).toBeDefined();
+    });
+    expect(screen.queryByText("Select two to four creatives to compare.")).toBeNull();
+    expect(screen.queryByText("No Creatives Yet")).toBeNull();
   });
 
   it("distinguishes incomplete selection from genuinely missing data", async () => {

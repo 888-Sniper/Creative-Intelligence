@@ -1,4 +1,4 @@
-# Creative Intelligence — audit of the checkpoint-031 remediation push
+# Creative Intelligence — audit of the checkpoint-032 incremental push
 
 You are the second, independent reviewer. Find what is still missing, wrong,
 or unsafe below. Assume every claim is unproven until you have opened the
@@ -10,7 +10,7 @@ not complete the audit or the remediation: most groups remain open below.
 
 - Repository: https://github.com/888-Sniper/Creative-Intelligence
 - Original audited pin / parent: `1342bb48ef59c45981c716c77d12898ae029daba`
-- Code under review: `c0eaf8afb41894658b4e22413bc77bf6eff1dff0` plus any
+- Code under review: `e3af84bd939964abc16a0a226b364d79632fe26f` plus any
   review-fix commits named in the final handoff. Commits after the code
   head on this push touch only this `Audit.md`; review the code regardless
   of branch head. After `git fetch`, confirm with `git rev-parse origin/main`.
@@ -23,21 +23,21 @@ not complete the audit or the remediation: most groups remain open below.
   `7bce053a8c4ec85befe80644764d114c31afe15b` (QI176 slice),
   `06d163daaab3ce15c8ef7cc78e8f9839d3348b2e` (QI124/QI126),
   `8305af3fa1ab2561da9bff20c9f95b9c34eaa8f1` (Mac re-audit fixes),
-  `c0eaf8afb41894658b4e22413bc77bf6eff1dff0` (verifier nits: docstring, Polish/divergent tests).
+  `c0eaf8afb41894658b4e22413bc77bf6eff1dff0` (verifier nits), then checkpoint-032 commits `432ab38` (daily/filtered/QA), `0772b15` (Compare/Campaigns), `2f3e98b` (QI270 tests), `e3af84b` (032 re-audit crash/cross-currency fixes). Previous main was `25d4e9d`.
 - Render auto-deploys from `main`; deployment was not verified. Do not
   treat live-site state as a source defect.
 
 Confirm with both ends named (never a one-revision diff):
 
 ```
-git diff --stat 1342bb48ef59c45981c716c77d12898ae029daba c0eaf8afb41894658b4e22413bc77bf6eff1dff0
-git diff 1342bb48ef59c45981c716c77d12898ae029daba c0eaf8afb41894658b4e22413bc77bf6eff1dff0
+git diff --stat 25d4e9d795e45a354752a62628abb7b02ddbae68 e3af84bd939964abc16a0a226b364d79632fe26f
+git diff 25d4e9d795e45a354752a62628abb7b02ddbae68 e3af84bd939964abc16a0a226b364d79632fe26f
 git rev-parse origin/main
 git status  # stop only if dirty, or origin/main differs from GitHub main
 ```
 
-Expected code-diff shape at `c0eaf8a`: 84 files, 7,741 insertions,
-766 deletions. If yours disagrees, stop and say so. A behind checkout or
+Expected incremental diff shape at `e3af84b` vs previous main: 9 files, 427 insertions,
+44 deletions. Cumulative vs original pin also available via both-ends diff. If yours disagrees, stop and say so. A behind checkout or
 no local `main` branch is not a reason to stop. Read files at the reviewed
 commit; if a line moved, follow the symbol. Original audit scope was
 incomplete (51,371 of 103,845 lines scored); unscored scope may hide more.
@@ -73,11 +73,11 @@ consolidations: QI303→QI-011, QI259→QI173, QI270→QI269, QI280→QI189,
 QI308→QI307, QI095→QI016, QI101→QI060, QI228→QI251, QI302→QI312).
 Groups are not unique runtime-reproduced bugs. Kinds: 193 defects,
 36 conditional risks, 45 test gaps, 52 improvements. Severity: 0 critical,
-37 high, 193 medium, 96 low. Status at this push: 30 implemented pending
-your verification, 8 partial, 288 untouched. Nothing below erases an
+37 high, 193 medium, 96 low. Status at this push: 32 implemented pending
+your verification, 6 partial, 288 untouched. Nothing below erases an
 unresolved finding, and implemented does not mean verified by you.
 
-## Claims to falsify — implemented pending verification (30)
+## Claims to falsify — implemented pending verification (32; QI060/QI269 completed in this increment, prior 30 already on main)
 
 For checkpoint-030 groups, the Mac tree commit is the import commit
 `1ba11ab…` (historical batch commit in parentheses). Benefit is the
@@ -353,13 +353,24 @@ finding's intended benefit; verify the code actually delivers it.
 - Benefit to verify: Retain or uniquely index the exact recommendation source finding.
 - Status: implemented pending verification (not verified).
 
-## Partly done — do not ship these claims as complete (8)
+## Newly completed in this increment (verify these first)
+
+- QI060 (0772b15): Campaigns spend bench gated on comparable currency;
+  rail ROAS pooled from reporting components. Prior Dashboard/Analyst
+  baselines already on main. Tests: CampaignsPage suite + full UI.
+- QI269/QI270 (2f3e98b): annotation associations asserted both orders and
+  N-way in tests/test_why_associations_quality.py atop ordering fixes.
+- Advanced but still partial: QI016 daily canonical (432ab38 backend +
+  0772b15 Compare), QI150 benchmark_filtered + QA money gate (432ab38),
+  QI176 coverage label + QA currency (432ab38). See updated remainders.
+
+## Partly done — do not ship these claims as complete (6; QI060/QI269 entries below are completion records)
 
 ### QI016 — UI ROAS recomputation loses the revenue-reporting population (PARTIAL)
 
 - Findings: QI016, QI095; severity high; kind defect. Files: Backend/creative_intel/benchmarks.py; apps/creative-intelligence-ui/src/pages/AnalystPage.tsx; apps/creative-intelligence-ui/src/pages/CampaignsPage.tsx; apps/creative-intelligence-ui/src/pages/ComparePage.tsx; apps/creative-intelligence-ui/src/pages/DashboardPage.tsx; apps/creative-intelligence-ui/src/pages/OverviewPage.tsx.
 - Original locations: apps/creative-intelligence-ui/src/pages/DashboardPage.tsx:158-158; apps/creative-intelligence-ui/src/pages/ComparePage.tsx:556-556; Backend/creative_intel/benchmarks.py:215-222; apps/creative-intelligence-ui/src/pages/CampaignsPage.tsx:431-431. Benefit: Make charts and baselines agree with the canonical reporting-population KPI.
-- Remaining: Dashboard, Analyst platform baseline and Campaigns main per-row pooling done. Remaining: Analyst length-band ROAS (unconditional revenue/spend), Compare daily ROAS/CPA/CPM, legacy Overview; canonical payload/coverage presentation and full integration.
+- Remaining: Dashboard, Analyst platform baseline, Campaigns pooling and Compare daily canonical KPIs done (432ab38/0772b15). Remaining: Analyst length-band ROAS wiring sits on deferred AnalystPage lines (blocked, not bypassed), legacy Overview (unrouted; retain/retire decision), canonical payload/coverage presentation.
 - Status: partial. Verify done slices; report remainder as missing, not as a new defect unless worsened.
 
 ### QI017 — Money displays assume USD despite native-currency backend values (PARTIAL)
@@ -383,33 +394,33 @@ finding's intended benefit; verify the code actually delivers it.
 - Remaining: Ratios + period raw totals done. Remaining: benchmarks raw totals retain legacy numeric API by design in summarize/kpis_for_rows; frontend nullable raw-total presentation in deferred-heavy pages.
 - Status: partial. Verify done slices; report remainder as missing, not as a new defect unless worsened.
 
-### QI060 — Dashboard and Campaigns baselines pool unlike currency amounts (PARTIAL)
+### QI060 — Dashboard and Campaigns baselines pool unlike currency amounts (COMPLETED 032)
 
 - Findings: QI060, QI101; severity high; kind defect. Files: apps/creative-intelligence-ui/src/pages/AnalystPage.tsx; apps/creative-intelligence-ui/src/pages/CampaignsPage.tsx; apps/creative-intelligence-ui/src/pages/DashboardPage.tsx.
 - Original locations: apps/creative-intelligence-ui/src/pages/DashboardPage.tsx:152-152; apps/creative-intelligence-ui/src/pages/DashboardPage.tsx:159-160; apps/creative-intelligence-ui/src/pages/CampaignsPage.tsx:431-431; apps/creative-intelligence-ui/src/pages/CampaignsPage.tsx:433-435. Benefit: Use canonical or single-currency baselines and omit incomparable results.
-- Remaining: Dashboard/Analyst baselines and Campaigns main pooling done. Remaining: Campaigns platform spend average and unweighted platform-ROAS mean; full-page integration.
-- Status: partial. Verify done slices; report remainder as missing, not as a new defect unless worsened.
+- Remaining: none. Campaigns platform spend bench now gated on comparable currency and rail ROAS pooled from reporting components (0772b15); full UI suite passes.
+- Status: implemented pending verification (not verified).
 
 ### QI150 — Cost comparisons and recommendation pools mix native currency units (PARTIAL)
 
 - Findings: QI150; severity high; kind defect. Files: Backend/ci_backend/actions.py; Backend/creative_intel/benchmarks.py; Backend/creative_intel/qa.py.
 - Original locations: Backend/creative_intel/benchmarks.py:819-820; Backend/creative_intel/benchmarks.py:958-958; Backend/creative_intel/benchmarks.py:977-977; Backend/creative_intel/benchmarks.py:1218-1218. Benefit: Apply one comparable-currency policy to unit-bearing rankings and recommendations.
-- Remaining: Creative/campaign/dashboard slices done. Remaining: benchmarks benchmark_filtered/_report_extras/campaign_recommendations/build_report (mixed), QA _fact_pack/answer CPA-spend ranking (mixed), markets/peer pools. Legacy wholly-unspecified arithmetic preserved by 58251b1.
+- Remaining: Creative/campaign/dashboard, benchmark_filtered bands and QA _group_metric money gate done (432ab38). Remaining: benchmarks _report_extras/campaign_recommendations/build_report (mixed), QA _fact_pack (mixed), markets/peer pools. Legacy wholly-unspecified arithmetic preserved by 58251b1.
 - Status: partial. Verify done slices; report remainder as missing, not as a new defect unless worsened.
 
 ### QI176 — QA ROAS rankings ignore revenue-reporting coverage (PARTIAL)
 
 - Findings: QI176; severity high; kind defect. Files: Backend/creative_intel/qa.py; tests/test_ask_llm.py.
 - Original locations: Backend/creative_intel/qa.py:596-596; Backend/creative_intel/qa.py:601-602; tests/test_ask_llm.py:184-186. Benefit: Use matched ROAS with explicit reported fixtures and unavailable handling.
-- Remaining: Winner selection uses reporting population (7bce053). Remaining: partial-coverage labeling in answer text and QA currency policy (mixed answer owner).
+- Remaining: Winner selection, single-winner coverage label and QA money-currency gate done (7bce053/432ab38). Remaining: tied-winner coverage labels and _fact_pack currency in mixed owner.
 - Status: partial. Verify done slices; report remainder as missing, not as a new defect unless worsened.
 
-### QI269 — Comparison explanations reverse the paired values when the second creative leads (PARTIAL)
+### QI269 — Comparison explanations reverse the paired values when the second creative leads (COMPLETED 032)
 
 - Findings: QI269, QI270; severity medium; kind defect. Files: Backend/ci_backend/actions.py; tests/test_acceptance_10.py; tests/test_cohorts_compare.py.
 - Original locations: Backend/ci_backend/actions.py:143-145; tests/test_cohorts_compare.py:466-468; tests/test_cohorts_compare.py:531-534; tests/test_acceptance_10.py:1030-1031. Benefit: Order values with their owners or label each value explicitly.
-- Remaining: Pairwise value ordering fixed in shared helpers. Remaining: QI270 annotation-association assertions beyond metric values; other consumers/integration.
-- Status: partial. Verify done slices; report remainder as missing, not as a new defect unless worsened.
+- Remaining: none. QI270 annotation associations asserted both orders and N-way in tests/test_why_associations_quality.py (2f3e98b); metric associations already covered.
+- Status: implemented pending verification (not verified).
 
 ## Integration triage you must judge (commit `58251b1`)
 
@@ -433,8 +444,6 @@ multi-row reach pricing, zero-weight manufactured mean, plus low reason/
 strictness fixes). These lows remain tracked follow-ups — confirm they are
 still true, do not re-report them as undisclosed:
 
-- Compare campaign boot still hard-codes ROAS rank instead of the campaign
-  rank state (ComparePage boot paths; creative boot was fixed by QI014).
 - Dashboard hook chart converts an unavailable CTR baseline to zero though
   the shared chart supports null (reachable mainly with legacy metadata).
 - Singleton chart accessibility text interpolates the raw number, so es/pl
@@ -452,7 +461,7 @@ still true, do not re-report them as undisclosed:
   (15 checkpoint-030 quality files), UI 316 passed, TypeScript 45 entries pass.
   Historical cloud checkpoint-030 counts were Python 332, UI 316, TS 45.
 - Full Python baseline (pristine): 913 passed, 5 failed, 1 skipped (919).
-  Full Python at code head: 1,270 passed, 4 failed, 1 skipped (1,275).
+  Full Python at code head: 1,285 passed, 4 failed, 1 skipped (1,290).
   The 338-test scoped subset above also passes inside this full suite;
   newer QI323/QI176/XLSX quality tests are full-suite only and included.
   Failures are only pre-existing `0012` vs `0013`: three
@@ -462,18 +471,20 @@ still true, do not re-report them as undisclosed:
   pass after the UI build; ffmpeg-host test skips.)
   Commands: `.venv/bin/python -m pytest tests/ -q --tb=line -rs -p no:cacheprovider`.
 - Full UI baseline (pristine): tsc clean, 361 passed. At code head: tsc clean,
-  664 passed (144 suites), `vite build` pass. UI tree unchanged after that run.
+  668 passed (146 suites), `vite build` pass (asset index-YjXmDUhh.js).
 - `Source/self_check.py`: 97/97. Ruff: 0 new errors (35 Backend-wide
   pre-existing import errors identical on baseline; changed files add none
   beyond two pre-existing unused `json` imports). No tracked CI config exists;
   exact-commit CI is unavailable, not passed. No live browser, provider,
-  native-spreadsheet, or deployment check was run.
+  or native-spreadsheet check was run. Deployment of previous main was
+  verified read-only on creative-intelligence-0t0c.onrender.com (root and
+  /health 200, asset hash matched local build); re-verify after this push.
 
 ## Still open (288 untouched groups — summary)
 
-Untouched alone: 12 high, 181 medium, 95 low. With the 8 partials above
-(6 high, 2 medium): 18 high, 183 medium, 95 low remaining. Remaining by kind
-including partials: 164 defects, 36 conditional risks, 45 test gaps,
+Untouched alone: 12 high, 181 medium, 95 low. With the 6 partials above
+(5 high, 1 medium): 17 high, 182 medium, 95 low remaining. Remaining by kind
+including partials: 162 defects, 36 conditional risks, 45 test gaps,
 51 improvements. Conditional risks are hypotheses to validate, not bugs to
 blindly fix. Notable blocked highs: QI035/QI036 (mixed `_rows_from_dicts`,
 deferred `ingest.py:365-368`), QI172/QI173/QI178 (mixed `qa.answer`),
@@ -556,7 +567,7 @@ medium batch in plan order; do not retry deferred owners wholesale.
 | QI057 | QI057 | high | defect | PARTIALLY_IMPLEMENTED | Aggregate totals and common KPIs turn unreported fields into measured zeroes |
 | QI058 | QI058 | low | improvement | NOT_IMPLEMENTED | Date-range docstring promises filtered extent but uses dataset extent |
 | QI059 | QI059 | medium | defect | NOT_IMPLEMENTED | Saved benchmark confirmation is lost if the subsequent list refresh fails |
-| QI060 | QI060,QI101 | high | defect | PARTIALLY_IMPLEMENTED | Dashboard and Campaigns baselines pool unlike currency amounts |
+| QI060 | QI060,QI101 | high | defect | LOCALLY_IMPLEMENTED_INTEGRATION_PENDING | Dashboard and Campaigns baselines pool unlike currency amounts |
 | QI061 | QI061 | low | defect | NOT_IMPLEMENTED | An old retention error survives a switch to an empty scope |
 | QI063 | QI063 | medium | defect | NOT_IMPLEMENTED | Format chart converts a zero denominator into measured CTR zero |
 | QI064 | QI064 | medium | defect | NOT_IMPLEMENTED | Insight navigation reloads the app and loses active filters |
@@ -760,7 +771,7 @@ medium batch in plan order; do not retry deferred owners wholesale.
 | QI266 | QI266 | low | improvement | NOT_IMPLEMENTED | The attempt-state test docstring contradicts its cancelled-state case |
 | QI267 | QI267 | medium | test_gap | NOT_IMPLEMENTED | The exact-date filter test accepts a result from the wrong day |
 | QI268 | QI268 | medium | test_gap | NOT_IMPLEMENTED | Workbook section checks confuse global strings and archive entries with worksheet content |
-| QI269 | QI269,QI270 | medium | defect | PARTIALLY_IMPLEMENTED | Comparison explanations reverse the paired values when the second creative leads |
+| QI269 | QI269,QI270 | medium | defect | LOCALLY_IMPLEMENTED_INTEGRATION_PENDING | Comparison explanations reverse the paired values when the second creative leads |
 | QI271 | QI271 | medium | defect | NOT_IMPLEMENTED | N-way comparison omits timed CTA annotations recognized elsewhere |
 | QI272 | QI272 | low | improvement | NOT_IMPLEMENTED | N-way empty-data copy refers to only two creatives |
 | QI273 | QI273 | medium | test_gap | NOT_IMPLEMENTED | The six-creative acceptance test exercises only three keys |

@@ -178,6 +178,10 @@ def _quintile_split(rows, metric):
         if not key:
             continue
         by_key.setdefault(key, []).append(row)
+    if metric not in ("ctr", "vtr"):
+        from creative_intel import currency_scope as _currency_scope
+        if _currency_scope.money_scope(rows)["mixed_currency"]:
+            return [], [], len(by_key)
     scored = []
     for key, group in by_key.items():
         value = _group_score(group, metric)
@@ -230,6 +234,29 @@ def _qa_amount(value, rows):
     return compact_money(value, scope["currency"] if scope["currency_known"] else None)
 
 
+def _money_fields(group):
+    """Native spend and CPA, or None when the group is not one unit.
+
+    Wholly unspecified currency stays numeric. Mixed currency and a
+    known currency plus an unknown contribution are unavailable. No
+    denomination is invented.
+    """
+    from .currency_scope import money_scope
+    scope = money_scope(group)
+    spend = sum(x["spend"] for x in group)
+    conv = sum(x["conversions"] for x in group)
+    comparable = not scope["mixed_currency"]
+    cpa = round(spend / conv, 2) if conv else None
+    return {
+        "spend": round(spend, 2) if comparable else None,
+        "cpa": cpa if comparable else None,
+        "currency": scope["currency"],
+        "currencies": scope["currencies"],
+        "mixed_currency": scope["mixed_currency"],
+        "currency_known": scope["currency_known"],
+    }
+
+
 def _show_metric(metric, value, currency=None):
     if metric in ("cpa",):
         from .native_money import compact_money
@@ -255,10 +282,19 @@ def _fact_pack(conn, limit=8, scope=None, owner=None, admin=False):
              else benchmarks.Scope(scope))
     rows = [r for r in _ads(conn) if scope.match(r)]
     anns = _annotations(conn, owner=owner, admin=admin)
-    spend = sum(r["spend"] for r in rows)
     impr = sum(r["impressions"] for r in rows)
     clicks = sum(r["clicks"] for r in rows)
-    conv = sum(r["conversions"] for r in rows)
+    pool_money = _money_fields(rows)
+    spend_rank = not pool_money["mixed_currency"]
+
+    def _by_spend(items):
+        if spend_rank:
+            return sorted(
+                items,
+                key=lambda kv: sum(x["spend"] for x in kv[1]),
+                reverse=True)
+        return sorted(items, key=lambda kv: str(kv[0]))
+
     by_campaign, by_hook, by_format, by_style = {}, {}, {}, {}
     for r in rows:
         by_campaign.setdefault(r["campaign"] or "(uncategorised)", []).append(r)
@@ -274,18 +310,14 @@ def _fact_pack(conn, limit=8, scope=None, owner=None, admin=False):
             by_format.setdefault(mode, []).append(r)
 
     def _kpis(group):
-        spend = sum(x["spend"] for x in group)
-        impr = sum(x["impressions"] for x in group)
-        clicks = sum(x["clicks"] for x in group)
-        conv = sum(x["conversions"] for x in group)
+        group_impr = sum(x["impressions"] for x in group)
+        group_clicks = sum(x["clicks"] for x in group)
         keys = sorted({x["creative_key"] for x in group})
-        return {"n_creatives": len(keys), "spend": round(spend, 2),
-                "ctr": round(clicks / impr, 4) if impr else None,
-                "cpa": round(spend / conv, 2) if conv else None}
+        return {"n_creatives": len(keys),
+                "ctr": round(group_clicks / group_impr, 4) if group_impr else None,
+                **_money_fields(group)}
 
-    camps = sorted(by_campaign.items(),
-                   key=lambda kv: sum(x["spend"] for x in kv[1]),
-                   reverse=True)[:limit]
+    camps = _by_spend(list(by_campaign.items()))[:limit]
     by_funnel, by_vertical, by_market = {}, {}, {}
     for r in rows:
         by_funnel.setdefault(
@@ -377,23 +409,30 @@ def _fact_pack(conn, limit=8, scope=None, owner=None, admin=False):
     for r in rows:
         by_key.setdefault(r["creative_key"], []).append(r)
 
-    def _score(group):
-        spend = sum(x["spend"] for x in group)
-        conv = sum(x["conversions"] for x in group)
-        if conv:
-            return (0, spend / conv)
-        impr = sum(x["impressions"] for x in group)
-        clicks = sum(x["clicks"] for x in group)
-        if impr:
-            return (1, -(clicks / impr))
-        return (2, 0.0)
+    if pool_money["mixed_currency"]:
+        quintiles = {
+            "top_20_pct": [],
+            "bottom_20_pct": [],
+            "ranking": "unavailable",
+        }
+    else:
+        def _score(group):
+            spend = sum(x["spend"] for x in group)
+            conv = sum(x["conversions"] for x in group)
+            if conv:
+                return (0, spend / conv)
+            group_impr = sum(x["impressions"] for x in group)
+            group_clicks = sum(x["clicks"] for x in group)
+            if group_impr:
+                return (1, -(group_clicks / group_impr))
+            return (2, 0.0)
 
-    ranked = sorted(by_key, key=lambda k: _score(by_key[k]))
-    nq = max(1, len(ranked) // 5)
-    quintiles = {
-        "top_20_pct": ranked[:nq],
-        "bottom_20_pct": ranked[-nq:] if len(ranked) > 1 else [],
-    }
+        ranked = sorted(by_key, key=lambda k: _score(by_key[k]))
+        nq = max(1, len(ranked) // 5)
+        quintiles = {
+            "top_20_pct": ranked[:nq],
+            "bottom_20_pct": ranked[-nq:] if len(ranked) > 1 else [],
+        }
     retention = {}
     scoped_keys = {r["creative_key"] for r in rows if r["creative_key"]}
     curves = [(k, t0, t1) for k, t0, t1 in conn.execute(
@@ -411,41 +450,26 @@ def _fact_pack(conn, limit=8, scope=None, owner=None, admin=False):
                      "avg_drop_pts": round(sum(drops) / len(drops), 2)
                      if drops else None}
     pack = {
-        "totals": {"rows": len(rows), "spend": round(spend, 2),
+        "totals": {"rows": len(rows),
                    "ctr": round(clicks / impr, 4) if impr else None,
-                   "cpa": round(spend / conv, 2) if conv else None},
+                   "spend_ranking": ("available" if spend_rank
+                                     else "unavailable"),
+                   **pool_money},
         "campaigns": [{"campaign": name, **_kpis(group)}
                       for name, group in camps],
         "hooks": [{"hook": hook, **_kpis(group)}
-                  for hook, group in sorted(
-                      by_hook.items(),
-                      key=lambda kv: sum(x["spend"] for x in kv[1]),
-                      reverse=True)[:limit]],
+                  for hook, group in _by_spend(list(by_hook.items()))[:limit]],
         "styles": [{"style": style, **_kpis(group)}
-                   for style, group in sorted(
-                       by_style.items(),
-                       key=lambda kv: sum(x["spend"] for x in kv[1]),
-                       reverse=True)[:limit]],
+                   for style, group in _by_spend(list(by_style.items()))[:limit]],
         "formats": [{"format": mode, **_kpis(group)}
-                    for mode, group in sorted(
-                        by_format.items(),
-                        key=lambda kv: sum(x["spend"] for x in kv[1]),
-                        reverse=True)[:limit]],
+                    for mode, group in _by_spend(list(by_format.items()))[:limit]],
         "funnel": [{"stage": stage, **_kpis(group)}
-                   for stage, group in sorted(
-                       by_funnel.items(),
-                       key=lambda kv: sum(x["spend"] for x in kv[1]),
-                       reverse=True)[:limit]],
+                   for stage, group in _by_spend(list(by_funnel.items()))[:limit]],
         "verticals": [{"vertical": name, **_kpis(group)}
-                      for name, group in sorted(
-                          by_vertical.items(),
-                          key=lambda kv: sum(x["spend"] for x in kv[1]),
-                          reverse=True)[:limit]],
+                      for name, group in _by_spend(
+                          list(by_vertical.items()))[:limit]],
         "markets": [{"market": name, **_kpis(group)}
-                    for name, group in sorted(
-                        by_market.items(),
-                        key=lambda kv: sum(x["spend"] for x in kv[1]),
-                        reverse=True)[:limit]],
+                    for name, group in _by_spend(list(by_market.items()))[:limit]],
         "product_timing": {
             "early_s": PRODUCT_EARLY_S,
             # A15: labelled rates for the LLM prompt — VTR only when
@@ -598,12 +622,19 @@ def answer(conn, question, llm=None, scope=None, owner=None,
 
     if any(w in q for w in ("spend", "cost", "budget")):
         total = sum(r["spend"] for r in rows)
-        top_spend = max(rows, key=lambda r: r["spend"])
-        parts.append("Total spend across %d uploaded rows is %s. Top spend "
-                     "row is %r at %s."
-                     % (len(rows), _qa_amount(total, rows),
-                        top_spend["creative_key"],
-                        _qa_amount(top_spend["spend"], [top_spend])))
+        total_text = _qa_amount(total, rows)
+        from .currency_scope import money_scope as _spend_scope
+        if _spend_scope(rows)["mixed_currency"]:
+            parts.append("Total spend across %d uploaded rows is %s. "
+                         "No spend ranking is available across currencies."
+                         % (len(rows), total_text))
+        else:
+            top_spend = max(rows, key=lambda r: r["spend"])
+            parts.append("Total spend across %d uploaded rows is %s. Top spend "
+                         "row is %r at %s."
+                         % (len(rows), total_text,
+                            top_spend["creative_key"],
+                            _qa_amount(top_spend["spend"], [top_spend])))
         cite("Uploaded CSV")
     if any(w in q for w in ("ctr", "click")):
         impr = sum(r["impressions"] for r in rows)
@@ -694,7 +725,7 @@ def answer(conn, question, llm=None, scope=None, owner=None,
 
         ranked = [(k, _group_metric(g)) for k, g in by_key.items()]
         ranked = [(k, v) for k, v in ranked if v is not None]
-        if metric == "cpa" or metric not in ("cpa", "ctr", "roas", "vtr"):
+        if metric in ("cpa", "roas") or metric not in ("cpa", "ctr", "roas", "vtr"):
             from creative_intel import currency_scope as _rank_scope
             _ranked_rows = [x for k, _v in ranked for x in by_key[k]]
             if ranked and _rank_scope.money_scope(
@@ -870,9 +901,15 @@ def answer(conn, question, llm=None, scope=None, owner=None,
                               admin=admin)
         return pack
 
-    def _money(value):
+    def _money(value, row=None):
         from .native_money import compact_money
-        return compact_money(value, None) if value is not None else "n/a"
+        if isinstance(row, dict) and row.get("mixed_currency"):
+            return "unavailable"
+        if value is None:
+            return "n/a"
+        currency = row.get("currency") if (
+            isinstance(row, dict) and row.get("currency_known")) else None
+        return compact_money(value, currency)
 
     if any(w in q for w in ("style", "editing", "talking head", "ugc",
                             "montage", "cinematic", "testimonial")):
@@ -883,8 +920,8 @@ def answer(conn, question, llm=None, scope=None, owner=None,
             cite("Annotation")
         else:
             bits = ["%s: %d creatives at %s spend, CPA %s" % (
-                s["style"], s["n_creatives"], _money(s["spend"]),
-                _money(s["cpa"])) for s in styles]
+                s["style"], s["n_creatives"], _money(s["spend"], s),
+                _money(s["cpa"], s)) for s in styles]
             parts.append("Editing styles in scope — " + "; ".join(bits) + ".")
             cite("Uploaded CSV")
             cite("Annotation")
@@ -898,13 +935,13 @@ def answer(conn, question, llm=None, scope=None, owner=None,
                 bits.append(
                     "%s %s: %d creatives at %s spend, %s %s, CTR %s, CPA %s"
                     % (label, when % timing["cutoff_s"],
-                       group["n_creatives"], _money(group["spend"]),
+                       group["n_creatives"], _money(group["spend"], group),
                        group.get("rate_label", "play rate"),
                        ("%.2f%%" % (100.0 * group["rate"])
                         if group.get("rate") is not None else "n/a"),
                        ("%.2f%%" % (100.0 * group["ctr"])
                         if group.get("ctr") is not None else "n/a"),
-                       _money(group["cpa"])))
+                       _money(group["cpa"], group)))
         return bits
 
     if "brand" in q or "logo" in q:
@@ -941,8 +978,8 @@ def answer(conn, question, llm=None, scope=None, owner=None,
             cite("Annotation")
         else:
             bits = ["%s: %d creatives at %s spend, CPA %s" % (
-                h["hook"], h["n_creatives"], _money(h["spend"]),
-                _money(h["cpa"])) for h in hooks]
+                h["hook"], h["n_creatives"], _money(h["spend"], h),
+                _money(h["cpa"], h)) for h in hooks]
             parts.append("Hooks in scope — " + "; ".join(bits) + ".")
             cite("Uploaded CSV")
             cite("Annotation")
@@ -955,8 +992,8 @@ def answer(conn, question, llm=None, scope=None, owner=None,
             cite("Uploaded CSV")
         else:
             bits = ["%s: %d creatives at %s spend, CPA %s, CTR %s" % (
-                b["bucket"], b["n_creatives"], _money(b["spend"]),
-                _money(b["cpa"]),
+                b["bucket"], b["n_creatives"], _money(b["spend"], b),
+                _money(b["cpa"], b),
                 ("%.2f%%" % (100.0 * b["ctr"]) if b.get("ctr") is not None
                  else "n/a")) for b in lengths]
             parts.append("Video length in scope — " + "; ".join(bits) + ".")
@@ -971,7 +1008,8 @@ def answer(conn, question, llm=None, scope=None, owner=None,
             if group:
                 bits.append("%s: %d creatives at %s spend, CPA %s, CTR %s"
                             % (label, group["n_creatives"],
-                               _money(group["spend"]), _money(group["cpa"]),
+                               _money(group["spend"], group),
+                               _money(group["cpa"], group),
                                ("%.2f%%" % (100.0 * group["ctr"])
                                 if group.get("ctr") is not None else "n/a")))
         if not bits:
@@ -990,8 +1028,8 @@ def answer(conn, question, llm=None, scope=None, owner=None,
             cite("Uploaded CSV")
         else:
             bits = ["%s: %d creatives at %s spend, CPA %s" % (
-                s["stage"], s["n_creatives"], _money(s["spend"]),
-                _money(s["cpa"])) for s in funnel]
+                s["stage"], s["n_creatives"], _money(s["spend"], s),
+                _money(s["cpa"], s)) for s in funnel]
             parts.append("Funnel in scope — " + "; ".join(bits) + ".")
             cite("Uploaded CSV")
             cite("Benchmark Derived")
@@ -1005,8 +1043,8 @@ def answer(conn, question, llm=None, scope=None, owner=None,
             cite("Uploaded CSV")
         else:
             bits = ["%s: %d creatives at %s spend, CPA %s" % (
-                m["market"], m["n_creatives"], _money(m["spend"]),
-                _money(m["cpa"])) for m in markets]
+                m["market"], m["n_creatives"], _money(m["spend"], m),
+                _money(m["cpa"], m)) for m in markets]
             parts.append("Markets in scope — " + "; ".join(bits) + ".")
             cite("Uploaded CSV")
             cite("Benchmark Derived")
@@ -1017,8 +1055,8 @@ def answer(conn, question, llm=None, scope=None, owner=None,
             cite("Uploaded CSV")
         else:
             bits = ["%s: %d creatives at %s spend, CPA %s" % (
-                v["vertical"], v["n_creatives"], _money(v["spend"]),
-                _money(v["cpa"])) for v in verticals]
+                v["vertical"], v["n_creatives"], _money(v["spend"], v),
+                _money(v["cpa"], v)) for v in verticals]
             parts.append("Verticals in scope — " + "; ".join(bits) + ".")
             cite("Uploaded CSV")
             cite("Benchmark Derived")

@@ -1663,11 +1663,13 @@ async def compare_campaigns_post(request: Request,
     body = _validated(CompareBody, await json_payload(request),
                       "campaign comparison")
     try:
-        pseudo = {"campaigns": [",".join(body.campaigns)],
-                  "rank_by": [body.rank_by]}
+        # Exact names. Joining on commas would split a comma that
+        # belongs inside one campaign before the comparison runs.
+        pseudo = {"rank_by": [body.rank_by]}
         for key, vals in body.filters.items():
             pseudo[key] = (list(vals) if isinstance(vals, list) else [vals])
-        return legacy.expert2_compare_route(conn, pseudo)
+        return legacy.expert2_compare_route(
+            conn, pseudo, campaigns=list(body.campaigns))
     except ValueError as exc:
         raise _conflict(exc)
 

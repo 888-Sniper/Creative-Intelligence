@@ -98,8 +98,21 @@ export function AskPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [chats, setChats] = useState<Conversation[] | null>(null);
+  const [answerScopeKey, setAnswerScopeKey] = useState<string | null>(null);
+  const askGen = useRef(0);
   const scopeRef = useRef(scope);
   scopeRef.current = scope;
+  const liveScope = scope.toString();
+  // Drop a held answer in the same render as the new filters, before
+  // the KPI hooks paint that new scope underneath it.
+  if (answerScopeKey !== null && answerScopeKey !== liveScope) {
+    askGen.current += 1;
+    setAnswerScopeKey(null);
+    setAnswer(null);
+    setAsked("");
+    setError("");
+    setBusy(false);
+  }
   // The opening answered example fires exactly once per mount.
   const autoRan = useRef(false);
 
@@ -122,20 +135,25 @@ export function AskPage() {
   const ask = async (q?: string) => {
     const text = (q ?? question).trim();
     if (!text || busy) return;
+    const gen = ++askGen.current;
+    const captured = scopeRef.current.toString();
     setBusy(true);
     setError("");
     setAnswer(null);
     setAsked(text);
+    setAnswerScopeKey(captured);
     try {
       const res = await api<AskAnswer>("POST", "/api/ask", {
         question: text,
         filters: scopeBody(scopeRef.current),
       });
+      if (gen !== askGen.current || captured !== scopeRef.current.toString()) return;
       setAnswer(res);
     } catch (e) {
+      if (gen !== askGen.current) return;
       setError(e instanceof ApiError ? e.message : t("ask.failedMsg"));
     } finally {
-      setBusy(false);
+      if (gen === askGen.current) setBusy(false);
     }
   };
   const askRef = useRef(ask);
@@ -239,7 +257,7 @@ export function AskPage() {
               })}
             </div>
           </section>
-          {asked ? (
+          {answerScopeKey === liveScope && asked ? (
             <Panel title={asked} sub={t("ask.todaySub")} style={{ flex: "1 0 auto" }}>
               {busy ? <Skeleton height={120} /> : error ? (
                 <EmptyState text={error} />

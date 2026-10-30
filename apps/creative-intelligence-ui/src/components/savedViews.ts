@@ -1,5 +1,6 @@
 import type { FilterValues } from "@/state/FilterContext";
 import { markCampaignStatusTouched } from "@/state/prefs";
+import { compareSelectionQuery } from "./compareSelection";
 
 export interface SavedViewState {
   filters?: Record<string, string[]>;
@@ -50,7 +51,7 @@ export function compareDeepLink(v: SavedView): string | null {
       .map((s) => String(s)).filter(Boolean))].slice(0, 4);
   if (list.length < 2) return null;
   const param = mode === "campaigns" ? "campaigns" : "creatives";
-  return `/compare?mode=${mode}&${param}=${list.map(encodeURIComponent).join(",")}`;
+  return `/compare?${compareSelectionQuery(mode, param, list)}`;
 }
 
 export type SetFilter = (key: keyof FilterValues, value: string) => void;

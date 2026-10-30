@@ -83,6 +83,42 @@ function mockFetchAll() {
   }) as unknown as typeof fetch;
 }
 
+describe("ComparePage campaign names", () => {
+  it("requests a legacy comma link as the original campaign names", async () => {
+    const previous = `${window.location.pathname}${window.location.search}`;
+    window.history.replaceState(
+      {},
+      "",
+      `/compare?mode=campaigns&campaigns=${encodeURIComponent("US, CA")},Other`,
+    );
+    window.fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.startsWith("/api/compare/campaigns")) return Response.json(campaignPayload);
+      if (url.startsWith("/api/kpis/daily")) return Response.json({ days: [] });
+      if (url.startsWith("/api/creatives")) return Response.json(creativeOptions);
+      if (url.startsWith("/api/campaigns")) {
+        return Response.json({
+          "US, CA": { spend: 50, impressions: 10, clicks: 1, conversions: 1, revenue: 10, ctr: 0.1, cpa: 5, roas: 2 },
+          Other: { spend: 40, impressions: 10, clicks: 1, conversions: 1, revenue: 8, ctr: 0.1, cpa: 6, roas: 1 },
+        });
+      }
+      return Response.json({ error: "not found" }, { status: 404 });
+    }) as unknown as typeof fetch;
+    try {
+      renderPage();
+      await waitFor(() => {
+        const called = (window.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls
+          .map((call) => String(call[0]));
+        const hit = called.find((url) => url.includes("/api/compare/campaigns"));
+        expect(hit).toBeTruthy();
+        expect(new URL(hit ?? "", "http://local").searchParams.getAll("campaigns")).toEqual(["US, CA", "Other"]);
+      });
+    } finally {
+      window.history.replaceState({}, "", previous || "/");
+    }
+  });
+});
+
 describe("ComparePage", () => {
   it("auto-runs a campaign comparison on first load", async () => {
     mockFetchAll();

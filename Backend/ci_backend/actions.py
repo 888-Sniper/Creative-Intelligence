@@ -1302,10 +1302,31 @@ def _csv_param(value):
     return [v.strip() for v in str(value or "").split(",") if v.strip()]
 
 
-def expert2_compare_route(conn, query):
+def _selection_names(values):
+    """Repeated values are exact names. One value stays comma-delimited.
+
+    A comma inside a campaign name is preserved only when the caller
+    already supplied separate values. A single decoded string cannot
+    tell an encoded comma from a separator.
+    """
+    if values is None:
+        return []
+    if not isinstance(values, list):
+        values = [values]
+    items = ["" if item is None else str(item) for item in values]
+    if len(items) != 1:
+        return [item.strip() for item in items if item.strip()]
+    return _csv_param(items[0])
+
+
+def expert2_compare_route(conn, query, campaigns=None):
     from creative_intel import benchmarks as _bench
-    campaigns = _csv_param(query.get("campaigns", [""])[0]
-                           if "campaigns" in query else query.get("campaign", [""]))
+    if campaigns is None:
+        raw = (query.get("campaigns") if "campaigns" in query
+               else query.get("campaign", [""]))
+        campaigns = _selection_names(raw)
+    else:
+        campaigns = [str(item).strip() for item in campaigns if str(item).strip()]
     rank_by = (query.get("rank_by", ["cpa"])[0] or "cpa").lower()
     # ?campaign(s)= names the candidates; every other axis scopes them.
     scope = _bench.Scope.from_query(

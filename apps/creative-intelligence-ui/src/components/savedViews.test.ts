@@ -40,11 +40,11 @@ const FOCUS: SavedView = {
 
 describe("compareDeepLink", () => {
   it("carries the full four-campaign selection", () => {
-    expect(compareDeepLink(CMP4)).toBe(
-      "/compare?mode=campaigns&campaigns=" +
-        ["First Light Ritual", "One Sip Ahead", "The 6AM Commitment", "Find Your Focus"]
-          .map(encodeURIComponent).join(","),
-    );
+    const params = new URL(compareDeepLink(CMP4) ?? "", "http://local").searchParams;
+    expect(params.get("mode")).toBe("campaigns");
+    expect(params.getAll("campaigns")).toEqual([
+      "First Light Ritual", "One Sip Ahead", "The 6AM Commitment", "Find Your Focus",
+    ]);
   });
 
   it("carries explicit creative identities, not the campaign", () => {
@@ -53,6 +53,21 @@ describe("compareDeepLink", () => {
     expect(link).toContain("creatives=smp-focus-desk-noise");
     expect(link).toContain("smp-focus-one-button");
     expect(link).not.toContain("Find%20Your%20Focus");
+  });
+
+  it("keeps commas, ampersands, percents, unicode and surrounding spaces as separate campaign names", () => {
+    const link = compareDeepLink({
+      id: 9,
+      name: "comma",
+      state: {
+        view: "compare",
+        compare_mode: "campaigns",
+        filters: { campaign: [" US, CA ", "A&B", "100%", "Łódź"] },
+      },
+    });
+    const params = new URL(link ?? "", "http://local").searchParams;
+    expect(params.get("mode")).toBe("campaigns");
+    expect(params.getAll("campaigns")).toEqual([" US, CA ", "A&B", "100%", "Łódź"]);
   });
 
   it("returns null for non-compare views and single selections", () => {

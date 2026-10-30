@@ -8,6 +8,7 @@ import { useLocale } from "@/i18n";
 import { TrendChart } from "@/components/charts";
 import { PeriodComparisonTable, type PeriodResponse } from "@/components/PeriodComparisonTable";
 import { dailyMetricValue } from "@/components/compareDaily";
+import { compareSelectionNames } from "@/components/compareSelection";
 import {
   CreativeThumb,
   EmptyState,
@@ -295,7 +296,7 @@ export function ComparePage() {
     try {
       const params = new URLSearchParams();
       params.set("rank_by", rankBy);
-      params.set("campaigns", names.join(","));
+      names.forEach((name) => params.append("campaigns", name));
       const r = await api<CampaignCompareResponse>(
         "GET", scopedPath(`/api/compare/campaigns?${params.toString()}`, scope),
       );
@@ -368,8 +369,10 @@ export function ComparePage() {
     const params = new URLSearchParams(window.location.search);
     const linkMode = params.get("mode");
     if (linkMode === "campaigns" || linkMode === "creatives") {
-      const names = (params.get(linkMode === "campaigns" ? "campaigns" : "creatives") ?? "")
-        .split(",").map((s) => s.trim()).filter(Boolean).slice(0, 4);
+      const names = compareSelectionNames(
+        window.location.search,
+        linkMode === "campaigns" ? "campaigns" : "creatives",
+      );
       const valid = names.filter((n) => linkMode === "campaigns"
         ? Object.hasOwn(campaignOptions.data ?? {}, n)
         : (creativeOptions.data ?? []).some((c) => c.creative_key === n));

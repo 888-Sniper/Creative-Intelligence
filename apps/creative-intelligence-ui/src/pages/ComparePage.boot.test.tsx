@@ -7,6 +7,7 @@ import * as ts from "typescript";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import source from "./ComparePage.tsx?raw";
+import selectionSource from "@/components/compareSelection.ts?raw";
 
 const tree = ts.createSourceFile("ComparePage.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const page = tree.statements.find((node): node is ts.FunctionDeclaration =>
@@ -27,7 +28,8 @@ const effects = page.body!.statements.filter((node) => ts.isExpressionStatement(
 if (effects.length !== 1) throw new Error("Expected one ordinary comparison boot effect");
 const numberHelper = tree.statements.find((node): node is ts.FunctionDeclaration =>
   ts.isFunctionDeclaration(node) && node.name?.text === "num")!;
-const extracted = `const {useState,useEffect}=require("react");
+const extracted = `${selectionSource}
+const {useState,useEffect}=require("react");
 ${numberHelper.getText(tree)}
 export function useOriginalBoot(campaignOptions,creativeOptions,runCampaigns,runCreatives) {
 ${states.map((node) => node.getText(tree)).join("\n")}

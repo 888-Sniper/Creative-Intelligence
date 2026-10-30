@@ -1,4 +1,4 @@
-# Creative Intelligence — audit of the checkpoint-032 incremental push
+# Creative Intelligence — audit of the checkpoint-033 incremental push
 
 You are the second, independent reviewer. Find what is still missing, wrong,
 or unsafe below. Assume every claim is unproven until you have opened the
@@ -10,10 +10,10 @@ not complete the audit or the remediation: most groups remain open below.
 
 - Repository: https://github.com/888-Sniper/Creative-Intelligence
 - Original audited pin / parent: `1342bb48ef59c45981c716c77d12898ae029daba`
-- Code under review: `e3af84bd939964abc16a0a226b364d79632fe26f` plus any
-  review-fix commits named in the final handoff. Commits after the code
-  head on this push touch only this `Audit.md`; review the code regardless
-  of branch head. After `git fetch`, confirm with `git rev-parse origin/main`.
+- Code under review: `ccfe325587607b7a18ca1a8e81123471f153565a`.
+  Commits after that code head on this push touch only this `Audit.md`.
+  Review the code regardless of branch head. After `git fetch`, confirm
+  with `git rev-parse origin/main`.
 - Provenance: saved cloud implementation `fa30fc21e897a832b3358d851555385530b5d2e4`
   (tree `b3d4d169f9ecc920bfbd75ff63b0b0cb674d12eb`, 34 commits) was imported
   as a zero-context patch, Mac commit `1ba11abe2b011f880b0adcbd603c1a09bfd3da29`.
@@ -23,21 +23,29 @@ not complete the audit or the remediation: most groups remain open below.
   `7bce053a8c4ec85befe80644764d114c31afe15b` (QI176 slice),
   `06d163daaab3ce15c8ef7cc78e8f9839d3348b2e` (QI124/QI126),
   `8305af3fa1ab2561da9bff20c9f95b9c34eaa8f1` (Mac re-audit fixes),
-  `c0eaf8afb41894658b4e22413bc77bf6eff1dff0` (verifier nits), then checkpoint-032 commits `432ab38` (daily/filtered/QA), `0772b15` (Compare/Campaigns), `2f3e98b` (QI270 tests), `e3af84b` (032 re-audit crash/cross-currency fixes). Previous main was `25d4e9d`.
-- Render auto-deploys from `main`; deployment was not verified. Do not
-  treat live-site state as a source defect.
+  `c0eaf8afb41894658b4e22413bc77bf6eff1dff0` (verifier nits), then checkpoint-032 commits `432ab38` (daily/filtered/QA), `0772b15` (Compare/Campaigns), `2f3e98b` (QI270 tests), `e3af84b` (032 re-audit crash/cross-currency fixes), `c020e60` (Audit.md only). This push's code commit is `ccfe325` (QI-004 comma campaign names and QI-195 Ask scope). Previous main was `c020e60`.
+- Render auto-deploys from `main`. Deployment of this push was not
+  verified when this file was written. Do not treat live-site state as
+  a source defect.
 
 Confirm with both ends named (never a one-revision diff):
 
 ```
-git diff --stat 25d4e9d795e45a354752a62628abb7b02ddbae68 e3af84bd939964abc16a0a226b364d79632fe26f
-git diff 25d4e9d795e45a354752a62628abb7b02ddbae68 e3af84bd939964abc16a0a226b364d79632fe26f
+git fetch origin
+git diff --stat c020e60e3ba4e6ea37e9ee98517048b535c405a5 origin/main
+git diff c020e60e3ba4e6ea37e9ee98517048b535c405a5 origin/main
+git diff --stat c020e60e3ba4e6ea37e9ee98517048b535c405a5 ccfe325587607b7a18ca1a8e81123471f153565a
+git diff --stat ccfe325587607b7a18ca1a8e81123471f153565a origin/main
 git rev-parse origin/main
 git status  # stop only if dirty, or origin/main differs from GitHub main
 ```
 
-Expected incremental diff shape at `e3af84b` vs previous main: 9 files, 427 insertions,
-44 deletions. Cumulative vs original pin also available via both-ends diff. If yours disagrees, stop and say so. A behind checkout or
+The commit under review is `origin/main` after fetch. Previous main is
+`c020e60e3ba4e6ea37e9ee98517048b535c405a5`. The first diff is the whole
+push: the code below plus this file. The code slice
+`c020e60`..`ccfe325` is 12 files, 428 insertions, 18 deletions.
+`ccfe325`..`origin/main` is this file only. If yours disagrees, stop
+and say so. A behind checkout or
 no local `main` branch is not a reason to stop. Read files at the reviewed
 commit; if a line moved, follow the symbol. Original audit scope was
 incomplete (51,371 of 103,845 lines scored); unscored scope may hide more.
@@ -73,15 +81,78 @@ consolidations: QI303→QI-011, QI259→QI173, QI270→QI269, QI280→QI189,
 QI308→QI307, QI095→QI016, QI101→QI060, QI228→QI251, QI302→QI312).
 Groups are not unique runtime-reproduced bugs. Kinds: 193 defects,
 36 conditional risks, 45 test gaps, 52 improvements. Severity: 0 critical,
-37 high, 193 medium, 96 low. Status at this push: 32 implemented pending
-your verification, 6 partial, 288 untouched. Nothing below erases an
+37 high, 193 medium, 96 low. Status at this push: 34 implemented pending
+your verification, 6 partial, 286 untouched. Nothing below erases an
 unresolved finding, and implemented does not mean verified by you.
 
-## Claims to falsify — implemented pending verification (32; QI060/QI269 completed in this increment, prior 30 already on main)
+## This push
+
+Parent `c020e60e3ba4e6ea37e9ee98517048b535c405a5`. Code
+`ccfe325587607b7a18ca1a8e81123471f153565a`. These two groups are
+implemented pending your verification. They are not verified.
+
+QI-004, high, defect. A campaign name that contains a comma stays one
+selection on a saved link, a compare request, and a JSON body.
+`compareSelectionQuery` writes one query key per name.
+`compareSelectionNames` reads repeated keys as exact names, and splits
+a single legacy value on the raw unencoded comma before decoding, so
+`campaigns=US%2C%20CA,Other` is `US, CA` and `Other`. `ComparePage`
+appends each name. `POST /api/compare/campaigns` passes
+`body.campaigns` into `expert2_compare_route` as `campaigns=` and does
+not join on commas (`product.py` around the compare post).
+`_selection_names` treats a list of more than one value as exact names.
+A single already-decoded value still uses the legacy comma split, so
+`Alpha,Beta` stays two names. A single decoded value `US, CA,Other`
+still cannot recover an encoded comma: the raw query is owned by the
+deferred GET handler (`product.py` `compare_campaigns`, original
+deferred range 775–1005), which this push does not edit. The page
+repairs that legacy link before it calls the API. Confirm with
+`tests/test_compare_campaign_names.py`, `compareSelection.test.ts`,
+the comma case in `savedViews.test.ts`, and the ComparePage test
+"requests a legacy comma link".
+
+QI-195, high, defect. An Ask answer is not shown with KPI, trend, or
+benchmark context from a later filter. `AskPage` stores the request's
+`scope.toString()`. A different scope clears the answer in that render
+and increments `askGen`. A late response from an older generation does
+not call `setAnswer` and does not clear a newer request's busy flag.
+The answer panel renders only when `answerScopeKey === liveScope`.
+Confirm with `AskPage.scope.test.tsx`: same-scope success and failure
+settle; a finished answer disappears on a campaign change and is not
+shown with the new spend; a late first response is ignored and the
+second request can finish.
+
+The other 32 implemented groups were not edited here. The six partials
+are unchanged: QI016 Analyst length-band wiring and the OverviewPage
+retain/retire decision, QI017 USD formatters and locale spend-band
+copy, QI028 mixed null-mean propagation, QI057 raw-total nullable API
+migration, QI150 mixed report extras and peer pools, QI176 tied-winner
+labels and `_fact_pack`. QI035 and QI036 stay deferred on
+`ingest.py` 365–368.
+
+## Claims to falsify — implemented pending verification (34; QI-004 and QI195 are this push, prior 32 already on main)
 
 For checkpoint-030 groups, the Mac tree commit is the import commit
 `1ba11ab…` (historical batch commit in parentheses). Benefit is the
 finding's intended benefit; verify the code actually delivers it.
+
+### QI-004 — Comma-delimited comparison selections cannot preserve campaign names containing commas
+
+- Findings: QI-004; severity high; kind defect; workstream B2.
+- Original locations (pin `1342bb4`): `savedViews.ts` compare link join; `ComparePage.tsx` campaign join and split; `actions.py` `_csv_param` via `expert2_compare_route`; `product.py` `",".join(body.campaigns)`.
+- Files now: `apps/creative-intelligence-ui/src/components/compareSelection.ts`, `savedViews.ts`, `pages/ComparePage.tsx`, `Backend/ci_backend/actions.py` (`_selection_names`, `expert2_compare_route`), `Backend/ci_backend/routers/product.py` (compare post).
+- Change (`ccfe325`): repeated query names and an intact JSON campaign list. Legacy single-value comma links still split after the framework decodes them.
+- Benefit to verify: Saved links, direct comparisons, and JSON requests keep exact campaign identities, including a comma inside a name.
+- Status: implemented pending verification (not verified).
+
+### QI195 — Ask answers remain paired with newly filtered KPI context
+
+- Findings: QI195; severity high; kind defect; workstream B2.
+- Original locations (pin `1342bb4`): `apps/creative-intelligence-ui/src/pages/AskPage.tsx` answer install without a scope generation.
+- Files now: `apps/creative-intelligence-ui/src/pages/AskPage.tsx` (`answerScopeKey`, `askGen`, the answer panel guard). Deferred line for the review-saved note was not edited.
+- Change (`ccfe325`): the answer, its error, and its supporting visuals belong to the scope that asked. A later filter clears them. An older completion cannot publish or clear a newer request's busy flag.
+- Benefit to verify: An answer and the KPI, trend, and benchmark context under it are one analytical scope.
+- Status: implemented pending verification (not verified).
 
 ### QI-005 — A failed KPI refresh leaves prior-scope values displayed as current
 
@@ -461,7 +532,7 @@ still true, do not re-report them as undisclosed:
   (15 checkpoint-030 quality files), UI 316 passed, TypeScript 45 entries pass.
   Historical cloud checkpoint-030 counts were Python 332, UI 316, TS 45.
 - Full Python baseline (pristine): 913 passed, 5 failed, 1 skipped (919).
-  Full Python at code head: 1,285 passed, 4 failed, 1 skipped (1,290).
+  Full Python at code head `ccfe325`: 1,289 passed, 4 failed, 1 skipped (1,294).
   The 338-test scoped subset above also passes inside this full suite;
   newer QI323/QI176/XLSX quality tests are full-suite only and included.
   Failures are only pre-existing `0012` vs `0013`: three
@@ -470,31 +541,37 @@ still true, do not re-report them as undisclosed:
   environmental (`.venv` walker), not fixed by this push. React-dist tests
   pass after the UI build; ffmpeg-host test skips.)
   Commands: `.venv/bin/python -m pytest tests/ -q --tb=line -rs -p no:cacheprovider`.
-- Full UI baseline (pristine): tsc clean, 361 passed. At code head: tsc clean,
-  668 passed (146 suites), `vite build` pass (asset index-YjXmDUhh.js).
-- `Source/self_check.py`: 97/97. Ruff: 0 new errors (35 Backend-wide
-  pre-existing import errors identical on baseline; changed files add none
-  beyond two pre-existing unused `json` imports). No tracked CI config exists;
-  exact-commit CI is unavailable, not passed. No live browser, provider,
-  or native-spreadsheet check was run. Deployment of previous main was
-  verified read-only on creative-intelligence-0t0c.onrender.com (root and
-  /health 200, asset hash matched local build); re-verify after this push.
+  The 4 failures are only the pre-existing `0012` vs `0013` mismatch
+  (`tests/test_ci_migrations.py` three tests and `tests/test_deploy.py`).
+  The skip is `tests/test_acceptance_10.py` (needs a no-ffmpeg host).
+  193 subtests passed.
+- Full UI at code head: `tsc --noEmit` clean, then `vitest run` 677 passed
+  (61 files). `vite build` passed. Local asset `index-CSQ3HkiB.js`.
+  Package scripts are `typecheck`, `test`, and `build` in
+  `apps/creative-intelligence-ui/package.json`.
+- `Source/self_check.py`: 97/97. Ruff `ruff check Backend tests Source`:
+  55 findings, none in `actions.py` or `tests/test_compare_campaign_names.py`.
+  `product.py` findings are pre-existing import order on lines this edit
+  did not change. No tracked CI config exists; exact-commit CI is
+  unavailable, not passed. No live browser, live provider, or native
+  Excel check was run. Deployment of this push was not verified when
+  this file was written.
 
-## Still open (288 untouched groups — summary)
+## Still open (286 untouched groups — summary)
 
-Untouched alone: 12 high, 181 medium, 95 low. With the 6 partials above
-(5 high, 1 medium): 17 high, 182 medium, 95 low remaining. Remaining by kind
-including partials: 162 defects, 36 conditional risks, 45 test gaps,
+Untouched alone: 10 high, 181 medium, 95 low. With the 6 partials
+(5 high, 1 medium): 15 high, 182 medium, 95 low remaining. Remaining by kind
+including partials: 160 defects, 36 conditional risks, 45 test gaps,
 51 improvements. Conditional risks are hypotheses to validate, not bugs to
-blindly fix. Notable blocked highs: QI035/QI036 (mixed `_rows_from_dicts`,
+blindly fix. Blocked highs still untouched: QI035/QI036 (mixed `_rows_from_dicts`,
 deferred `ingest.py:365-368`), QI172/QI173/QI178 (mixed `qa.answer`),
 QI038 (mixed retention owner), QI037/QI263 (mixed transaction/worker owners),
 QI-001 (needs safe validation boundary), QI315 (documentation-only restore).
 B9 inactive-prototype groups (28) need retain/retire decisions; B10 fallback
 (14) stays separate. Full per-group status is in the appendix. The complete
 finding evidence lives in the preserved handoff register; this file does
-not replace it. Next cursor after this push: classify the next separable
-medium batch in plan order; do not retry deferred owners wholesale.
+not replace it. QI-004 and QI195 are no longer untouched. Next fresh
+triage, not done here: QI-006 and QI-009. Do not retry deferred owners wholesale.
 
 ## Independent recheck steps
 
@@ -512,7 +589,7 @@ medium batch in plan order; do not retry deferred owners wholesale.
 | QI-001 | QI-001 | high | defect | NOT_IMPLEMENTED | Video-only analysis cannot complete the normal review workflow |
 | QI-002 | QI-002 | medium | defect | NOT_IMPLEMENTED | Repeated tooltip resize adjustments undo the previous collision correction |
 | QI-003 | QI-003 | medium | defect | NOT_IMPLEMENTED | Tooltip positioning keeps the old responsive mode after crossing the breakpoint |
-| QI-004 | QI-004 | high | defect | NOT_IMPLEMENTED | Comma-delimited comparison selections cannot preserve campaign names containing commas |
+| QI-004 | QI-004 | high | defect | LOCALLY_IMPLEMENTED_INTEGRATION_PENDING | Comma-delimited comparison selections cannot preserve campaign names containing commas |
 | QI-005 | QI-005 | high | defect | LOCALLY_IMPLEMENTED_INTEGRATION_PENDING | A failed KPI refresh leaves prior-scope values displayed as current |
 | QI-006 | QI-006 | medium | defect | NOT_IMPLEMENTED | Daily-series request failures are presented as an empty dataset |
 | QI-007 | QI-007 | high | defect | LOCALLY_IMPLEMENTED_INTEGRATION_PENDING | Top Performer benchmark uses the worst CPA/CPC value |
@@ -699,7 +776,7 @@ medium batch in plan order; do not retry deferred owners wholesale.
 | QI192 | QI192 | medium | conditional_risk | NOT_IMPLEMENTED | Invalid-WAV cleanup can remove a peer’s newly published cache |
 | QI193 | QI193 | medium | defect | NOT_IMPLEMENTED | Creative reports omit metric units and print unavailable values as None |
 | QI194 | QI194 | medium | test_gap | NOT_IMPLEMENTED | The video-only report assertion permits fabricated metrics beside an unavailable notice |
-| QI195 | QI195 | high | defect | NOT_IMPLEMENTED | Ask answers remain paired with newly filtered KPI context |
+| QI195 | QI195 | high | defect | LOCALLY_IMPLEMENTED_INTEGRATION_PENDING | Ask answers remain paired with newly filtered KPI context |
 | QI196 | QI196 | medium | defect | NOT_IMPLEMENTED | Ask turns a recent-conversation request failure into no recent chats |
 | QI197 | QI197 | medium | defect | NOT_IMPLEMENTED | Insights applies axis filters only after truncating its findings |
 | QI198 | QI198 | medium | defect | NOT_IMPLEMENTED | Creative-finding search links do not filter the finding cards |
